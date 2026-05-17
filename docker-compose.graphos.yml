@@ -1,0 +1,152 @@
+# graphos — postgres+AGE data plane and FastAPI control plane.
+# Self-contained: own networks, own volumes, own backup policy.
+# Consumers attach to `graphos-net` and reach `graphos-api:8080`.
+name: graphos
+
+services:
+  # ── Data plane ──────────────────────────────────────────────────────────
+  # Not exposed outside the compose. Only graphos-api can reach it.
+  graphos-db:
+    image: apache/age:release_PG16_1.6.0
+    container_name: graphos-db
+    hostname: graphos-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: graphos
+      POSTGRES_USER: graphos
+      POSTGRES_PASSWORD_FILE: /run/graphos/secrets/graphos_pw.txt
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=1GB"
+      - "-c"
+      - "effective_cache_size=2GB"
+      - "-c"
+      - "work_mem=64MB"
+      - "-c"
+      - "maintenance_work_mem=512MB"
+      - "-c"
+      - "max_connections=50"
+      - "-c"
+      - "max_wal_size=2GB"
+      - "-c"
+      - "shared_preload_libraries=age,pg_stat_statements"
+      - "-c"
+      - "pg_stat_statements.track=all"
+      - "-c"
+      - "log_min_duration_statement=500ms"
+    expose:
+      - "5432"
+    volumes:
+      - graphos_data:/var/lib/postgresql/data
+      - ./services/graphos/deploy/db-init:/docker-entrypoint-initdb.d:ro
+      # Mount the whole secrets dir (not individual files). Docker Desktop
+      # on Windows has a known bug where single-file bind-mounts surface
+      # with `?????????` permissions to non-root users (EIO on read).
+      - ./services/graphos/deploy/secrets:/run/graphos/secrets:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U graphos -d graphos"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    networks:
+      - graphos-internal
+    # Sized to start on a laptop (about 4 GB free for Docker).  For graphs
+    # with millions of edges raise shared_buffers (4GB), effective_cache_size
+    # (6GB) and this limit (6g) together: see docs/apache-age.md, tuning.
+    mem_limit: 2g
+    mem_reservation: 512m
+    # Raise ``/dev/shm`` from the Docker default 64 MB to 1 GB. Large
+    # ``GROUP BY`` / hash-aggregate queries on the per-label edge tables
+    # (e.g. /edges/aggregate on a multi-million-edge label) allocate
+    # dynamic shared-memory segments that can exceed 64 MB on their own,
+    # and concurrent requests each hold their own segments. Without the
+    # headroom Postgres fails with ``could not resize shared memory
+    # segment ... No space left on device``. Within one request graphos
+    # aggregates one edge type at a time. 1 GB also covers parallel
+    # maintenance work (VACUUM, index builds); total host memory for
+    # graphos-db stays bounded by ``mem_limit`` above.
+    shm_size: 1g
+
+  # ── Control plane / REST API ────────────────────────────────────────────
+  # Bridges graphos-internal (talks to graphos-db) and graphos-net (consumers).
+  graphos-api:
+    image: graphos-api:${GRAPHOS_API_TAG:-dev}
+    build:
+      context: ./services/graphos
+      dockerfile: Dockerfile
+      args:
+        # Local builds include Louvain community detection. python-igraph is
+        # GPL-2.0-or-later: set GRAPHOS_EXTRAS="" to build a permissive-only
+        # image (recompute-communities then answers 501).
+        GRAPHOS_EXTRAS: ${GRAPHOS_EXTRAS-louvain}
+    container_name: graphos-api
+    hostname: graphos-api
+    restart: unless-stopped
+    depends_on:
+      graphos-db:
+        condition: service_healthy
+    environment:
+      GRAPHOS_DB_HOST: graphos-db
+      GRAPHOS_DB_PORT: "5432"
+      GRAPHOS_DB_NAME: graphos
+      # Unprivileged role created by deploy/db-init/01-app-role.sh; the
+      # superuser (POSTGRES_USER) is only used by the init scripts.
+      GRAPHOS_DB_USER: graphos_app
+      GRAPHOS_DB_PASSWORD_FILE: /run/graphos/secrets/graphos_app_pw.txt
+      GRAPHOS_BIND_HOST: "0.0.0.0"
+      GRAPHOS_BIND_PORT: "8080"
+      GRAPHOS_LOG_LEVEL: info
+      # Bearer tokens (created by scripts/init-secrets.sh). graphos refuses
+      # to start without a tokens file unless GRAPHOS_AUTH_DISABLED=true,
+      # which makes every request an anonymous admin: local use only.
+      GRAPHOS_AUTH_TOKENS_FILE: /run/graphos/secrets/graphos_tokens.json
+      # No pre-configured tenants: graphos is tenant-agnostic. Consumers
+      # register their own context via POST /v1/tenants on startup.
+    volumes:
+      # Whole-directory bind: avoids Docker Desktop / Windows EIO on
+      # single-file mounts when read as non-root user.
+      - ./services/graphos/deploy/secrets:/run/graphos/secrets:ro
+    ports:
+      # Bind to localhost only — production should reverse-proxy.
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2).status == 200 else sys.exit(1)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    networks:
+      - graphos-internal
+      - graphos-net
+    # Idle is ~60 MiB; the headroom matters only during
+    # /recompute-communities, which holds the edge list in memory.  2 GB is
+    # enough for roughly 3 M edges; raise to 4g for 6 M+.
+    mem_limit: 2g
+    mem_reservation: 256m
+
+volumes:
+  graphos_data:
+    name: graphos_data
+
+networks:
+  graphos-internal:
+    name: graphos-internal
+    driver: bridge
+    internal: true                # not reachable from outside the compose
+  graphos-net:
+    name: graphos-net
+    driver: bridge                # external consumers attach here
+
+# NOTE: top-level `secrets:` block intentionally omitted. The compose-managed
+# secrets feature is designed for Swarm and has known stat-EIO issues on
+# Docker Desktop / Windows bind-mounted file inputs. Plain file bind-mounts
+# of the whole secrets directory in the per-service `volumes:` expose each
+# file at /run/graphos/secrets/<file> inside the container, with broader
+# cross-platform support.

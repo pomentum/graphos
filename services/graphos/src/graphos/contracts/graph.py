@@ -1,0 +1,1114 @@
+"""Pydantic wire contracts for the graph data plane."""
+
+from __future__ import annotations
+
+import re
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+_LABEL_PATTERN = re.compile(r"^[A-Z][A-Za-z0-9_]{0,62}$")
+_NODE_ID_MAX_LEN = 512
+
+DEFAULT_SEARCH_LIMIT = 20
+MAX_SEARCH_LIMIT = 200
+
+# Bulk-enumeration scan limits — see /nodes:scan.
+DEFAULT_SCAN_LIMIT = 500
+MAX_SCAN_LIMIT = 2000
+# Soft response-payload ceiling: if the accumulated `items` payload
+# crosses this many bytes mid-page, the scan stops early and the
+# cursor is positioned at the last included row.  Belt-and-braces:
+# the per-row size is bounded by the node properties shape, which is
+# usually <1 KB but can spike on fat nodes (large manifest blobs).
+SCAN_PAYLOAD_CAP_BYTES = 10 * 1024 * 1024  # 10 MiB
+
+# Small-batch upsert cap. Above this, consumers must use the NDJSON-streaming
+# bulk endpoints (not implemented yet). The cap protects against one client
+# pinning a connection on a very large MERGE roundtrip.
+MAX_NODES_UPSERT_BATCH = 1000
+MAX_EDGES_UPSERT_BATCH = 1000
+
+# Bulk endpoints: server-side chunk size for the streamed NDJSON path.
+# Rows are accumulated up to this many per label before being flushed to
+# upsert_*_inline. Tuneable; tradeoff is roundtrip count vs memory.
+BULK_FLUSH_CHUNK = 500
+
+
+class NodeHit(BaseModel):
+    """One row in a graph search / read response."""
+
+    id: int                                       # AGE graphid
+    label: str                                    # vertex label
+    properties: dict[str, object] = Field(default_factory=dict)
+
+
+class SearchResponse(BaseModel):
+    """Response for GET /v1/{tenant}/graph/search."""
+
+    tenant: str
+    query: str
+    label: str | None = None
+    limit: int
+    truncated: bool = Field(
+        ...,
+        description=(
+            "True iff the result set hit the limit; client may want to paginate "
+            "or tighten the query. Backed by `count(rows) == limit`, not a "
+            "round-trip second query — so it's a hint, not authoritative."
+        ),
+    )
+    elapsed_ms: int
+    nodes: list[NodeHit] = Field(default_factory=list)
+
+
+def validate_label_optional(value: str | None) -> str | None:
+    """Re-used by query-param dependencies that accept an optional ``label``."""
+    if value is None:
+        return None
+    if not _LABEL_PATTERN.fullmatch(value):
+        raise ValueError(
+            f"label '{value}' must match {_LABEL_PATTERN.pattern} (UpperCamelCase)"
+        )
+    return value
+
+
+class _LabelHolder(BaseModel):
+    """Internal helper to reuse the validator from a Pydantic context (tests)."""
+
+    label: str | None = None
+
+    @field_validator("label")
+    @classmethod
+    def _validate_label(cls, v: str | None) -> str | None:
+        return validate_label_optional(v)
+
+
+# ── Upsert ─────────────────────────────────────────────────────────────────
+
+
+class NodeUpsert(BaseModel):
+    """One row in a POST /v1/{tenant}/graph/nodes payload.
+
+    The ``id`` is **consumer-assigned** — it's the property the MERGE clause
+    keys on, not AGE's internal numeric id. Stable across re-runs of the
+    same consumer-side scan.
+    """
+
+    id: str = Field(..., min_length=1, max_length=_NODE_ID_MAX_LEN)
+    label: str = Field(..., description="Vertex label; must be registered for the tenant.")
+    properties: dict[str, object] = Field(
+        default_factory=dict,
+        description=(
+            "Free-form properties. `id` is set automatically from the top-level "
+            "`id` field; you may include it here too, but the top-level value wins."
+        ),
+    )
+
+    @field_validator("label")
+    @classmethod
+    def _validate_label(cls, v: str) -> str:
+        if not _LABEL_PATTERN.fullmatch(v):
+            raise ValueError(
+                f"label '{v}' must match {_LABEL_PATTERN.pattern} (UpperCamelCase)"
+            )
+        return v
+
+
+class NodesUpsertRequest(BaseModel):
+    """Body for POST /v1/{tenant}/graph/nodes — small-batch upsert.
+
+    Idempotent: re-POSTing the same payload is a no-op (graph state is the
+    same); changed properties get merged additively (existing keys not in
+    the new payload are preserved, openCypher ``SET n += map`` semantics).
+    """
+
+    nodes: list[NodeUpsert] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_NODES_UPSERT_BATCH,
+        description=(
+            f"Up to {MAX_NODES_UPSERT_BATCH} nodes. For larger batches, use "
+            "the NDJSON bulk endpoints (`/nodes:bulk`, `/edges:bulk`)."
+        ),
+    )
+
+
+class NodesUpsertResponse(BaseModel):
+    tenant: str
+    nodes_upserted: int
+    by_label: dict[str, int] = Field(default_factory=dict)
+    elapsed_ms: int
+
+
+# ── Single-node property merge ─────────────────────────────────────────────
+#
+# Generic "stamp these properties on the node identified by external id"
+# primitive.  Schema-agnostic: one surface every consumer can use to upsert
+# aggregates onto any metadata-bearing node (``:Team``, ``:Collection``,
+# or whatever a consumer schema defines).
+
+
+class NodePropertiesUpsertRequest(BaseModel):
+    """Merge a property bag onto the node whose ``properties.id`` matches the
+    URL ``external_id``.
+
+    Merge semantics are last-write-wins per top-level key (Postgres ``agtype``
+    ``||`` operator).  Keys not in ``properties`` are preserved; keys in
+    ``properties`` overwrite their previous value.  To clear a key entirely,
+    set it to ``null`` in ``properties`` and the value will be replaced by
+    the agtype null sentinel (consumers should treat null as "absent").
+    """
+
+    properties: dict[str, object] = Field(
+        ..., min_length=1,
+        description="The property bag to merge onto the node.",
+    )
+
+
+class NodePropertiesUpsertResponse(BaseModel):
+    tenant: str
+    external_id: str
+    label: str = Field(
+        ..., description=(
+            "The AGE label of the node that was updated.  Reported so callers "
+            "can verify they hit the metadata node they expected (cheap "
+            "defence against id collisions across labels — a :Team id "
+            "shouldn't accidentally hit a :Document row)."
+        ),
+    )
+    properties_merged: int = Field(
+        ..., description="Number of top-level keys merged from the payload.",
+    )
+    elapsed_ms: int
+
+
+class NodeGetResponse(BaseModel):
+    """Single-node read by external id, returning the full property bag."""
+
+    tenant: str
+    external_id: str
+    label: str
+    properties: dict[str, object] = Field(default_factory=dict)
+    elapsed_ms: int
+
+
+# ── Edge upsert ────────────────────────────────────────────────────────────
+
+
+class EdgeUpsert(BaseModel):
+    """One row in a POST /v1/{tenant}/graph/edges payload.
+
+    Endpoints are addressed by ``(label, id)`` pairs. Both labels and the
+    edge ``type`` must be registered for the tenant. Endpoint **nodes must
+    already exist** — graphos does not auto-create endpoints; if either
+    endpoint is missing, the edge is silently skipped and counted in
+    ``edges_skipped`` so the consumer can detect ordering issues.
+    """
+
+    src_id: str = Field(..., min_length=1, max_length=_NODE_ID_MAX_LEN)
+    src_label: str = Field(..., description="Vertex label of the source.")
+    dst_id: str = Field(..., min_length=1, max_length=_NODE_ID_MAX_LEN)
+    dst_label: str = Field(..., description="Vertex label of the destination.")
+    type: str = Field(..., description="Edge label / relationship type.")
+    properties: dict[str, object] = Field(default_factory=dict)
+
+    @field_validator("src_label", "dst_label", "type")
+    @classmethod
+    def _validate_label(cls, v: str) -> str:
+        if not _LABEL_PATTERN.fullmatch(v):
+            raise ValueError(
+                f"label '{v}' must match {_LABEL_PATTERN.pattern} (UpperCamelCase / SNAKE_CASE)"
+            )
+        return v
+
+
+class EdgesUpsertRequest(BaseModel):
+    """Body for POST /v1/{tenant}/graph/edges — small-batch upsert.
+
+    Idempotent on ``(src_id, dst_id, type)`` — re-POSTing the same payload
+    is a graph-state no-op; props merge additively (openCypher
+    ``SET r += map`` semantics).
+    """
+
+    edges: list[EdgeUpsert] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_EDGES_UPSERT_BATCH,
+        description=(
+            f"Up to {MAX_EDGES_UPSERT_BATCH} edges. For larger batches, use "
+            "the NDJSON bulk endpoints (`/nodes:bulk`, `/edges:bulk`)."
+        ),
+    )
+
+
+class EdgesUpsertResponse(BaseModel):
+    tenant: str
+    edges_upserted: int = Field(..., description="MERGEs whose MATCH found both endpoints.")
+    edges_skipped: int = Field(..., description="Rows whose src or dst node didn't exist.")
+    by_type: dict[str, int] = Field(default_factory=dict)
+    elapsed_ms: int
+
+
+# ── Bulk responses ─────────────────────────────────────────────────────────
+
+
+class BulkNodesResponse(BaseModel):
+    """Response for POST /v1/{tenant}/graph/nodes:bulk."""
+
+    tenant: str
+    rows_received: int
+    rows_invalid: int = Field(
+        ...,
+        description=(
+            "NDJSON lines that failed Pydantic validation; their indices appear in `errors`."
+        ),
+    )
+    nodes_upserted: int
+    by_label: dict[str, int] = Field(default_factory=dict)
+    errors: list[str] = Field(
+        default_factory=list,
+        description="Up to 50 most-recent validation errors, in the form 'line N: <message>'.",
+    )
+    elapsed_ms: int
+
+
+class BulkEdgesResponse(BaseModel):
+    """Response for POST /v1/{tenant}/graph/edges:bulk."""
+
+    tenant: str
+    rows_received: int
+    rows_invalid: int
+    edges_upserted: int
+    edges_skipped: int
+    by_type: dict[str, int] = Field(default_factory=dict)
+    errors: list[str] = Field(default_factory=list)
+    elapsed_ms: int
+
+
+# ── Reads: neighbors + induced_edges ───────────────────────────────────────
+
+
+DEFAULT_NEIGHBORS_LIMIT = 50
+MAX_NEIGHBORS_LIMIT = 500
+
+DEFAULT_INDUCED_LIMIT = 500
+MAX_INDUCED_LIMIT = 5000
+MAX_INDUCED_NODE_IDS = 1000
+
+DEFAULT_EXPAND_HOPS = 2
+MAX_EXPAND_HOPS = 5
+DEFAULT_EXPAND_LIMIT = 100
+MAX_EXPAND_LIMIT = 1000
+
+
+class EdgeHit(BaseModel):
+    """One edge row in a graph-read response."""
+
+    id: int                         # AGE relationship graphid
+    src_id: str                     # neighbor's consumer-assigned `id` (or this node's)
+    dst_id: str
+    type: str
+    properties: dict[str, object] = Field(default_factory=dict)
+
+
+class Neighbor(BaseModel):
+    """One row in a /graph/neighbors response.
+
+    `direction` says which way the edge points relative to the node passed
+    in the request: ``out`` = edge from us to the neighbor, ``in`` = from
+    neighbor to us.
+    """
+
+    neighbor_id: str
+    neighbor_label: str
+    neighbor_properties: dict[str, object] = Field(default_factory=dict)
+    direction: str = Field(..., pattern="^(in|out)$")
+    edge_type: str
+    edge_properties: dict[str, object] = Field(default_factory=dict)
+
+
+class NeighborsResponse(BaseModel):
+    tenant: str
+    node_id: str
+    limit: int
+    truncated: bool
+    elapsed_ms: int
+    neighbors: list[Neighbor] = Field(default_factory=list)
+
+
+class InducedEdgesRequest(BaseModel):
+    """Body for POST /v1/{tenant}/graph/induced_edges.
+
+    Returns every edge whose ``src.id`` and ``dst.id`` are both in
+    ``node_ids``. Optional ``rel_types`` narrows by edge type.
+    """
+
+    node_ids: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_INDUCED_NODE_IDS,
+    )
+    rel_types: list[str] | None = Field(
+        default=None,
+        description="If set, restrict to edges of these types. Default: all types.",
+    )
+    limit: int = Field(default=DEFAULT_INDUCED_LIMIT, ge=1, le=MAX_INDUCED_LIMIT)
+
+
+class InducedEdgesResponse(BaseModel):
+    tenant: str
+    node_count: int
+    rel_types: list[str] | None = None
+    limit: int
+    truncated: bool
+    elapsed_ms: int
+    edges: list[EdgeHit] = Field(default_factory=list)
+
+
+class ScopedSubgraphNode(BaseModel):
+    """One vertex in a scoped-subgraph response."""
+
+    id: str
+    label: str = ""
+    properties: dict[str, object] = Field(default_factory=dict)
+
+
+class ScopedSubgraphRequest(BaseModel):
+    """Body for POST /v1/{tenant}/graph/scoped_subgraph.
+
+    Returns the vertices whose ``scope_property`` equals ``scope_value``,
+    capped at ``node_cap``, plus the induced edges among them.  When
+    ``group_property`` and ``group_values`` are given, only vertices whose
+    group property is one of those values are kept, and the cap is shared
+    evenly across the values so no single group swamps the result.
+    ``exclude_property`` / ``exclude_substrings`` drop vertices whose
+    property contains any of the (case-insensitive) substrings.
+
+    graphos attaches no meaning to any of these names: the caller supplies
+    every property.  The scope filter is one direct-SQL scan; declare an
+    index on ``scope_property`` at registration for large tenants.
+    """
+
+    scope_property: str
+    scope_value: str = Field(..., min_length=1)
+    group_property: str | None = None
+    group_values: list[str] | None = Field(default=None, max_length=64)
+    include_properties: list[str] = Field(default_factory=lambda: ["name"], max_length=32)
+    exclude_property: str | None = None
+    exclude_substrings: list[str] | None = Field(default=None, max_length=64)
+    node_cap: int = Field(default=1200, ge=1, le=4000)
+    rel_types: list[str] | None = None
+    edge_limit: int = Field(default=8000, ge=1, le=12000)
+
+    @field_validator("scope_property", "group_property", "exclude_property")
+    @classmethod
+    def _validate_keys(cls, v: str | None) -> str | None:
+        return None if v is None else _validate_prop_key(v)
+
+    @field_validator("include_properties")
+    @classmethod
+    def _validate_include(cls, v: list[str]) -> list[str]:
+        return [_validate_prop_key(k) for k in v]
+
+    @model_validator(mode="after")
+    def _check_pairs(self) -> ScopedSubgraphRequest:
+        if self.group_values and not self.group_property:
+            raise ValueError("group_values requires group_property")
+        if self.exclude_substrings and not self.exclude_property:
+            raise ValueError("exclude_substrings requires exclude_property")
+        return self
+
+
+class ScopedSubgraphResponse(BaseModel):
+    tenant: str
+    scope_property: str
+    scope_value: str
+    truncated: bool
+    elapsed_ms: int
+    nodes: list[ScopedSubgraphNode] = Field(default_factory=list)
+    edges: list[EdgeHit] = Field(default_factory=list)
+
+
+class CatalogueResponse(BaseModel):
+    """Resolver property→labels catalogue for one tenant.
+
+    The catalogue is the in-process map the resolver compiler reads to
+    decide which child-vertex tables carry a given property; it is
+    rebuilt on tenant registration and on cache miss.  This endpoint
+    exposes it as a diagnostic surface — given a resolve_rule's
+    property names, an operator can verify what labels graphos
+    actually considers candidates before firing ``/edges:resolve``.
+
+    ``by_property`` keys are top-level JSONB property names found on
+    at least one row in some child of ``_ag_label_vertex``; values
+    are the leaf labels carrying them (inheritance parents are
+    pruned, see ``catalogue._discover_label_parents``).
+    """
+
+    tenant: str
+    by_property: dict[str, list[str]] = Field(default_factory=dict)
+
+
+# ── Expand (variable-length BFS) ───────────────────────────────────────────
+
+
+class PathHit(BaseModel):
+    """One reachable endpoint with metadata about the path that got there."""
+
+    end_id: str
+    end_label: str
+    end_properties: dict[str, object] = Field(default_factory=dict)
+    hops: int = Field(..., ge=1)
+    rel_path: list[str] = Field(
+        ...,
+        description="Edge types in order from seed to endpoint.",
+    )
+
+
+class ExpandResponse(BaseModel):
+    tenant: str
+    node_id: str
+    max_hops: int
+    direction: str
+    rel_types: list[str] | None = None
+    limit: int
+    truncated: bool
+    elapsed_ms: int
+    paths: list[PathHit] = Field(default_factory=list)
+
+
+# ── Edges aggregate ────────────────────────────────────────────────────────
+
+
+_PROP_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+
+DEFAULT_AGGREGATE_LIMIT = 200
+MAX_AGGREGATE_LIMIT = 5000
+
+
+def _validate_prop_key(key: str) -> str:
+    if not _PROP_KEY_PATTERN.fullmatch(key):
+        raise ValueError(
+            f"property key '{key}' must match {_PROP_KEY_PATTERN.pattern} — "
+            "graphos disallows keys with whitespace, dots, or non-ascii to "
+            "keep the Cypher template safely formattable."
+        )
+    return key
+
+
+class EdgesAggregateRequest(BaseModel):
+    """Body for POST /v1/{tenant}/graph/edges/aggregate.
+
+    Groups edges by ``(src.<group_by_src>, dst.<group_by_dst>, type(r))`` and
+    returns a count per group. Optionally filter on edge type, on values
+    of the grouping property (whitelist), and on whether src and dst must
+    differ on the grouping property (the "cross-group edges"
+    case: same property name on both sides, distinct values required).
+    """
+
+    group_by_src: str = Field(..., description="Source-node property to group by.")
+    group_by_dst: str = Field(..., description="Destination-node property to group by.")
+    rel_types: list[str] | None = Field(default=None)
+    src_values: list[str] | None = Field(
+        default=None,
+        description="If set, only count edges whose `src.<group_by_src>` is in this list.",
+    )
+    dst_values: list[str] | None = Field(
+        default=None,
+        description="If set, only count edges whose `dst.<group_by_dst>` is in this list.",
+    )
+    require_different: bool = Field(
+        default=False,
+        description="If true, only count edges where the two grouping values differ.",
+    )
+    limit: int = Field(default=DEFAULT_AGGREGATE_LIMIT, ge=1, le=MAX_AGGREGATE_LIMIT)
+
+    @field_validator("group_by_src", "group_by_dst")
+    @classmethod
+    def _validate_keys(cls, v: str) -> str:
+        return _validate_prop_key(v)
+
+
+class AggregateRow(BaseModel):
+    src_value: str
+    dst_value: str
+    rel_type: str
+    count: int
+
+
+class EdgesAggregateResponse(BaseModel):
+    tenant: str
+    group_by_src: str
+    group_by_dst: str
+    rel_types: list[str] | None = None
+    truncated: bool
+    elapsed_ms: int
+    groups: list[AggregateRow] = Field(default_factory=list)
+
+
+# ── Node aggregate (sibling of the edges variant) ─────────────────────────
+
+
+class NodesAggregateRequest(BaseModel):
+    """Body for POST /v1/{tenant}/graph/nodes/aggregate.
+
+    Groups vertices of ``label`` by ``group_by`` (a single property name)
+    and returns ``{value: <prop-value>, count: <n>}`` rows ordered by
+    descending count.  Uses postgres table inheritance: passing the
+    parent label ``Document`` matches all inheriting child labels
+    (Article, Report, …) -- the same semantic as Cypher
+    ``MATCH (n:Document)``.
+
+    Useful for live summary views (e.g. counts per ``type`` or
+    ``category``) when no materialised snapshot is available.  The
+    Cypher template is ``MATCH (n:<label>) RETURN n.<group_by> AS v,
+    count(n) AS c ORDER BY count(n) DESC LIMIT $lim``; ``label`` /
+    ``group_by`` are regex-validated so the interpolation is safe.
+    """
+
+    label: str = Field(..., description="Vertex label to scan (parent label OK).")
+    group_by: str = Field(..., description="Node property to group by.")
+    values: list[str] | None = Field(
+        default=None,
+        description="If set, only count nodes whose `n.<group_by>` is in this list.",
+    )
+    limit: int = Field(default=DEFAULT_AGGREGATE_LIMIT, ge=1, le=MAX_AGGREGATE_LIMIT)
+
+    @field_validator("label", "group_by")
+    @classmethod
+    def _validate_keys(cls, v: str) -> str:
+        return _validate_prop_key(v)
+
+
+class NodeAggregateRow(BaseModel):
+    value: str
+    count: int
+
+
+class NodesAggregateResponse(BaseModel):
+    tenant: str
+    label: str
+    group_by: str
+    truncated: bool
+    elapsed_ms: int
+    groups: list[NodeAggregateRow] = Field(default_factory=list)
+
+
+# ── Stratified sample-subgraph (for graph visualisation) ───────────────────
+
+
+class SampleSubgraphRequest(BaseModel):
+    """Body for POST /v1/{tenant}/graph/sample_subgraph.
+
+    Returns a stratified edge sample -- up to ``per_rel`` edges per
+    relationship type, taken from every edge type (or ``rel_types``) whatever
+    the endpoint labels.  ``label`` selects the vertex table whose properties
+    are read for the endpoints: ``include_properties`` are projected from it,
+    and ``filter_property`` / ``filter_value`` keep only edges whose two
+    endpoints are rows of that label with that value.  Endpoints outside the
+    label come back as id-only nodes when no filter is set.
+
+    The caller stays in control of every domain-specific knob -- which
+    label is the "node of interest", which property scopes the query, which
+    properties to materialise -- so this endpoint is reusable by any
+    consumer of graphos, regardless of its data model.
+
+    Stratification: a flat LIMIT over a graph where one rel type
+    dominates (e.g. CITES at 90 %+) would render a one-colour graph
+    in a visualisation.  Sampling ``per_rel`` per type guarantees every rel
+    type the tenant has gets a visible footprint.  ``rel_types``
+    optional whitelist short-circuits the histogram discovery when
+    the caller already knows which types to include.
+    """
+
+    label: str = Field(
+        ...,
+        description=(
+            "Vertex label whose properties are read for the sampled endpoints "
+            "(parent label OK; inheritance applies). Edges are not filtered by it "
+            "unless filter_property is set."
+        ),
+    )
+    filter_property: str | None = Field(
+        default=None,
+        description="Optional property name to filter both endpoints by.",
+    )
+    filter_value: str | None = Field(
+        default=None,
+        description="Required when filter_property is set. Both endpoints must match.",
+    )
+    rel_types: list[str] | None = Field(
+        default=None,
+        description="Whitelist of edge types. If unset, discover via histogram.",
+    )
+    per_rel: int = Field(
+        default=50, ge=1, le=500,
+        description="Max edges per rel type. Stratifies the sample.",
+    )
+    include_properties: list[str] = Field(
+        default_factory=list,
+        description="Node properties to materialise on each returned hit. "
+                    "Empty = return id only (lightweight).",
+    )
+    edge_properties: list[str] = Field(
+        default_factory=list,
+        description="Edge properties to materialise (e.g. 'confidence'). "
+                    "Empty = return type only.",
+    )
+
+    @field_validator("label")
+    @classmethod
+    def _validate_label(cls, v: str) -> str:
+        return _validate_prop_key(v)
+
+    @field_validator("filter_property")
+    @classmethod
+    def _validate_filter_property(cls, v: str | None) -> str | None:
+        return _validate_prop_key(v) if v else None
+
+
+class SampleNodeHit(BaseModel):
+    id: str
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class SampleEdgeHit(BaseModel):
+    src_id: str
+    dst_id: str
+    type: str
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class SampleSubgraphResponse(BaseModel):
+    tenant: str
+    label: str
+    rel_types: list[str]
+    per_rel: int
+    truncated: bool
+    elapsed_ms: int
+    nodes: list[SampleNodeHit] = Field(default_factory=list)
+    edges: list[SampleEdgeHit] = Field(default_factory=list)
+
+
+# ── Delete responses ───────────────────────────────────────────────────────
+
+
+class DeleteNodeResponse(BaseModel):
+    tenant: str
+    node_id: str
+    nodes_deleted: int
+    edges_deleted: int = Field(
+        ...,
+        description="Edges incident to the deleted node (auto-removed by DETACH DELETE).",
+    )
+    elapsed_ms: int
+
+
+class DeleteByPropertyResponse(BaseModel):
+    """Response for property-scoped tombstones (e.g. drop every node of one project)."""
+
+    tenant: str
+    property_key: str
+    property_value: str
+    nodes_deleted: int
+    edges_deleted: int
+    elapsed_ms: int
+
+
+# ── Bulk node enumeration (POST /nodes:scan) ──────────────────────────────
+
+
+_SCAN_OPS = ("=", "!=", "in", "not in", "exists", "not exists")
+
+
+class NodesScanWhere(BaseModel):
+    """One AND-combined filter clause on POST /v1/{tenant}/graph/nodes:scan.
+
+    Supported ``op`` values:
+
+    * ``=`` / ``!=``     — scalar equality / inequality (string, number, bool).
+    * ``in`` / ``not in`` — membership against a list ``value``.
+    * ``exists`` / ``not exists`` — presence of the property key on the node.
+      ``value`` is omitted for these.
+
+    Substring / regex are intentionally NOT supported here — ``/search`` is
+    the indexed text-matching primitive.  ``/scan`` is structural
+    enumeration only.
+    """
+
+    property: str = Field(..., description="Property name to filter on.")
+    op: Literal["=", "!=", "in", "not in", "exists", "not exists"]
+    value: Any | None = Field(
+        default=None,
+        description=(
+            "Value for the comparison.  Required for `=`, `!=`, `in`, "
+            "`not in`.  Omit for `exists` / `not exists`."
+        ),
+    )
+
+    @field_validator("property")
+    @classmethod
+    def _validate_prop(cls, v: str) -> str:
+        return _validate_prop_key(v)
+
+
+class NodesScanOrderClause(BaseModel):
+    """One key in a multi-key sort on POST /v1/{tenant}/graph/nodes:scan.
+
+    ``property`` is a node-property name.  ``desc`` defaults to False
+    (ascending).  The ``_node`` sentinel is NOT accepted in clause form —
+    use the single-string ``order_by`` shape for graphid sort.
+    """
+
+    property: str = Field(..., description="Property name to sort on.")
+    desc: bool = Field(
+        default=False,
+        description="True for descending sort on this key.",
+    )
+
+    @field_validator("property")
+    @classmethod
+    def _validate_prop(cls, v: str) -> str:
+        if v == "_node":
+            raise ValueError(
+                "'_node' sentinel is only valid in the single-string "
+                "order_by form; in clause form use a property name"
+            )
+        return _validate_prop_key(v)
+
+
+class NodesScanRequest(BaseModel):
+    """Body for POST /v1/{tenant}/graph/nodes:scan.
+
+    Enumerate every node matching ``labels`` (1+, OR-combined) and
+    ``where`` (AND-combined), with optional property projection and
+    cursor pagination.  Schema-agnostic: graphos knows only label,
+    property name, property value, external id.  The caller passes
+    their own concepts (e.g. ``project_id``) as plain
+    ``where`` clauses.
+
+    Ordering is stable: ``(label, external_id)`` lexicographic.  When
+    scanning multiple labels, label[0] is fully exhausted before
+    moving to label[1].  Predictable + cheap to checkpoint.
+
+    Page semantics: the response's ``next_cursor`` is opaque — round-
+    trip it back in the next request without modification.  ``null``
+    means the scan is fully drained.
+    """
+
+    labels: list[str] = Field(
+        ...,
+        min_length=1,
+        description=(
+            "1+ vertex labels to scan, OR-combined.  All must be "
+            "registered on the tenant."
+        ),
+    )
+    where: list[NodesScanWhere] = Field(
+        default_factory=list,
+        description="AND-combined filters; empty list = no filter.",
+    )
+    project: list[str] | None = Field(
+        default=None,
+        description=(
+            "Property names to return per node.  ``id`` is always "
+            "implicitly included.  Pass ``['*']`` for the full "
+            "property bag (bounded by the response payload cap).  "
+            "Default ``None`` is equivalent to ``['id']``."
+        ),
+    )
+    order_by: str | list[NodesScanOrderClause] | None = Field(
+        default="id",
+        description=(
+            "Stable sort key(s) + cursor anchor.  Four forms:\n\n"
+            "* **``None``**: skip ORDER BY entirely.  Use when the "
+            "  caller does NOT paginate (always reads the whole "
+            "  result in one request).  Eliminates the cost of "
+            "  AGE-planner-induced wrong-index picks on the "
+            "  ``<Label>_id_unique`` btree — empirically a "
+            "  37 s → 235 ms win on large-label scans where "
+            "  the WHERE clause has a sargable functional index on "
+            "  another property.  Cursor pagination is incompatible "
+            "  with ``order_by=None``; the route 422s in that case.\n"
+            "* **Property name** (str, default ``id``): single-key ASC "
+            "  sort on ``properties.<order_by>``.  ``id`` benefits "
+            "  from graphos's auto-created ``<Label>_id_unique`` "
+            "  btree.  Other property names need a matching "
+            "  functional index declared via ``POST /v1/tenants`` "
+            "  ``indexes`` to stay index-driven on large tables.\n"
+            "* **``_node`` sentinel** (str): single-key ASC sort by "
+            "  the node's intrinsic identity (AGE ``graphid`` primary "
+            "  key — always indexed).  Equivalent to Cypher's "
+            "  ``ORDER BY n`` form.  Use when you want fast, stable "
+            "  paging and don't care about the order value being "
+            "  semantically meaningful — typical case is a full-graph "
+            "  batch walk.\n"
+            "* **List of clauses** (list[NodesScanOrderClause]): "
+            "  lexicographic multi-key sort.  Each clause carries a "
+            "  ``property`` name and an optional ``desc`` flag "
+            "  (default ASC).  Mixed directions are supported; the "
+            "  server expands the cursor-position predicate over the "
+            "  full key sequence.  Note: the ``_node`` sentinel is "
+            "  only valid as a single-key string form; use property "
+            "  names in the list form."
+        ),
+    )
+    limit: int = Field(
+        default=DEFAULT_SCAN_LIMIT,
+        ge=1,
+        le=MAX_SCAN_LIMIT,
+        description=(
+            f"Max rows per response page.  Server may return fewer if "
+            f"the payload cap is hit.  Hard cap {MAX_SCAN_LIMIT}."
+        ),
+    )
+    cursor: str | None = Field(
+        default=None,
+        description=(
+            "Opaque pagination token from a prior response's "
+            "``next_cursor``.  Treat as a black box; round-trip "
+            "unchanged."
+        ),
+    )
+
+    @field_validator("labels")
+    @classmethod
+    def _validate_labels(cls, v: list[str]) -> list[str]:
+        for label in v:
+            if not _LABEL_PATTERN.fullmatch(label):
+                raise ValueError(
+                    f"label '{label}' must match {_LABEL_PATTERN.pattern}"
+                )
+        # De-dupe while preserving order so scan order is predictable.
+        seen: set[str] = set()
+        out: list[str] = []
+        for label in v:
+            if label not in seen:
+                seen.add(label)
+                out.append(label)
+        return out
+
+    @field_validator("project")
+    @classmethod
+    def _validate_project(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        if v == ["*"]:
+            return v
+        for key in v:
+            if key == "*":
+                raise ValueError(
+                    "'*' must appear alone in `project`; mixing it with "
+                    "explicit names is ambiguous."
+                )
+            _validate_prop_key(key)
+        return v
+
+    @field_validator("order_by")
+    @classmethod
+    def _validate_order_by(
+        cls, v: str | list[NodesScanOrderClause] | None,
+    ) -> str | list[NodesScanOrderClause] | None:
+        if v is None:
+            # Explicit ``null`` → skip ORDER BY on the server.  Caller
+            # opts out of pagination.  See model field docstring for
+            # the AGE-planner rationale.
+            return None
+        if isinstance(v, str):
+            # String form: either a property name or the _node sentinel.
+            # Both pass _validate_prop_key (regex matches identifiers
+            # starting with letter or underscore).
+            return _validate_prop_key(v)
+        # List form: each clause is already validated by NodesScanOrderClause.
+        if not v:
+            raise ValueError(
+                "order_by list form must contain at least one clause"
+            )
+        # De-dupe by property name while preserving order — sorting on
+        # the same property twice is meaningless and silently produces
+        # an unstable plan in some engines.
+        seen: set[str] = set()
+        out: list[NodesScanOrderClause] = []
+        for clause in v:
+            if clause.property in seen:
+                raise ValueError(
+                    f"property '{clause.property}' appears more than once "
+                    "in order_by — each key may appear at most once"
+                )
+            seen.add(clause.property)
+            out.append(clause)
+        return out
+
+
+class NodesScanItem(BaseModel):
+    """One node row in a /nodes:scan response.
+
+    ``label`` is the resolved leaf label of the node — useful when
+    the request scanned >1 label so callers don't need to track
+    which label produced which row externally.
+    """
+
+    id: str = Field(..., description="Consumer-assigned external id.")
+    label: str = Field(..., description="Resolved leaf label.")
+    properties: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Projected properties.  Missing projected keys are absent "
+            "(no nulls).  ``id`` is always present."
+        ),
+    )
+
+
+class NodesScanResponse(BaseModel):
+    tenant: str
+    labels: list[str]
+    items: list[NodesScanItem] = Field(default_factory=list)
+    next_cursor: str | None = Field(
+        default=None,
+        description=(
+            "Opaque cursor for the next page; ``null`` when the scan "
+            "is fully drained."
+        ),
+    )
+    scanned: int = Field(
+        ...,
+        description="Number of rows returned in this page.",
+    )
+    truncated_by_payload_cap: bool = Field(
+        default=False,
+        description=(
+            "True when the page was cut short by the payload cap "
+            "before ``limit`` was hit.  Caller pages normally via "
+            "``next_cursor``."
+        ),
+    )
+    elapsed_ms: int
+
+
+# ── Bulk edge enumeration (POST /edges:scan) ──────────────────────────────
+
+
+class EdgesScanRequest(BaseModel):
+    """Body for POST /v1/{tenant}/graph/edges:scan.
+
+    Enumerate every edge whose ``type`` is in ``types`` (1+, OR-
+    combined) AND that matches every ``where`` clause (AND-combined),
+    with optional property projection and opaque cursor pagination.
+    Same schema-agnostic shape as ``/nodes:scan``.
+
+    Order is fixed in v1: by edge graphid PK ascending — always
+    indexed, and edges don't have a consumer-assigned external id
+    the way nodes do (they're keyed by ``(src_id, dst_id, type)``).
+    Multi-key / property-based edge sort can be added later without
+    breaking the v1 contract.
+
+    Response items carry resolved endpoint info (``src_id`` /
+    ``src_label`` / ``dst_id`` / ``dst_label``) so callers can
+    round-trip directly to ``/edges:bulk`` — symmetric with the write
+    shape.  The endpoint resolution does a JOIN per row and is
+    bounded by ``limit``; on hot tenants the JOIN sits within ~100 ms.
+    """
+
+    types: list[str] = Field(
+        ...,
+        min_length=1,
+        description=(
+            "1+ edge types to scan, OR-combined.  All must be "
+            "registered on the tenant."
+        ),
+    )
+    where: list[NodesScanWhere] = Field(
+        default_factory=list,
+        description=(
+            "AND-combined filters on edge properties (same op set as "
+            "``/nodes:scan``)."
+        ),
+    )
+    project: list[str] | None = Field(
+        default=None,
+        description=(
+            "Property names to return per edge.  Pass ``['*']`` for "
+            "the full property bag.  Default ``None`` returns an "
+            "empty property bag (callers that only want the topology "
+            "+ type don't pay for property decode)."
+        ),
+    )
+    limit: int = Field(
+        default=DEFAULT_SCAN_LIMIT,
+        ge=1,
+        le=MAX_SCAN_LIMIT,
+        description=(
+            f"Max rows per response page.  Server may return fewer "
+            f"if the payload cap is hit.  Hard cap {MAX_SCAN_LIMIT}."
+        ),
+    )
+    cursor: str | None = Field(
+        default=None,
+        description=(
+            "Opaque pagination token from a prior response's "
+            "``next_cursor``.  Treat as a black box; round-trip "
+            "unchanged."
+        ),
+    )
+
+    @field_validator("types")
+    @classmethod
+    def _validate_types(cls, v: list[str]) -> list[str]:
+        for t in v:
+            if not _LABEL_PATTERN.fullmatch(t):
+                raise ValueError(
+                    f"edge type '{t}' must match {_LABEL_PATTERN.pattern}"
+                )
+        seen: set[str] = set()
+        out: list[str] = []
+        for t in v:
+            if t not in seen:
+                seen.add(t)
+                out.append(t)
+        return out
+
+    @field_validator("project")
+    @classmethod
+    def _validate_project(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        if v == ["*"]:
+            return v
+        for key in v:
+            if key == "*":
+                raise ValueError(
+                    "'*' must appear alone in `project`; mixing it with "
+                    "explicit names is ambiguous."
+                )
+            _validate_prop_key(key)
+        return v
+
+
+class EdgesScanItem(BaseModel):
+    """One edge row in a /edges:scan response — shape mirrors EdgeUpsert
+    so a caller can round-trip the row straight back through /edges:bulk
+    if it wants to amend properties or migrate."""
+
+    src_id: str = Field(..., description="Source node's external id.")
+    src_label: str = Field(..., description="Source node's label.")
+    dst_id: str = Field(..., description="Destination node's external id.")
+    dst_label: str = Field(..., description="Destination node's label.")
+    type: str = Field(..., description="Edge relationship type.")
+    properties: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Projected edge properties.  Empty when ``project`` was "
+            "omitted in the request."
+        ),
+    )
+
+
+class EdgesScanResponse(BaseModel):
+    tenant: str
+    types: list[str]
+    items: list[EdgesScanItem] = Field(default_factory=list)
+    next_cursor: str | None = None
+    scanned: int
+    truncated_by_payload_cap: bool = False
+    elapsed_ms: int

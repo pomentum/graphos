@@ -1,0 +1,7 @@
+# Every text file is LF, in the repository and in checkouts on any OS:
+# shell, SQL, compose and Dockerfiles run inside Linux containers, and the
+# generated diagrams are compared byte for byte by tools/docs/diagrams.mjs.
+* text=auto eol=lf
+
+# Windows PowerShell scripts keep CRLF.
+*.ps1 text eol=crlf

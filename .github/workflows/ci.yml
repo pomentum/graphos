@@ -1,0 +1,72 @@
+# graphos CI — fast unit tests on every push, integration on PR/main only.
+name: graphos-ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Fast path: lint + unit tests (no DB) ────────────────────────────────
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install (service)
+        run: pip install -e "services/graphos[dev]"
+
+      - name: Lint (service)
+        run: ruff check services/graphos/src services/graphos/tests
+
+      - name: Unit tests (no DB)
+        run: pytest -m "not db" services/graphos/tests
+
+      - name: Install (client)
+        run: pip install -e "clients/python[dev]"
+
+      - name: Lint (client)
+        run: ruff check clients/python/src clients/python/tests
+
+      - name: Client tests
+        run: pytest clients/python/tests
+
+  # ── Repo consistency: licence copies + generated diagrams ───────────────
+  consistency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Licence files in each package match the repository root
+        run: |
+          for d in services/graphos clients/python; do
+            for f in LICENSE NOTICE THIRD_PARTY_NOTICES.md; do
+              cmp "$f" "$d/$f" || { echo "::error::$d/$f differs from ./$f"; exit 1; }
+            done
+          done
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Diagrams and whitepaper figures are up to date
+        run: node tools/docs/diagrams.mjs --check
+
+  # ── Integration: brings up compose, runs @db-marked tests ───────────────
+  # Heavier; runs only on PRs and pushes to main. Tear-down is in the
+  # script's exit trap, so a failure mid-run still cleans up.
+  integration:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run DB-gated tests against compose stack
+        run: bash scripts/run-db-tests.sh --down-volumes

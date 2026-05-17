@@ -1,0 +1,12 @@
+graphos
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+graphos runs on Apache AGE (https://age.apache.org/), a project of the
+Apache Software Foundation, licensed under the Apache License, Version 2.0.
+Apache AGE is used as an unmodified upstream container image and is not
+redistributed in this repository. "Apache", "Apache AGE" and the Apache
+feather logo are trademarks of The Apache Software Foundation.
+
+See THIRD_PARTY_NOTICES.md for the licences of Apache AGE, PostgreSQL and the
+Python dependencies.

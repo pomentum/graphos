@@ -1,0 +1,41 @@
+# Python build / caches
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+build/
+dist/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Local env / secrets — everything in deploy/secrets except *.example and .gitkeep
+services/graphos/deploy/secrets/*
+!services/graphos/deploy/secrets/*.example
+!services/graphos/deploy/secrets/.gitkeep
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local override files
+.env
+.env.local
+docker-compose.override.yml
+
+# Crash dumps from Windows / Cygwin tools
+*.stackdump

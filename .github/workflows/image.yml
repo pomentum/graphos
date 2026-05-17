@@ -1,0 +1,110 @@
+# graphos-api container image.
+#
+# build    every PR and push: builds both variants (no push) and smoke-tests them.
+#          Read-only token, so it is safe on pull requests from forks.
+# publish  main and v* tags only (push or manual run): publishes the default variant to
+#          GitHub Container Registry as ghcr.io/<owner>/graphos-api. Only this job
+#          gets `packages: write`.
+#
+# Variants:
+#   default  permissive dependencies only; POST .../recompute-communities answers 501
+#   louvain  adds python-igraph (GPL-2.0-or-later) for Louvain community detection.
+#            Built and tested, not published: publishing it distributes GPL code.
+name: graphos-image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: default
+            extras: ""
+          - variant: louvain
+            extras: louvain
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build (${{ matrix.variant }}, amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: services/graphos
+          build-args: |
+            GRAPHOS_EXTRAS=${{ matrix.extras }}
+          load: true
+          tags: graphos-api:ci
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
+
+      - name: Smoke test
+        run: |
+          docker run --rm --entrypoint python graphos-api:ci -c "
+          import graphos.louvain as l, graphos.app
+          expected = '${{ matrix.extras }}' == 'louvain'
+          assert l.LOUVAIN_AVAILABLE is expected, (l.LOUVAIN_AVAILABLE, expected)
+          print('ok: louvain available =', l.LOUVAIN_AVAILABLE)
+          "
+          docker run --rm --entrypoint ls graphos-api:ci /usr/share/licenses/graphos
+
+  publish:
+    needs: build
+    # Only main and version tags publish: not pull requests, not manual runs on other branches.
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/graphos-api
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+          labels: |
+            org.opencontainers.image.title=graphos-api
+            org.opencontainers.image.description=Multi-tenant graph service on PostgreSQL + Apache AGE
+            org.opencontainers.image.licenses=Apache-2.0
+
+      - name: Build and push (default variant, amd64 + arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: services/graphos
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=default

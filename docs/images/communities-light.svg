@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 282" width="1000" height="282" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" role="img" aria-labelledby="title desc">
+<title id="title">How communities are computed</title>
+<desc id="desc">An admin call to recompute-communities streams edges out of PostgreSQL as integer ids with plain SQL, builds a weighted undirected igraph, runs Louvain in the C core with a fixed seed, and matches each new cluster to its predecessor from the last run by Jaccard overlap of at least 0.5 so community ids stay stable. Results are written back with COPY and a single UPDATE, then the community id is denormalised onto every edge so scoped traversals use an index. Only one run per tenant happens at a time, a dry run previews the partition, and the response reports time per step and modularity.</desc>
+<defs>
+  <marker id="h0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6B7584"/></marker>
+</defs>
+
+<text x="30" y="40" font-size="12.5" font-weight="600" fill="#1D5BD6" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">POST /v1/{tenant}/recompute-communities</text>
+<rect x="30" y="62" width="142" height="96" rx="4" fill="#ECE8F8" stroke="#B8ACE3" stroke-width="1.2"/>
+<text x="44" y="94" font-size="15.5" font-weight="700" fill="#5B45B0">Edge stream</text>
+<text x="44" y="118" font-size="12.5" font-weight="400" fill="#4A5563">plain SQL,</text>
+<text x="44" y="136" font-size="12.5" font-weight="400" fill="#4A5563">integer ids only</text>
+<path d="M174 110 H190" fill="none" stroke="#6B7584" stroke-width="1.8" stroke-linecap="round" marker-end="url(#h0)"/>
+<rect x="193" y="62" width="142" height="96" rx="4" fill="#E3EBFB" stroke="#9DB7EC" stroke-width="1.2"/>
+<text x="207" y="94" font-size="15.5" font-weight="700" fill="#1D5BD6">Build graph</text>
+<text x="207" y="118" font-size="12.5" font-weight="400" fill="#4A5563">weighted,</text>
+<text x="207" y="136" font-size="12.5" font-weight="400" fill="#4A5563">undirected igraph</text>
+<path d="M337 110 H353" fill="none" stroke="#6B7584" stroke-width="1.8" stroke-linecap="round" marker-end="url(#h0)"/>
+<rect x="356" y="62" width="142" height="96" rx="4" fill="#E3EBFB" stroke="#9DB7EC" stroke-width="1.2"/>
+<text x="370" y="94" font-size="15.5" font-weight="700" fill="#1D5BD6">Louvain</text>
+<text x="370" y="118" font-size="12.5" font-weight="400" fill="#4A5563">C core,</text>
+<text x="370" y="136" font-size="12.5" font-weight="400" fill="#4A5563">fixed seed</text>
+<path d="M500 110 H516" fill="none" stroke="#6B7584" stroke-width="1.8" stroke-linecap="round" marker-end="url(#h0)"/>
+<rect x="519" y="62" width="142" height="96" rx="4" fill="#E3EBFB" stroke="#9DB7EC" stroke-width="1.2"/>
+<text x="533" y="94" font-size="15.5" font-weight="700" fill="#1D5BD6">Stable ids</text>
+<text x="533" y="118" font-size="12.5" font-weight="400" fill="#4A5563">Jaccard ≥ 0.5</text>
+<text x="533" y="136" font-size="12.5" font-weight="400" fill="#4A5563">vs. the last run</text>
+<path d="M663 110 H679" fill="none" stroke="#6B7584" stroke-width="1.8" stroke-linecap="round" marker-end="url(#h0)"/>
+<rect x="682" y="62" width="142" height="96" rx="4" fill="#ECE8F8" stroke="#B8ACE3" stroke-width="1.2"/>
+<text x="696" y="94" font-size="15.5" font-weight="700" fill="#5B45B0">Write back</text>
+<text x="696" y="118" font-size="12.5" font-weight="400" fill="#4A5563">COPY + one</text>
+<text x="696" y="136" font-size="12.5" font-weight="400" fill="#4A5563">UPDATE … FROM</text>
+<path d="M826 110 H842" fill="none" stroke="#6B7584" stroke-width="1.8" stroke-linecap="round" marker-end="url(#h0)"/>
+<rect x="845" y="62" width="142" height="96" rx="4" fill="#ECE8F8" stroke="#B8ACE3" stroke-width="1.2"/>
+<text x="859" y="94" font-size="15.5" font-weight="700" fill="#5B45B0">Denormalise</text>
+<text x="859" y="118" font-size="12.5" font-weight="400" fill="#4A5563">community onto</text>
+<text x="859" y="136" font-size="12.5" font-weight="400" fill="#4A5563">every edge</text>
+
+<rect x="30" y="180" width="940" height="1" fill="#C4CDD6"/>
+<text x="30" y="210" font-size="13" font-weight="400" fill="#131A22">one run per tenant at a time (advisory lock, 409 otherwise)</text>
+<text x="530" y="210" font-size="13" font-weight="400" fill="#131A22">dry_run previews the partition without writing</text>
+<text x="30" y="236" font-size="13" font-weight="400" fill="#131A22">response reports time per step and modularity</text>
+<text x="530" y="236" font-size="13" font-weight="400" fill="#131A22">ids persist across runs as membership drifts</text>
+<rect x="30" y="256" width="12" height="12" rx="3" fill="#ECE8F8" stroke="#B8ACE3"/><text x="48" y="266" font-size="12.5" font-weight="400" fill="#4A5563">inside PostgreSQL</text>
+<rect x="190" y="256" width="12" height="12" rx="3" fill="#E3EBFB" stroke="#9DB7EC"/><text x="208" y="266" font-size="12.5" font-weight="400" fill="#4A5563">inside graphos-api</text>
+</svg>

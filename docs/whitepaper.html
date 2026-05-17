@@ -1,0 +1,751 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>graphos Whitepaper</title>
+<meta name="description" content="graphos: a multi-tenant property-graph service built on PostgreSQL and Apache AGE, exposed as a typed HTTP API. The problem it addresses and the benefits it provides.">
+<script>try{var t=localStorage.getItem('graphos-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Drafting-paper ground, one spot colour, hairlines instead of shadows, figures framed like
+   plates. Blue is graphos and violet is PostgreSQL + Apache AGE, in the page and in every diagram. */
+:root{
+  --ground:#EDF0F2; --surface:#F7F8F9; --ink:#131A22; --ink-soft:#4A5563; --rule:#CBD3DB;
+  --grid:rgba(19,26,34,.07); --term:#141A22; --term-ink:#D7DEE7;
+  --accent:#1D5BD6; --accent-soft:#DDE7FA;
+  --store:#5B45B0; --store-soft:#ECE8F8;
+  --measured:#1C7A3A; --measured-bg:#DCEFE2;
+  --designed:#9A6100; --designed-bg:#F6EAD2;
+  --never:#B3261E; --never-bg:#F7DEDC;
+  --display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --ground:#0F1216; --surface:#161A20; --ink:#E6EAEF; --ink-soft:#9AA5B3; --rule:#2A313B;
+    --grid:rgba(230,234,239,.06); --term:#0A0D10; --term-ink:#D7DEE7;
+    --accent:#8AB0FF; --accent-soft:#1A2640;
+    --store:#B7A6F2; --store-soft:#231E3A;
+    --measured:#6FCB8D; --measured-bg:#132A1C;
+    --designed:#E6B75A; --designed-bg:#2E2410;
+    --never:#F2877F; --never-bg:#361816;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --ground:#0F1216; --surface:#161A20; --ink:#E6EAEF; --ink-soft:#9AA5B3; --rule:#2A313B;
+  --grid:rgba(230,234,239,.06); --term:#0A0D10; --term-ink:#D7DEE7;
+  --accent:#8AB0FF; --accent-soft:#1A2640;
+  --store:#B7A6F2; --store-soft:#231E3A;
+  --measured:#6FCB8D; --measured-bg:#132A1C;
+  --designed:#E6B75A; --designed-bg:#2E2410;
+  --never:#F2877F; --never-bg:#361816;
+}
+*{box-sizing:border-box}
+body{background:var(--ground); color:var(--ink); font-family:var(--body); font-size:16.5px; line-height:1.6; padding-inline:16px; padding-block:0 64px; margin:0}
+.wrap{max-width:70ch; margin:0 auto}
+.bar{position:sticky; top:env(safe-area-inset-top,0px); z-index:10; background:var(--ground); border-bottom:1px solid var(--rule); margin-inline:-16px; padding:8px 16px}
+.bar-inner{max-width:70ch; margin:0 auto; display:flex; align-items:center; gap:12px}
+.bar-name{display:inline-flex; align-items:center; gap:9px; font-family:var(--display); font-weight:800; font-size:15px; letter-spacing:-.01em; color:var(--ink); text-decoration:none; margin-right:auto}
+.bar-name::before{content:""; width:9px; height:9px; background:var(--accent)}
+.mode{display:inline-flex; border:1px solid var(--rule); border-radius:4px; overflow:hidden}
+.mode button{font:500 11px/1 var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--ink-soft); background:transparent; border:0; padding:8px 10px; cursor:pointer}
+.mode button + button{border-left:1px solid var(--rule)}
+.mode button[aria-pressed="true"]{background:var(--ink); color:var(--ground)}
+details.toc{position:relative; font-size:14px}
+details.toc > summary{list-style:none; cursor:pointer; display:inline-flex; align-items:center; gap:8px; font-family:var(--mono); font-size:11px; font-weight:500; letter-spacing:.08em; text-transform:uppercase; color:var(--ink); border:1px solid var(--rule); border-radius:4px; padding:7px 12px}
+details.toc > summary::-webkit-details-marker{display:none}
+details.toc > summary .bars{display:inline-grid; gap:3px}
+details.toc > summary .bars i{display:block; width:13px; height:1.5px; background:currentColor}
+details.toc[open] > summary{color:var(--accent); border-color:var(--accent)}
+details.toc .panel{position:absolute; right:0; top:calc(100% + 8px); width:min(290px, calc(100vw - 32px)); max-height:min(70vh, 520px); overflow-y:auto; background:var(--surface); border:1px solid var(--rule); border-radius:4px; padding:6px}
+details.toc ol{list-style:none; margin:0; padding:0}
+details.toc li{margin:0}
+details.toc a{display:block; padding:7px 10px; border-radius:2px; color:var(--ink); text-decoration:none}
+details.toc a:hover, details.toc a:focus-visible{background:var(--accent-soft); color:var(--accent)}
+main{min-width:0}
+
+header.top{padding-top:56px; padding-bottom:8px}
+.eyebrow{display:flex; align-items:center; gap:12px; font-family:var(--mono); font-size:11.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--accent); margin:0 0 14px}
+.eyebrow::before{content:""; width:28px; height:1px; background:currentColor}
+.repo{margin:0 0 18px}
+.repo a{display:inline-flex; align-items:center; gap:8px; padding:6px 11px; font-family:var(--mono); font-size:12.5px; line-height:1; color:var(--ink); text-decoration:none; border:1px solid var(--rule); border-radius:4px; transition:border-color .15s ease, color .15s ease}
+.repo a:hover{border-color:var(--accent); color:var(--accent)}
+.repo svg{width:15px; height:15px; fill:currentColor; flex:none; opacity:.85}
+.repo .go{opacity:0; margin-left:-3px; transition:opacity .15s ease, transform .15s ease}
+.repo a:hover .go{opacity:.8; transform:translateX(2px)}
+@media (prefers-reduced-motion:reduce){.repo a,.repo .go{transition:none}}
+h1{font-family:var(--display); font-weight:800; font-size:clamp(2.8rem,8vw,4.4rem); line-height:.95; letter-spacing:-.045em; margin:0 0 20px; text-wrap:balance}
+h1::after{content:"."; color:var(--accent)}
+.lede{font-size:1.25rem; line-height:1.45; color:var(--ink); margin:0 0 16px; text-wrap:pretty}
+.meta{color:var(--ink-soft); font-size:14.5px; margin:0}
+
+h2{font-family:var(--display); font-weight:800; font-size:1.75rem; line-height:1.1; letter-spacing:-.03em; margin:72px 0 16px; padding-top:12px; border-top:1px solid var(--rule); text-wrap:balance; scroll-margin-top:72px}
+h2 .sec{display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px; margin-bottom:14px; font-size:16.5px; letter-spacing:0}
+h2 .num{font-family:var(--mono); font-weight:500; font-size:12px; letter-spacing:.1em; color:var(--accent); margin-right:auto}
+h3{font-family:var(--display); font-weight:800; font-size:1.12rem; letter-spacing:-.015em; margin:30px 0 8px}
+p{margin:0 0 14px}
+ul, ol.steps{margin:0 0 16px; padding-left:1.2em}
+li{margin:0 0 8px}
+li::marker{color:var(--accent)}
+strong{font-weight:600}
+code{font-family:var(--mono); font-size:.86em; background:var(--accent-soft); padding:.08em .35em; border-radius:2px; overflow-wrap:anywhere}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+/* Evidence tags: a filled dot was measured, a ring is a design property. Shape carries the
+   meaning as well as colour, so it survives grey print and colour blindness. */
+.chip{display:inline-flex; align-items:center; gap:7px; font-family:var(--mono); font-size:11px; font-weight:500; letter-spacing:.08em; text-transform:uppercase; padding:4px 8px 4px 7px; border-radius:2px; line-height:1.2; white-space:nowrap}
+.chip::before{content:""; width:7px; height:7px; border-radius:50%; box-sizing:border-box; flex:none}
+.chip.m{color:var(--measured); background:var(--measured-bg)}
+.chip.m::before{background:currentColor}
+.chip.d{color:var(--designed); background:var(--designed-bg)}
+.chip.d::before{border:1.5px solid currentColor}
+
+.summary{border:1px solid var(--rule); border-radius:4px; background:var(--surface); margin:36px 0 8px}
+.summary h2{margin:0; padding:10px 18px; border-top:0; border-bottom:1px solid var(--rule); font-family:var(--mono); font-weight:500; font-size:11.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--accent)}
+.summary ul{padding:0 18px; margin:0; list-style:none}
+.summary li{display:grid; grid-template-columns:118px minmax(0,1fr); gap:14px; padding:12px 0; border-top:1px solid var(--rule); margin:0}
+.summary li:first-child{border-top:0}
+.summary .k{font-family:var(--mono); font-size:11.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-soft); padding-top:3px}
+@media (max-width:520px){ .summary li{grid-template-columns:minmax(0,1fr); gap:2px} }
+
+dl.gloss{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 28px; margin:0 0 16px}
+@media (max-width:640px){ dl.gloss{grid-template-columns:minmax(0,1fr)} }
+dl.gloss div{padding:10px 0; border-top:1px solid var(--rule)}
+dl.gloss dt{font-family:var(--mono); font-size:13.5px; font-weight:500; color:var(--accent)}
+dl.gloss dd{margin:2px 0 0; font-size:15px; color:var(--ink)}
+
+.tbl{overflow-x:auto; margin:0 0 18px; border:1px solid var(--rule); border-radius:4px; background:var(--surface)}
+table{border-collapse:collapse; width:100%; font-size:15px}
+th, td{text-align:left; vertical-align:top; padding:10px 14px; border-top:1px solid var(--rule)}
+th + th, td + td{border-left:1px solid var(--rule)}
+thead th{border-top:0; font-family:var(--mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-soft); font-weight:500}
+td:first-child{font-weight:500}
+td.n{font-family:var(--mono); font-size:13.5px; white-space:nowrap}
+.good{color:var(--measured); font-weight:600}
+
+.fig{--mark:var(--ink-soft); --len:12px; margin:8px 0 12px; padding:22px 20px 14px; overflow-x:auto;
+  background:
+    linear-gradient(var(--mark),var(--mark)) left top / var(--len) 1px,
+    linear-gradient(var(--mark),var(--mark)) left top / 1px var(--len),
+    linear-gradient(var(--mark),var(--mark)) right top / var(--len) 1px,
+    linear-gradient(var(--mark),var(--mark)) right top / 1px var(--len),
+    linear-gradient(var(--mark),var(--mark)) left bottom / var(--len) 1px,
+    linear-gradient(var(--mark),var(--mark)) left bottom / 1px var(--len),
+    linear-gradient(var(--mark),var(--mark)) right bottom / var(--len) 1px,
+    linear-gradient(var(--mark),var(--mark)) right bottom / 1px var(--len),
+    radial-gradient(circle, var(--grid) 1px, transparent 1.2px) 0 0 / 16px 16px;
+  background-repeat:no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, repeat}
+.fig img, .fig svg{display:block; width:100%; height:auto}
+.fig figcaption{display:flex; gap:12px; align-items:baseline; margin-top:14px; padding-top:10px; border-top:1px solid var(--rule); font-size:13.5px; color:var(--ink-soft)}
+.fig .fig-n{font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); white-space:nowrap}
+.pic .pic-dark{display:none}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .pic .pic-light{display:none} :root:not([data-theme="light"]) .pic .pic-dark{display:block} }
+:root[data-theme="dark"] .pic .pic-light{display:none} :root[data-theme="dark"] .pic .pic-dark{display:block}
+
+.record{font-family:var(--mono); font-size:13px; line-height:1.7; color:var(--term-ink); background:var(--term); border-radius:4px; padding:14px 18px; margin:4px 0 16px; overflow-x:auto; white-space:pre}
+.callout{border-left:2px solid var(--designed); background:var(--designed-bg); padding:12px 16px; border-radius:0 4px 4px 0; margin:6px 0 18px}
+.callout p:last-child{margin:0}
+blockquote{margin:6px 0 18px; padding:2px 0 2px 16px; border-left:2px solid var(--accent); font-size:1.08rem}
+blockquote p:last-child{margin:0}
+.age{border:1px solid var(--rule); border-left:3px solid var(--store); border-radius:0 4px 4px 0; background:var(--surface); padding:14px 18px; margin:6px 0 18px}
+.age p:last-child{margin:0}
+footer{margin-top:56px; padding-top:18px; border-top:1px solid var(--rule); color:var(--ink-soft); font-size:14.5px}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} }
+</style>
+</head>
+<body>
+
+<div class="bar"><div class="bar-inner">
+  <a class="bar-name" href="#top">graphos</a>
+  <div class="mode" role="group" aria-label="Colour theme">
+    <button type="button" data-set="light" aria-pressed="false">Light</button><button type="button" data-set="dark" aria-pressed="false">Dark</button>
+  </div>
+  <details class="toc" id="toc">
+    <summary aria-label="Table of contents"><span class="bars" aria-hidden="true"><i></i><i></i><i></i></span>Contents</summary>
+    <nav class="panel" aria-label="Contents">
+    <ol>
+      <li><a href="#summary">In 30 seconds</a></li>
+      <li><a href="#problem">1 · The problem</a></li>
+      <li><a href="#approach">2 · The approach</a></li>
+      <li><a href="#how">3 · How it works</a></li>
+      <li><a href="#communities">4 · Communities that stay put</a></li>
+      <li><a href="#rules">5 · Edges from rules</a></li>
+      <li><a href="#ops">6 · Operating it</a></li>
+      <li><a href="#benefits">7 · Benefits</a></li>
+      <li><a href="#measured">8 · What has been measured</a></li>
+      <li><a href="#boundaries">9 · Boundaries and limits</a></li>
+      <li><a href="#age">10 · Built on Apache AGE</a></li>
+      <li><a href="#start">11 · Getting started</a></li>
+    </ol>
+    </nav>
+  </details>
+</div></div>
+
+<div class="wrap">
+<main>
+    <header class="top" id="top">
+      <p class="eyebrow">Whitepaper · version 2026-10-02</p>
+      <p class="repo"><a href="https://github.com/pomentum/graphos" rel="noopener"
+        aria-label="Read the source on GitHub: pomentum/graphos"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg><span>pomentum/graphos</span><svg class="go" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 1 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06Z"/></svg></a></p>
+      <h1>graphos</h1>
+      <p class="lede">A graph store many services can share without sharing a database. PostgreSQL and Apache AGE underneath, a typed HTTP API on top.</p>
+      <p class="meta">This paper explains the problem graphos addresses, the decisions behind it, how it works and what it gives the people who build on it and run it. Numbers are marked <span class="chip m">measured</span> only where they come from a benchmark or a profiled query; everything else is a property of the design.</p>
+    </header>
+
+    <section class="summary" id="summary">
+      <h2>In 30 seconds</h2>
+      <ul>
+        <li><span class="k">The problem</span><span>Connected data turns up in most systems. Once several services need it, each one ends up holding database credentials, its own Cypher, and its own answers to bulk loading, indexing and isolation.</span></li>
+        <li><span class="k">The approach</span><span>One service owns the graph. Consumers call a typed REST API; graphos alone talks to PostgreSQL + Apache AGE on a private network.</span></li>
+        <li><span class="k">What you get</span><span>A graph per tenant, token-scoped access, COPY-speed idempotent writes, composable reads, optional Louvain communities with stable ids, rule-based edges and ordinary Postgres operations.</span></li>
+        <li><span class="k">What it is not</span><span>Not a general query console, not a new database engine, and not tied to any domain: graphos ships no labels of its own.</span></li>
+        <li><span class="k">Licence</span><span>Apache 2.0, like the Apache AGE extension it is built on.</span></li>
+      </ul>
+    </section>
+
+    <h2 id="problem"><span class="sec"><span class="num">01</span></span>The problem</h2>
+    <p>Graphs are rarely the product, but they are often underneath it: links between documents, people and the teams they belong to, ownership and access relationships, lineage, recommendations. Storing them is the easy part. The difficulty starts when more than one service needs the same graph store.</p>
+    <p>The usual pattern is that each service adds a database driver, a connection string, and its own query text. That works for one consumer. With several, the same costs appear every time:</p>
+    <ul>
+      <li><strong>Credentials spread.</strong> Every consumer holds a database login, so every consumer can run any query, against any data.</li>
+      <li><strong>Query text is copied and drifts.</strong> The same traversal is written slightly differently in each service, with different limits and different bugs.</li>
+      <li><strong>There is no tenant boundary.</strong> Separating one team's or one dataset's graph from another becomes a convention in application code rather than something the system enforces.</li>
+      <li><strong>One slow query affects everyone.</strong> An unbounded variable-length match can hold connections and I/O that every other consumer is waiting for.</li>
+      <li><strong>Everyone re-solves bulk loading.</strong> Row-by-row <code>MERGE</code> is the obvious way to write a graph and also the slowest; each team discovers that separately.</li>
+      <li><strong>Analytics happen off to the side.</strong> Community detection is exported, computed elsewhere and written back, and the community ids change on every run, which breaks anything that remembered them.</li>
+      <li><strong>Operations need a specialist.</strong> A dedicated graph database is one more product to back up, monitor, upgrade and secure.</li>
+    </ul>
+
+    <figure class="fig pic">
+      <!--fig:problem-light--><svg class="pic-light" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 430" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" role="img" aria-labelledby="problem-light-title problem-light-desc">
+<title id="problem-light-title">From many database clients to one graph service</title>
+<desc id="problem-light-desc">Left: three services each embed a database driver, a connection string and their own Cypher, and all reach one shared graph database, so credentials and query text spread, there is no tenant boundary, a slow query affects everyone and each team re-solves bulk load and indexing. Right: the same services call graphos over typed HTTP; graphos alone reaches PostgreSQL with Apache AGE on a private network, giving one scoped token per consumer, a graph per tenant with bounded, timed queries, and built-in bulk load, indexing and community detection.</desc>
+<defs>
+  <marker id="problem-light-h0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B3261E"/></marker>
+  <marker id="problem-light-h1" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1D5BD6"/></marker>
+  <marker id="problem-light-h2" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5B45B0"/></marker>
+</defs>
+
+<text x="30" y="40" font-size="12" font-weight="600" fill="#4A5563" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="1.2">EVERY SERVICE TALKS TO THE DATABASE</text>
+<rect x="30" y="70" width="180" height="68" rx="4" fill="#F7F8F9" stroke="#C4CDD6" stroke-width="1.2"/>
+<text x="48" y="98" font-size="16" font-weight="600" fill="#131A22">Service A</text>
+<text x="48" y="120" font-size="12" font-weight="400" fill="#4A5563" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">driver · DSN · Cypher</text>
+<rect x="30" y="160" width="180" height="68" rx="4" fill="#F7F8F9" stroke="#C4CDD6" stroke-width="1.2"/>
+<text x="48" y="188" font-size="16" font-weight="600" fill="#131A22">Service B</text>
+<text x="48" y="210" font-size="12" font-weight="400" fill="#4A5563" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">driver · DSN · Cypher</text>
+<rect x="30" y="250" width="180" height="68" rx="4" fill="#F7F8F9" stroke="#C4CDD6" stroke-width="1.2"/>
+<text x="48" y="278" font-size="16" font-weight="600" fill="#131A22">Service C</text>
+<text x="48" y="300" font-size="12" font-weight="400" fill="#4A5563" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">driver · DSN · Cypher</text>
+<path d="M210 104 C 250 104, 262 170, 296 182" fill="none" stroke="#B3261E" stroke-width="1.8" stroke-linecap="round" marker-end="url(#problem-light-h0)"/>
+<path d="M210 194 H296" fill="none" stroke="#B3261E" stroke-width="1.8" stroke-linecap="round" marker-end="url(#problem-light-h0)"/>
+<path d="M210 284 C 250 284, 262 218, 296 206" fill="none" stroke="#B3261E" stroke-width="1.8" stroke-linecap="round" marker-end="url(#problem-light-h0)"/>
+<g><path d="M300 100 v190 a80 16 0 0 0 160 0 v-190" fill="#ECE8F8" stroke="#B8ACE3" stroke-width="1.4"/>
+  <ellipse cx="380" cy="100" rx="80" ry="16" fill="#ECE8F8" stroke="#B8ACE3" stroke-width="1.4"/></g>
+<text x="380" y="186" font-size="16" font-weight="700" fill="#5B45B0" text-anchor="middle">graph</text>
+<text x="380" y="206" font-size="16" font-weight="700" fill="#5B45B0" text-anchor="middle">database</text>
+<text x="380" y="232" font-size="12" font-weight="400" fill="#4A5563" text-anchor="middle">one shared login</text>
+<path d="M31 343 l9 9 M40 343 l-9 9" stroke="#B3261E" stroke-width="2" stroke-linecap="round"/><text x="50" y="352" font-size="13.5" font-weight="400" fill="#131A22">credentials and query text in every service</text>
+<path d="M31 369 l9 9 M40 369 l-9 9" stroke="#B3261E" stroke-width="2" stroke-linecap="round"/><text x="50" y="378" font-size="13.5" font-weight="400" fill="#131A22">no tenant boundary; one slow query stalls all</text>
+<path d="M31 395 l9 9 M40 395 l-9 9" stroke="#B3261E" stroke-width="2" stroke-linecap="round"/><text x="50" y="404" font-size="13.5" font-weight="400" fill="#131A22">each team re-solves bulk load and indexing</text>
+<path d="M495 30 V410" stroke="#C4CDD6" stroke-width="1.2"/>
+<text x="525" y="40" font-size="12" font-weight="600" fill="#1D5BD6" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="1.2">ONE SERVICE OWNS THE GRAPH</text>
+<rect x="525" y="70" width="130" height="68" rx="4" fill="#F7F8F9" stroke="#C4CDD6" stroke-width="1.2"/>
+<text x="541" y="98" font-size="16" font-weight="600" fill="#131A22">Service A</text>
+<text x="541" y="120" font-size="12" font-weight="400" fill="#4A5563" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">typed HTTP</text>
+<rect x="525" y="160" width="130" height="68" rx="4" fill="#F7F8F9" stroke="#C4CDD6" stroke-width="1.2"/>
+<text x="541" y="188" font-size="16" font-weight="600" fill="#131A22">Service B</text>
+<text x="541" y="210" font-size="12" font-weight="400" fill="#4A5563" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">typed HTTP</text>
+<rect x="525" y="250" width="130" height="68" rx="4" fill="#F7F8F9" stroke="#C4CDD6" stroke-width="1.2"/>
+<text x="541" y="278" font-size="16" font-weight="600" fill="#131A22">Service C</text>
+<text x="541" y="300" font-size="12" font-weight="400" fill="#4A5563" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">typed HTTP</text>
+<path d="M655 104 C 672 104, 676 150, 690 160" fill="none" stroke="#1D5BD6" stroke-width="1.8" stroke-linecap="round" marker-end="url(#problem-light-h1)"/>
+<path d="M655 194 H688" fill="none" stroke="#1D5BD6" stroke-width="1.8" stroke-linecap="round" marker-end="url(#problem-light-h1)"/>
+<path d="M655 284 C 672 284, 676 238, 690 228" fill="none" stroke="#1D5BD6" stroke-width="1.8" stroke-linecap="round" marker-end="url(#problem-light-h1)"/>
+<rect x="692" y="70" width="116" height="248" rx="4" fill="#E3EBFB" stroke="#9DB7EC" stroke-width="1.2"/>
+<text x="750" y="172" font-size="17" font-weight="700" fill="#1D5BD6" text-anchor="middle">graphos</text>
+<text x="750" y="194" font-size="12" font-weight="400" fill="#4A5563" text-anchor="middle">auth · tenants</text>
+<text x="750" y="212" font-size="12" font-weight="400" fill="#4A5563" text-anchor="middle">limits · metrics</text>
+<path d="M808 194 H842" fill="none" stroke="#5B45B0" stroke-width="2.2" stroke-linecap="round" marker-end="url(#problem-light-h2)"/>
+<g><path d="M845 100 v190 a60 16 0 0 0 120 0 v-190" fill="#ECE8F8" stroke="#B8ACE3" stroke-width="1.4"/>
+  <ellipse cx="905" cy="100" rx="60" ry="16" fill="#ECE8F8" stroke="#B8ACE3" stroke-width="1.4"/></g>
+<text x="905" y="186" font-size="15" font-weight="700" fill="#5B45B0" text-anchor="middle">Postgres</text>
+<text x="905" y="206" font-size="13" font-weight="600" fill="#5B45B0" text-anchor="middle">+ Apache AGE</text>
+<text x="905" y="232" font-size="12" font-weight="400" fill="#4A5563" text-anchor="middle">private network</text>
+<path d="M525 348 l4 4 l8 -9" fill="none" stroke="#1C7A3A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="545" y="352" font-size="13.5" font-weight="400" fill="#131A22">one scoped token per consumer</text>
+<path d="M525 374 l4 4 l8 -9" fill="none" stroke="#1C7A3A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="545" y="378" font-size="13.5" font-weight="400" fill="#131A22">a graph per tenant; bounded, timed queries</text>
+<path d="M525 400 l4 4 l8 -9" fill="none" stroke="#1C7A3A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="545" y="404" font-size="13.5" font-weight="400" fill="#131A22">bulk load, indexes, communities built in</text>
+</svg><!--/fig:problem-light-->
+      <!--fig:problem-dark--><svg class="pic-dark" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 430" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" role="img" aria-labelledby="problem-dark-title problem-dark-desc">
+<title id="problem-dark-title">From many database clients to one graph service</title>
+<desc id="problem-dark-desc">Left: three services each embed a database driver, a connection string and their own Cypher, and all reach one shared graph database, so credentials and query text spread, there is no tenant boundary, a slow query affects everyone and each team re-solves bulk load and indexing. Right: the same services call graphos over typed HTTP; graphos alone reaches PostgreSQL with Apache AGE on a private network, giving one scoped token per consumer, a graph per tenant with bounded, timed queries, and built-in bulk load, indexing and community detection.</desc>
+<defs>
+  <marker id="problem-dark-h0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#F2877F"/></marker>
+  <marker id="problem-dark-h1" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8AB0FF"/></marker>
+  <marker id="problem-dark-h2" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B7A6F2"/></marker>
+</defs>
+
+<text x="30" y="40" font-size="12" font-weight="600" fill="#9AA5B3" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="1.2">EVERY SERVICE TALKS TO THE DATABASE</text>
+<rect x="30" y="70" width="180" height="68" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
+<text x="48" y="98" font-size="16" font-weight="600" fill="#E6EAEF">Service A</text>
+<text x="48" y="120" font-size="12" font-weight="400" fill="#9AA5B3" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">driver · DSN · Cypher</text>
+<rect x="30" y="160" width="180" height="68" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
+<text x="48" y="188" font-size="16" font-weight="600" fill="#E6EAEF">Service B</text>
+<text x="48" y="210" font-size="12" font-weight="400" fill="#9AA5B3" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">driver · DSN · Cypher</text>
+<rect x="30" y="250" width="180" height="68" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
+<text x="48" y="278" font-size="16" font-weight="600" fill="#E6EAEF">Service C</text>
+<text x="48" y="300" font-size="12" font-weight="400" fill="#9AA5B3" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">driver · DSN · Cypher</text>
+<path d="M210 104 C 250 104, 262 170, 296 182" fill="none" stroke="#F2877F" stroke-width="1.8" stroke-linecap="round" marker-end="url(#problem-dark-h0)"/>
+<path d="M210 194 H296" fill="none" stroke="#F2877F" stroke-width="1.8" stroke-linecap="round" marker-end="url(#problem-dark-h0)"/>
+<path d="M210 284 C 250 284, 262 218, 296 206" fill="none" stroke="#F2877F" stroke-width="1.8" stroke-linecap="round" marker-end="url(#problem-dark-h0)"/>
+<g><path d="M300 100 v190 a80 16 0 0 0 160 0 v-190" fill="#231E3A" stroke="#594C92" stroke-width="1.4"/>
+  <ellipse cx="380" cy="100" rx="80" ry="16" fill="#231E3A" stroke="#594C92" stroke-width="1.4"/></g>
+<text x="380" y="186" font-size="16" font-weight="700" fill="#B7A6F2" text-anchor="middle">graph</text>
+<text x="380" y="206" font-size="16" font-weight="700" fill="#B7A6F2" text-anchor="middle">database</text>
+<text x="380" y="232" font-size="12" font-weight="400" fill="#9AA5B3" text-anchor="middle">one shared login</text>
+<path d="M31 343 l9 9 M40 343 l-9 9" stroke="#F2877F" stroke-width="2" stroke-linecap="round"/><text x="50" y="352" font-size="13.5" font-weight="400" fill="#E6EAEF">credentials and query text in every service</text>
+<path d="M31 369 l9 9 M40 369 l-9 9" stroke="#F2877F" stroke-width="2" stroke-linecap="round"/><text x="50" y="378" font-size="13.5" font-weight="400" fill="#E6EAEF">no tenant boundary; one slow query stalls all</text>
+<path d="M31 395 l9 9 M40 395 l-9 9" stroke="#F2877F" stroke-width="2" stroke-linecap="round"/><text x="50" y="404" font-size="13.5" font-weight="400" fill="#E6EAEF">each team re-solves bulk load and indexing</text>
+<path d="M495 30 V410" stroke="#2E3642" stroke-width="1.2"/>
+<text x="525" y="40" font-size="12" font-weight="600" fill="#8AB0FF" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="1.2">ONE SERVICE OWNS THE GRAPH</text>
+<rect x="525" y="70" width="130" height="68" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
+<text x="541" y="98" font-size="16" font-weight="600" fill="#E6EAEF">Service A</text>
+<text x="541" y="120" font-size="12" font-weight="400" fill="#9AA5B3" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">typed HTTP</text>
+<rect x="525" y="160" width="130" height="68" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
+<text x="541" y="188" font-size="16" font-weight="600" fill="#E6EAEF">Service B</text>
+<text x="541" y="210" font-size="12" font-weight="400" fill="#9AA5B3" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">typed HTTP</text>
+<rect x="525" y="250" width="130" height="68" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
+<text x="541" y="278" font-size="16" font-weight="600" fill="#E6EAEF">Service C</text>
+<text x="541" y="300" font-size="12" font-weight="400" fill="#9AA5B3" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">typed HTTP</text>
+<path d="M655 104 C 672 104, 676 150, 690 160" fill="none" stroke="#8AB0FF" stroke-width="1.8" stroke-linecap="round" marker-end="url(#problem-dark-h1)"/>
+<path d="M655 194 H688" fill="none" stroke="#8AB0FF" stroke-width="1.8" stroke-linecap="round" marker-end="url(#problem-dark-h1)"/>
+<path d="M655 284 C 672 284, 676 238, 690 228" fill="none" stroke="#8AB0FF" stroke-width="1.8" stroke-linecap="round" marker-end="url(#problem-dark-h1)"/>
+<rect x="692" y="70" width="116" height="248" rx="4" fill="#1A2640" stroke="#3A5690" stroke-width="1.2"/>
+<text x="750" y="172" font-size="17" font-weight="700" fill="#8AB0FF" text-anchor="middle">graphos</text>
+<text x="750" y="194" font-size="12" font-weight="400" fill="#9AA5B3" text-anchor="middle">auth · tenants</text>
+<text x="750" y="212" font-size="12" font-weight="400" fill="#9AA5B3" text-anchor="middle">limits · metrics</text>
+<path d="M808 194 H842" fill="none" stroke="#B7A6F2" stroke-width="2.2" stroke-linecap="round" marker-end="url(#problem-dark-h2)"/>
+<g><path d="M845 100 v190 a60 16 0 0 0 120 0 v-190" fill="#231E3A" stroke="#594C92" stroke-width="1.4"/>
+  <ellipse cx="905" cy="100" rx="60" ry="16" fill="#231E3A" stroke="#594C92" stroke-width="1.4"/></g>
+<text x="905" y="186" font-size="15" font-weight="700" fill="#B7A6F2" text-anchor="middle">Postgres</text>
+<text x="905" y="206" font-size="13" font-weight="600" fill="#B7A6F2" text-anchor="middle">+ Apache AGE</text>
+<text x="905" y="232" font-size="12" font-weight="400" fill="#9AA5B3" text-anchor="middle">private network</text>
+<path d="M525 348 l4 4 l8 -9" fill="none" stroke="#6FCB8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="545" y="352" font-size="13.5" font-weight="400" fill="#E6EAEF">one scoped token per consumer</text>
+<path d="M525 374 l4 4 l8 -9" fill="none" stroke="#6FCB8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="545" y="378" font-size="13.5" font-weight="400" fill="#E6EAEF">a graph per tenant; bounded, timed queries</text>
+<path d="M525 400 l4 4 l8 -9" fill="none" stroke="#6FCB8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="545" y="404" font-size="13.5" font-weight="400" fill="#E6EAEF">bulk load, indexes, communities built in</text>
+</svg><!--/fig:problem-dark-->
+      <figcaption><span class="fig-n">Figure 1</span><span>From many database clients to one graph service.</span></figcaption>
+    </figure>
+
+    <h2 id="approach"><span class="sec"><span class="num">02</span></span>The approach</h2>
+    <p>graphos rests on four decisions. Each one removes a class of the problems above rather than mitigating it.</p>
+    <dl class="gloss">
+      <div><dt>Postgres, not a new engine</dt><dd>The graph lives in PostgreSQL through the Apache AGE extension. You keep MVCC, disk-backed storage, <code>pg_dump</code>, streaming replication and <code>pg_stat_statements</code>, and still query with openCypher.</dd></div>
+      <div><dt>The boundary is HTTP</dt><dd>Consumers speak typed JSON. Cypher and SQL are written inside graphos, once, with checked identifiers and capped limits. No connection string leaves the service.</dd></div>
+      <div><dt>A tenant is a graph</dt><dd>Each tenant gets its own AGE graph. A token lists the tenants it may touch; the tenant is in the URL and is checked before any SQL runs.</dd></div>
+      <div><dt>The schema is the consumer's</dt><dd>graphos ships no labels and interprets no properties. Consumers declare labels at registration; every endpoint takes label, property and edge names as parameters.</dd></div>
+    </dl>
+    <blockquote><p>graphos owns the data plane and generic graph operations. The meaning of the data stays with whoever wrote it.</p></blockquote>
+
+    <h2 id="how"><span class="sec"><span class="num">03</span></span>How it works</h2>
+    <p>graphos is two containers. <code>graphos-db</code> is PostgreSQL 16 with Apache AGE and has no externally reachable port. <code>graphos-api</code> is a FastAPI service on asyncpg and is the only thing that can reach it. Consumers join a separate network and call the API with a bearer token.</p>
+
+    <figure class="fig pic">
+      <!--fig:architecture-light--><svg class="pic-light" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 516" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" role="img" aria-labelledby="architecture-light-title architecture-light-desc">
+<title id="architecture-light-title">How graphos is deployed</title>
+<desc id="architecture-light-desc">Consumers such as a loader job, an application, an analytics UI and an operator call graphos-api over the graphos-net network with a bearer token. graphos-api checks the token against the tenant in the path, validates typed request contracts, builds Cypher and SQL internally with checked identifiers and capped limits, runs each query under a statement timeout, and emits metrics, JSON logs and an audit trail; it also runs Louvain community detection and a key/value cache. Only graphos-api reaches graphos-db, PostgreSQL 16 with Apache AGE, over an internal network with no external port. Each tenant is its own AGE graph, and graphos_meta holds registrations and the cache. Consumers never receive a connection string and never send raw Cypher or SQL.</desc>
+<defs>
+  <marker id="architecture-light-h0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1D5BD6"/></marker>
+  <marker id="architecture-light-h1" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5B45B0"/></marker>
+</defs>
+
+<text x="30" y="40" font-size="12" font-weight="600" fill="#4A5563" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="1.2">CONSUMERS</text>
+<text x="470" y="40" font-size="12" font-weight="600" fill="#1D5BD6" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="1.2">GRAPHOS-API</text>
+<text x="840" y="40" font-size="12" font-weight="600" fill="#5B45B0" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="1.2">GRAPHOS-DB</text>
+<rect x="30" y="60" width="196" height="62" rx="4" fill="#F7F8F9" stroke="#C4CDD6" stroke-width="1.2"/>
+<text x="46" y="86" font-size="15" font-weight="600" fill="#131A22">Loader job</text>
+<text x="46" y="108" font-size="12" font-weight="400" fill="#4A5563">NDJSON / COPY bulk writes</text>
+<rect x="30" y="146" width="196" height="62" rx="4" fill="#F7F8F9" stroke="#C4CDD6" stroke-width="1.2"/>
+<text x="46" y="172" font-size="15" font-weight="600" fill="#131A22">Application</text>
+<text x="46" y="194" font-size="12" font-weight="400" fill="#4A5563">search · neighbors · expand</text>
+<rect x="30" y="232" width="196" height="62" rx="4" fill="#F7F8F9" stroke="#C4CDD6" stroke-width="1.2"/>
+<text x="46" y="258" font-size="15" font-weight="600" fill="#131A22">Analytics / UI</text>
+<text x="46" y="280" font-size="12" font-weight="400" fill="#4A5563">aggregates · export</text>
+<rect x="30" y="318" width="196" height="62" rx="4" fill="#F7F8F9" stroke="#C4CDD6" stroke-width="1.2"/>
+<text x="46" y="344" font-size="15" font-weight="600" fill="#131A22">Operator</text>
+<text x="46" y="366" font-size="12" font-weight="400" fill="#4A5563">admin token: tenants, Louvain</text>
+<path d="M226 91 C 262 91, 270 215, 304 215" fill="none" stroke="#1D5BD6" stroke-width="1.8" stroke-linecap="round" marker-end="url(#architecture-light-h0)"/>
+<path d="M226 177 C 262 177, 270 215, 304 215" fill="none" stroke="#1D5BD6" stroke-width="1.8" stroke-linecap="round" marker-end="url(#architecture-light-h0)"/>
+<path d="M226 263 C 262 263, 270 215, 304 215" fill="none" stroke="#1D5BD6" stroke-width="1.8" stroke-linecap="round" marker-end="url(#architecture-light-h0)"/>
+<path d="M226 349 C 262 349, 270 215, 304 215" fill="none" stroke="#1D5BD6" stroke-width="1.8" stroke-linecap="round" marker-end="url(#architecture-light-h0)"/>
+<text x="30" y="444" font-size="12" font-weight="600" fill="#1D5BD6" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">graphos-net</text><text x="120" y="444" font-size="12" font-weight="400" fill="#4A5563">HTTP + bearer token, the only way in</text>
+<rect x="306" y="58" width="330" height="360" rx="4" fill="#E3EBFB" stroke="#9DB7EC" stroke-width="1.2"/>
+<text x="326" y="88" font-size="18" font-weight="700" fill="#1D5BD6">graphos-api</text>
+<text x="326" y="108" font-size="12.5" font-weight="400" fill="#4A5563">FastAPI · asyncpg · one process per replica</text>
+<rect x="324" y="124" width="294" height="42" rx="4" fill="#F7F8F9" stroke="#C4CDD6" stroke-width="1.2"/>
+<text x="338" y="142" font-size="13" font-weight="600" fill="#131A22">bearer token → tenant scope</text>
+<text x="338" y="158" font-size="11.5" font-weight="400" fill="#4A5563">403 / 404 before any SQL</text>
+<rect x="324" y="174" width="294" height="42" rx="4" fill="#F7F8F9" stroke="#C4CDD6" stroke-width="1.2"/>
+<text x="338" y="192" font-size="13" font-weight="600" fill="#131A22">typed REST contracts</text>
+<text x="338" y="208" font-size="11.5" font-weight="400" fill="#4A5563">Pydantic models, OpenAPI</text>
+<rect x="324" y="224" width="294" height="42" rx="4" fill="#F7F8F9" stroke="#C4CDD6" stroke-width="1.2"/>
+<text x="338" y="242" font-size="13" font-weight="600" fill="#131A22">Cypher + SQL built inside</text>
+<text x="338" y="258" font-size="11.5" font-weight="400" fill="#4A5563">identifiers checked, limits capped</text>
+<rect x="324" y="274" width="294" height="42" rx="4" fill="#F7F8F9" stroke="#C4CDD6" stroke-width="1.2"/>
+<text x="338" y="292" font-size="13" font-weight="600" fill="#131A22">statement_timeout per query</text>
+<text x="338" y="308" font-size="11.5" font-weight="400" fill="#4A5563">a bad query cannot starve the pool</text>
+<rect x="324" y="324" width="294" height="42" rx="4" fill="#F7F8F9" stroke="#C4CDD6" stroke-width="1.2"/>
+<text x="338" y="342" font-size="13" font-weight="600" fill="#131A22">metrics · JSON logs · audit</text>
+<text x="338" y="358" font-size="11.5" font-weight="400" fill="#4A5563">Prometheus, W3C traceparent</text>
+<rect x="324" y="380" width="140" height="24" rx="3" fill="#F7F8F9"/><text x="394" y="396.5" font-size="12.5" font-weight="600" fill="#1D5BD6" text-anchor="middle">Louvain · igraph</text><rect x="472" y="380" width="146" height="24" rx="3" fill="#F7F8F9"/><text x="545" y="396.5" font-size="12.5" font-weight="600" fill="#1D5BD6" text-anchor="middle">K/V cache · LRU</text>
+<path d="M636 215 H708" fill="none" stroke="#5B45B0" stroke-width="2.2" stroke-linecap="round" marker-end="url(#architecture-light-h1)"/>
+<text x="712" y="444" font-size="12" font-weight="600" fill="#5B45B0" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">graphos-internal</text><text x="842" y="444" font-size="12" font-weight="400" fill="#4A5563">no external port</text>
+<g><path d="M712 82 v316 a128 22 0 0 0 256 0 v-316" fill="#ECE8F8" stroke="#B8ACE3" stroke-width="1.4"/>
+  <ellipse cx="840" cy="82" rx="128" ry="22" fill="#ECE8F8" stroke="#B8ACE3" stroke-width="1.4"/></g>
+<text x="840" y="132" font-size="16" font-weight="700" fill="#5B45B0" text-anchor="middle">PostgreSQL 16</text>
+<text x="840" y="152" font-size="13" font-weight="600" fill="#5B45B0" text-anchor="middle">+ Apache AGE (openCypher)</text>
+<rect x="734" y="176" width="212" height="50" rx="4" fill="#F7F8F9" stroke="#B8ACE3" stroke-opacity="0.7"/>
+<text x="750" y="197" font-size="13" font-weight="600" fill="#131A22" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">tenant_a</text>
+<text x="750" y="215" font-size="12" font-weight="400" fill="#4A5563">its own AGE graph</text>
+<rect x="734" y="238" width="212" height="50" rx="4" fill="#F7F8F9" stroke="#B8ACE3" stroke-opacity="0.7"/>
+<text x="750" y="259" font-size="13" font-weight="600" fill="#131A22" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">tenant_b</text>
+<text x="750" y="277" font-size="12" font-weight="400" fill="#4A5563">its own AGE graph</text>
+<rect x="734" y="300" width="212" height="50" rx="4" fill="#F7F8F9" stroke="#B8ACE3" stroke-opacity="0.7"/>
+<text x="750" y="321" font-size="13" font-weight="600" fill="#131A22" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">graphos_meta</text>
+<text x="750" y="339" font-size="12" font-weight="400" fill="#4A5563">registrations · cache</text>
+<text x="840" y="384" font-size="12" font-weight="400" fill="#4A5563" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">pg_trgm · pg_stat_statements</text>
+<rect x="30" y="464" width="940" height="34" rx="3" fill="#F7DEDC"/>
+<path d="M48 475 l12 12 M60 475 l-12 12" stroke="#B3261E" stroke-width="2" stroke-linecap="round"/>
+<text x="72" y="486" font-size="13.5" font-weight="600" fill="#B3261E">Consumers never receive a database connection string and never send raw Cypher or SQL.</text>
+</svg><!--/fig:architecture-light-->
+      <!--fig:architecture-dark--><svg class="pic-dark" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 516" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" role="img" aria-labelledby="architecture-dark-title architecture-dark-desc">
+<title id="architecture-dark-title">How graphos is deployed</title>
+<desc id="architecture-dark-desc">Consumers such as a loader job, an application, an analytics UI and an operator call graphos-api over the graphos-net network with a bearer token. graphos-api checks the token against the tenant in the path, validates typed request contracts, builds Cypher and SQL internally with checked identifiers and capped limits, runs each query under a statement timeout, and emits metrics, JSON logs and an audit trail; it also runs Louvain community detection and a key/value cache. Only graphos-api reaches graphos-db, PostgreSQL 16 with Apache AGE, over an internal network with no external port. Each tenant is its own AGE graph, and graphos_meta holds registrations and the cache. Consumers never receive a connection string and never send raw Cypher or SQL.</desc>
+<defs>
+  <marker id="architecture-dark-h0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8AB0FF"/></marker>
+  <marker id="architecture-dark-h1" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B7A6F2"/></marker>
+</defs>
+
+<text x="30" y="40" font-size="12" font-weight="600" fill="#9AA5B3" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="1.2">CONSUMERS</text>
+<text x="470" y="40" font-size="12" font-weight="600" fill="#8AB0FF" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="1.2">GRAPHOS-API</text>
+<text x="840" y="40" font-size="12" font-weight="600" fill="#B7A6F2" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="1.2">GRAPHOS-DB</text>
+<rect x="30" y="60" width="196" height="62" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
+<text x="46" y="86" font-size="15" font-weight="600" fill="#E6EAEF">Loader job</text>
+<text x="46" y="108" font-size="12" font-weight="400" fill="#9AA5B3">NDJSON / COPY bulk writes</text>
+<rect x="30" y="146" width="196" height="62" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
+<text x="46" y="172" font-size="15" font-weight="600" fill="#E6EAEF">Application</text>
+<text x="46" y="194" font-size="12" font-weight="400" fill="#9AA5B3">search · neighbors · expand</text>
+<rect x="30" y="232" width="196" height="62" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
+<text x="46" y="258" font-size="15" font-weight="600" fill="#E6EAEF">Analytics / UI</text>
+<text x="46" y="280" font-size="12" font-weight="400" fill="#9AA5B3">aggregates · export</text>
+<rect x="30" y="318" width="196" height="62" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
+<text x="46" y="344" font-size="15" font-weight="600" fill="#E6EAEF">Operator</text>
+<text x="46" y="366" font-size="12" font-weight="400" fill="#9AA5B3">admin token: tenants, Louvain</text>
+<path d="M226 91 C 262 91, 270 215, 304 215" fill="none" stroke="#8AB0FF" stroke-width="1.8" stroke-linecap="round" marker-end="url(#architecture-dark-h0)"/>
+<path d="M226 177 C 262 177, 270 215, 304 215" fill="none" stroke="#8AB0FF" stroke-width="1.8" stroke-linecap="round" marker-end="url(#architecture-dark-h0)"/>
+<path d="M226 263 C 262 263, 270 215, 304 215" fill="none" stroke="#8AB0FF" stroke-width="1.8" stroke-linecap="round" marker-end="url(#architecture-dark-h0)"/>
+<path d="M226 349 C 262 349, 270 215, 304 215" fill="none" stroke="#8AB0FF" stroke-width="1.8" stroke-linecap="round" marker-end="url(#architecture-dark-h0)"/>
+<text x="30" y="444" font-size="12" font-weight="600" fill="#8AB0FF" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">graphos-net</text><text x="120" y="444" font-size="12" font-weight="400" fill="#9AA5B3">HTTP + bearer token, the only way in</text>
+<rect x="306" y="58" width="330" height="360" rx="4" fill="#1A2640" stroke="#3A5690" stroke-width="1.2"/>
+<text x="326" y="88" font-size="18" font-weight="700" fill="#8AB0FF">graphos-api</text>
+<text x="326" y="108" font-size="12.5" font-weight="400" fill="#9AA5B3">FastAPI · asyncpg · one process per replica</text>
+<rect x="324" y="124" width="294" height="42" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
+<text x="338" y="142" font-size="13" font-weight="600" fill="#E6EAEF">bearer token → tenant scope</text>
+<text x="338" y="158" font-size="11.5" font-weight="400" fill="#9AA5B3">403 / 404 before any SQL</text>
+<rect x="324" y="174" width="294" height="42" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
+<text x="338" y="192" font-size="13" font-weight="600" fill="#E6EAEF">typed REST contracts</text>
+<text x="338" y="208" font-size="11.5" font-weight="400" fill="#9AA5B3">Pydantic models, OpenAPI</text>
+<rect x="324" y="224" width="294" height="42" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
+<text x="338" y="242" font-size="13" font-weight="600" fill="#E6EAEF">Cypher + SQL built inside</text>
+<text x="338" y="258" font-size="11.5" font-weight="400" fill="#9AA5B3">identifiers checked, limits capped</text>
+<rect x="324" y="274" width="294" height="42" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
+<text x="338" y="292" font-size="13" font-weight="600" fill="#E6EAEF">statement_timeout per query</text>
+<text x="338" y="308" font-size="11.5" font-weight="400" fill="#9AA5B3">a bad query cannot starve the pool</text>
+<rect x="324" y="324" width="294" height="42" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
+<text x="338" y="342" font-size="13" font-weight="600" fill="#E6EAEF">metrics · JSON logs · audit</text>
+<text x="338" y="358" font-size="11.5" font-weight="400" fill="#9AA5B3">Prometheus, W3C traceparent</text>
+<rect x="324" y="380" width="140" height="24" rx="3" fill="#161A20"/><text x="394" y="396.5" font-size="12.5" font-weight="600" fill="#8AB0FF" text-anchor="middle">Louvain · igraph</text><rect x="472" y="380" width="146" height="24" rx="3" fill="#161A20"/><text x="545" y="396.5" font-size="12.5" font-weight="600" fill="#8AB0FF" text-anchor="middle">K/V cache · LRU</text>
+<path d="M636 215 H708" fill="none" stroke="#B7A6F2" stroke-width="2.2" stroke-linecap="round" marker-end="url(#architecture-dark-h1)"/>
+<text x="712" y="444" font-size="12" font-weight="600" fill="#B7A6F2" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">graphos-internal</text><text x="842" y="444" font-size="12" font-weight="400" fill="#9AA5B3">no external port</text>
+<g><path d="M712 82 v316 a128 22 0 0 0 256 0 v-316" fill="#231E3A" stroke="#594C92" stroke-width="1.4"/>
+  <ellipse cx="840" cy="82" rx="128" ry="22" fill="#231E3A" stroke="#594C92" stroke-width="1.4"/></g>
+<text x="840" y="132" font-size="16" font-weight="700" fill="#B7A6F2" text-anchor="middle">PostgreSQL 16</text>
+<text x="840" y="152" font-size="13" font-weight="600" fill="#B7A6F2" text-anchor="middle">+ Apache AGE (openCypher)</text>
+<rect x="734" y="176" width="212" height="50" rx="4" fill="#161A20" stroke="#594C92" stroke-opacity="0.7"/>
+<text x="750" y="197" font-size="13" font-weight="600" fill="#E6EAEF" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">tenant_a</text>
+<text x="750" y="215" font-size="12" font-weight="400" fill="#9AA5B3">its own AGE graph</text>
+<rect x="734" y="238" width="212" height="50" rx="4" fill="#161A20" stroke="#594C92" stroke-opacity="0.7"/>
+<text x="750" y="259" font-size="13" font-weight="600" fill="#E6EAEF" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">tenant_b</text>
+<text x="750" y="277" font-size="12" font-weight="400" fill="#9AA5B3">its own AGE graph</text>
+<rect x="734" y="300" width="212" height="50" rx="4" fill="#161A20" stroke="#594C92" stroke-opacity="0.7"/>
+<text x="750" y="321" font-size="13" font-weight="600" fill="#E6EAEF" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">graphos_meta</text>
+<text x="750" y="339" font-size="12" font-weight="400" fill="#9AA5B3">registrations · cache</text>
+<text x="840" y="384" font-size="12" font-weight="400" fill="#9AA5B3" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">pg_trgm · pg_stat_statements</text>
+<rect x="30" y="464" width="940" height="34" rx="3" fill="#361816"/>
+<path d="M48 475 l12 12 M60 475 l-12 12" stroke="#F2877F" stroke-width="2" stroke-linecap="round"/>
+<text x="72" y="486" font-size="13.5" font-weight="600" fill="#F2877F">Consumers never receive a database connection string and never send raw Cypher or SQL.</text>
+</svg><!--/fig:architecture-dark-->
+      <figcaption><span class="fig-n">Figure 2</span><span>The deployment. The database network is internal, so the rule that consumers never touch the database is enforced by the network, not by convention.</span></figcaption>
+    </figure>
+
+    <h3>Tenants and registration</h3>
+    <p>A consumer registers a tenant by posting its vertex labels, edge labels and, optionally, extra indexes and generated columns. graphos creates the AGE graph, the per-label tables and a unique index on each label's external id. Registration is idempotent and additive, so a consumer can simply re-register on every start; it is persisted, so a restart of graphos needs nothing from consumers. Writing to an unregistered label returns <code>400</code>; the schema never grows silently.</p>
+
+    <h3>Writing</h3>
+    <div class="tbl"><table>
+      <thead><tr><th>Path</th><th>Use it for</th><th>Behaviour</th></tr></thead>
+      <tbody>
+        <tr><td>Small upserts</td><td>Up to ~1,000 rows per call</td><td>Upsert on your id; property updates are additive</td></tr>
+        <tr><td>NDJSON bulk</td><td>Streaming loads of any size</td><td>Flushes in batches; bad rows reported, not fatal</td></tr>
+        <tr><td>Snapshot import</td><td>One file holding a whole graph</td><td>Nodes and edges in one stream, nodes flushed before edges</td></tr>
+      </tbody>
+    </table></div>
+    <p>All three write through the same path: a binary <code>COPY</code> into a staging table, then one <code>INSERT … ON CONFLICT</code> per label. graphos writes no rows through Cypher. That is faster, and it also avoids an AGE 1.6 crash: a Cypher write into a label table that carries extra columns (graphos adds one to edge tables; generated columns add more) takes down the database backend. Edges whose endpoints do not exist yet are counted in <code>edges_skipped</code> rather than failing the batch, so ordering mistakes are visible without losing work. Nodes can be deleted by id or by a property predicate, for example everything belonging to one dataset.</p>
+
+    <h3>Reading</h3>
+    <p>Reads are small primitives that compose: substring <strong>search</strong>, one-hop <strong>neighbors</strong>, multi-seed <strong>expand</strong> up to five hops, the <strong>induced subgraph</strong> of a node set, a paginated <strong>node scan</strong> with filters and projection, a stratified <strong>sample</strong> for visualisation, <strong>histograms</strong>, <strong>top-K by degree</strong>, node and edge <strong>aggregates</strong>, and an <strong>export</strong> in graphology JSON that sigma.js and Gephi read directly.</p>
+
+    <h3>Safety rails</h3>
+    <ul>
+      <li>Read endpoints cap their <code>limit</code> parameters and report <code>truncated</code> when a result was cut.</li>
+      <li>Every statement runs under a server-side <code>statement_timeout</code> (60 s by default); one that runs too long is cancelled by Postgres and the request returns <code>504</code> as <code>problem+json</code> instead of holding the pool. The few deliberately long operations (index builds, Louvain, rule resolution, vacuum) raise the limit for their own statements only.</li>
+      <li>Label and property names are checked against an identifier pattern and the tenant's registered schema, and index or generated-column DDL supplied at registration must be a single <code>CREATE INDEX</code> / <code>ADD COLUMN … GENERATED</code> statement on the tenant's own tables, so neither can carry arbitrary SQL.</li>
+      <li>Authentication fails closed: without a tokens file graphos will not start unless local-only anonymous mode is switched on explicitly.</li>
+      <li>graphos-api connects to Postgres as an unprivileged role (no superuser, cannot create roles or databases); the superuser is only used to initialise the database.</li>
+      <li>Endpoints that need no token (health, readiness, service info) report counts, never tenant names or database error text.</li>
+    </ul>
+
+    <h2 id="communities"><span class="sec"><span class="num">04</span></span>Communities that stay put</h2>
+    <p>Clustering a graph into communities is useful for navigation, for summarising large graphs and for narrowing a traversal to the relevant neighbourhood. graphos runs Louvain itself, close to the data, with one admin call.</p>
+    <div class="callout"><p><strong>Optional extra.</strong> Louvain uses python-igraph, which is GPL-licensed, so it is not part of the default install or the published image. Add it with <code>pip install "graphos[louvain]"</code> or <code>--build-arg GRAPHOS_EXTRAS=louvain</code>; without it the endpoint answers <code>501</code> and everything else works. <code>GET /v1/info</code> reports whether it is present.</p></div>
+    <figure class="fig pic">
+      <!--fig:communities-light--><svg class="pic-light" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 282" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" role="img" aria-labelledby="communities-light-title communities-light-desc">
+<title id="communities-light-title">How communities are computed</title>
+<desc id="communities-light-desc">An admin call to recompute-communities streams edges out of PostgreSQL as integer ids with plain SQL, builds a weighted undirected igraph, runs Louvain in the C core with a fixed seed, and matches each new cluster to its predecessor from the last run by Jaccard overlap of at least 0.5 so community ids stay stable. Results are written back with COPY and a single UPDATE, then the community id is denormalised onto every edge so scoped traversals use an index. Only one run per tenant happens at a time, a dry run previews the partition, and the response reports time per step and modularity.</desc>
+<defs>
+  <marker id="communities-light-h0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6B7584"/></marker>
+</defs>
+
+<text x="30" y="40" font-size="12.5" font-weight="600" fill="#1D5BD6" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">POST /v1/{tenant}/recompute-communities</text>
+<rect x="30" y="62" width="142" height="96" rx="4" fill="#ECE8F8" stroke="#B8ACE3" stroke-width="1.2"/>
+<text x="44" y="94" font-size="15.5" font-weight="700" fill="#5B45B0">Edge stream</text>
+<text x="44" y="118" font-size="12.5" font-weight="400" fill="#4A5563">plain SQL,</text>
+<text x="44" y="136" font-size="12.5" font-weight="400" fill="#4A5563">integer ids only</text>
+<path d="M174 110 H190" fill="none" stroke="#6B7584" stroke-width="1.8" stroke-linecap="round" marker-end="url(#communities-light-h0)"/>
+<rect x="193" y="62" width="142" height="96" rx="4" fill="#E3EBFB" stroke="#9DB7EC" stroke-width="1.2"/>
+<text x="207" y="94" font-size="15.5" font-weight="700" fill="#1D5BD6">Build graph</text>
+<text x="207" y="118" font-size="12.5" font-weight="400" fill="#4A5563">weighted,</text>
+<text x="207" y="136" font-size="12.5" font-weight="400" fill="#4A5563">undirected igraph</text>
+<path d="M337 110 H353" fill="none" stroke="#6B7584" stroke-width="1.8" stroke-linecap="round" marker-end="url(#communities-light-h0)"/>
+<rect x="356" y="62" width="142" height="96" rx="4" fill="#E3EBFB" stroke="#9DB7EC" stroke-width="1.2"/>
+<text x="370" y="94" font-size="15.5" font-weight="700" fill="#1D5BD6">Louvain</text>
+<text x="370" y="118" font-size="12.5" font-weight="400" fill="#4A5563">C core,</text>
+<text x="370" y="136" font-size="12.5" font-weight="400" fill="#4A5563">fixed seed</text>
+<path d="M500 110 H516" fill="none" stroke="#6B7584" stroke-width="1.8" stroke-linecap="round" marker-end="url(#communities-light-h0)"/>
+<rect x="519" y="62" width="142" height="96" rx="4" fill="#E3EBFB" stroke="#9DB7EC" stroke-width="1.2"/>
+<text x="533" y="94" font-size="15.5" font-weight="700" fill="#1D5BD6">Stable ids</text>
+<text x="533" y="118" font-size="12.5" font-weight="400" fill="#4A5563">Jaccard ≥ 0.5</text>
+<text x="533" y="136" font-size="12.5" font-weight="400" fill="#4A5563">vs. the last run</text>
+<path d="M663 110 H679" fill="none" stroke="#6B7584" stroke-width="1.8" stroke-linecap="round" marker-end="url(#communities-light-h0)"/>
+<rect x="682" y="62" width="142" height="96" rx="4" fill="#ECE8F8" stroke="#B8ACE3" stroke-width="1.2"/>
+<text x="696" y="94" font-size="15.5" font-weight="700" fill="#5B45B0">Write back</text>
+<text x="696" y="118" font-size="12.5" font-weight="400" fill="#4A5563">COPY + one</text>
+<text x="696" y="136" font-size="12.5" font-weight="400" fill="#4A5563">UPDATE … FROM</text>
+<path d="M826 110 H842" fill="none" stroke="#6B7584" stroke-width="1.8" stroke-linecap="round" marker-end="url(#communities-light-h0)"/>
+<rect x="845" y="62" width="142" height="96" rx="4" fill="#ECE8F8" stroke="#B8ACE3" stroke-width="1.2"/>
+<text x="859" y="94" font-size="15.5" font-weight="700" fill="#5B45B0">Denormalise</text>
+<text x="859" y="118" font-size="12.5" font-weight="400" fill="#4A5563">community onto</text>
+<text x="859" y="136" font-size="12.5" font-weight="400" fill="#4A5563">every edge</text>
+
+<rect x="30" y="180" width="940" height="1" fill="#C4CDD6"/>
+<text x="30" y="210" font-size="13" font-weight="400" fill="#131A22">one run per tenant at a time (advisory lock, 409 otherwise)</text>
+<text x="530" y="210" font-size="13" font-weight="400" fill="#131A22">dry_run previews the partition without writing</text>
+<text x="30" y="236" font-size="13" font-weight="400" fill="#131A22">response reports time per step and modularity</text>
+<text x="530" y="236" font-size="13" font-weight="400" fill="#131A22">ids persist across runs as membership drifts</text>
+<rect x="30" y="256" width="12" height="12" rx="3" fill="#ECE8F8" stroke="#B8ACE3"/><text x="48" y="266" font-size="12.5" font-weight="400" fill="#4A5563">inside PostgreSQL</text>
+<rect x="190" y="256" width="12" height="12" rx="3" fill="#E3EBFB" stroke="#9DB7EC"/><text x="208" y="266" font-size="12.5" font-weight="400" fill="#4A5563">inside graphos-api</text>
+</svg><!--/fig:communities-light-->
+      <!--fig:communities-dark--><svg class="pic-dark" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 282" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" role="img" aria-labelledby="communities-dark-title communities-dark-desc">
+<title id="communities-dark-title">How communities are computed</title>
+<desc id="communities-dark-desc">An admin call to recompute-communities streams edges out of PostgreSQL as integer ids with plain SQL, builds a weighted undirected igraph, runs Louvain in the C core with a fixed seed, and matches each new cluster to its predecessor from the last run by Jaccard overlap of at least 0.5 so community ids stay stable. Results are written back with COPY and a single UPDATE, then the community id is denormalised onto every edge so scoped traversals use an index. Only one run per tenant happens at a time, a dry run previews the partition, and the response reports time per step and modularity.</desc>
+<defs>
+  <marker id="communities-dark-h0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8C97A6"/></marker>
+</defs>
+
+<text x="30" y="40" font-size="12.5" font-weight="600" fill="#8AB0FF" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace">POST /v1/{tenant}/recompute-communities</text>
+<rect x="30" y="62" width="142" height="96" rx="4" fill="#231E3A" stroke="#594C92" stroke-width="1.2"/>
+<text x="44" y="94" font-size="15.5" font-weight="700" fill="#B7A6F2">Edge stream</text>
+<text x="44" y="118" font-size="12.5" font-weight="400" fill="#9AA5B3">plain SQL,</text>
+<text x="44" y="136" font-size="12.5" font-weight="400" fill="#9AA5B3">integer ids only</text>
+<path d="M174 110 H190" fill="none" stroke="#8C97A6" stroke-width="1.8" stroke-linecap="round" marker-end="url(#communities-dark-h0)"/>
+<rect x="193" y="62" width="142" height="96" rx="4" fill="#1A2640" stroke="#3A5690" stroke-width="1.2"/>
+<text x="207" y="94" font-size="15.5" font-weight="700" fill="#8AB0FF">Build graph</text>
+<text x="207" y="118" font-size="12.5" font-weight="400" fill="#9AA5B3">weighted,</text>
+<text x="207" y="136" font-size="12.5" font-weight="400" fill="#9AA5B3">undirected igraph</text>
+<path d="M337 110 H353" fill="none" stroke="#8C97A6" stroke-width="1.8" stroke-linecap="round" marker-end="url(#communities-dark-h0)"/>
+<rect x="356" y="62" width="142" height="96" rx="4" fill="#1A2640" stroke="#3A5690" stroke-width="1.2"/>
+<text x="370" y="94" font-size="15.5" font-weight="700" fill="#8AB0FF">Louvain</text>
+<text x="370" y="118" font-size="12.5" font-weight="400" fill="#9AA5B3">C core,</text>
+<text x="370" y="136" font-size="12.5" font-weight="400" fill="#9AA5B3">fixed seed</text>
+<path d="M500 110 H516" fill="none" stroke="#8C97A6" stroke-width="1.8" stroke-linecap="round" marker-end="url(#communities-dark-h0)"/>
+<rect x="519" y="62" width="142" height="96" rx="4" fill="#1A2640" stroke="#3A5690" stroke-width="1.2"/>
+<text x="533" y="94" font-size="15.5" font-weight="700" fill="#8AB0FF">Stable ids</text>
+<text x="533" y="118" font-size="12.5" font-weight="400" fill="#9AA5B3">Jaccard ≥ 0.5</text>
+<text x="533" y="136" font-size="12.5" font-weight="400" fill="#9AA5B3">vs. the last run</text>
+<path d="M663 110 H679" fill="none" stroke="#8C97A6" stroke-width="1.8" stroke-linecap="round" marker-end="url(#communities-dark-h0)"/>
+<rect x="682" y="62" width="142" height="96" rx="4" fill="#231E3A" stroke="#594C92" stroke-width="1.2"/>
+<text x="696" y="94" font-size="15.5" font-weight="700" fill="#B7A6F2">Write back</text>
+<text x="696" y="118" font-size="12.5" font-weight="400" fill="#9AA5B3">COPY + one</text>
+<text x="696" y="136" font-size="12.5" font-weight="400" fill="#9AA5B3">UPDATE … FROM</text>
+<path d="M826 110 H842" fill="none" stroke="#8C97A6" stroke-width="1.8" stroke-linecap="round" marker-end="url(#communities-dark-h0)"/>
+<rect x="845" y="62" width="142" height="96" rx="4" fill="#231E3A" stroke="#594C92" stroke-width="1.2"/>
+<text x="859" y="94" font-size="15.5" font-weight="700" fill="#B7A6F2">Denormalise</text>
+<text x="859" y="118" font-size="12.5" font-weight="400" fill="#9AA5B3">community onto</text>
+<text x="859" y="136" font-size="12.5" font-weight="400" fill="#9AA5B3">every edge</text>
+
+<rect x="30" y="180" width="940" height="1" fill="#2E3642"/>
+<text x="30" y="210" font-size="13" font-weight="400" fill="#E6EAEF">one run per tenant at a time (advisory lock, 409 otherwise)</text>
+<text x="530" y="210" font-size="13" font-weight="400" fill="#E6EAEF">dry_run previews the partition without writing</text>
+<text x="30" y="236" font-size="13" font-weight="400" fill="#E6EAEF">response reports time per step and modularity</text>
+<text x="530" y="236" font-size="13" font-weight="400" fill="#E6EAEF">ids persist across runs as membership drifts</text>
+<rect x="30" y="256" width="12" height="12" rx="3" fill="#231E3A" stroke="#594C92"/><text x="48" y="266" font-size="12.5" font-weight="400" fill="#9AA5B3">inside PostgreSQL</text>
+<rect x="190" y="256" width="12" height="12" rx="3" fill="#1A2640" stroke="#3A5690"/><text x="208" y="266" font-size="12.5" font-weight="400" fill="#9AA5B3">inside graphos-api</text>
+</svg><!--/fig:communities-dark-->
+      <figcaption><span class="fig-n">Figure 3</span><span>Community detection, from edge stream to indexed edges.</span></figcaption>
+    </figure>
+    <p>The step that matters most is the matching. Louvain on its own numbers clusters arbitrarily, so a re-run gives every community a new id even when almost nothing changed. graphos compares each new cluster with the previous partition and keeps the old id when the overlap is high enough (the method of Greene et al., 2010). Ids are stable on stable input and drift gracefully on changing input, so dashboards, caches and saved filters keep working.</p>
+    <p>After the write-back, each edge carries the community of its endpoint in an indexed column, so a traversal scoped to a few communities is an index lookup rather than a recursive walk. Runs are single-flight per tenant, can be scoped to a subgraph by property, and can be weighted per relationship type.</p>
+
+    <h2 id="rules"><span class="sec"><span class="num">05</span></span>Edges from rules</h2>
+    <p>Many edges are implied by properties: a document lists the tag keys it carries, and each tag node has its own key. The usual way to materialise them is to page every node out, match in application code and write the edges back. graphos lets a consumer declare the rule once, at registration:</p>
+    <div class="record">{ "name": "TAGGED",
+  "resolve_rule": { "src_has_array":     "tag_keys",
+                    "dst_value_from":    "concat(collection, '/', slug)",
+                    "require_dst_label": ["Tag"],
+                    "require_same":      ["team"] } }</div>
+    <p>A call to <code>edges:resolve</code> compiles each rule into one parameterised <code>INSERT … SELECT … JOIN</code> and runs it inside the database. The rule language is a closed set of nine keys, so it cannot carry SQL, and graphos creates the supporting indexes itself. Re-running is idempotent.</p>
+
+    <h2 id="ops"><span class="sec"><span class="num">06</span></span>Operating it</h2>
+    <p>graphos is meant to be run by a platform team that knows nothing about any tenant's data.</p>
+    <ul>
+      <li><strong>Health:</strong> <code>/healthz</code>, <code>/readyz</code> and <code>/v1/info</code> with service and AGE versions.</li>
+      <li><strong>Metrics:</strong> Prometheus request counts and latency histograms per route and status, connection-pool size, registered tenants, and rate-limit rejections.</li>
+      <li><strong>Logs and audit:</strong> structured JSON logs carrying a W3C <code>traceparent</code> trace id; every write also produces an audit record with tenant, calling consumer, status, latency and a hash of the request body.</li>
+      <li><strong>Database introspection</strong> for admins: table and index sizes, dead tuples, slow queries from <code>pg_stat_statements</code>, and a validated vacuum call.</li>
+      <li><strong>Tokens</strong> reload on <code>SIGHUP</code>, so rotation needs no restart. An optional per-token rate limiter protects shared deployments.</li>
+      <li><strong>Everything else is Postgres:</strong> backups, replicas, upgrades and tuning use the tools your team already runs.</li>
+    </ul>
+
+    <h2 id="benefits"><span class="sec"><span class="num">07</span></span>Benefits</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>For</th><th>What changes</th></tr></thead>
+      <tbody>
+        <tr><td>Application developers</td><td>A typed client and OpenAPI contract instead of a driver and query strings. Bulk loading, traversal and aggregation are calls, not projects.</td></tr>
+        <tr><td>Platform and operations</td><td>One service to run, on PostgreSQL. Standard backups and monitoring, bounded memory, per-query timeouts and slow-query visibility out of the box.</td></tr>
+        <tr><td>Security</td><td>No database credentials outside one container. Token-scoped tenants, a network that makes the database unreachable, validated identifiers and an audit trail of every write.</td></tr>
+        <tr><td>Data and analytics</td><td>Communities with stable ids, histograms, top-K and aggregates computed where the data lives, and exports that visualisation tools open directly.</td></tr>
+        <tr><td>The organisation</td><td>One graph capability shared by many teams, each in its own tenant, rather than one graph database per team. Open source under Apache 2.0, with no vendor lock-in beyond PostgreSQL.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2 id="measured"><span class="sec"><span class="num">08</span><span class="chip m">measured</span></span>What has been measured</h2>
+    <p>The figures below come from the benchmark scripts in <code>scripts/</code> and from profiling individual queries. The dataset is stated with each; treat them as orders of magnitude, not guarantees.</p>
+    <h3>Write throughput</h3>
+    <p>Synthetic dataset of 13k nodes and 44k edges, database with 4 GB <code>shared_buffers</code>, single host.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Write path</th><th>Edges per second</th></tr></thead>
+      <tbody>
+        <tr><td>Per-row Cypher <code>MERGE</code></td><td class="n">31</td></tr>
+        <tr><td>COPY-staged <code>INSERT … ON CONFLICT</code></td><td class="n good">1,153 – 4,840</td></tr>
+      </tbody>
+    </table></div>
+    <h3>Reads while a writer is running</h3>
+    <p>One writer and eight concurrent readers on the same dataset.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Query</th><th>Writer idle</th><th>Writer active</th></tr></thead>
+      <tbody>
+        <tr><td>One-hop neighbors</td><td class="n">68 ms</td><td class="n">130 ms</td></tr>
+        <tr><td>Two-hop expand</td><td class="n">779 ms</td><td class="n">1,390 ms</td></tr>
+        <tr><td>All queries, p50</td><td class="n">210 ms</td><td class="n">390 ms</td></tr>
+        <tr><td>All queries, p95</td><td class="n">953 ms</td><td class="n">1,894 ms</td></tr>
+      </tbody>
+    </table></div>
+    <p>Reads slow down by roughly 2× under a concurrent bulk write and do not stall: MVCC keeps readers and the writer out of each other's way.</p>
+    <h3>Indexes graphos creates for you</h3>
+    <p>Lookups on a ~117k-row label before and after the indexes graphos creates for every label at registration:</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Lookup</th><th>Without</th><th>With</th></tr></thead>
+      <tbody>
+        <tr><td>Substring search on <code>name</code> (trigram index)</td><td class="n">1.2 s</td><td class="n good">1.3 ms</td></tr>
+        <tr><td>Community id</td><td class="n">2.4 s</td><td class="n good">0.5 ms</td></tr>
+      </tbody>
+    </table></div>
+    <p>Any other hot property is yours to index: declare it at registration and graphos creates it.</p>
+
+    <h2 id="boundaries"><span class="sec"><span class="num">09</span></span>Boundaries and limits</h2>
+    <p>Some choices are deliberate in the current design:</p>
+    <ul>
+      <li><strong>Typed endpoints rather than query passthrough.</strong> graphos does not expose a raw Cypher or SQL endpoint today; that is what keeps limits, timeouts and tenant checks enforceable. Pattern queries are composed from primitives (scan for a node set, then neighbors or induced edges), and new needs are met by adding typed endpoints.</li>
+      <li><strong>No connection strings</strong> for consumers, and no DDL through the API beyond tenant registration.</li>
+      <li><strong>No domain concepts.</strong> Labels and properties are opaque strings to graphos.</li>
+    </ul>
+    <p>And some limits that are simply where the project stands today:</p>
+    <ul>
+      <li>The reference deployment is a single PostgreSQL node. It fits millions of nodes and tens of millions of edges in a few gigabytes of RAM. Going beyond one node (partitioning, read replicas) is a PostgreSQL exercise; graphos does not shard for you.</li>
+      <li>Louvain is an optional extra (see section 4). When installed, it runs in the API process and holds the edge list in memory while it clusters: the bundled compose file gives the API 4 GB, enough for graphs above six million edges.</li>
+      <li>Apache AGE 1.6 has known Cypher gaps and quirks. graphos works around the ones it meets, and <a href="apache-age.md">the AGE notes</a> record each one.</li>
+    </ul>
+
+    <h2 id="age"><span class="sec"><span class="num">10</span></span>Built on Apache AGE</h2>
+    <div class="age">
+      <p><strong>graphos uses <a href="https://age.apache.org/">Apache AGE</a></strong>, the PostgreSQL extension that adds a property-graph model and openCypher queries to Postgres. The bundled stack runs the upstream image <code>apache/age:release_PG16_1.6.0</code> unmodified.</p>
+    </div>
+    <p>AGE provides the graph engine: each graph is a Postgres schema, each label is a table inheriting from a parent vertex or edge table, properties are stored as <code>agtype</code>, and Cypher runs inside the database through the <code>cypher()</code> function. Because it is plain Postgres underneath, graphos can mix Cypher with SQL where SQL is faster: bulk writes through <code>COPY</code>, functional and trigram indexes on properties, and set-based edge derivation.</p>
+    <p>graphos adds what a shared service needs on top: the HTTP contract, tenancy and tokens, bulk paths, index management, community detection, rule-based edges and observability. Apache AGE is a project of the Apache Software Foundation under the Apache 2.0 licence; graphos is an independent project and is not affiliated with or endorsed by the ASF.</p>
+
+    <h2 id="start"><span class="sec"><span class="num">11</span></span>Getting started</h2>
+    <div class="record">bash scripts/init-secrets.sh
+docker compose -f docker-compose.graphos.yml up -d
+curl -s http://127.0.0.1:8080/readyz</div>
+    <p>Then register a tenant and start writing; the <a href="../README.md">README</a> has the full quickstart, the <a href="usage.md">usage guide</a> covers integration patterns, and the running service publishes its OpenAPI contract at <code>/docs</code>.</p>
+
+    <footer>
+      <p>graphos is open source under the <a href="../LICENSE">Apache License 2.0</a>. “Apache”, “Apache AGE” and the feather logo are trademarks of The Apache Software Foundation.</p>
+    </footer>
+</main>
+</div>
+
+<script>
+(function(){
+  var toc = document.getElementById('toc');
+  if (toc) {
+    toc.addEventListener('click', function(e){ if (e.target.closest('a')) toc.open = false; });
+    document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && toc.open){ toc.open = false; toc.querySelector('summary').focus(); } });
+    document.addEventListener('click', function(e){ if (toc.open && !toc.contains(e.target)) toc.open = false; });
+  }
+  // The theme follows the reader's system until they pick one; the pick is remembered where
+  // the browser allows it, and the page works the same where it does not.
+  var root = document.documentElement, dark = matchMedia('(prefers-color-scheme: dark)');
+  var buttons = document.querySelectorAll('.mode button');
+  function show(){
+    var now = root.dataset.theme || (dark.matches ? 'dark' : 'light');
+    buttons.forEach(function(b){ b.setAttribute('aria-pressed', String(b.dataset.set === now)); });
+  }
+  buttons.forEach(function(b){ b.addEventListener('click', function(){
+    root.dataset.theme = b.dataset.set;
+    try { localStorage.setItem('graphos-theme', b.dataset.set); } catch (e) {}
+    show();
+  }); });
+  if (dark.addEventListener) dark.addEventListener('change', show);
+  show();
+})();
+</script>
+</body>
+</html>
