@@ -6,9 +6,9 @@
 #          GitHub Container Registry as ghcr.io/<owner>/graphos-api. Only this job
 #          gets `packages: write`.
 #
-# A version tag (e.g. 0.1.0) releases the image and graphos-client together
-# (see client-release.yml). The tag must equal the version in both
-# services/graphos/pyproject.toml and clients/python/pyproject.toml, or neither publishes.
+# A version tag (e.g. 0.1.0) releases the image. It must equal the version in both
+# services/graphos/pyproject.toml and clients/python/pyproject.toml. The client is
+# published to PyPI separately, by hand (see client-release.yml).
 #
 # Variants:
 #   default  permissive dependencies only; POST .../recompute-communities answers 501
