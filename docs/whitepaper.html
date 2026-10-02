@@ -700,7 +700,7 @@ html{scroll-behavior:smooth}
     <ul>
       <li>The reference deployment is a single PostgreSQL node. It fits millions of nodes and tens of millions of edges in a few gigabytes of RAM. Going beyond one node (partitioning, read replicas) is a PostgreSQL exercise; graphos does not shard for you.</li>
       <li>Louvain is an optional extra (see section 4). When installed, it runs in the API process and holds the edge list in memory while it clusters: the bundled compose file gives the API 4 GB, enough for graphs above six million edges.</li>
-      <li>Apache AGE 1.6 has known Cypher gaps and quirks. graphos works around the ones it meets, and <a href="apache-age.md">the AGE notes</a> record each one.</li>
+      <li>Apache AGE 1.6 has known Cypher gaps and quirks. graphos works around the ones it meets, and <a href="https://github.com/pomentum/graphos/blob/main/docs/apache-age.md">the AGE notes</a> record each one.</li>
     </ul>
 
     <h2 id="age"><span class="sec"><span class="num">10</span></span>Built on Apache AGE</h2>
@@ -714,10 +714,10 @@ html{scroll-behavior:smooth}
     <div class="record">bash scripts/init-secrets.sh
 docker compose -f docker-compose.graphos.yml up -d
 curl -s http://127.0.0.1:8080/readyz</div>
-    <p>Then register a tenant and start writing; the <a href="../README.md">README</a> has the full quickstart, the <a href="usage.md">usage guide</a> covers integration patterns, and the running service publishes its OpenAPI contract at <code>/docs</code>.</p>
+    <p>Then register a tenant and start writing; the <a href="https://github.com/pomentum/graphos/blob/main/README.md">README</a> has the full quickstart, the <a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md">usage guide</a> covers integration patterns, and the running service publishes its OpenAPI contract at <code>/docs</code>.</p>
 
     <footer>
-      <p>graphos is open source under the <a href="../LICENSE">Apache License 2.0</a>. “Apache”, “Apache AGE” and the feather logo are trademarks of The Apache Software Foundation.</p>
+      <p>graphos is open source under the <a href="https://github.com/pomentum/graphos/blob/main/LICENSE">Apache License 2.0</a>. “Apache”, “Apache AGE” and the feather logo are trademarks of The Apache Software Foundation.</p>
     </footer>
 </main>
 </div>
