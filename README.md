@@ -97,7 +97,9 @@ Community detection uses [python-igraph](https://python.igraph.org/), which is G
 
 ## Container image
 
-The [`graphos-image`](.github/workflows/image.yml) workflow builds and smoke-tests both variants (`linux/amd64`) on every pull request and push, and publishes the default (permissive-only) variant for `linux/amd64` and `linux/arm64` to `ghcr.io/<owner>/graphos-api` from `main` and `v*` tags. The `louvain` variant is built and smoke-tested but not published.
+The [`graphos-image`](.github/workflows/image.yml) workflow builds and smoke-tests both variants (`linux/amd64`) on every pull request and push, and publishes the default (permissive-only) variant for `linux/amd64` and `linux/arm64` to `ghcr.io/<owner>/graphos-api` from `main` and version tags. The `louvain` variant is built and smoke-tested but not published.
+
+**Releasing.** Push a version tag such as `0.1.0`. It publishes the image (`ghcr.io/<owner>/graphos-api:0.1.0` and `:0.1`) and [`graphos-client`](clients/python/) to PyPI together, so keep the versions in `services/graphos/pyproject.toml` and `clients/python/pyproject.toml` in step: if either differs from the tag, neither is published.
 
 ## Python client
 

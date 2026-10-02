@@ -1,5 +1,7 @@
 # Publish graphos-client to PyPI when a version tag X.Y.Z (e.g. 0.1.0) is pushed.
-# The tag must equal the version in clients/python/pyproject.toml.
+# The same tag releases the container image (see image.yml); it must equal the
+# version in both clients/python/pyproject.toml and services/graphos/pyproject.toml,
+# or neither publishes.
 #
 # Uses PyPI trusted publishing (OIDC): no API token is stored in GitHub.
 # One-time setup on pypi.org: add a (pending) trusted publisher for project
@@ -24,14 +26,15 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Tag matches the package version
-        working-directory: clients/python
+      - name: Tag matches the service and client versions
         run: |
-          version="$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
-          if [ "${version}" != "${GITHUB_REF_NAME}" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} does not match package version ${version}"
-            exit 1
-          fi
+          for f in services/graphos/pyproject.toml clients/python/pyproject.toml; do
+            version="$(python3 -c "import sys,tomllib;print(tomllib.load(open(sys.argv[1],'rb'))['project']['version'])" "$f")"
+            if [ "${version}" != "${GITHUB_REF_NAME}" ]; then
+              echo "::error::tag ${GITHUB_REF_NAME} does not match version ${version} in $f"
+              exit 1
+            fi
+          done
 
       - name: Test
         working-directory: clients/python
