@@ -9,7 +9,7 @@ Your services send JSON over HTTP. graphos owns the database, writes the Cypher 
   <img src="docs/images/architecture-light.svg" width="100%" alt="Consumers call graphos-api over the graphos-net network with a bearer token. graphos-api checks tenant scope, validates typed contracts, builds Cypher and SQL internally, times out bad queries and emits metrics and audit logs. Only graphos-api reaches PostgreSQL 16 with Apache AGE on an internal network; each tenant is its own AGE graph.">
 </picture>
 
-**Why:** see the [whitepaper](docs/whitepaper.html) for the problem graphos solves and what it gives you.
+**Why:** read the [whitepaper](https://graphos-pomentum.vercel.app) for the problem graphos solves and what it gives you.
 
 ## Features
 
@@ -136,7 +136,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 
 | Doc | Read it for |
 |---|---|
-| [Whitepaper](docs/whitepaper.html) | The problem, the approach, the benefits |
+| [Whitepaper](https://graphos-pomentum.vercel.app) ([source](docs/whitepaper.html)) | The problem, the approach, the benefits |
 | [Usage guide](docs/usage.md) | Practical integration patterns |
 | [Feature survey](docs/features.md) | Every capability, briefly |
 | [Concept](docs/concept.md) | Architecture, endpoint catalogue, capacity planning |
