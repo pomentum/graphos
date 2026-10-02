@@ -88,6 +88,7 @@ class GraphosClient:
         timeout_s: float = 30.0,
         retries: int = 3,
         retry_backoff_s: float = 0.5,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         """Construct the client.
 
@@ -135,6 +136,8 @@ class GraphosClient:
                 # ReadTimeout-then-retry amplification it prevents.
                 keepalive_expiry=10.0,
             ),
+            # Optional custom transport (tests: httpx.MockTransport; proxies, TLS).
+            transport=transport,
         )
 
     async def __aenter__(self) -> GraphosClient:
@@ -262,7 +265,7 @@ class GraphosClient:
         *,
         name: str | None = None,
         vertex_labels: Iterable[str] = (),
-        edge_labels: Iterable[str] = (),
+        edge_labels: Iterable[str | Mapping[str, Any]] = (),
         indexes: Iterable[str] = (),
         generated_columns: Iterable[str] = (),
         label_hierarchy: Mapping[str, str] | None = None,
@@ -270,7 +273,8 @@ class GraphosClient:
     ) -> dict[str, Any]:
         """Register / re-register a tenant.
 
-        ``label_hierarchy`` maps ``{child_label: parent_label}``;
+        ``edge_labels`` entries are names or ``{"name": ..., "resolve_rule": {...}}``
+        dicts (rule-based edges).  ``label_hierarchy`` maps ``{child_label: parent_label}``;
         graphos wires postgres table inheritance so writes under the
         child label are visible to ``MATCH (n:parent)`` queries
         without storing duplicate rows.  Both child and parent must
@@ -363,6 +367,30 @@ class GraphosClient:
             content_type="application/x-ndjson",
         )
         return BulkEdgesResponse.model_validate(resp.json())
+
+    async def snapshot_import(
+        self,
+        nodes: Iterable[NodeUpsert] = (),
+        edges: Iterable[EdgeUpsert] = (),
+    ) -> dict[str, Any]:
+        """``POST .../graph/snapshot-import``: nodes and edges in one stream.
+
+        Nodes are sent first; the server also flushes buffered nodes before
+        every edge batch.  Returns the raw response (``nodes_upserted``,
+        ``edges_upserted``, ``edges_skipped``, ``errors``, timings).  Not
+        retried automatically: a large import is not something to repeat
+        blindly on a transient error (re-sending it is safe, though).
+        """
+        lines = [json.dumps({"_kind": "node", **n.model_dump()}) for n in nodes]
+        lines += [json.dumps({"_kind": "edge", **e.model_dump()}) for e in edges]
+        resp = await self._request(
+            "POST",
+            f"/v1/{self._tenant}/graph/snapshot-import",
+            content="\n".join(lines).encode("utf-8"),
+            content_type="application/x-ndjson",
+            idempotent=False,
+        )
+        return resp.json()
 
     async def scan_nodes(
         self,
@@ -788,6 +816,42 @@ class GraphosClient:
         return TenantStatsResponse.model_validate(resp.json())
 
     # ── Generic analytics primitives ───────────────────────────────────────
+
+    async def catalogue(self) -> dict[str, Any]:
+        """``GET .../graph/catalogue``: property name → labels carrying it.
+
+        Diagnostic for rule-based edges: shows which labels the resolver
+        considers for each property.
+        """
+        resp = await self._request("GET", f"/v1/{self._tenant}/graph/catalogue")
+        return resp.json()
+
+    # ── operations (admin token) ───────────────────────────────────────────
+
+    async def db_stats(self) -> dict[str, Any]:
+        """``GET /v1/db/stats``: table sizes, dead tuples, last vacuum/analyze."""
+        resp = await self._request("GET", "/v1/db/stats")
+        return resp.json()
+
+    async def slow_queries(self, limit: int = 25) -> dict[str, Any]:
+        """``GET /v1/db/slow-queries``: top statements by mean time."""
+        resp = await self._request("GET", "/v1/db/slow-queries", params={"limit": limit})
+        return resp.json()
+
+    async def vacuum(
+        self,
+        *,
+        tables: list[str] | None = None,
+        full: bool = False,
+        analyze: bool = True,
+    ) -> dict[str, Any]:
+        """``POST /v1/db/vacuum``.  Without ``tables`` it vacuums the whole
+        database.  Long-running, so never retried automatically."""
+        body: dict[str, Any] = {"full": full, "analyze": analyze}
+        if tables:
+            body["tables"] = list(tables)
+        resp = await self._request("POST", "/v1/db/vacuum", json_body=body, idempotent=False)
+        return resp.json()
 
     async def label_histogram(
         self, label: str, *, property: str, limit: int = 100,

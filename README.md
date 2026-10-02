@@ -113,7 +113,7 @@ async with GraphosClient(base_url="http://127.0.0.1:8080", token=ADMIN_TOKEN, te
     hits = await cli.search("grace", limit=10)
 ```
 
-Typed Pydantic models, pooled `httpx` connections, retries on transient 5xx for safe calls (never for long operations or 504 timeouts). See [`clients/python/`](clients/python/).
+Async, typed (Pydantic), with pooled connections and safe retries. `GraphosPool` manages one registered client per tenant for services that write to many tenants. See [`clients/python/`](clients/python/) and its [runnable examples](clients/python/examples/).
 
 ## Configuration
 

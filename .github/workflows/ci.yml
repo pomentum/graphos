@@ -33,7 +33,7 @@ jobs:
         run: pip install -e "clients/python[dev]"
 
       - name: Lint (client)
-        run: ruff check clients/python/src clients/python/tests
+        run: ruff check clients/python/src clients/python/tests clients/python/examples
 
       - name: Client tests
         run: pytest clients/python/tests

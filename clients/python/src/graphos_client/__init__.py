@@ -1,7 +1,11 @@
 """graphos-client — async HTTP client for the graphos graph service.
 
-Public surface is intentionally compact: one ``GraphosClient`` class plus the
-Pydantic request/response models that mirror graphos's own wire contracts.
+- ``GraphosClient``: async client for one tenant; typed models mirror the
+  server's contracts.
+- ``GraphosPool`` + ``TenantSchema``: one registered client per tenant, with
+  re-registration and a single retry when the server has lost a label.
+
+The package is async-only (``asyncio`` + ``httpx``).
 """
 
 from graphos_client._client import GraphosClient, GraphosError, GraphosNotReady
@@ -44,6 +48,7 @@ from graphos_client._models import (
     TenantInfo,
     TenantStatsResponse,
 )
+from graphos_client._pool import GraphosPool, TenantSchema, is_schema_drift
 
 __version__ = "0.1.0"
 
@@ -51,6 +56,9 @@ __all__ = [
     "GraphosClient",
     "GraphosError",
     "GraphosNotReady",
+    "GraphosPool",
+    "TenantSchema",
+    "is_schema_drift",
     # Models
     "AggregateRow",
     "BulkEdgesResponse",
