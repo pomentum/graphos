@@ -24,6 +24,12 @@
 # One repository secret, VERCEL_POMENTUM_GRAPHOS: a Vercel token with access to
 # the `pomentum` team. The job refuses with a message naming it when it is
 # missing, rather than failing somewhere less clear.
+#
+# ── Making it public ──────────────────────────────────────────────────────────
+#
+# Team URLs (graphos-pomentum.vercel.app) sit behind Vercel Authentication.
+# For a public page, add a domain to the project (the specmake page uses
+# spec-make.vercel.app) or turn off Vercel Authentication for this project.
 
 name: whitepaper
 
