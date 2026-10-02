@@ -90,7 +90,7 @@ def test_resolve_rejects_unsafe_edge_type_name(registered_tenant: str) -> None:
         f"/v1/{registered_tenant}/graph/edges:resolve",
         json={"edge_types": ["FOO; DROP TABLE x;"]},
     )
-    assert resp.status_code == HTTPStatus.UNPROCESSABLE_CONTENT
+    assert resp.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
 
 def test_resolve_empty_catalogue_zero_emit_with_warning(
@@ -190,7 +190,7 @@ def test_register_tenant_accepts_resolve_rule_shape() -> None:
     # 422 would mean the contract rejected the body.  We accept either
     # a successful bootstrap (with a real DB) or a 5xx (no DB) — but
     # NOT a 422.
-    assert resp.status_code != HTTPStatus.UNPROCESSABLE_CONTENT
+    assert resp.status_code != HTTPStatus.UNPROCESSABLE_ENTITY
 
 
 @pytest.fixture
@@ -368,7 +368,7 @@ def test_register_tenant_rejects_unknown_resolve_rule_key() -> None:
             ],
         },
     )
-    assert resp.status_code == HTTPStatus.UNPROCESSABLE_CONTENT
+    assert resp.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
     detail = resp.json()["detail"]
     # Find the message somewhere in the validation detail.
     flat = str(detail)
