@@ -348,7 +348,7 @@ html{scroll-behavior:smooth}
     <p>graphos rests on four decisions. Each one removes a class of the problems above rather than mitigating it.</p>
     <dl class="gloss">
       <div><dt>Postgres, not a new engine</dt><dd>The graph lives in PostgreSQL through the Apache AGE extension. You keep MVCC, disk-backed storage, <code>pg_dump</code>, streaming replication and <code>pg_stat_statements</code>, and still query with openCypher.</dd></div>
-      <div><dt>The boundary is HTTP</dt><dd>Consumers speak typed JSON. Cypher and SQL are written inside graphos, once, with checked identifiers and capped limits. No connection string leaves the service.</dd></div>
+      <div><dt>The boundary is HTTP</dt><dd>Consumers speak typed JSON. The queries are written inside graphos, once, as SQL over AGE's tables, with checked identifiers and capped limits. No connection string leaves the service.</dd></div>
       <div><dt>A tenant is a graph</dt><dd>Each tenant gets its own AGE graph. A token lists the tenants it may touch; the tenant is in the URL and is checked before any SQL runs.</dd></div>
       <div><dt>The schema is the consumer's</dt><dd>graphos ships no labels and interprets no properties. Consumers declare labels at registration; every endpoint takes label, property and edge names as parameters.</dd></div>
     </dl>
@@ -515,7 +515,7 @@ html{scroll-behavior:smooth}
     <h3>Safety rails</h3>
     <ul>
       <li>Read endpoints cap their <code>limit</code> parameters and report <code>truncated</code> when a result was cut.</li>
-      <li>Every statement runs under a server-side <code>statement_timeout</code> (60 s by default); one that runs too long is cancelled by Postgres and the request returns <code>504</code> as <code>problem+json</code> instead of holding the pool. The few deliberately long operations (index builds, Louvain, rule resolution, vacuum) raise the limit for their own statements only, and Louvain, rule resolution and vacuum can also run as background jobs (section 6).</li>
+      <li>Every statement runs under a server-side <code>statement_timeout</code> (60 s by default); one that runs too long is cancelled by Postgres and the request returns <code>504</code> as <code>problem+json</code> instead of holding the pool. The few deliberately long operations (index builds, Louvain, rule resolution, vacuum) raise the limit for their own statements only, and Louvain, rule resolution and vacuum can also run as background jobs (section 6). Every endpoint is plain SQL, never Cypher: on a large graph, AGE's Cypher executor was seen ignoring both the timeout and a cancel for over ten minutes.</li>
       <li>Label and property names are checked against an identifier pattern and the tenant's registered schema, and index or generated-column DDL supplied at registration must be a single <code>CREATE INDEX</code> / <code>ADD COLUMN … GENERATED</code> statement on the tenant's own tables, so neither can carry arbitrary SQL.</li>
       <li>Authentication fails closed: without a tokens file graphos will not start unless local-only anonymous mode is switched on explicitly.</li>
       <li>graphos-api connects to Postgres as an unprivileged role (no superuser, cannot create roles or databases); the superuser is only used to initialise the database.</li>
@@ -688,7 +688,7 @@ html{scroll-behavior:smooth}
         <tr><td>Community id</td><td class="n">2.4 s</td><td class="n good">0.5 ms</td></tr>
       </tbody>
     </table></div>
-    <p>Any other hot property is yours to index: declare it at registration and graphos creates it.</p>
+    <p>Any other hot property is yours to index: declare it at registration and graphos creates it. graphos also indexes each edge table's graphid, which AGE leaves unindexed (built without blocking writes: 12 s for an 8M-row table), and collects statistics for label tables that have never had any, so the planner does not guess.</p>
     <h3>Large tenants</h3>
     <p>A 10.6M-row database whose largest edge type holds 8M rows, and a synthetic 600k-edge graph for Louvain. The earlier column is graphos's own previous design, kept for comparison.</p>
     <div class="tbl"><table>
@@ -697,9 +697,15 @@ html{scroll-behavior:smooth}
         <tr><td>One page of 50 edges of the 8M-row type (<code>edges:scan</code>)</td><td class="n">181 s, 8.3 GB of temp files</td><td class="n good">~1 s, no temp files</td></tr>
         <tr><td>Delete one node with 1,175 edges</td><td class="n">&gt; 10 min</td><td class="n good">27 ms</td></tr>
         <tr><td>Slowest <code>/healthz</code> while Louvain runs</td><td class="n">3.4 – 4.5 s</td><td class="n good">≤ 163 ms</td></tr>
+        <tr><td>Edge aggregate by endpoint property, the 8M-row type</td><td class="n">71 s, and an empty answer</td><td class="n good">25 s, correct</td></tr>
+        <tr><td>Edge aggregate across every edge type</td><td class="n">&gt; 4 min (gave up)</td><td class="n good">13.5 s</td></tr>
+        <tr><td>Node aggregate by property</td><td class="n">22 s</td><td class="n good">1.2 s</td></tr>
+        <tr><td>Export of 2,000 nodes and the edges among them</td><td class="n">504 after 60 s</td><td class="n good">0.3 s</td></tr>
+        <tr><td>Community list (258 communities)</td><td class="n">16 – 54 s</td><td class="n good">6 – 10 s</td></tr>
+        <tr><td>Member ids of the 20 largest communities</td><td class="n">69 s with the list</td><td class="n good">0.12 s</td></tr>
       </tbody>
     </table></div>
-    <p>The edge scan now fetches the page before resolving its endpoints, the delete is one SQL statement instead of three Cypher queries, and Louvain runs in a child process instead of the API's own.</p>
+    <p>The edge scan now fetches the page before resolving its endpoints, the delete is one SQL statement instead of three Cypher queries, and Louvain runs in a child process instead of the API's own. The edge aggregate joins edges to narrow maps of the grouping property instead of whole vertex rows (the earlier design wrote 4.4 GB of temporary files for one edge type, and a failing edge type was silently left out of the answer); the node aggregate, the export and the member lists moved from Cypher to indexed SQL; the community list reads the vertices once instead of three times.</p>
 
     <h2 id="boundaries"><span class="sec"><span class="num">09</span></span>Boundaries and limits</h2>
     <p>Some choices are deliberate in the current design:</p>
@@ -719,7 +725,7 @@ html{scroll-behavior:smooth}
     <div class="age">
       <p><strong>graphos uses <a href="https://age.apache.org/">Apache AGE</a></strong>, the PostgreSQL extension that adds a property-graph model and openCypher queries to Postgres. The bundled stack runs the upstream image <code>apache/age:release_PG16_1.6.0</code> unmodified.</p>
     </div>
-    <p>AGE provides the graph engine: each graph is a Postgres schema, each label is a table inheriting from a parent vertex or edge table, properties are stored as <code>agtype</code>, and Cypher runs inside the database through the <code>cypher()</code> function. Because it is plain Postgres underneath, graphos can mix Cypher with SQL where SQL is faster: bulk writes through <code>COPY</code>, functional and trigram indexes on properties, and set-based edge derivation.</p>
+    <p>AGE provides the graph engine: each graph is a Postgres schema, each label is a table inheriting from a parent vertex or edge table, properties are stored as <code>agtype</code>, and Cypher runs inside the database through the <code>cypher()</code> function. Because it is plain Postgres underneath, graphos can use SQL where it is faster and better behaved, and it does so for every endpoint: bulk writes through <code>COPY</code>, functional and trigram indexes on properties, set-based edge derivation, and reads that statement timeouts and cancellation always apply to.</p>
     <p>graphos adds what a shared service needs on top: the HTTP contract, tenancy and tokens, bulk paths, index management, community detection, rule-based edges and observability. Apache AGE is a project of the Apache Software Foundation under the Apache 2.0 licence; graphos is an independent project and is not affiliated with or endorsed by the ASF.</p>
 
     <h2 id="start"><span class="sec"><span class="num">11</span></span>Getting started</h2>
