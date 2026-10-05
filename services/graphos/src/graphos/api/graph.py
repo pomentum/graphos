@@ -2,8 +2,9 @@
 
 Mounted under ``/v1/{tenant}/graph/...``. Each endpoint is tenant-scoped at
 the URL level (so a token with access to one tenant can't read another's
-graph), and each turns into a single ``cypher('<tenant>', $$ ... $$)`` call
-via the helper in ``graphos.cypher``.
+graph).  Every endpoint is plain SQL over AGE's per-label tables, so
+``statement_timeout`` and cancellation always apply (AGE's Cypher executor
+was seen ignoring both); writes go through ``graphos.writes``.
 
 Core surface (see the module for the full list):
 
@@ -15,9 +16,6 @@ Core surface (see the module for the full list):
 - ``GET  /v1/{tenant}/graph/catalogue``      — resolver property→labels map.
 
 NDJSON-streaming bulk variants live in ``graphos.api.bulk``.
-
-Both endpoints follow the same AGE-over-asyncpg pattern: ``cypher('<graph>',
-$$ … $$, $1::agtype)`` via ``graphos.cypher.query_cypher``.
 """
 
 from __future__ import annotations
@@ -106,7 +104,7 @@ from graphos.contracts.tenants import (
     ResolveEdgesResponse,
     ResolveEdgesResult,
 )
-from graphos.cypher import CypherError, query_cypher
+from graphos.cypher import CypherError, parse_agtype
 from graphos.resolver import (
     CompileError,
     compile_resolve_rules_for_edge_type,
@@ -1107,25 +1105,6 @@ async def catalogue(
 # ── Expand (variable-length BFS) ────────────────────────────────────────────
 
 
-# Quirks of AGE 1.6 baked into this handler:
-#
-#  - `end` is a reserved keyword (CASE … END). We use `dst` for the path
-#    endpoint variable.
-#  - `ALL(rel IN r WHERE …)` predicates in WHERE are not supported. The
-#    edge-type filter must be inlined into the relationship pattern via
-#    `[r:T1|T2*N..M]`.
-#  - RETURN aliases cannot be referenced in ORDER BY. We re-evaluate the
-#    expression (e.g. `size(r)`) there.
-#
-# The pattern template uses `{rel_filter}` for the inlined types and `{n}`
-# for the max-hops upper bound.
-_DIRECTION_PATTERNS = {
-    "out":  "(seed_n {{id: $seed}})-[r{rel_filter}*1..{n}]->(dst)",
-    "in":   "(seed_n {{id: $seed}})<-[r{rel_filter}*1..{n}]-(dst)",
-    "both": "(seed_n {{id: $seed}})-[r{rel_filter}*1..{n}]-(dst)",
-}
-
-
 @router.get(
     "/expand",
     response_model=ExpandResponse,
@@ -1504,29 +1483,7 @@ async def aggregate_edges(
     started = time.perf_counter()
     pool = request.app.state.pool
 
-    # Build a single agtype literal for the property extraction --
-    # ``properties->'"<key>"'`` selects the value as agtype.  Cast to
-    # text for grouping (text comparison is what the Cypher version
-    # did implicitly).
-    #
-    # IMPORTANT: wrap the extraction in parens so downstream uses can
-    # safely append ``::text`` without tripping Postgres operator
-    # precedence.  Without parens, ``src.properties->'"team"'::text``
-    # binds the cast to the JSON-path-key string literal rather than
-    # to the extracted value (parser reads it as
-    # ``src.properties -> ('"team"'::text)``).  The ``->`` arm then
-    # returns NULL on every row and the GROUP BY collapses all rows
-    # into a single ("", "") bucket -- which is exactly the symptom
-    # a caller observed (``source/target = "<group>/"`` with the full
-    # rel-type rowcount as the weight).
-    src_extract = f"(src.properties->'\"{src_key}\"')"
-    dst_extract = f"(dst.properties->'\"{dst_key}\"')"
-
-    # Build per-rel-type SQL.  Aggregate locally per rel then merge
-    # in Python -- avoids a giant UNION ALL.  Each per-rel query
-    # uses the (start_id, end_id) btree for the JOIN.
     async with pool.acquire() as conn:
-        # 1. Discover edge labels.
         if body.rel_types:
             edge_labels = list(body.rel_types)
         else:
@@ -1540,183 +1497,19 @@ async def aggregate_edges(
                 tenant,
             )
             edge_labels = [r["label"] for r in label_rows]
-        safe_rels: list[str] = []
-        for rt in edge_labels:
-            try:
-                validate_label_optional(rt)
-                safe_rels.append(rt)
-            except ValueError:
-                continue
-
-        # 2. Build the WHERE clause once.  Whitelist filters use IN
-        #    over inline agtype-quoted values (safer than asyncpg
-        #    array binding given the agtype operator path).
-        def _agtype_literal(s: str) -> str:
-            # JSON-encode the value as an agtype scalar literal,
-            # then quote-escape for inline use.  Strings become
-            # '"value"', numbers stay bare, etc.
-            return "'" + _json.dumps(s).replace("'", "''") + "'::agtype"
-        extra_where: list[str] = []
-        if body.require_different:
-            extra_where.append(f"{src_extract} <> {dst_extract}")
-        if body.src_values:
-            in_list = ", ".join(_agtype_literal(v) for v in body.src_values)
-            extra_where.append(f"{src_extract} IN ({in_list})")
-        if body.dst_values:
-            in_list = ", ".join(_agtype_literal(v) for v in body.dst_values)
-            extra_where.append(f"{dst_extract} IN ({in_list})")
-        where_extra = (" AND " + " AND ".join(extra_where)) if extra_where else ""
-
-        # 3. Per-rel aggregate, fanned out in parallel.  Previously a
-        #    sequential ``for rel in safe_rels:`` — on a large graph
-        #    (7 active rel-types × 6-10 s each on a 7M-edge graph)
-        #    that totalled 60-90 s wall-clock, tripping the caller's
-        #    read budget and surfacing as a timeout with empty edges.
-        #
-        #    Each per-rel query is independent (separate table, no
-        #    locks on edge labels) so running them on parallel
-        #    connections collapses wall-clock to roughly the slowest
-        #    single query.  ``pool.acquire`` is bounded by the pool
-        #    size so we cap concurrency at the smaller of len(rels)
-        #    and the pool's safe-concurrent-checkout budget.
-        per_rel_cap = max(body.limit, 1000)
-
-        def _build_sql(rel: str) -> str:
-            return (
-                f'SELECT {src_extract}::text AS src_value, '
-                f'       {dst_extract}::text AS dst_value, '
-                f'       count(*)::bigint    AS n '
-                f'FROM "{tenant}"."{rel}" e '
-                f'JOIN "{tenant}"."_ag_label_vertex" src '
-                f'  ON src.id = e.start_id '
-                f'JOIN "{tenant}"."_ag_label_vertex" dst '
-                f'  ON dst.id = e.end_id '
-                f'WHERE {src_extract} IS NOT NULL '
-                f'  AND {dst_extract} IS NOT NULL '
-                f'{where_extra} '
-                f'GROUP BY src_value, dst_value '
-                f'ORDER BY count(*) DESC '
-                f'LIMIT $1;'
-            )
-
-        async def _run_rel(rel: str) -> tuple[str, list[tuple[str, str, str, int]]]:
-            sql = _build_sql(rel)
-            # Use a fresh pool connection per rel so the queries
-            # run concurrently — sharing ``conn`` would serialise
-            # them on the connection's single in-flight query slot.
-            try:
-                async with pool.acquire() as rconn:
-                    # Disable per-query parallel workers.  Each
-                    # rel's parallel hash-join + parallel sort
-                    # otherwise spawns 2 worker processes, each
-                    # allocating shared memory for the parallel-
-                    # scan/hash-join coordination segment.  With
-                    # sem=6 we'd have 6 rels × 3 workers = 18
-                    # backends competing for ``/dev/shm``, tripping
-                    # ``could not resize shared memory segment ...
-                    # No space left on device`` on the rels that
-                    # lose the race.  Running each rel single-
-                    # threaded keeps the cross-rel parallelism
-                    # (the asyncio.gather above) and trades a
-                    # tolerable per-rel slowdown for a clean,
-                    # bounded shared-memory footprint -- 6
-                    # serial workers fit comfortably in the 1 GB
-                    # ``shm_size`` we set on graphos-db.
-                    await rconn.execute(
-                        "SET LOCAL max_parallel_workers_per_gather = 0",
-                    )
-                    rows = await rconn.fetch(sql, per_rel_cap)
-            except asyncpg.exceptions.QueryCanceledError:
-                raise
-            except asyncpg.exceptions.PostgresError as exc:
-                _aggregate_log.warning(
-                    "aggregate_edges per_rel postgres_error rel=%s err=%s",
-                    rel, str(exc)[:200],
-                )
-                return rel, []
-            except Exception as exc:  # noqa: BLE001
-                _aggregate_log.warning(
-                    "aggregate_edges per_rel unexpected rel=%s err=%s",
-                    rel, type(exc).__name__,
-                )
-                return rel, []
-            out: list[tuple[str, str, str, int]] = []
-            for row in rows:
-                src_raw = row["src_value"] or ""
-                dst_raw = row["dst_value"] or ""
-                src_val = src_raw.rsplit("::", 1)[0] if src_raw.endswith("::agtype") else src_raw
-                dst_val = dst_raw.rsplit("::", 1)[0] if dst_raw.endswith("::agtype") else dst_raw
-                if src_val.startswith('"') and src_val.endswith('"'):
-                    src_val = src_val[1:-1]
-                if dst_val.startswith('"') and dst_val.endswith('"'):
-                    dst_val = dst_val[1:-1]
-                out.append((src_val, dst_val, rel, int(row["n"])))
-            return rel, out
-
-        all_groups: list[tuple[str, str, str, int]] = []
-        # (src_value, dst_value, rel_type, count)
-        #
-        # Cap concurrency to bound Postgres ``/dev/shm`` usage.  Each
-        # per-rel GROUP BY allocates a hash-aggregate workspace in
-        # shared memory (~work_mem bytes per sort/agg).  Without the
-        # cap, 11+ parallel queries blew out the default 64 MB
-        # ``/dev/shm`` and tripped ``could not resize shared memory
-        # segment ... No space left on device`` on the rels that lost
-        # the race -- swallowed silently by the per-rel error handler,
-        # so callers got a subset of rel-types back with no failure
-        # surfaced.
-        #
-        # Per-rel concurrency is now SERIAL (sem=1) inside graphos.
-        #
-        # The previous sem=3 still tripped ``/dev/shm`` exhaustion on
-        # large multi-rel aggregates: individual per-rel
-        # queries allocate up to 128 MB shared-memory segments for
-        # their hash-aggregate / sort state, and running 3 of those
-        # concurrently against a 7M-edge graph saturates the 1 GB
-        # ``shm_size`` once any short-lived segments from prior rels
-        # don't get reclaimed in time.  Symptom: ~20 rel-types in
-        # one request silently fail with ``could not resize shared
-        # memory segment ... No space left on device`` and the caller
-        # gets a subset of rel-types back with no failure surfaced
-        # (e.g. LINKS_TO, RELATES_TO, CITES, REFERENCES — whichever
-        # lost the race on a multi-million-edge graph).
-        #
-        # Fan-out belongs on the CALLER side: a caller that needs
-        # several rel types should split one logical aggregate
-        # into N per-rel HTTP requests (``rel_types=[<one type>]``),
-        # each with its own cache slot and deadline.
-        # That keeps graphos's per-request shm footprint deterministic
-        # at one rel-query worth of state and the network layer
-        # naturally bounds concurrency at the asyncpg pool size.
-        #
-        # For multi-rel callers that bypass the per-rel fan-out
-        # (batch summary jobs, ad-hoc admin queries) we
-        # serialise the per-rel run.  Wall-clock is N × slowest_query
-        # but every rel-type returns intact, which is the only
-        # correctness-preserving behaviour on large graphs.
-        _SEM = asyncio.Semaphore(1)
-
-        async def _bounded(rel: str) -> tuple[str, list[tuple[str, str, str, int]]]:
-            async with _SEM:
-                return await _run_rel(rel)
-
-        results = await asyncio.gather(
-            *(_bounded(rel) for rel in safe_rels),
-            return_exceptions=True,
+    safe_rels: list[str] = []
+    for rt in edge_labels:
+        try:
+            validate_label_optional(rt)
+            safe_rels.append(rt)
+        except ValueError:
+            continue
+    all_groups: list[tuple[str, str, str, int]] = []
+    truncated = False
+    if safe_rels:
+        all_groups, truncated = await _aggregate_edge_groups(
+            pool, tenant, body, sorted(set(safe_rels)),
         )
-        for r in results:
-            if isinstance(r, BaseException):
-                # Per-rel failure already swallowed inside _run_rel;
-                # this branch only catches unexpected upstream errors.
-                continue
-            _, rel_groups = r
-            all_groups.extend(rel_groups)
-
-    # Global sort by count desc, then src, dst -- match the Cypher
-    # ORDER BY behaviour.  Truncate to limit.
-    all_groups.sort(key=lambda g: (-g[3], g[0], g[1]))
-    truncated = len(all_groups) > body.limit
-    all_groups = all_groups[: body.limit]
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     groups = [
@@ -1738,6 +1531,107 @@ async def aggregate_edges(
         elapsed_ms=elapsed_ms,
         groups=groups,
     )
+
+
+def _agtype_text_value(raw: str | None) -> str:
+    """An agtype rendered as text, as the endpoint has always returned it:
+    no ``::agtype`` suffix, strings without their quotes."""
+    val = raw or ""
+    if val.endswith("::agtype"):
+        val = val.rsplit("::", 1)[0]
+    if len(val) >= 2 and val.startswith('"') and val.endswith('"'):  # noqa: PLR2004
+        val = val[1:-1]
+    return val
+
+
+async def _aggregate_edge_groups(
+    pool: asyncpg.Pool,
+    tenant: str,
+    body: EdgesAggregateRequest,
+    rels: list[str],
+) -> tuple[list[tuple[str, str, str, int]], bool]:
+    """The top ``body.limit`` ``(src_value, dst_value, rel_type, count)``
+    groups, and whether there were more.
+
+    One statement.  The grouping property of each side is first extracted
+    into a narrow ``(graphid, value)`` map of the vertices that have it;
+    the edges of the requested types are then joined to those maps and
+    grouped.  Joining edges to whole vertex rows instead (properties and
+    all) was what made each per-type query's hash join run out of shared
+    memory on large graphs.
+
+    Ordering is count descending, then source value, destination value and
+    edge type, compared as the returned strings.  The query returns every
+    group tied with the last one kept, and the sort and cut happen here, so
+    the same groups come back however ties fall in SQL.
+    """
+    def side(key: str, param: int) -> str:
+        value = f"""(v.properties -> '"{key}"'::agtype)"""
+        return f"""
+            SELECT v.id, {value} AS val
+            FROM "{tenant}"."_ag_label_vertex" v
+            WHERE {value} IS NOT NULL
+              AND (${param}::text[] IS NULL
+                   OR {value} IN (SELECT x::agtype FROM unnest(${param}::text[]) AS x))"""
+
+    edges = " UNION ALL ".join(
+        f"SELECT start_id, end_id, '{rel}'::text AS rel FROM \"{tenant}\".\"{rel}\""
+        for rel in rels
+    )
+    different = "WHERE s.val <> d.val" if body.require_different else ""
+    sql = f"""
+        WITH src AS MATERIALIZED ({side(body.group_by_src, 2)}),
+             dst AS MATERIALIZED ({side(body.group_by_dst, 3)}),
+             groups AS MATERIALIZED (
+                SELECT s.val::text AS src_value, d.val::text AS dst_value,
+                       e.rel AS rel_type, count(*)::bigint AS n
+                FROM ({edges}) e
+                JOIN src s ON s.id = e.start_id
+                JOIN dst d ON d.id = e.end_id
+                {different}
+                GROUP BY s.val, d.val, e.rel
+             ),
+             cut AS (SELECT n FROM groups ORDER BY n DESC OFFSET $1 LIMIT 1)
+        SELECT src_value, dst_value, rel_type, n, (SELECT n FROM cut) AS cut_n
+        FROM groups
+        WHERE n >= COALESCE((SELECT n FROM cut), 0);
+    """
+
+    def values(vals: list[str] | None) -> list[str] | None:
+        return [_json.dumps(v) for v in vals] if vals else None
+
+    async with pool.acquire() as conn, conn.transaction():
+        # Parallel workers each take their own shared-memory hash tables;
+        # one backend keeps the footprint to one query's worth.
+        await conn.execute("SET LOCAL max_parallel_workers_per_gather = 0;")
+        # The vertex maps are materialized CTEs, which carry no statistics:
+        # the planner then overestimates each join by orders of magnitude
+        # and picks nested loops over every vertex pair (hours on a large
+        # graph).  This query is always one scan of the edges plus two
+        # small hash tables; say so.
+        await conn.execute("SET LOCAL enable_nestloop = off;")
+        await conn.execute("SET LOCAL enable_mergejoin = off;")
+        try:
+            rows = await conn.fetch(
+                sql, body.limit, values(body.src_values), values(body.dst_values),
+            )
+        except asyncpg.exceptions.QueryCanceledError:
+            raise
+        except asyncpg.exceptions.PostgresError as exc:
+            _aggregate_log.warning("aggregate_edges failed: %s", str(exc)[:200])
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"aggregate failed: {exc}",
+            ) from exc
+
+    found = [
+        (_agtype_text_value(r["src_value"]), _agtype_text_value(r["dst_value"]),
+         str(r["rel_type"]), int(r["n"]))
+        for r in rows
+    ]
+    found.sort(key=lambda g: (-g[3], g[0], g[1], g[2]))
+    truncated = bool(rows) and rows[0]["cut_n"] is not None
+    return found[: body.limit], truncated
 
 
 @router.post(
@@ -1763,53 +1657,44 @@ async def aggregate_nodes(
     _check_tenant(tenant, principal)
 
     # label + group_by are regex-validated by the Pydantic body so the
-    # interpolation below is safe.  ``MATCH (n:<label>)`` rides postgres
-    # inheritance for free: a parent label is the AGE parent table for
-    # every vertex label that inherits from it.
+    # interpolation below is safe.  Reading the label's table without ONLY
+    # includes the tables of labels inheriting from it, as Cypher
+    # ``MATCH (n:<label>)`` did.  Grouping is on the agtype value, so
+    # values compare exactly as they did in Cypher (``values`` match
+    # string properties only).
     label = body.label
-    group_by = body.group_by
-
-    where_clauses: list[str] = [f"n.{group_by} IS NOT NULL"]
-    if body.values:
-        where_clauses.append(f"n.{group_by} IN $values")
-    where = " AND ".join(where_clauses)
-
-    cypher = f"""
-        MATCH (n:{label})
-        WHERE {where}
-        RETURN n.{group_by} AS v, count(n) AS c
-        ORDER BY count(n) DESC
-        LIMIT $lim
+    value = f"""(n.properties -> '"{body.group_by}"'::agtype)"""
+    sql = f"""
+        SELECT {value}::text AS v, count(*) AS c
+        FROM "{tenant}"."{label}" n
+        WHERE {value} IS NOT NULL
+          AND ($2::text[] IS NULL
+               OR {value} IN (SELECT x::agtype FROM unnest($2::text[]) AS x))
+        GROUP BY {value}
+        ORDER BY count(*) DESC, {value}
+        LIMIT $1
     """
-
-    params: dict[str, object] = {"lim": body.limit}
-    if body.values:
-        params["values"] = list(body.values)
+    wanted = [_json.dumps(v) for v in body.values] if body.values else None
 
     started = time.perf_counter()
     try:
-        rows = await query_cypher(
-            request.app.state.pool,
-            graph=tenant,
-            cypher=cypher,
-            return_cols=[("v", "agtype"), ("c", "agtype")],
-            params=params,
-        )
-    except CypherError as exc:
+        async with request.app.state.pool.acquire() as conn:
+            rows = await conn.fetch(sql, body.limit, wanted)
+    except asyncpg.exceptions.UndefinedTableError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"cypher error: {exc}",
+            detail=f"label '{label}' not registered for tenant '{tenant}'",
         ) from exc
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     groups = [
-        NodeAggregateRow(value=str(row["v"]), count=int(row["c"]))
+        NodeAggregateRow(value=str(parse_agtype(row["v"])), count=int(row["c"]))
         for row in rows
     ]
     return NodesAggregateResponse(
         tenant=tenant,
         label=label,
-        group_by=group_by,
+        group_by=body.group_by,
         truncated=len(groups) == body.limit,
         elapsed_ms=elapsed_ms,
         groups=groups,
@@ -2209,69 +2094,68 @@ async def export_graph(
                     detail=str(exc),
                 ) from exc
 
-    # Step 1: collect nodes
-    if node_ids:
-        nodes_cypher = """
-            MATCH (n) WHERE n.id IN $ids
-            RETURN n.id AS id, label(n) AS lbl, properties(n) AS props
-            LIMIT $lim
-        """
-        node_params: dict[str, object] = {"ids": list(node_ids), "lim": limit_nodes}
-    else:
-        nodes_cypher = """
-            MATCH (n) WHERE n.id IS NOT NULL
-            RETURN n.id AS id, label(n) AS lbl, properties(n) AS props
-            LIMIT $lim
-        """
-        node_params = {"lim": limit_nodes}
-
     pool = request.app.state.pool
-    try:
-        node_rows = await query_cypher(
-            pool, graph=tenant, cypher=nodes_cypher,
-            return_cols=[("id", "agtype"), ("lbl", "agtype"), ("props", "agtype")],
-            params=node_params,
-        )
-    except CypherError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"cypher error: {exc}",
-        ) from exc
-
-    if not node_rows:
+    # Step 1: the nodes.  By id through each label's unique index, or any
+    # ``limit_nodes`` nodes.
+    by_id = (
+        "WHERE (v.properties -> '\"id\"') = ANY(ARRAY("
+        "  SELECT x::agtype FROM unnest($2::text[]) AS x))"
+        if node_ids else
+        "WHERE (v.properties -> '\"id\"') IS NOT NULL"
+    )
+    node_sql = f"""
+        SELECT v.id::text AS gid, c.relname AS lbl, v.properties::text AS props
+        FROM "{tenant}"."_ag_label_vertex" v
+        JOIN pg_class c ON c.oid = v.tableoid
+        {by_id}
+        LIMIT $1
+    """
+    node_args: list[object] = [limit_nodes]
+    if node_ids:
+        node_args.append([_json.dumps(i) for i in node_ids])
+    async with pool.acquire() as conn:
+        found = await conn.fetch(node_sql, *node_args)
+    if not found:
         return GraphologyExport()
 
-    in_set = [str(r["id"]) for r in node_rows]
+    ext_of_gid: dict[str, str] = {}
+    node_rows = []
+    for r in found:
+        props = _safe_decode_props(r["props"])
+        ext = str(props.get("id"))
+        ext_of_gid[r["gid"]] = ext
+        node_rows.append({"id": ext, "lbl": r["lbl"], "props": props})
 
-    # Step 2: collect edges among the returned node set.
-    rel_filter = "AND type(r) IN $rels" if rel_types else ""
-    edges_cypher = f"""
-        MATCH (a)-[r]->(b)
-        WHERE a.id IN $ids AND b.id IN $ids {rel_filter}
-        RETURN id(r) AS rid, a.id AS src, b.id AS dst,
-               type(r) AS rel_type, properties(r) AS rprops
-    """
-    edge_params: dict[str, object] = {"ids": in_set}
-    if rel_types:
-        edge_params["rels"] = list(rel_types)
-
-    try:
-        edge_rows = await query_cypher(
-            pool, graph=tenant, cypher=edges_cypher,
-            return_cols=[
-                ("rid", "agtype"),
-                ("src", "agtype"),
-                ("dst", "agtype"),
-                ("rel_type", "agtype"),
-                ("rprops", "agtype"),
-            ],
-            params=edge_params,
+    # Step 2: edges whose two endpoints are both among those nodes,
+    # through the (start_id, end_id) index of each edge table.
+    rel_filter = "AND c.relname = ANY($2::text[])" if rel_types else ""
+    edge_sql = f"""
+        WITH ids AS MATERIALIZED (
+            SELECT agtype_to_graphid(x::agtype) AS gid FROM unnest($1::text[]) AS x
         )
-    except CypherError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"cypher error: {exc}",
-        ) from exc
+        SELECT e.id::text AS rid, e.start_id::text AS src, e.end_id::text AS dst,
+               c.relname AS rel_type, e.properties::text AS rprops
+        FROM "{tenant}"."_ag_label_edge" e
+        JOIN pg_class c ON c.oid = e.tableoid
+        WHERE e.start_id = ANY(ARRAY(SELECT gid FROM ids))
+          AND e.end_id = ANY(ARRAY(SELECT gid FROM ids))
+          {rel_filter}
+    """
+    edge_args: list[object] = [list(ext_of_gid)]
+    if rel_types:
+        edge_args.append(list(rel_types))
+    async with pool.acquire() as conn:
+        found_edges = await conn.fetch(edge_sql, *edge_args)
+    edge_rows = [
+        {
+            "rid": r["rid"],
+            "src": ext_of_gid[r["src"]],
+            "dst": ext_of_gid[r["dst"]],
+            "rel_type": r["rel_type"],
+            "rprops": _safe_decode_props(r["rprops"]),
+        }
+        for r in found_edges
+    ]
 
     # Step 3: project into graphology's native format.
     nodes = [

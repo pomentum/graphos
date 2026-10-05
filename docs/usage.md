@@ -597,6 +597,10 @@ also exported.
 `method`, `path`, `tenant`, `consumer` (the token's consumer name, `anonymous` without one),
 `args_hash`, `status` and `elapsed_ms`.
 
+**JIT.** Off for graphos's connections (`GRAPHOS_DB_JIT=true` turns it on). On
+graphos's heaviest queries it gained nothing measurable; on tenants without
+statistics it spent seconds compiling queries that run in milliseconds.
+
 **Statement timeout.** Every pooled connection runs with `statement_timeout =
 GRAPHOS_STATEMENT_TIMEOUT_S` (default 60). This Postgres setting is the only per-statement limit;
 the pool sets no client-side command timeout. When it fires, the response is **504** with an

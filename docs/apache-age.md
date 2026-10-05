@@ -91,7 +91,7 @@ for every registered label:
 
 | Index | Purpose |
 |---|---|
-| `GIN (properties)` per vertex label | Serves Cypher `MATCH (n:L {k: v})` (containment `@>`) |
+| `GIN (properties)` per vertex label | Containment `@>`: Cypher `MATCH (n:L {k: v})` and graphos's delete-by-property |
 | `UNIQUE ((properties->'"id"'))` per vertex label | Arbiter for the `ON CONFLICT` of every node write; serves direct-SQL id lookups and the edge-endpoint JOIN |
 | btree on `community_id` (text extract) per vertex label | Community endpoints, community-scoped expansion |
 | trigram GIN on `name` per vertex label | `/graph/search` (case-insensitive `ILIKE '%q%'`; `%` and `_` in `q` are escaped, so `q` matches literally) |
@@ -99,6 +99,8 @@ for every registered label:
 | `btree (start_id, end_id)` per edge label | Outgoing-edge lookups on read paths (kept alongside the unique one) |
 | `btree (end_id)` per edge label | Incoming-edge lookups (`WHERE end_id IN (…)`) |
 | partial `btree (end_community_id)` per edge label | Community-scoped BFS |
+| `btree (id)` per edge label (`CONCURRENTLY`) | Paging edges in graphid order; AGE does not index the graphid |
+| `btree (id)` per vertex label (opt-in, `GRAPHOS_VERTEX_GRAPHID_INDEXES`) | Resolving edge endpoints by graphid; costs 20–30% on bulk vertex writes |
 
 Two different access paths, two different indexes:
 
@@ -106,7 +108,8 @@ Two different access paths, two different indexes:
   `WHERE properties @> '{"id":"X"}'::agtype`** — the GIN containment
   operator. It does *not* lower to `properties->'"id"' = …`, so the btree
   unique index is **not** used by Cypher MATCH. GIN on `properties` is
-  what keeps Cypher reads and deletes by id off a sequential scan.
+  what keeps a Cypher read by id off a sequential scan. (graphos itself runs
+  no Cypher; it reads by id in SQL, through the unique btree.)
 - **Direct SQL** that compares `properties->'"id"'` (node-by-id reads,
   property stamping, the `ON CONFLICT` of every node write, and the edge
   write path's endpoint JOIN) uses the unique btree.

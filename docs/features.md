@@ -12,8 +12,8 @@ in [concept.md](concept.md); request/response models are in
 graphos is a generic, multi-tenant property-graph service: PostgreSQL 16 with
 Apache AGE 1.6 behind a typed FastAPI REST surface. Storage is ordinary
 Postgres (MVCC, WAL, standard backup tooling). Requests are JSON, with NDJSON
-for bulk writes. Internally graphos issues a mix of AGE Cypher and direct SQL
-against AGE's per-label tables ([concept §3.1](concept.md#31-cypher--sql-boundary)).
+for bulk writes. Internally graphos runs plain SQL against AGE's per-label
+tables, never Cypher ([concept §3.1](concept.md#31-cypher--sql-boundary)).
 
 graphos ships no labels, property keys, or relationship types. Every analytics
 endpoint takes label, property, and edge names as request parameters.

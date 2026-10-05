@@ -140,7 +140,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # service, and every other tenant, from starting.
     for spec in list(registered_tenants().values()):
         try:
-            await bootstrap_tenant(pool, spec)
+            await bootstrap_tenant(
+                pool, spec, vertex_graphid_indexes=settings.vertex_graphid_indexes,
+            )
         except Exception:  # noqa: BLE001
             log.exception("tenant bootstrap failed at startup", extra={"tenant": spec.name})
 

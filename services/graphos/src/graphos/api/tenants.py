@@ -141,7 +141,10 @@ async def register(
 
     pool = request.app.state.pool
     try:
-        await bootstrap_tenant(pool, spec)
+        await bootstrap_tenant(
+            pool, spec,
+            vertex_graphid_indexes=request.app.state.settings.vertex_graphid_indexes,
+        )
     except ValueError as exc:
         # Spec-level problems found during bootstrap (e.g. a label_hierarchy
         # entry naming a label that is not in vertex_labels) are the caller's.

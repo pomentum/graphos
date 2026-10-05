@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import asdict, dataclass, field
 
 import asyncpg
@@ -131,6 +132,36 @@ async def _safe(
             raise
 
 
+async def _ensure_index_concurrently(
+    conn: asyncpg.Connection, schema: str, table: str, name: str, definition: str,
+) -> None:
+    """``CREATE INDEX CONCURRENTLY IF NOT EXISTS``, redoing an interrupted build.
+
+    Concurrent builds do not block writes, so an index can be added to a
+    large existing table at startup.  A build that was interrupted leaves an
+    invalid index that ``IF NOT EXISTS`` would keep skipping; it is dropped
+    and built again.  Must run outside a transaction block.
+    """
+    valid = await conn.fetchval(
+        "SELECT i.indisvalid FROM pg_index i "
+        "JOIN pg_class c ON c.oid = i.indexrelid "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = $1 AND c.relname = $2;",
+        schema, name,
+    )
+    if valid:
+        return
+    if valid is False:
+        await conn.execute(f'DROP INDEX CONCURRENTLY IF EXISTS "{schema}"."{name}";')
+    started = time.perf_counter()
+    await conn.execute(
+        f'CREATE INDEX CONCURRENTLY IF NOT EXISTS "{name}" ON "{schema}"."{table}" {definition};'
+    )
+    took = time.perf_counter() - started
+    if took > 1.0:  # noqa: PLR2004 — only builds over existing data are worth a line
+        log.info("index built", extra={"tenant": schema, "index": name, "seconds": round(took, 1)})
+
+
 # ── Bootstrap routine ───────────────────────────────────────────────────────
 
 
@@ -202,7 +233,9 @@ def _validate_label_hierarchy(
             )
 
 
-async def bootstrap_tenant(pool: asyncpg.Pool, spec: TenantSpec) -> None:
+async def bootstrap_tenant(
+    pool: asyncpg.Pool, spec: TenantSpec, *, vertex_graphid_indexes: bool = False,
+) -> None:
     """Bring a tenant's AGE graph up to spec. Idempotent.
 
     Concurrency: the body issues a long sequence of DDL statements
@@ -441,6 +474,36 @@ async def bootstrap_tenant(pool: asyncpg.Pool, spec: TenantSpec) -> None:
             for ddl in spec.generated_columns:
                 await _safe(conn, ddl, swallow=_SWALLOW_DUPLICATE_COLUMN)
 
+            # 7. A btree on ``id`` (the graphid), which AGE does not create.
+            # Edge tables always: paging edges in graphid order
+            # (``/edges:scan``) reads it instead of sorting the table.
+            # Vertex tables on request (GRAPHOS_VERTEX_GRAPHID_INDEXES):
+            # resolving edge endpoints by graphid then probes an index
+            # instead of scanning every label table, but measured bulk
+            # writes of vertices 20-30% slower (edges ~5%).
+            for label in spec.edge_labels:
+                await _ensure_index_concurrently(
+                    conn, spec.name, label, f"{label}_graphid", "(id)",
+                )
+            if vertex_graphid_indexes:
+                for label in spec.vertex_labels:
+                    await _ensure_index_concurrently(
+                        conn, spec.name, label, f"{label}_graphid", "(id)",
+                    )
+
+            # 8. Statistics for label tables never analyzed.  Autovacuum only
+            # analyzes a table after 50+ changed rows, so small and empty
+            # label tables can stay unknown forever; the planner then
+            # assumes ~10 pages each, and a query across 80 such tables is
+            # costed as millions of rows.  Cheap: only those tables, once.
+            for row in await conn.fetch(
+                "SELECT c.relname FROM pg_class c "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = $1 AND c.relkind = 'r' AND c.reltuples < 0;",
+                spec.name,
+            ):
+                await conn.execute(f'ANALYZE "{spec.name}"."{row["relname"]}";')
+
 
         finally:
             # Best-effort release — see bootstrap_tenant() docstring.
@@ -647,14 +710,16 @@ async def load_spec(pool: asyncpg.Pool, name: str) -> TenantSpec | None:
     return None if text is None else _spec_from_jsonable(json.loads(text))
 
 
-async def register_tenant(pool: asyncpg.Pool, spec: TenantSpec) -> None:
+async def register_tenant(
+    pool: asyncpg.Pool, spec: TenantSpec, *, vertex_graphid_indexes: bool = False,
+) -> None:
     """Register a tenant — bring schema up, persist spec, remember in memory.
 
     Idempotent on all three levels: bootstrap is idempotent by construction,
     persistence is `ON CONFLICT DO UPDATE`, in-memory remember is a simple
     dict overwrite.
     """
-    await bootstrap_tenant(pool, spec)
+    await bootstrap_tenant(pool, spec, vertex_graphid_indexes=vertex_graphid_indexes)
     await persist_spec(pool, spec)
     # Persisting merges with the stored spec; serve the merged result, not
     # the (possibly partial) incoming one.

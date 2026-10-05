@@ -1,7 +1,10 @@
-"""Cypher execution helper, for reads.
+"""Cypher execution helper, plus the agtype parser and error type graphos uses.
 
-Graph writes never go through Cypher; they live in :mod:`graphos.writes`.
-Responsibilities:
+No endpoint runs Cypher: every read is SQL over AGE's label tables (AGE's
+Cypher executor was seen ignoring ``statement_timeout`` and cancellation on
+large graphs) and every write lives in :mod:`graphos.writes`.  The tests use
+:func:`query_cypher` as an independent reference for what the SQL returns.
+Responsibilities of :func:`query_cypher`:
 
 - Take a Cypher template + a tenant name + a Python dict of parameters.
 - Wrap them in AGE's ``cypher('<graph>', $$ … $$, <params>::agtype)`` form.

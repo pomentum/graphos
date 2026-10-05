@@ -34,7 +34,6 @@ from graphos.contracts.communities import (
     TopByEdgeResponse,
     TopByEdgeRow,
 )
-from graphos.cypher import CypherError, query_cypher
 
 # Upper bound on ``sample_labels``; larger requests fall back to the default.
 MAX_SAMPLE_LABELS = 100
@@ -60,83 +59,37 @@ SAMPLE_LABELS_PER_COMMUNITY = 5
 # ── helpers ────────────────────────────────────────────────────────────────
 
 
-async def _community_counts(
-    request: Request, tenant: str, min_size: int,
-) -> tuple[list[tuple[int, int]], int, int]:
-    """Return ``(communities, n_assigned, n_unassigned)``.
+async def _members_of_communities(
+    request: Request, tenant: str, community_ids: list[int], limit: int,
+) -> dict[int, list[str]]:
+    """Up to ``limit`` member ids for each community, in one query.
 
-    ``communities`` is ``[(community_id, size), …]`` sorted by size desc.
-    Filtered by ``size >= min_size``. Computed in two Cypher passes (one
-    for the histogram, one for the unassigned count).
+    For each community, the per-label index registration creates on
+    ``community_id`` (``<Label>_community_id``) is read until ``limit``
+    members are found, so the cost is bounded by ``limit`` per community
+    rather than by community size (the largest communities hold most of a
+    large graph).
     """
-    pool = request.app.state.pool
-    rows = await query_cypher(
-        pool, graph=tenant,
-        cypher="""
-            MATCH (n) WHERE n.community_id IS NOT NULL
-            RETURN n.community_id AS cid, count(n) AS c
-            ORDER BY count(n) DESC
+    if not community_ids:
+        return {}
+    rows = await request.app.state.pool.fetch(
+        f"""
+        SELECT c.cid, m.ext_id
+        FROM unnest($1::text[]) AS c(cid)
+        CROSS JOIN LATERAL (
+            SELECT (v.properties -> '"id"')::text AS ext_id
+            FROM "{tenant}"."_ag_label_vertex" v
+            WHERE ((v.properties::text)::jsonb ->> 'community_id') = c.cid
+              AND (v.properties -> '"id"') IS NOT NULL
+            LIMIT $2
+        ) m;
         """,
-        return_cols=[("cid", "agtype"), ("c", "agtype")],
+        [str(c) for c in community_ids], limit,
     )
-    communities = [
-        (int(r["cid"]), int(r["c"]))
-        for r in rows
-        if int(r["c"]) >= min_size
-    ]
-    n_assigned = sum(int(r["c"]) for r in rows)
-
-    unassigned_rows = await query_cypher(
-        pool, graph=tenant,
-        cypher="MATCH (n) WHERE n.community_id IS NULL RETURN count(n) AS c",
-        return_cols=[("c", "agtype")],
-    )
-    n_unassigned = int(unassigned_rows[0]["c"]) if unassigned_rows else 0
-
-    return communities, n_assigned, n_unassigned
-
-
-async def _members_of_community(
-    request: Request, tenant: str, community_id: int, limit: int,
-) -> list[str]:
-    pool = request.app.state.pool
-    rows = await query_cypher(
-        pool, graph=tenant,
-        cypher="""
-            MATCH (n) WHERE n.community_id = $cid AND n.id IS NOT NULL
-            RETURN n.id AS id
-            LIMIT $lim
-        """,
-        return_cols=[("id", "agtype")],
-        params={"cid": community_id, "lim": limit},
-    )
-    return [str(r["id"]) for r in rows]
-
-
-async def _sample_labels(
-    request: Request, tenant: str, community_id: int, limit: int = 5,
-) -> list[str]:
-    """Top-N vertex labels among a community's members.
-
-    Retained for callers that need a single community's labels.  The
-    list / summary endpoints use :func:`_communities_with_labels` which
-    folds size + sample_labels into one SQL round-trip — closes the
-    historical N+1 (~31 s on a 164-community graph) to a single
-    GROUP BY (~50-200 ms).
-    """
-    pool = request.app.state.pool
-    rows = await query_cypher(
-        pool, graph=tenant,
-        cypher="""
-            MATCH (n) WHERE n.community_id = $cid
-            RETURN label(n) AS lbl, count(n) AS c
-            ORDER BY count(n) DESC
-            LIMIT $lim
-        """,
-        return_cols=[("lbl", "agtype"), ("c", "agtype")],
-        params={"cid": community_id, "lim": limit},
-    )
-    return [str(r["lbl"]) for r in rows]
+    members: dict[int, list[str]] = {c: [] for c in community_ids}
+    for r in rows:
+        members[int(r["cid"])].append(str(r["ext_id"]))
+    return members
 
 
 async def _communities_with_labels(
@@ -168,9 +121,8 @@ async def _communities_with_labels(
     # Both run against the parent label table so they cover every
     # registered vertex label automatically.
     #
-    # ``properties->'"community_id"'`` is the same indexed expression
-    # Louvain writeback populates and ``_check_community_id_index``
-    # (in louvain.py) builds a btree over.  Casting to ::text then
+    # These aggregate over every assigned vertex, so they scan rather than
+    # use the per-label ``community_id`` index; casting to ::text then
     # ::int matches the pattern the /community-ids endpoint uses.
     #
     # ``(array_agg(DISTINCT c.relname ORDER BY c.relname))[1:N]`` keeps
@@ -274,26 +226,22 @@ async def list_communities(
             min_size=min_size,
             limit=(limit if limit > 0 else None),
         )
-        out: list[CommunityRow] = []
-        for cid, size, labels in triples:
-            row = CommunityRow(
+        members = (
+            await _members_of_communities(
+                request, tenant, [cid for cid, _, _ in triples],
+                limit=MAX_INCLUDED_MEMBERS_PER_COMMUNITY,
+            )
+            if include_members else {}
+        )
+        out = [
+            CommunityRow(
                 community_id=cid,
                 size=size,
                 sample_labels=labels,
+                member_ids=members.get(cid) if include_members else None,
             )
-            if include_members:
-                row = row.model_copy(update={
-                    "member_ids": await _members_of_community(
-                        request, tenant, cid,
-                        limit=MAX_INCLUDED_MEMBERS_PER_COMMUNITY,
-                    ),
-                })
-            out.append(row)
-    except CypherError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"cypher error: {exc}",
-        ) from exc
+            for cid, size, labels in triples
+        ]
     except asyncpg.exceptions.UndefinedTableError as exc:
         # Tenant graph doesn't exist.
         raise HTTPException(
@@ -345,11 +293,6 @@ async def community_summary(
             )
             for cid, size, labels in triples[:top]
         ]
-    except CypherError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"cypher error: {exc}",
-        ) from exc
     except asyncpg.exceptions.UndefinedTableError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

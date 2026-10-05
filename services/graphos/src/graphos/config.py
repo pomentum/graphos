@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     # answers 504.  The few deliberately long operations (Louvain stages,
     # rule-based edge resolution, vacuum) raise it for their own statement.
     statement_timeout_s: float = Field(default=60.0, gt=0)
+    # PostgreSQL JIT compilation for graphos's connections.  Off: it showed
+    # no gain on the heaviest queries and cost seconds on small ones.
+    db_jit: bool = False
+    # A btree on ``id`` for every vertex label table (edge tables always get
+    # one).  Speeds up resolving edge endpoints (e.g. ``/edges:scan`` pages,
+    # ~1 s -> ~60 ms on an 8M-edge type) at a measured 20-30% cost on bulk
+    # vertex writes.  Built concurrently at startup for existing tenants.
+    vertex_graphid_indexes: bool = False
 
     # ── Background jobs (``Prefer: respond-async``) ──────────────────────
     # Jobs each process runs at once.  They are the heavy operations, so the

@@ -77,7 +77,13 @@ async def create_pool(settings: Settings) -> asyncpg.Pool:
         # ``allow_long_statements`` raised it for a long operation.  No
         # client-side ``command_timeout``: it cannot be raised per connection
         # and would cut long operations (index builds, Louvain) short.
-        server_settings={"statement_timeout": str(int(settings.statement_timeout_s * 1000))},
+        # JIT off unless configured: on graphos's heaviest queries it gained
+        # nothing measurable, and on tenants without statistics it spent
+        # ~1.8 s compiling queries that run in milliseconds.
+        server_settings={
+            "statement_timeout": str(int(settings.statement_timeout_s * 1000)),
+            "jit": "on" if settings.db_jit else "off",
+        },
         command_timeout=None,
     )
     if pool is None:

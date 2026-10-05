@@ -134,6 +134,8 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | `GRAPHOS_DB_POOL_MAX_SIZE` | `16` | asyncpg pool size per replica |
 | `GRAPHOS_JOB_CONCURRENCY` | `1` | Background jobs each replica runs at once |
 | `GRAPHOS_JOB_RETENTION_H` | `168` | Hours finished jobs are kept |
+| `GRAPHOS_VERTEX_GRAPHID_INDEXES` | `false` | Also index the graphid of every vertex table: faster endpoint resolution, 20–30% slower bulk vertex writes |
+| `GRAPHOS_DB_JIT` | `false` | PostgreSQL JIT for graphos's connections |
 
 ## Documentation
 

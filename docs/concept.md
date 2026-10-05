@@ -188,7 +188,12 @@ CREATE INDEX "<E>_end_id" ON "<tenant>"."<E>" USING btree (end_id);
 ALTER TABLE "<tenant>"."<E>" ADD COLUMN IF NOT EXISTS end_community_id text;
 CREATE INDEX "<E>_end_comm_id" ON "<tenant>"."<E>" USING btree (end_community_id)
   WHERE end_community_id IS NOT NULL;
+CREATE INDEX CONCURRENTLY "<E>_graphid" ON "<tenant>"."<E>" (id);
 ```
+
+With `GRAPHOS_VERTEX_GRAPHID_INDEXES=true`, every vertex label also gets
+`"<L>_graphid" (id)`. Finally, every label table that has never been analyzed
+gets `ANALYZE`.
 
 Consequences:
 
@@ -203,6 +208,20 @@ Consequences:
 - `end_community_id` is filled by Louvain (§5) and read by community-scoped
   `/expand`. Edges written after the last recompute have `NULL` there and are
   invisible to scoped traversals until the next recompute.
+- `<E>_graphid`: AGE does not index the graphid. Paging edges in graphid
+  order (`/edges:scan`) reads it instead of sorting the table. It is built
+  `CONCURRENTLY`, so on the first start after an upgrade it is added to large
+  existing tables without blocking writes (12 s for an 8M-row table); an
+  interrupted build is detected and redone. Measured cost: about 5% on bulk
+  edge writes.
+- Vertex `<L>_graphid` (opt-in): resolving edge endpoints by graphid then
+  probes an index instead of scanning every vertex table (`/edges:scan`
+  pages ~1 s → ~60 ms on an 8M-edge type), at a measured 20–30% cost on bulk
+  vertex writes, hence off by default.
+- `ANALYZE` of never-analyzed tables: autovacuum only analyzes a table after
+  50+ changed rows, so small and empty label tables could stay without
+  statistics; the planner then assumed ~10 pages for each, and a query across
+  80 of them was costed as millions of rows.
 - Per-property indexes beyond these are the consumer's choice via `indexes`.
   `/nodes:scan` filters use the expression
   `(((properties::text)::jsonb) ->> '<prop>')`, so a declared index must use
@@ -587,9 +606,13 @@ property and a destination-node property:
              "rel_type": "FOLLOWS", "count": 14}]}
 ```
 
-One query per edge type, run serially. If one type's query fails with a
-database error other than a timeout, it is logged and that type is omitted
-from the result.
+One statement. The grouping property of each side is first extracted into
+a narrow `(graphid, value)` map of the vertices that have it; the edges of the
+requested types are joined to those maps with hash joins and grouped. (Joining
+edges to whole vertex rows wrote gigabytes of temporary files on large
+graphs.) A database error fails the request (400; a timeout 504) rather than
+dropping that edge type from the result. Ties in count are ordered by source
+value, destination value, then edge type.
 
 #### 2.5.9 K/V cache — example
 
@@ -703,16 +726,17 @@ request-context logging → rate limit → metrics → audit → router.
 
 ### 3.1 Cypher / SQL boundary
 
-graphos issues Cypher through AGE's `cypher('<tenant>', $$ … $$, $1)` and
-plain SQL against the AGE storage tables. Most read paths use direct SQL
-because AGE's planner scans every inheritance child for those queries;
-plain SQL lets graphos pick the tables and indexes directly.
+No endpoint runs Cypher. Every read and write is plain SQL against AGE's
+storage tables: graphos picks the tables and indexes directly, and
+`statement_timeout` and cancellation always apply. (On an 8M-edge tenant,
+AGE's Cypher executor ran a node-plus-edges pattern for over ten minutes
+without stopping at either.)
 
 | Operation | Language |
 |---|---|
 | Every node upsert (`/nodes`, `nodes:bulk`, `snapshot-import`) | SQL: binary `COPY` into a temp table, `INSERT … ON CONFLICT ((properties->'"id"')) DO UPDATE` |
 | Every edge upsert (`/edges`, `edges:bulk`, `snapshot-import`) | SQL: binary `COPY` into a temp table, `INSERT … ON CONFLICT (start_id, end_id) DO UPDATE` |
-| `nodes/aggregate`, `export`, `communities?include_members=true` member lists | Cypher |
+| `nodes/aggregate`, `export`, `communities?include_members=true` member lists | SQL |
 | Node deletes (by id, by property) | SQL: one statement deletes the matching nodes (unique `id` index, or GIN containment for other keys) and every edge touching them |
 | `search`, `nodes/{id}`, `nodes/{id}/properties`, `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `nodes:scan`, `edges:scan`, `edges/aggregate` | SQL |
 | `histogram`, `top`, `stats`, `communities`, `community-summary`, `community-ids`, `catalogue` | SQL |
@@ -790,7 +814,7 @@ It relies on the unique indexes from §2.3 and runs with
 one statement removes the matching nodes and every edge touching them, so
 they go together or not at all. (A Cypher `DETACH DELETE` does not crash, but
 its node-plus-edges pattern on a large tenant ran for many minutes and did
-not stop at `statement_timeout`.) Cypher is still used for some reads.
+not stop at `statement_timeout`.)
 
 With audit enabled (the default), the audit middleware reads each write
 request's full body into memory before the handler parses it (§2.5.6).
@@ -912,7 +936,8 @@ It is consumable by `Graph.from()` in graphology / sigma.js.
 - Nodes: up to `limit_nodes` nodes (default 5000, max 50000), or only
   `node_ids` if given.
 - Edges: every edge among those nodes, optionally filtered by `rel_types`.
-- Both steps run as Cypher.
+- Both steps are SQL: nodes by id through each label's unique index, edges
+  through each edge table's `(start_id, end_id)` index.
 
 ```json
 {
