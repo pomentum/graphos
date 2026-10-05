@@ -62,11 +62,14 @@ async def run_recompute(
     pool: asyncpg.Pool, tenant: str, body: RecomputeCommunitiesRequest,
 ) -> RecomputeCommunitiesResponse:
     """The recompute itself, for the endpoint and for background jobs."""
-    # Single-flight per tenant via advisory lock. We hash the tenant name
-    # to fit in a bigint lock key.
+    # Single-flight per tenant via an advisory lock on a 64-bit hash of the
+    # tenant name (a 32-bit hash lets two tenants' names collide and block
+    # each other).  Seed 1 keeps it apart from tenant setup's lock on the
+    # same name (bootstrap.py, seed 0), so a recompute never holds up
+    # registration of its own tenant.
     async with pool.acquire() as lock_conn:
         got = await lock_conn.fetchval(
-            "SELECT pg_try_advisory_lock(hashtext($1))",
+            "SELECT pg_try_advisory_lock(hashtextextended($1, 1))",
             tenant,
         )
         if not got:
@@ -92,7 +95,7 @@ async def run_recompute(
             elapsed_ms = int((time.perf_counter() - started) * 1000)
         finally:
             await lock_conn.execute(
-                "SELECT pg_advisory_unlock(hashtext($1))",
+                "SELECT pg_advisory_unlock(hashtextextended($1, 1))",
                 tenant,
             )
 

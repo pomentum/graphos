@@ -13,7 +13,7 @@ so ids stay stable across runs, which makes diff-based monitoring (how many
 nodes changed community) cheap.
 
 Single-flight: callers acquire a postgres advisory lock keyed on
-``hashtext(tenant_name)`` before invoking. Two concurrent recomputes
+``hashtextextended(tenant_name, 1)`` before invoking. Two concurrent recomputes
 of the same tenant → 409 at the API layer (see api/louvain.py).
 """
 

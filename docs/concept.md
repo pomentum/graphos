@@ -830,7 +830,8 @@ request's full body into memory before the handler parses it (§2.5.6).
 
 `POST /v1/{tenant}/recompute-communities` (admin) answers when done, or
 runs as a background job with `Prefer: respond-async` (§2.6). It is
-single-flight per tenant via `pg_try_advisory_lock(hashtext(tenant))`; a
+single-flight per tenant via `pg_try_advisory_lock(hashtextextended(tenant, 1))`
+(a 64-bit key, apart from tenant setup's lock on the same name); a
 concurrent call gets 409.
 
 The edges are read through a server-side cursor into compact arrays (two
