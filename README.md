@@ -2,11 +2,11 @@
 
 A multi-tenant property-graph service: **PostgreSQL + [Apache AGE](https://age.apache.org/) behind a typed HTTP API.**
 
-Your services send JSON over HTTP. graphos owns the database, writes the Cypher and SQL, enforces tenant isolation, and gives you bulk loading, traversal, aggregation and (optionally) Louvain community detection. Consumers never get a connection string and never send raw Cypher.
+Your services send JSON over HTTP. graphos owns the database, writes the SQL against AGE's tables, enforces tenant isolation, and gives you bulk loading, traversal, aggregation and (optionally) Louvain community detection. Consumers never get a connection string and never send raw Cypher.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture-dark.svg">
-  <img src="docs/images/architecture-light.svg" width="100%" alt="Consumers call graphos-api over the graphos-net network with a bearer token. graphos-api checks tenant scope, validates typed contracts, builds Cypher and SQL internally, times out bad queries and emits metrics and audit logs. Only graphos-api reaches PostgreSQL 16 with Apache AGE on an internal network; each tenant is its own AGE graph.">
+  <img src="docs/images/architecture-light.svg" width="100%" alt="Consumers call graphos-api over the graphos-net network with a bearer token. graphos-api checks tenant scope, validates typed contracts, builds SQL internally, times out bad queries and emits metrics and audit logs. Only graphos-api reaches PostgreSQL 16 with Apache AGE on an internal network; each tenant is its own AGE graph.">
 </picture>
 
 **Why:** read the [whitepaper](https://graphos-pomentum.vercel.app) for the problem graphos solves and what it gives you.
@@ -17,10 +17,10 @@ Your services send JSON over HTTP. graphos owns the database, writes the Cypher 
 - **Schema-agnostic.** No built-in labels or property names. Every endpoint takes label / property / edge names as parameters.
 - **Fast, idempotent writes:** small batches, NDJSON streaming bulk and single-file snapshot import all go through COPY-staged SQL upserts (`INSERT … ON CONFLICT`); in our measurements this was 37–156× faster than per-row Cypher `MERGE` (see [AGE notes](docs/apache-age.md)).
 - **Composable reads:** search, neighbors, multi-hop expand, induced subgraph, paginated node scan, stratified sampling, graphology export (sigma.js / Gephi).
-- **Graph analytics:** label histograms, top-K by degree, node/edge aggregates, and (optional extra) Louvain communities with IDs that stay stable across runs.
+- **Graph analytics:** label histograms, top-K by degree, node/edge aggregates, and (optional extra) Louvain communities with IDs that stay stable across runs; the same graph gives the same communities, computed in a separate process so the API keeps serving.
 - **Rule-based edge derivation:** declare a property-match rule once at registration; `edges:resolve` writes the edges server-side in one SQL statement.
 - **Background jobs:** long operations (community recompute, edge resolution, vacuum) run as jobs with `Prefer: respond-async`: answered `202` at once, polled at `/v1/jobs/{id}`, cancellable.
-- **Safe by default:** bearer tokens required (the service refuses to start without them unless told otherwise), every query under a server-side `statement_timeout` (504 when exceeded), registration DDL validated, the database on a network consumers cannot reach.
+- **Safe by default:** bearer tokens required (the service refuses to start without them unless told otherwise), every query is SQL under a server-side `statement_timeout` (504 when exceeded), registration DDL validated, the database on a network consumers cannot reach.
 - **Operable by people who don't know your domain:** Prometheus metrics, JSON logs with W3C `traceparent`, write audit log naming the caller, per-token rate limiting, token reload on `SIGHUP`.
 
 ## Quickstart
@@ -81,6 +81,8 @@ curl -s -X POST http://127.0.0.1:8080/v1/acme/recompute-communities \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H "content-type: application/json" -d '{}'
 ```
 
+On a large graph, add `-H "Prefer: respond-async"`: the call answers `202` at once with a job, and `GET /v1/jobs/{id}` (the `Location` header) reports its progress and, when done, the same result.
+
 The full, live API contract is at `http://127.0.0.1:8080/docs` (OpenAPI: `/openapi.json`).
 
 ### Louvain is an optional extra
@@ -116,7 +118,7 @@ async with GraphosClient(base_url="http://127.0.0.1:8080", token=ADMIN_TOKEN, te
     hits = await cli.search("grace", limit=10)
 ```
 
-Async, typed (Pydantic), with pooled connections and safe retries. `GraphosPool` manages one registered client per tenant for services that write to many tenants. See [`clients/python/`](clients/python/) and its [runnable examples](clients/python/examples/).
+Async, typed (Pydantic), with pooled connections and safe retries. `GraphosPool` manages one registered client per tenant for services that write to many tenants; the `submit_*` methods run long operations as background jobs, with `wait_for_job` and `cancel_job`. See [`clients/python/`](clients/python/) and its [runnable examples](clients/python/examples/).
 
 ## Configuration
 
@@ -149,7 +151,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 
 ## Built on Apache AGE
 
-graphos stores every tenant as an [Apache AGE](https://age.apache.org/) graph inside PostgreSQL 16 (image `apache/age:release_PG16_1.6.0`). AGE provides the openCypher engine and the per-label storage tables; graphos adds the HTTP boundary, tenancy, bulk paths, indexing and analytics on top. Apache AGE is a project of the Apache Software Foundation, licensed under Apache 2.0, and is not affiliated with graphos.
+graphos stores every tenant as an [Apache AGE](https://age.apache.org/) graph inside PostgreSQL 16 (image `apache/age:release_PG16_1.6.0`). AGE provides the property-graph model and its per-label storage tables (and an openCypher engine; graphos queries the tables with SQL instead, so statement timeouts and cancellation always apply); graphos adds the HTTP boundary, tenancy, bulk paths, indexing and analytics on top. Apache AGE is a project of the Apache Software Foundation, licensed under Apache 2.0, and is not affiliated with graphos.
 
 ## Development
 
