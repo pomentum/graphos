@@ -192,7 +192,7 @@ html{scroll-behavior:smooth}
 <div class="wrap">
 <main>
     <header class="top" id="top">
-      <p class="eyebrow">Whitepaper · version 2026-10-02</p>
+      <p class="eyebrow">Whitepaper · version 2026-10-05</p>
       <p class="repo"><a href="https://github.com/pomentum/graphos" rel="noopener"
         aria-label="Read the source on GitHub: pomentum/graphos"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg><span>pomentum/graphos</span><svg class="go" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 1 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06Z"/></svg></a></p>
       <h1>graphos</h1>
@@ -205,7 +205,7 @@ html{scroll-behavior:smooth}
       <ul>
         <li><span class="k">The problem</span><span>Connected data turns up in most systems. Once several services need it, each one ends up holding database credentials, its own Cypher, and its own answers to bulk loading, indexing and isolation.</span></li>
         <li><span class="k">The approach</span><span>One service owns the graph. Consumers call a typed REST API; graphos alone talks to PostgreSQL + Apache AGE on a private network.</span></li>
-        <li><span class="k">What you get</span><span>A graph per tenant, token-scoped access, COPY-speed idempotent writes, composable reads, optional Louvain communities with stable ids, rule-based edges and ordinary Postgres operations.</span></li>
+        <li><span class="k">What you get</span><span>A graph per tenant, token-scoped access, COPY-speed idempotent writes, composable reads, optional Louvain communities with stable ids, rule-based edges, background jobs for long operations and ordinary Postgres operations.</span></li>
         <li><span class="k">What it is not</span><span>Not a general query console, not a new database engine, and not tied to any domain: graphos ships no labels of its own.</span></li>
         <li><span class="k">Licence</span><span>Apache 2.0, like the Apache AGE extension it is built on.</span></li>
       </ul>
@@ -507,7 +507,7 @@ html{scroll-behavior:smooth}
         <tr><td>Snapshot import</td><td>One file holding a whole graph</td><td>Nodes and edges in one stream, nodes flushed before edges</td></tr>
       </tbody>
     </table></div>
-    <p>All three write through the same path: a binary <code>COPY</code> into a staging table, then one <code>INSERT … ON CONFLICT</code> per label. graphos writes no rows through Cypher. That is faster, and it also avoids an AGE 1.6 crash: a Cypher write into a label table that carries extra columns (graphos adds one to edge tables; generated columns add more) takes down the database backend. Edges whose endpoints do not exist yet are counted in <code>edges_skipped</code> rather than failing the batch, so ordering mistakes are visible without losing work. Nodes can be deleted by id or by a property predicate, for example everything belonging to one dataset.</p>
+    <p>All three write through the same path: a binary <code>COPY</code> into a staging table, then one <code>INSERT … ON CONFLICT</code> per label. graphos writes no rows through Cypher. That is faster, and it also avoids an AGE 1.6 crash: a Cypher write into a label table that carries extra columns (graphos adds one to edge tables; generated columns add more) takes down the database backend. Edges whose endpoints do not exist yet are counted in <code>edges_skipped</code> rather than failing the batch, so ordering mistakes are visible without losing work. Nodes can be deleted by id or by a property predicate, for example everything belonging to one dataset; each delete removes the nodes and every edge touching them in one statement, so they go together or not at all.</p>
 
     <h3>Reading</h3>
     <p>Reads are small primitives that compose: substring <strong>search</strong>, one-hop <strong>neighbors</strong>, multi-seed <strong>expand</strong> up to five hops, the <strong>induced subgraph</strong> of a node set, a paginated <strong>node scan</strong> with filters and projection, a stratified <strong>sample</strong> for visualisation, <strong>histograms</strong>, <strong>top-K by degree</strong>, node and edge <strong>aggregates</strong>, and an <strong>export</strong> in graphology JSON that sigma.js and Gephi read directly.</p>
@@ -515,7 +515,7 @@ html{scroll-behavior:smooth}
     <h3>Safety rails</h3>
     <ul>
       <li>Read endpoints cap their <code>limit</code> parameters and report <code>truncated</code> when a result was cut.</li>
-      <li>Every statement runs under a server-side <code>statement_timeout</code> (60 s by default); one that runs too long is cancelled by Postgres and the request returns <code>504</code> as <code>problem+json</code> instead of holding the pool. The few deliberately long operations (index builds, Louvain, rule resolution, vacuum) raise the limit for their own statements only.</li>
+      <li>Every statement runs under a server-side <code>statement_timeout</code> (60 s by default); one that runs too long is cancelled by Postgres and the request returns <code>504</code> as <code>problem+json</code> instead of holding the pool. The few deliberately long operations (index builds, Louvain, rule resolution, vacuum) raise the limit for their own statements only, and Louvain, rule resolution and vacuum can also run as background jobs (section 6).</li>
       <li>Label and property names are checked against an identifier pattern and the tenant's registered schema, and index or generated-column DDL supplied at registration must be a single <code>CREATE INDEX</code> / <code>ADD COLUMN … GENERATED</code> statement on the tenant's own tables, so neither can carry arbitrary SQL.</li>
       <li>Authentication fails closed: without a tokens file graphos will not start unless local-only anonymous mode is switched on explicitly.</li>
       <li>graphos-api connects to Postgres as an unprivileged role (no superuser, cannot create roles or databases); the superuser is only used to initialise the database.</li>
@@ -528,7 +528,7 @@ html{scroll-behavior:smooth}
     <figure class="fig pic">
       <!--fig:communities-light--><svg class="pic-light" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 282" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" role="img" aria-labelledby="communities-light-title communities-light-desc">
 <title id="communities-light-title">How communities are computed</title>
-<desc id="communities-light-desc">An admin call to recompute-communities streams edges out of PostgreSQL as integer ids with plain SQL, builds a weighted undirected igraph, runs Louvain in the C core with a fixed seed, and matches each new cluster to its predecessor from the last run by Jaccard overlap of at least 0.5 so community ids stay stable. Results are written back with COPY and a single UPDATE, then the community id is denormalised onto every edge so scoped traversals use an index. Only one run per tenant happens at a time, a dry run previews the partition, and the response reports time per step and modularity.</desc>
+<desc id="communities-light-desc">An admin call to recompute-communities streams edges out of PostgreSQL as integer ids with plain SQL, builds a weighted undirected igraph with its vertices in id order, runs Louvain in a separate process with a fixed seed, and matches each new cluster to its predecessor from the last run by Jaccard overlap of at least 0.5 so community ids stay stable. Results are written back with COPY and a single UPDATE, then the community id is denormalised onto every edge so scoped traversals use an index. Only one run per tenant happens at a time, a dry run previews the partition, and the response reports time per step and modularity.</desc>
 <defs>
   <marker id="communities-light-h0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6B7584"/></marker>
 </defs>
@@ -541,12 +541,12 @@ html{scroll-behavior:smooth}
 <path d="M174 110 H190" fill="none" stroke="#6B7584" stroke-width="1.8" stroke-linecap="round" marker-end="url(#communities-light-h0)"/>
 <rect x="193" y="62" width="142" height="96" rx="4" fill="#E3EBFB" stroke="#9DB7EC" stroke-width="1.2"/>
 <text x="207" y="94" font-size="15.5" font-weight="700" fill="#1D5BD6">Build graph</text>
-<text x="207" y="118" font-size="12.5" font-weight="400" fill="#4A5563">weighted,</text>
-<text x="207" y="136" font-size="12.5" font-weight="400" fill="#4A5563">undirected igraph</text>
+<text x="207" y="118" font-size="12.5" font-weight="400" fill="#4A5563">vertices in id</text>
+<text x="207" y="136" font-size="12.5" font-weight="400" fill="#4A5563">order, weighted</text>
 <path d="M337 110 H353" fill="none" stroke="#6B7584" stroke-width="1.8" stroke-linecap="round" marker-end="url(#communities-light-h0)"/>
 <rect x="356" y="62" width="142" height="96" rx="4" fill="#E3EBFB" stroke="#9DB7EC" stroke-width="1.2"/>
 <text x="370" y="94" font-size="15.5" font-weight="700" fill="#1D5BD6">Louvain</text>
-<text x="370" y="118" font-size="12.5" font-weight="400" fill="#4A5563">C core,</text>
+<text x="370" y="118" font-size="12.5" font-weight="400" fill="#4A5563">own process,</text>
 <text x="370" y="136" font-size="12.5" font-weight="400" fill="#4A5563">fixed seed</text>
 <path d="M500 110 H516" fill="none" stroke="#6B7584" stroke-width="1.8" stroke-linecap="round" marker-end="url(#communities-light-h0)"/>
 <rect x="519" y="62" width="142" height="96" rx="4" fill="#E3EBFB" stroke="#9DB7EC" stroke-width="1.2"/>
@@ -574,7 +574,7 @@ html{scroll-behavior:smooth}
 </svg><!--/fig:communities-light-->
       <!--fig:communities-dark--><svg class="pic-dark" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 282" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" role="img" aria-labelledby="communities-dark-title communities-dark-desc">
 <title id="communities-dark-title">How communities are computed</title>
-<desc id="communities-dark-desc">An admin call to recompute-communities streams edges out of PostgreSQL as integer ids with plain SQL, builds a weighted undirected igraph, runs Louvain in the C core with a fixed seed, and matches each new cluster to its predecessor from the last run by Jaccard overlap of at least 0.5 so community ids stay stable. Results are written back with COPY and a single UPDATE, then the community id is denormalised onto every edge so scoped traversals use an index. Only one run per tenant happens at a time, a dry run previews the partition, and the response reports time per step and modularity.</desc>
+<desc id="communities-dark-desc">An admin call to recompute-communities streams edges out of PostgreSQL as integer ids with plain SQL, builds a weighted undirected igraph with its vertices in id order, runs Louvain in a separate process with a fixed seed, and matches each new cluster to its predecessor from the last run by Jaccard overlap of at least 0.5 so community ids stay stable. Results are written back with COPY and a single UPDATE, then the community id is denormalised onto every edge so scoped traversals use an index. Only one run per tenant happens at a time, a dry run previews the partition, and the response reports time per step and modularity.</desc>
 <defs>
   <marker id="communities-dark-h0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8C97A6"/></marker>
 </defs>
@@ -587,12 +587,12 @@ html{scroll-behavior:smooth}
 <path d="M174 110 H190" fill="none" stroke="#8C97A6" stroke-width="1.8" stroke-linecap="round" marker-end="url(#communities-dark-h0)"/>
 <rect x="193" y="62" width="142" height="96" rx="4" fill="#1A2640" stroke="#3A5690" stroke-width="1.2"/>
 <text x="207" y="94" font-size="15.5" font-weight="700" fill="#8AB0FF">Build graph</text>
-<text x="207" y="118" font-size="12.5" font-weight="400" fill="#9AA5B3">weighted,</text>
-<text x="207" y="136" font-size="12.5" font-weight="400" fill="#9AA5B3">undirected igraph</text>
+<text x="207" y="118" font-size="12.5" font-weight="400" fill="#9AA5B3">vertices in id</text>
+<text x="207" y="136" font-size="12.5" font-weight="400" fill="#9AA5B3">order, weighted</text>
 <path d="M337 110 H353" fill="none" stroke="#8C97A6" stroke-width="1.8" stroke-linecap="round" marker-end="url(#communities-dark-h0)"/>
 <rect x="356" y="62" width="142" height="96" rx="4" fill="#1A2640" stroke="#3A5690" stroke-width="1.2"/>
 <text x="370" y="94" font-size="15.5" font-weight="700" fill="#8AB0FF">Louvain</text>
-<text x="370" y="118" font-size="12.5" font-weight="400" fill="#9AA5B3">C core,</text>
+<text x="370" y="118" font-size="12.5" font-weight="400" fill="#9AA5B3">own process,</text>
 <text x="370" y="136" font-size="12.5" font-weight="400" fill="#9AA5B3">fixed seed</text>
 <path d="M500 110 H516" fill="none" stroke="#8C97A6" stroke-width="1.8" stroke-linecap="round" marker-end="url(#communities-dark-h0)"/>
 <rect x="519" y="62" width="142" height="96" rx="4" fill="#1A2640" stroke="#3A5690" stroke-width="1.2"/>
@@ -620,8 +620,8 @@ html{scroll-behavior:smooth}
 </svg><!--/fig:communities-dark-->
       <figcaption><span class="fig-n">Figure 3</span><span>Community detection, from edge stream to indexed edges.</span></figcaption>
     </figure>
-    <p>The step that matters most is the matching. Louvain on its own numbers clusters arbitrarily, so a re-run gives every community a new id even when almost nothing changed. graphos compares each new cluster with the previous partition and keeps the old id when the overlap is high enough (the method of Greene et al., 2010). Ids are stable on stable input and drift gracefully on changing input, so dashboards, caches and saved filters keep working.</p>
-    <p>After the write-back, each edge carries the community of its endpoint in an indexed column, so a traversal scoped to a few communities is an index lookup rather than a recursive walk. Runs are single-flight per tenant, can be scoped to a subgraph by property, and can be weighted per relationship type.</p>
+    <p>The step that matters most is the matching. Louvain on its own numbers clusters arbitrarily, so a re-run gives every community a new id even when almost nothing changed. graphos compares each new cluster with the previous partition and keeps the old id when the overlap is high enough (the method of Greene et al., 2010). Ids are stable on stable input and drift gracefully on changing input, so dashboards, caches and saved filters keep working. The partition itself depends only on the graph: vertices are numbered by id before clustering, so the same edges give the same communities however their rows happen to be stored.</p>
+    <p>After the write-back, each edge carries the community of its endpoint in an indexed column, so a traversal scoped to a few communities is an index lookup rather than a recursive walk. Runs are single-flight per tenant, can be scoped to a subgraph by property, and can be weighted per relationship type. The clustering runs in its own process, so the API keeps answering other requests meanwhile; a long recompute can run as a background job, and cancelling it stops the computation and frees its memory.</p>
 
     <h2 id="rules"><span class="sec"><span class="num">05</span></span>Edges from rules</h2>
     <p>Many edges are implied by properties: a document lists the tag keys it carries, and each tag node has its own key. The usual way to materialise them is to page every node out, match in application code and write the edges back. graphos lets a consumer declare the rule once, at registration:</p>
@@ -639,6 +639,7 @@ html{scroll-behavior:smooth}
       <li><strong>Metrics:</strong> Prometheus request counts and latency histograms per route and status, connection-pool size, registered tenants, and rate-limit rejections.</li>
       <li><strong>Logs and audit:</strong> structured JSON logs carrying a W3C <code>traceparent</code> trace id; every write also produces an audit record with tenant, calling consumer, status, latency and a hash of the request body.</li>
       <li><strong>Database introspection</strong> for admins: table and index sizes, dead tuples, slow queries from <code>pg_stat_statements</code>, and a validated vacuum call.</li>
+      <li><strong>Background jobs:</strong> community recompute, rule resolution and vacuum accept <code>Prefer: respond-async</code> and answer <code>202</code> at once with a job to poll at <code>/v1/jobs/{id}</code>. A finished job holds exactly what the synchronous call returns; each job runs once, on any replica, and can be cancelled, which stops the work rather than just the wait.</li>
       <li><strong>Tokens</strong> reload on <code>SIGHUP</code>, so rotation needs no restart. An optional per-token rate limiter protects shared deployments.</li>
       <li><strong>Everything else is Postgres:</strong> backups, replicas, upgrades and tuning use the tools your team already runs.</li>
     </ul>
@@ -656,7 +657,7 @@ html{scroll-behavior:smooth}
     </table></div>
 
     <h2 id="measured"><span class="sec"><span class="num">08</span><span class="chip m">measured</span></span>What has been measured</h2>
-    <p>The figures below come from the benchmark scripts in <code>scripts/</code> and from profiling individual queries. The dataset is stated with each; treat them as orders of magnitude, not guarantees.</p>
+    <p>The figures below come from the benchmark scripts in <code>scripts/</code>, from profiling individual queries and from timing requests against a running service. The dataset is stated with each; treat them as orders of magnitude, not guarantees.</p>
     <h3>Write throughput</h3>
     <p>Synthetic dataset of 13k nodes and 44k edges, database with 4 GB <code>shared_buffers</code>, single host.</p>
     <div class="tbl"><table>
@@ -688,6 +689,17 @@ html{scroll-behavior:smooth}
       </tbody>
     </table></div>
     <p>Any other hot property is yours to index: declare it at registration and graphos creates it.</p>
+    <h3>Large tenants</h3>
+    <p>A 10.6M-row database whose largest edge type holds 8M rows, and a synthetic 600k-edge graph for Louvain. The earlier column is graphos's own previous design, kept for comparison.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Operation</th><th>Earlier</th><th>Now</th></tr></thead>
+      <tbody>
+        <tr><td>One page of 50 edges of the 8M-row type (<code>edges:scan</code>)</td><td class="n">181 s, 8.3 GB of temp files</td><td class="n good">~1 s, no temp files</td></tr>
+        <tr><td>Delete one node with 1,175 edges</td><td class="n">&gt; 10 min</td><td class="n good">27 ms</td></tr>
+        <tr><td>Slowest <code>/healthz</code> while Louvain runs</td><td class="n">3.4 – 4.5 s</td><td class="n good">≤ 163 ms</td></tr>
+      </tbody>
+    </table></div>
+    <p>The edge scan now fetches the page before resolving its endpoints, the delete is one SQL statement instead of three Cypher queries, and Louvain runs in a child process instead of the API's own.</p>
 
     <h2 id="boundaries"><span class="sec"><span class="num">09</span></span>Boundaries and limits</h2>
     <p>Some choices are deliberate in the current design:</p>
@@ -699,7 +711,7 @@ html{scroll-behavior:smooth}
     <p>And some limits that are simply where the project stands today:</p>
     <ul>
       <li>The reference deployment is a single PostgreSQL node. It fits millions of nodes and tens of millions of edges in a few gigabytes of RAM. Going beyond one node (partitioning, read replicas) is a PostgreSQL exercise; graphos does not shard for you.</li>
-      <li>Louvain is an optional extra (see section 4). When installed, it runs in the API process and holds the edge list in memory while it clusters: the bundled compose file gives the API 4 GB, enough for graphs above six million edges.</li>
+      <li>Louvain is an optional extra (see section 4). When installed, each recompute builds its graph in memory in a child process of the API: the API holds about 20 bytes per edge while streaming them, the child holds the graph, and the memory is released when the run ends. One recompute runs at a time per API process; the bundled compose file gives the API 2 GB.</li>
       <li>Apache AGE 1.6 has known Cypher gaps and quirks. graphos works around the ones it meets, and <a href="https://github.com/pomentum/graphos/blob/main/docs/apache-age.md">the AGE notes</a> record each one.</li>
     </ul>
 

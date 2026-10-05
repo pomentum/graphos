@@ -208,8 +208,8 @@ function communities(t) {
   const { text, card, arrow } = k;
   const steps = [
     ['Edge stream', 'plain SQL,', 'integer ids only'],
-    ['Build graph', 'weighted,', 'undirected igraph'],
-    ['Louvain', 'C core,', 'fixed seed'],
+    ['Build graph', 'vertices in id', 'order, weighted'],
+    ['Louvain', 'own process,', 'fixed seed'],
     ['Stable ids', 'Jaccard ≥ 0.5', 'vs. the last run'],
     ['Write back', 'COPY + one', 'UPDATE … FROM'],
     ['Denormalise', 'community onto', 'every edge'],
@@ -234,7 +234,7 @@ ${text(530, 236, 'ids persist across runs as membership drifts', { size: 13 })}
 <rect x="30" y="256" width="12" height="12" rx="3" fill="${t.storeSoft}" stroke="${t.storeLine}"/>${text(48, 266, 'inside PostgreSQL', { size: 12.5, fill: t.soft })}
 <rect x="190" y="256" width="12" height="12" rx="3" fill="${t.accentSoft}" stroke="${t.accentLine}"/>${text(208, 266, 'inside graphos-api', { size: 12.5, fill: t.soft })}`;
   return k.svg(1000, 282, 'How communities are computed',
-    'An admin call to recompute-communities streams edges out of PostgreSQL as integer ids with plain SQL, builds a weighted undirected igraph, runs Louvain in the C core with a fixed seed, and matches each new cluster to its predecessor from the last run by Jaccard overlap of at least 0.5 so community ids stay stable. Results are written back with COPY and a single UPDATE, then the community id is denormalised onto every edge so scoped traversals use an index. Only one run per tenant happens at a time, a dry run previews the partition, and the response reports time per step and modularity.',
+    'An admin call to recompute-communities streams edges out of PostgreSQL as integer ids with plain SQL, builds a weighted undirected igraph with its vertices in id order, runs Louvain in a separate process with a fixed seed, and matches each new cluster to its predecessor from the last run by Jaccard overlap of at least 0.5 so community ids stay stable. Results are written back with COPY and a single UPDATE, then the community id is denormalised onto every edge so scoped traversals use an index. Only one run per tenant happens at a time, a dry run previews the partition, and the response reports time per step and modularity.',
     body);
 }
 
