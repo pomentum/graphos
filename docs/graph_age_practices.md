@@ -20,9 +20,9 @@ What Neo4j-style Cypher accepts that AGE 1.6 does not:
 | Cypher `SET` on a label whose table has extra (non-AGE) columns | backend segfault (AGE 1.6.0) |
 
 Because of the last row (and the throughput gap in §3), graphos writes
-no rows through Cypher: every node and edge upsert is the COPY-staged SQL
-path of §3. Cypher is still used for some reads and for node deletes
-(`DETACH DELETE`, verified unaffected). What follows is what graphos does,
+no rows through Cypher: every write is SQL in `graphos.writes`, and every
+node and edge upsert is the COPY-staged SQL path of §3. Cypher is still used
+for some reads. What follows is what graphos does,
 plus the workaround a per-row Cypher write would need:
 
 - **Per-row Cypher writes must inline every property map as a literal**
@@ -42,9 +42,8 @@ plus the workaround a per-row Cypher write would need:
   edge table, or any registration `generated_columns` on a vertex or edge
   label), AGE 1.6 segfaults the Postgres backend on a Cypher `SET` /
   `MERGE … SET` that writes a row into that table (verified live; the
-  server restarts and every connection drops). `upsert_nodes_inline`
-  therefore delegates to `bulk_upsert_nodes_via_copy` and
-  `upsert_edges_inline` to `bulk_upsert_edges_via_copy` (§3): `INSERT …
+  server restarts and every connection drops). `graphos.writes`
+  therefore upserts nodes and edges with SQL only (§3): `INSERT …
   ON CONFLICT ((properties->'"id"'))` for nodes and `ON CONFLICT
   (start_id, end_id)` for edges, both `DO UPDATE SET properties =
   properties || EXCLUDED.properties`, for every write on every endpoint.
@@ -156,8 +155,8 @@ the per-row parse/plan cost. Direct `INSERT` rows are visible to Cypher
 `MATCH` because AGE reads the same tables, and the `graphid` column
 default mints ids.
 
-graphos's implementation (`bulk_upsert_nodes_via_copy` /
-`bulk_upsert_edges_via_copy`) stages each batch with binary COPY and
+graphos's implementation (`graphos.writes.upsert_nodes` /
+`upsert_edges`) stages each batch with binary COPY and
 upserts against the unique indexes from §2:
 
 ```sql

@@ -13,12 +13,9 @@ from __future__ import annotations
 import asyncpg
 import pytest
 
+from graphos import writes
 from graphos.bootstrap import TenantSpec, register_tenant
-from graphos.cypher import (
-    query_cypher,
-    upsert_edges_inline,
-    upsert_nodes_inline,
-)
+from graphos.cypher import query_cypher
 
 from .conftest import requires_db
 
@@ -59,11 +56,11 @@ async def test_upsert_is_idempotent_and_additive(db_pool: asyncpg.Pool) -> None:
     ]
 
     # 1st upsert
-    await upsert_nodes_inline(db_pool, graph=TEST_TENANT, label="Thing", rows=rows_v1)
+    await writes.upsert_nodes(db_pool, tenant=TEST_TENANT, label="Thing", rows=rows_v1)
     assert await _count_nodes(db_pool, "Thing") == 2
 
     # 2nd upsert: same payload → still 2 nodes
-    await upsert_nodes_inline(db_pool, graph=TEST_TENANT, label="Thing", rows=rows_v1)
+    await writes.upsert_nodes(db_pool, tenant=TEST_TENANT, label="Thing", rows=rows_v1)
     assert await _count_nodes(db_pool, "Thing") == 2
 
     # 3rd upsert: add a new property to 'a', and a new node 'c'.
@@ -71,7 +68,7 @@ async def test_upsert_is_idempotent_and_additive(db_pool: asyncpg.Pool) -> None:
         {"id": "a", "props": {"extra": 99}},                        # adds key
         {"id": "c", "props": {"name": "gamma"}},                    # new node
     ]
-    await upsert_nodes_inline(db_pool, graph=TEST_TENANT, label="Thing", rows=rows_v2)
+    await writes.upsert_nodes(db_pool, tenant=TEST_TENANT, label="Thing", rows=rows_v2)
     assert await _count_nodes(db_pool, "Thing") == 3
 
     # 'a' should keep its original 'name' and 'kind', plus the new 'extra'.
@@ -98,21 +95,21 @@ async def test_edge_upsert_skips_missing_endpoints(db_pool: asyncpg.Pool) -> Non
     await register_tenant(db_pool, spec)
 
     # Seed two Documents and one Collection.
-    await upsert_nodes_inline(
-        db_pool, graph=TEST_TENANT_EDGES, label="Document",
+    await writes.upsert_nodes(
+        db_pool, tenant=TEST_TENANT_EDGES, label="Document",
         rows=[{"id": "a", "props": {"name": "alpha"}},
               {"id": "b", "props": {"name": "beta"}}],
     )
-    await upsert_nodes_inline(
-        db_pool, graph=TEST_TENANT_EDGES, label="Collection",
+    await writes.upsert_nodes(
+        db_pool, tenant=TEST_TENANT_EDGES, label="Collection",
         rows=[{"id": "cmp", "props": {"name": "auth"}}],
     )
 
     # 1. Edge whose endpoints both exist → merged.
     # 2. Edge whose dst is missing → skipped.
-    merged, skipped = await upsert_edges_inline(
+    merged, skipped = await writes.upsert_edges(
         db_pool,
-        graph=TEST_TENANT_EDGES,
+        tenant=TEST_TENANT_EDGES,
         src_label="Document", dst_label="Document", edge_type="CITES",
         rows=[
             {"src_id": "a", "dst_id": "b", "props": {"weight": 0.8}},
@@ -123,9 +120,9 @@ async def test_edge_upsert_skips_missing_endpoints(db_pool: asyncpg.Pool) -> Non
     assert skipped == 1
 
     # Idempotent re-merge: same outcome, no new edges.
-    merged2, skipped2 = await upsert_edges_inline(
+    merged2, skipped2 = await writes.upsert_edges(
         db_pool,
-        graph=TEST_TENANT_EDGES,
+        tenant=TEST_TENANT_EDGES,
         src_label="Document", dst_label="Document", edge_type="CITES",
         rows=[{"src_id": "a", "dst_id": "b", "props": {"weight": 0.8}}],
     )
@@ -142,9 +139,9 @@ async def test_edge_upsert_skips_missing_endpoints(db_pool: asyncpg.Pool) -> Non
     assert int(rows[0]["c"]) == 1
 
     # Additive props merge: re-upsert with new prop, weight preserved.
-    await upsert_edges_inline(
+    await writes.upsert_edges(
         db_pool,
-        graph=TEST_TENANT_EDGES,
+        tenant=TEST_TENANT_EDGES,
         src_label="Document", dst_label="Document", edge_type="CITES",
         rows=[{"src_id": "a", "dst_id": "b", "props": {"confidence": 0.95}}],
     )
@@ -162,9 +159,9 @@ async def test_edge_upsert_skips_missing_endpoints(db_pool: asyncpg.Pool) -> Non
     assert props["confidence"] == 0.95
 
     # Cross-label edge (Document → Collection, PART_OF).
-    merged3, skipped3 = await upsert_edges_inline(
+    merged3, skipped3 = await writes.upsert_edges(
         db_pool,
-        graph=TEST_TENANT_EDGES,
+        tenant=TEST_TENANT_EDGES,
         src_label="Document", dst_label="Collection", edge_type="PART_OF",
         rows=[{"src_id": "a", "dst_id": "cmp", "props": {}}],
     )

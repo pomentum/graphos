@@ -34,6 +34,7 @@ from typing import Annotated, Any
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
+from graphos import writes
 from graphos.api.tenants import Principal  # re-export the auth dep
 from graphos.auth import require_tenant
 from graphos.bootstrap import registered_tenants
@@ -103,13 +104,7 @@ from graphos.contracts.tenants import (
     ResolveEdgesResponse,
     ResolveEdgesResult,
 )
-from graphos.cypher import (
-    CypherError,
-    query_cypher,
-    upsert_edges_inline,
-    upsert_nodes_inline,
-)
-from graphos.db import allow_long_statements
+from graphos.cypher import CypherError, query_cypher
 from graphos.resolver import (
     CompileError,
     compile_resolve_rules_for_edge_type,
@@ -328,12 +323,10 @@ async def upsert_nodes(
     by_label_count: dict[str, int] = {}
     total = 0
 
-    # Rows are written through SQL (``INSERT ... ON CONFLICT``), never
-    # Cypher: see ``graphos.cypher.upsert_nodes_inline`` for why.
     for label, rows in grouped.items():
         try:
-            n = await upsert_nodes_inline(
-                pool, graph=tenant, label=label, rows=rows,
+            n = await writes.upsert_nodes(
+                pool, tenant=tenant, label=label, rows=rows,
             )
         except CypherError as exc:
             raise HTTPException(
@@ -437,44 +430,10 @@ async def upsert_node_properties(
     started = time.perf_counter()
     pool = request.app.state.pool
 
-    # Serialise the payload to agtype-compatible JSON.  agtype's ``||``
-    # operator accepts a JSON object literal cast to ``agtype``, so we
-    # just hand it the json-encoded payload.  Special values (``True`` /
-    # ``False`` / ``None`` / nested dicts / lists) round-trip cleanly.
-    payload_json = _json.dumps(body.properties)
-
-    async with pool.acquire() as conn:
-        # One UPDATE against the parent ``_ag_label_vertex`` covers every
-        # label child via postgres inheritance.  The unique btrees on
-        # ``properties->'"id"'`` per label (``<Label>_id_unique``) drive
-        # an Index Scan over the Append node — confirmed via EXPLAIN
-        # ANALYZE on the symmetric SELECT pattern in /community-ids.
-        #
-        # ``c.relname`` is returned via ``pg_class`` JOIN on the row's
-        # ``tableoid`` so the response can echo back which label was
-        # actually touched — useful defence against id collisions across
-        # labels (e.g. a caller stamping on ":Team" should NOT
-        # accidentally hit a ":Document" sharing the same id).
-        row = await conn.fetchrow(
-            f"""
-            WITH updated AS (
-              UPDATE "{tenant}"."_ag_label_vertex" v
-              SET properties = v.properties || $1::agtype
-              WHERE (v.properties->'"id"') = ('"' || $2::text || '"')::agtype
-              RETURNING id, tableoid
-            )
-            SELECT
-              u.id::text   AS gid,
-              c.relname    AS label
-            FROM updated u
-            JOIN pg_class c ON c.oid = u.tableoid
-            LIMIT 1;
-            """,
-            payload_json,
-            external_id,
-        )
-
-    if row is None:
+    label = await writes.merge_node_properties(
+        pool, tenant=tenant, external_id=external_id, properties=body.properties,
+    )
+    if label is None:
         # Node not found — distinguish from "found but unchanged" because
         # the caller may have a stale view of which nodes exist.
         raise HTTPException(
@@ -489,7 +448,7 @@ async def upsert_node_properties(
     return NodePropertiesUpsertResponse(
         tenant=tenant,
         external_id=external_id,
-        label=str(row["label"]),
+        label=label,
         properties_merged=len(body.properties),
         elapsed_ms=elapsed_ms,
     )
@@ -568,9 +527,9 @@ async def upsert_edges(
 
     for (src_lbl, dst_lbl, et), rows in grouped.items():
         try:
-            merged, skipped = await upsert_edges_inline(
+            merged, skipped = await writes.upsert_edges(
                 pool,
-                graph=tenant,
+                tenant=tenant,
                 src_label=src_lbl,
                 dst_label=dst_lbl,
                 edge_type=et,
@@ -2104,10 +2063,11 @@ async def sample_subgraph(
 @router.delete(
     "/nodes/{node_id}",
     response_model=DeleteNodeResponse,
-    summary="DETACH DELETE a node by its consumer-assigned id",
+    summary="Delete a node and its edges by its consumer-assigned id",
     description=(
-        "Idempotent: missing nodes return 0/0. All incident edges are "
-        "removed by the DETACH DELETE clause."
+        "Idempotent: missing nodes return 0/0. Every node with that id (in "
+        "any label) is removed together with all its incident edges, in one "
+        "transaction."
     ),
 )
 async def delete_node(
@@ -2120,31 +2080,10 @@ async def delete_node(
 
     pool = request.app.state.pool
     started = time.perf_counter()
-    # AGE's DETACH DELETE returns no rows; we count via two MATCH queries
-    # so the caller knows what was removed.
     try:
-        before_n = await query_cypher(
-            pool, graph=tenant,
-            cypher="MATCH (n {id: $id}) RETURN count(n) AS c",
-            return_cols=[("c", "agtype")],
-            params={"id": node_id},
+        nodes_n, edges_n = await writes.delete_nodes(
+            pool, tenant=tenant, property_key="id", property_value=node_id,
         )
-        before_e = await query_cypher(
-            pool, graph=tenant,
-            cypher="MATCH (n {id: $id})-[r]-() RETURN count(r) AS c",
-            return_cols=[("c", "agtype")],
-            params={"id": node_id},
-        )
-        nodes_n = int(before_n[0]["c"]) if before_n else 0
-        edges_n = int(before_e[0]["c"]) if before_e else 0
-
-        if nodes_n > 0:
-            await query_cypher(
-                pool, graph=tenant,
-                cypher="MATCH (n {id: $id}) DETACH DELETE n RETURN 1 AS c",
-                return_cols=[("c", "agtype")],
-                params={"id": node_id},
-            )
     except CypherError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2166,10 +2105,11 @@ async def delete_node(
     response_model=DeleteByPropertyResponse,
     summary="Tombstone every node (and its edges) matching a single-property predicate",
     description=(
-        "Removes every node whose `<property_key> = <property_value>`, along "
-        "with all incident edges (DETACH DELETE). Used for scope-wide "
-        "tombstones (e.g. `property_key=project_id`). The property key "
-        "must match the standard identifier regex to keep the Cypher safe."
+        "Removes every node whose `<property_key>` equals the string "
+        "`<property_value>`, along with all incident edges, in one "
+        "transaction. Used for scope-wide tombstones (e.g. "
+        "`property_key=project_id`). The property key must match the "
+        "standard identifier regex."
     ),
 )
 async def delete_by_property(
@@ -2187,8 +2127,8 @@ async def delete_by_property(
 ) -> DeleteByPropertyResponse:
     _check_tenant(tenant, principal)
 
-    # Property keys are interpolated into Cypher — whitelist-validate to
-    # the same regex used by the aggregate endpoint.
+    # Property keys are interpolated into SQL — whitelist-validate to the
+    # same regex used by the aggregate endpoint.
     try:
         _validate_prop_key(property_key)
     except ValueError as exc:
@@ -2200,33 +2140,10 @@ async def delete_by_property(
     pool = request.app.state.pool
     started = time.perf_counter()
     try:
-        before_n = await query_cypher(
-            pool, graph=tenant,
-            cypher=f"MATCH (n) WHERE n.{property_key} = $val RETURN count(n) AS c",
-            return_cols=[("c", "agtype")],
-            params={"val": property_value},
+        nodes_n, edges_n = await writes.delete_nodes(
+            pool, tenant=tenant, property_key=property_key,
+            property_value=property_value,
         )
-        before_e = await query_cypher(
-            pool, graph=tenant,
-            cypher=(
-                f"MATCH (n)-[r]-() WHERE n.{property_key} = $val RETURN count(r) AS c"
-            ),
-            return_cols=[("c", "agtype")],
-            params={"val": property_value},
-        )
-        nodes_n = int(before_n[0]["c"]) if before_n else 0
-        edges_n = int(before_e[0]["c"]) if before_e else 0
-
-        if nodes_n > 0:
-            await query_cypher(
-                pool, graph=tenant,
-                cypher=(
-                    f"MATCH (n) WHERE n.{property_key} = $val "
-                    "DETACH DELETE n RETURN 1 AS c"
-                ),
-                return_cols=[("c", "agtype")],
-                params={"val": property_value},
-            )
     except CypherError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -3395,39 +3312,23 @@ async def resolve_edges(
                 ) from exc
 
             no_label_count = compiled.no_label_rule_count
-            if compiled.sql is not None:
-                # One INSERT per edge_type — all candidate (src_label,
-                # dst_label) arms across every rule for this type are
-                # UNION ALL'd into a single statement so postgres can
-                # plan globally and we pay one round-trip instead of
-                # N.  See compiler.compile_resolve_rules_for_edge_type.
-                async with pool.acquire() as conn:
-                    try:
-                        # Per-INSERT timeout override: the pool
-                        # default (``statement_timeout``, 60 s, in
-                        # ``db.py``) is sized for OLTP-shaped reads.
-                        # A single resolve INSERT can touch the full
-                        # cross-product of a label pair on large
-                        # graphs and legitimately needs minutes
-                        # — same rationale Louvain already uses for
-                        # its own bump.  Bounded at 30 min so a
-                        # runaway plan still fails cleanly.
-                        await allow_long_statements(conn, 1800.0)
-                        rows = await conn.fetch(
-                            compiled.sql, *compiled.params, timeout=1800.0,
-                        )
-                    except asyncpg.exceptions.QueryCanceledError:
-                        raise
-                    except asyncpg.exceptions.PostgresError as exc:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=(
-                                f"resolve INSERT failed for edge_type "
-                                f"{edge_type!r} "
-                                f"({compiled.arm_count} arms): {exc}"
-                            ),
-                        ) from exc
-                    written += len(rows)
+            # One INSERT per edge_type: every (src_label, dst_label) arm of
+            # every rule is UNION ALL'd into a single statement, so postgres
+            # plans globally and we pay one round-trip.  Bounded at 30 min
+            # so a runaway plan still fails.
+            try:
+                written += await writes.insert_resolved_edges(
+                    pool, compiled=compiled, timeout_s=1800.0,
+                )
+            except CypherError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"resolve INSERT failed for edge_type "
+                        f"{edge_type!r} "
+                        f"({compiled.arm_count} arms): {exc}"
+                    ),
+                ) from exc
 
         if no_label_count == len(rules) and rules:
             warning = (

@@ -329,8 +329,8 @@ Paths under `/v1/{tenant}/graph/...` are abbreviated to `…/graph/...`.
 | `POST …/graph/edges:bulk` (NDJSON) | Streamed edge upsert (§4) | tenant |
 | `POST …/graph/snapshot-import` (NDJSON) | Mixed node + edge import (§4) | tenant |
 | `POST …/graph/edges:resolve` `{edge_types?}` | Run registered resolve rules | tenant |
-| `DELETE …/graph/nodes/{node_id}` | `DETACH DELETE` one node | tenant |
-| `DELETE …/graph/nodes?property_key=&property_value=` | `DETACH DELETE` every node with that property value | tenant |
+| `DELETE …/graph/nodes/{node_id}` | Delete one node and its edges | tenant |
+| `DELETE …/graph/nodes?property_key=&property_value=` | Delete every node with that property value, and their edges | tenant |
 | **Community detection** | | |
 | `POST /v1/{tenant}/recompute-communities` | Louvain (§5); 501 without the extra | admin |
 | **Operational** | | |
@@ -674,7 +674,8 @@ plain SQL lets graphos pick the tables and indexes directly.
 |---|---|
 | Every node upsert (`/nodes`, `nodes:bulk`, `snapshot-import`) | SQL: binary `COPY` into a temp table, `INSERT … ON CONFLICT ((properties->'"id"')) DO UPDATE` |
 | Every edge upsert (`/edges`, `edges:bulk`, `snapshot-import`) | SQL: binary `COPY` into a temp table, `INSERT … ON CONFLICT (start_id, end_id) DO UPDATE` |
-| `nodes/aggregate`, `export`, node deletes (`DETACH DELETE`), `communities?include_members=true` member lists | Cypher |
+| `nodes/aggregate`, `export`, `communities?include_members=true` member lists | Cypher |
+| Node deletes (by id, by property) | SQL: one statement deletes the matching nodes (unique `id` index, or GIN containment for other keys) and every edge touching them |
 | `search`, `nodes/{id}`, `nodes/{id}/properties`, `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `nodes:scan`, `edges:scan`, `edges/aggregate` | SQL |
 | `histogram`, `top`, `stats`, `communities`, `community-summary`, `community-ids`, `catalogue` | SQL |
 | `edges:resolve` | SQL: one `INSERT … SELECT … ON CONFLICT (start_id, end_id) DO NOTHING` per edge type |
@@ -719,10 +720,10 @@ into one row.
 | `POST /nodes:bulk`, `/edges:bulk` | NDJSON, one row per line | Buffers per label / per edge key; flushes every 500 rows and at end of stream. **Each flush is its own transaction**; an error stops the request but earlier flushes stay committed. Invalid lines are skipped (`rows_invalid`, first 50 in `errors`). |
 | `POST /snapshot-import` | NDJSON lines tagged `"_kind": "node"` or `"edge"` (default node) | Buffers per label / edge key. When any node buffer reaches 5,000 rows all node buffers are flushed. Before every edge flush (an edge buffer reaching 5,000 rows, or end of stream) all buffered nodes are flushed first, so an edge never misses an endpoint sent earlier in the stream. Nodes and edges use the same COPY-staged SQL upsert as the other paths (below); one transaction per label / edge key per flush, so the import is not atomic. >50,000,000 lines → 413. |
 
-**graphos writes no rows through Cypher.** Every write endpoint uses the same
-COPY-staged SQL upsert (`cypher.py::upsert_nodes_inline` delegates to
-`bulk_upsert_nodes_via_copy`, and `upsert_edges_inline` to
-`bulk_upsert_edges_via_copy`); there is no flag to select another path. Two
+**graphos writes no rows through Cypher.** Every write is SQL in one module,
+`graphos.writes` (a test fails if a write appears anywhere else); upserts on
+every endpoint use the same COPY-staged path (`writes.upsert_nodes` /
+`writes.upsert_edges`), and there is no flag to select another. Two
 reasons:
 
 - **Throughput.** In a development benchmark the COPY-staged upsert wrote
@@ -747,9 +748,11 @@ rows with a missing endpoint are counted as skipped. Per flush:
    `DO UPDATE SET properties = properties || EXCLUDED.properties`.
 
 It relies on the unique indexes from §2.3 and runs with
-`synchronous_commit = off` for that transaction. Cypher is still used for some
-reads and for node deletes (`DETACH DELETE`), which are not affected by the
-crash above.
+`synchronous_commit = off` for that transaction. Node deletes are SQL too:
+one statement removes the matching nodes and every edge touching them, so
+they go together or not at all. (A Cypher `DETACH DELETE` does not crash, but
+its node-plus-edges pattern on a large tenant ran for many minutes and did
+not stop at `statement_timeout`.) Cypher is still used for some reads.
 
 With audit enabled (the default), the audit middleware reads each write
 request's full body into memory before the handler parses it (§2.5.6).

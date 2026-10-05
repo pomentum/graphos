@@ -36,6 +36,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import ValidationError
 
+from graphos import writes
 from graphos.api.graph import _check_tenant
 from graphos.api.tenants import Principal
 from graphos.bootstrap import registered_tenants
@@ -46,11 +47,7 @@ from graphos.contracts.graph import (
     EdgeUpsert,
     NodeUpsert,
 )
-from graphos.cypher import (
-    CypherError,
-    bulk_upsert_edges_via_copy,
-    bulk_upsert_nodes_via_copy,
-)
+from graphos.cypher import CypherError
 
 log = logging.getLogger(__name__)
 
@@ -128,8 +125,8 @@ async def upsert_nodes_bulk(
         if not rows:
             return
         try:
-            n = await bulk_upsert_nodes_via_copy(
-                pool, graph=tenant, label=label, rows=rows,
+            n = await writes.upsert_nodes(
+                pool, tenant=tenant, label=label, rows=rows,
             )
         except CypherError as exc:
             raise HTTPException(
@@ -252,9 +249,9 @@ async def upsert_edges_bulk(  # noqa: PLR0915 — streaming loop, splitting furt
             return
         src_lbl, dst_lbl, et = key
         try:
-            merged, skipped = await bulk_upsert_edges_via_copy(
+            merged, skipped = await writes.upsert_edges(
                 pool,
-                graph=tenant,
+                tenant=tenant,
                 src_label=src_lbl,
                 dst_label=dst_lbl,
                 edge_type=et,

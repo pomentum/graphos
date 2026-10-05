@@ -24,13 +24,12 @@ openCypher to SQL**. Anything that doesn't have a clean SQL lowering
 (parameterised maps, chained writes, conditional set clauses) is
 either rejected at parse time or compiled to something slow.
 
-graphos writes no rows through Cypher. Every node and edge upsert, on
-every write endpoint, goes through the COPY-staged SQL path of §6:
-`graphos.cypher.upsert_nodes_inline` delegates to
-`bulk_upsert_nodes_via_copy`, and `upsert_edges_inline` to
-`bulk_upsert_edges_via_copy`. §5 gives the two reasons (throughput and a
-backend segfault). Cypher remains in use for some reads and for node
-deletes (`DETACH DELETE`, verified unaffected by the segfault). The rows
+graphos writes no rows through Cypher. Every write, on every endpoint, is
+SQL in one module, `graphos.writes`: node and edge upserts go through the
+COPY-staged path of §6 (`writes.upsert_nodes` / `writes.upsert_edges`), and
+node deletes are one SQL statement that removes the nodes and their edges
+together. §5 gives the two reasons (throughput and a backend segfault).
+Cypher remains in use for some reads only. The rows
 above about inlined map literals and per-row `cypher()` calls describe what
 a Cypher write needs on AGE 1.6; graphos does not write that way.
 
@@ -188,7 +187,7 @@ even though the MERGE succeeded.
 
 ## 6. COPY-staged bulk upsert — the canonical pattern
 
-Vertices (`graphos.cypher.bulk_upsert_nodes_via_copy`, used for every node
+Vertices (`graphos.writes.upsert_nodes`, used for every node
 write on every endpoint):
 
 ```sql
@@ -215,7 +214,7 @@ The `DISTINCT ON … ORDER BY ctid DESC` collapses duplicate ids within one
 batch (last row wins). Without it Postgres rejects the INSERT with
 "ON CONFLICT DO UPDATE command cannot affect row a second time".
 
-Edges (`graphos.cypher.bulk_upsert_edges_via_copy`, used for every edge
+Edges (`graphos.writes.upsert_edges`, used for every edge
 write on every endpoint):
 
 ```sql

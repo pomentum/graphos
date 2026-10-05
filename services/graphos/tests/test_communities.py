@@ -16,9 +16,10 @@ from __future__ import annotations
 import asyncpg
 import pytest
 
+from graphos import writes
 from graphos.api.communities import _communities_with_labels
 from graphos.bootstrap import TenantSpec, register_tenant
-from graphos.cypher import query_cypher, upsert_nodes_inline
+from graphos.cypher import query_cypher
 
 from .conftest import requires_db
 
@@ -60,8 +61,8 @@ async def _seed(pool: asyncpg.Pool) -> None:
     )
     await register_tenant(pool, spec)
 
-    await upsert_nodes_inline(
-        pool, graph=TEST_TENANT, label="Document",
+    await writes.upsert_nodes(
+        pool, tenant=TEST_TENANT, label="Document",
         rows=[
             {"id": "c1a", "props": {}},
             {"id": "c1b", "props": {}},
@@ -72,8 +73,8 @@ async def _seed(pool: asyncpg.Pool) -> None:
             {"id": "orphan", "props": {}},
         ],
     )
-    await upsert_nodes_inline(
-        pool, graph=TEST_TENANT, label="Collection",
+    await writes.upsert_nodes(
+        pool, tenant=TEST_TENANT, label="Collection",
         rows=[{"id": "cmp2", "props": {}}],
     )
 

@@ -31,7 +31,7 @@ MAX_EDGES_UPSERT_BATCH = 1000
 
 # Bulk endpoints: server-side chunk size for the streamed NDJSON path.
 # Rows are accumulated up to this many per label before being flushed to
-# upsert_*_inline. Tuneable; tradeoff is roundtrip count vs memory.
+# graphos.writes. Tuneable; tradeoff is roundtrip count vs memory.
 BULK_FLUSH_CHUNK = 500
 
 
@@ -700,7 +700,7 @@ class DeleteNodeResponse(BaseModel):
     nodes_deleted: int
     edges_deleted: int = Field(
         ...,
-        description="Edges incident to the deleted node (auto-removed by DETACH DELETE).",
+        description="Edges incident to the deleted node, removed with it (each counted once).",
     )
     elapsed_ms: int
 

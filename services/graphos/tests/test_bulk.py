@@ -14,9 +14,10 @@ import json
 import asyncpg
 import pytest
 
+from graphos import writes
 from graphos.api.bulk import _iter_ndjson_lines
 from graphos.bootstrap import TenantSpec, register_tenant
-from graphos.cypher import query_cypher, upsert_nodes_inline
+from graphos.cypher import query_cypher
 
 from .conftest import requires_db
 
@@ -26,7 +27,7 @@ TEST_TENANT = "graphos_test_bulk"
 @requires_db
 @pytest.mark.asyncio
 async def test_bulk_nodes_streams_in_batches(db_pool: asyncpg.Pool) -> None:
-    """Stream a small NDJSON batch through upsert_nodes_inline directly.
+    """Stream a small NDJSON batch through writes.upsert_nodes directly.
 
     This validates the same write path the bulk handler delegates to,
     without standing up a TestClient (which would require its own
@@ -45,8 +46,8 @@ async def test_bulk_nodes_streams_in_batches(db_pool: asyncpg.Pool) -> None:
     rows_a = [{"id": f"a-{i}", "props": {"name": f"a-{i}", "kind": "alpha"}} for i in range(250)]
     rows_b = [{"id": f"b-{i}", "props": {"name": f"b-{i}", "kind": "beta"}}  for i in range(250)]
 
-    await upsert_nodes_inline(db_pool, graph=TEST_TENANT, label="Thing", rows=rows_a)
-    await upsert_nodes_inline(db_pool, graph=TEST_TENANT, label="Thing", rows=rows_b)
+    await writes.upsert_nodes(db_pool, tenant=TEST_TENANT, label="Thing", rows=rows_a)
+    await writes.upsert_nodes(db_pool, tenant=TEST_TENANT, label="Thing", rows=rows_b)
 
     rows = await query_cypher(
         db_pool, graph=TEST_TENANT,
@@ -56,7 +57,7 @@ async def test_bulk_nodes_streams_in_batches(db_pool: asyncpg.Pool) -> None:
     assert int(rows[0]["c"]) == 500
 
     # Re-run alpha: should remain 500 (idempotent).
-    await upsert_nodes_inline(db_pool, graph=TEST_TENANT, label="Thing", rows=rows_a)
+    await writes.upsert_nodes(db_pool, tenant=TEST_TENANT, label="Thing", rows=rows_a)
     rows = await query_cypher(
         db_pool, graph=TEST_TENANT,
         cypher="MATCH (n:Thing) RETURN count(n) AS c",

@@ -282,8 +282,8 @@ and `snapshot-import` bodies. Size requests with that in mind.
 
 | Call | Effect |
 |---|---|
-| `DELETE /v1/{t}/graph/nodes/{node_id}` | `DETACH DELETE` by external id; idempotent (`nodes_deleted: 0` if absent) |
-| `DELETE /v1/{t}/graph/nodes?property_key=team&property_value=core` | `DETACH DELETE` every node whose property equals that string; returns node and edge counts |
+| `DELETE /v1/{t}/graph/nodes/{node_id}` | Delete the node(s) with that external id and their edges, in one transaction; idempotent (`nodes_deleted: 0` if absent) |
+| `DELETE /v1/{t}/graph/nodes?property_key=team&property_value=core` | Delete every node whose property equals that string, and their edges, in one transaction; returns node and edge counts (each edge once) |
 
 ---
 

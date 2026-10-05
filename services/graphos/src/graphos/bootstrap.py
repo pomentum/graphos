@@ -280,7 +280,7 @@ async def bootstrap_tenant(pool: asyncpg.Pool, spec: TenantSpec) -> None:
                 )
                 # UNIQUE expression index on the external id ``properties->'"id"'``.
                 # Required by the COPY-based bulk upsert path
-                # (``bulk_upsert_nodes_via_copy``) — ``INSERT … ON CONFLICT
+                # (``graphos.writes.upsert_nodes``) — ``INSERT … ON CONFLICT
                 # ((properties->'"id"'))`` resolves to this index for the
                 # dedup/property-merge semantics that ``cypher MERGE`` provides
                 # on the per-row write path.  Per-vertex-label so ``:Article`` and

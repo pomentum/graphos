@@ -99,9 +99,10 @@ one id (or one src/dst pair) in a batch collapse into one row.
   endpoints. Buffered nodes are flushed before
   every edge flush, so edges find endpoints sent earlier in the stream. Each
   batch commits separately (not atomic). Limit 50,000,000 lines (413 beyond).
-- **Deletes:** `DELETE …/graph/nodes/{id}` (`DETACH DELETE`, returns counts,
-  0/0 if absent) and `DELETE …/graph/nodes?property_key=&property_value=`
-  (every node with that string value, across labels).
+- **Deletes:** `DELETE …/graph/nodes/{id}` (the node and its edges, returns
+  counts, 0/0 if absent) and `DELETE …/graph/nodes?property_key=&property_value=`
+  (every node with that string value, across labels, and their edges). Each
+  is one SQL statement: nodes and edges go together or not at all.
 
 ---
 

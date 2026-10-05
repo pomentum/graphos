@@ -14,11 +14,11 @@ from types import SimpleNamespace
 import asyncpg
 import pytest
 
+from graphos import writes
 from graphos.api.graph import scan_edges
 from graphos.auth import TokenPrincipal
 from graphos.bootstrap import TenantSpec, register_tenant
 from graphos.contracts.graph import EdgesScanRequest, NodesScanWhere
-from graphos.cypher import upsert_edges_inline, upsert_nodes_inline
 
 from .conftest import requires_db
 
@@ -36,12 +36,12 @@ async def _seed(pool: asyncpg.Pool) -> None:
     async with pool.acquire() as conn:
         for t in ("CITES", "PART_OF", "Document", "Collection"):
             await conn.execute(f'DELETE FROM "{TEST_TENANT}"."{t}";')
-    await upsert_nodes_inline(
-        pool, graph=TEST_TENANT, label="Document",
+    await writes.upsert_nodes(
+        pool, tenant=TEST_TENANT, label="Document",
         rows=[{"id": f"d{i}", "props": {"name": f"doc {i}"}} for i in range(N_DOCS)],
     )
-    await upsert_nodes_inline(
-        pool, graph=TEST_TENANT, label="Collection",
+    await writes.upsert_nodes(
+        pool, tenant=TEST_TENANT, label="Collection",
         rows=[{"id": "c0", "props": {"name": "shelf"}}],
     )
     # Every ordered pair i -> i+1 and i -> i+2, with a property to filter on.
@@ -49,12 +49,12 @@ async def _seed(pool: asyncpg.Pool) -> None:
         {"src_id": f"d{i}", "dst_id": f"d{j}", "props": {"hop": j - i}}
         for i in range(N_DOCS) for j in (i + 1, i + 2) if j < N_DOCS
     ]
-    await upsert_edges_inline(
-        pool, graph=TEST_TENANT, src_label="Document", dst_label="Document",
+    await writes.upsert_edges(
+        pool, tenant=TEST_TENANT, src_label="Document", dst_label="Document",
         edge_type="CITES", rows=rows,
     )
-    await upsert_edges_inline(
-        pool, graph=TEST_TENANT, src_label="Document", dst_label="Collection",
+    await writes.upsert_edges(
+        pool, tenant=TEST_TENANT, src_label="Document", dst_label="Collection",
         edge_type="PART_OF",
         rows=[{"src_id": f"d{i}", "dst_id": "c0", "props": {}} for i in range(N_DOCS)],
     )

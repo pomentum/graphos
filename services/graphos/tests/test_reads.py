@@ -9,8 +9,9 @@ from __future__ import annotations
 import asyncpg
 import pytest
 
+from graphos import writes
 from graphos.bootstrap import TenantSpec, register_tenant
-from graphos.cypher import query_cypher, upsert_edges_inline, upsert_nodes_inline
+from graphos.cypher import query_cypher
 
 from .conftest import requires_db
 
@@ -26,8 +27,8 @@ async def _seed(pool: asyncpg.Pool) -> None:
     await register_tenant(pool, spec)
 
     # 4 Documents (a, b, c, d) + 1 Collection (cmp)
-    await upsert_nodes_inline(
-        pool, graph=TEST_TENANT, label="Document",
+    await writes.upsert_nodes(
+        pool, tenant=TEST_TENANT, label="Document",
         rows=[
             {"id": "a", "props": {"name": "alpha"}},
             {"id": "b", "props": {"name": "beta"}},
@@ -35,14 +36,14 @@ async def _seed(pool: asyncpg.Pool) -> None:
             {"id": "d", "props": {"name": "delta"}},
         ],
     )
-    await upsert_nodes_inline(
-        pool, graph=TEST_TENANT, label="Collection",
+    await writes.upsert_nodes(
+        pool, tenant=TEST_TENANT, label="Collection",
         rows=[{"id": "cmp", "props": {"name": "auth"}}],
     )
 
     # Edges: a-CITES->b, a-CITES->c, b-CITES->c, a-PART_OF->cmp
-    await upsert_edges_inline(
-        pool, graph=TEST_TENANT,
+    await writes.upsert_edges(
+        pool, tenant=TEST_TENANT,
         src_label="Document", dst_label="Document", edge_type="CITES",
         rows=[
             {"src_id": "a", "dst_id": "b", "props": {"w": 0.9}},
@@ -50,8 +51,8 @@ async def _seed(pool: asyncpg.Pool) -> None:
             {"src_id": "b", "dst_id": "c", "props": {"w": 0.3}},
         ],
     )
-    await upsert_edges_inline(
-        pool, graph=TEST_TENANT,
+    await writes.upsert_edges(
+        pool, tenant=TEST_TENANT,
         src_label="Document", dst_label="Collection", edge_type="PART_OF",
         rows=[{"src_id": "a", "dst_id": "cmp", "props": {}}],
     )

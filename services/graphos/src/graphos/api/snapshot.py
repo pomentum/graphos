@@ -38,6 +38,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import ValidationError
 
+from graphos import writes
 from graphos.api.bulk import _iter_ndjson_lines
 from graphos.api.graph import _check_tenant
 from graphos.api.tenants import Principal
@@ -48,11 +49,7 @@ from graphos.contracts.snapshot import (
     MAX_SNAPSHOT_ROWS,
     SnapshotImportResponse,
 )
-from graphos.cypher import (
-    CypherError,
-    upsert_edges_inline,
-    upsert_nodes_inline,
-)
+from graphos.cypher import CypherError
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["graph"], prefix="/{tenant}/graph")
@@ -89,7 +86,7 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
     pool = request.app.state.pool
 
     # Buffer rows per label / edge type until a chunk is full, then write it
-    # through the COPY-staged SQL upserts (``upsert_*_inline``).  Buffered
+    # through the COPY-staged SQL upserts in ``graphos.writes``.  Buffered
     # nodes are always flushed before edges.
 
     nodes_by_label: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -112,8 +109,8 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
             if not rows:
                 continue
             try:
-                n = await upsert_nodes_inline(
-                    pool, graph=tenant, label=label, rows=rows,
+                n = await writes.upsert_nodes(
+                    pool, tenant=tenant, label=label, rows=rows,
                 )
             except CypherError as exc:
                 raise HTTPException(
@@ -130,8 +127,8 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
             if not rows:
                 continue
             try:
-                merged, skipped = await upsert_edges_inline(
-                    pool, graph=tenant,
+                merged, skipped = await writes.upsert_edges(
+                    pool, tenant=tenant,
                     src_label=src_lbl, dst_label=dst_lbl, edge_type=et,
                     rows=rows,
                 )

@@ -21,16 +21,16 @@ from __future__ import annotations
 
 import array
 import bisect
-import contextlib
 import logging
 import random
 import time as _t
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 import asyncpg
 
+from graphos import writes
 from graphos.contracts.graph import _validate_prop_key
 from graphos.db import allow_long_statements
 
@@ -420,8 +420,8 @@ async def _writeback_assignments(
 ) -> int:
     """Write `community_id` back onto each vertex.
 
-    Bulk COPY-staged UPDATE — mirrors the pattern used by
-    :func:`graphos.cypher.bulk_upsert_nodes_via_copy`.  Rather than issue
+    Bulk COPY-staged UPDATE (:func:`graphos.writes.set_node_communities`),
+    the same shape as the node upsert.  Rather than issue
     one ``MATCH … SET`` cypher per vertex (parser + planner + agtype
     binding round-trip × N — measured ~42 nodes/s on a large tenant, 215 s for
     9 k rows), we:
@@ -479,9 +479,8 @@ async def _writeback_assignments(
     pair_counts: dict[tuple[int, int], int] = {}
     old_sizes: dict[int, int] = {}
 
+    # Server-side cursors need a transaction; this one only reads.
     async with pool.acquire() as conn, conn.transaction():
-        await conn.execute("SET LOCAL synchronous_commit = off;")
-
         # Server-side cursor: PG streams rows in prefetch batches
         # rather than materialising the full result on either side.
         # ``int`` cast on the agtype-extracted text keeps the value
@@ -548,142 +547,20 @@ async def _writeback_assignments(
             },
         )
 
-        if delta:
-            await conn.execute(
-                "CREATE TEMP TABLE _stg_assignments "
-                "(gid bigint, community_id int) ON COMMIT DROP;"
-            )
-            await conn.copy_records_to_table(
-                "_stg_assignments",
-                records=delta,
-                columns=("gid", "community_id"),
-            )
-            sql = (
-                f'UPDATE "{tenant}"."_ag_label_vertex" t '
-                f"SET properties = t.properties || "
-                f"('{{\"community_id\": ' || s.community_id || '}}')::agtype "
-                f"FROM _stg_assignments s "
-                f"WHERE t.id = (s.gid::text)::graphid;"
-            )
-            await allow_long_statements(conn, 600.0)
-            await conn.execute(sql, timeout=600.0)
+    await writes.set_node_communities(pool, tenant=tenant, assignments=delta)
 
     # Edge writeback consumes the FINAL (post-Greene) IDs.  A
     # generator avoids materialising the full ~390 k-tuple list
     # before COPY hands it to PG; asyncpg's ``copy_records_to_table``
     # accepts any iterable.
-    await _writeback_edge_communities(
+    await writes.set_edge_end_communities(
         pool,
         tenant=tenant,
-        assignments_iter=(
+        assignments=(
             (gid, str(final_of_raw[raw])) for gid, raw in assignments.items()
         ),
-        n_assignments=len(assignments),
     )
     return len(assignments)
-
-
-async def _writeback_edge_communities(
-    pool: asyncpg.Pool,
-    *,
-    tenant: str,
-    assignments_iter: Iterable[tuple[int, str]],
-    n_assignments: int,
-) -> int:
-    """Backfill ``end_community_id`` onto every edge of *tenant*.
-
-    Single connection, per-edge-label loop, **one typed staging
-    table** shared across iterations:
-
-    1. ``CREATE TEMP TABLE _stg_edge (gid bigint, cid text)``
-    2. ``COPY`` the (graphid, community_id_as_text) tuples in once,
-       streamed from ``assignments_iter`` so no full materialised
-       tuple list lives in RAM alongside the partition.
-    3. For each edge child table in ``pg_inherits``, run a bounded
-       UPDATE joined to the staging table — hash join on a typed
-       graphid key, no per-row JSONB extract.
-    4. Drop staging.
-
-    Each per-label UPDATE auto-commits (no enclosing txn), so a
-    failure on one label doesn't roll back the others — same
-    bounded-blast-radius the previous version had, but with the
-    staging-table speedup of the original (now-reverted)
-    single-UPDATE shape.
-
-    Returns the total edge rows updated across all labels.
-    """
-    if not n_assignments:
-        return 0
-
-    total = 0
-    async with pool.acquire() as conn:
-        await conn.execute("SET LOCAL synchronous_commit = off;")
-        # Staging built once, reused per label.  ``ON COMMIT DROP``
-        # is N/A here because per-label UPDATEs auto-commit; we
-        # drop explicitly at the end (and on errors via finally).
-        await conn.execute(
-            "CREATE TEMP TABLE _stg_edge_communities "
-            "(gid bigint, cid text);"
-        )
-        # Stream the (gid, cid) tuples directly into COPY without
-        # building a ~390 k-tuple list first — asyncpg accepts any
-        # iterable.  The caller passes a generator, so peak Python
-        # memory stays bounded by asyncpg's COPY buffer (~MB), not
-        # n_vertices.
-        await conn.copy_records_to_table(
-            "_stg_edge_communities",
-            records=assignments_iter,
-            columns=("gid", "cid"),
-        )
-        # Single ANALYZE so per-label planner sees the right
-        # cardinality for the hash join.
-        await conn.execute("ANALYZE _stg_edge_communities;")
-
-        try:
-            label_rows = await conn.fetch(
-                "SELECT c.relname "
-                "FROM pg_class c "
-                "JOIN pg_namespace n ON n.oid = c.relnamespace "
-                "JOIN pg_inherits i ON i.inhrelid = c.oid "
-                "JOIN pg_class p ON p.oid = i.inhparent "
-                "WHERE n.nspname = $1 "
-                "  AND p.relname = '_ag_label_edge' "
-                "  AND c.relkind = 'r' "
-                "ORDER BY c.relname;",
-                tenant,
-            )
-            labels = [str(r["relname"]) for r in label_rows]
-
-            for label in labels:
-                # Per-label UPDATE.  Hash join builds a 1x staging
-                # hash table (~hundreds of k rows) once per query,
-                # probes per edge in the label — bounded by the
-                # label's edge count.  ``IS DISTINCT FROM`` filters
-                # no-op rows so reruns where ~all communities are
-                # stable do minimal heap writes.  300 s per-label
-                # cap is well above empirical largest-label times.
-                await allow_long_statements(conn, 300.0)
-                updated = await conn.execute(
-                    f'UPDATE "{tenant}"."{label}" e '
-                    f'SET end_community_id = s.cid '
-                    f'FROM _stg_edge_communities s '
-                    f'WHERE e.end_id = (s.gid::text)::graphid '
-                    f'  AND e.end_community_id IS DISTINCT FROM s.cid;',
-                    timeout=300.0,
-                )
-                with contextlib.suppress(ValueError, IndexError):
-                    total += int(updated.split()[-1])
-                log.info(
-                    "louvain.edge_writeback_label_done",
-                    extra={"tenant": tenant, "label": label,
-                           "total_updated_so_far": total},
-                )
-        finally:
-            await conn.execute(
-                "DROP TABLE IF EXISTS _stg_edge_communities;"
-            )
-
-    return total
 
 
 async def recompute_communities(
