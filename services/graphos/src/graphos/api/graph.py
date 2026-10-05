@@ -2976,14 +2976,15 @@ async def scan_nodes(
 # ═══════════════════════════════════════════════════════════════════════════
 #
 # Symmetric to ``/nodes:scan`` but over edges.  Order is fixed in v1
-# by edge graphid PK (always indexed) — edges don't have a consumer-
+# by edge graphid (AGE does not index it) — edges don't have a consumer-
 # assigned external id the way nodes do, so multi-key / property-based
 # sort would need consumer-declared functional indexes on edge tables.
 # That's a v2 extension; not breaking the v1 contract.
 #
-# Each row resolves both endpoints to ``(external_id, label)`` via a
-# JOIN against the parent vertex inheritance table — matches the input
-# shape of ``/edges:bulk`` so callers can round-trip without translation.
+# Each row resolves both endpoints to ``(external_id, label)`` against
+# the parent vertex inheritance table, for the page's edges only (see
+# ``_edge_scan_page_sql``) — matches the input shape of ``/edges:bulk``
+# so callers can round-trip without translation.
 
 
 def _compile_edge_scan_where(
@@ -3076,6 +3077,51 @@ def _decode_edge_scan_cursor(
     return edge_type, edge_gid
 
 
+def _edge_scan_page_sql(
+    tenant: str, edge_type: str, where_sql: str, *, limit_param: int,
+) -> str:
+    """One ``/edges:scan`` page: the edges first, then their endpoints.
+
+    ``page`` takes the next ``limit`` edges in graphid order; ``ends``
+    resolves only those edges' endpoints to ``(external id, label)``.
+    Joining the whole edge table to ``_ag_label_vertex`` before the
+    LIMIT, as a single flat query does, makes the planner hash every
+    edge against every vertex: minutes and gigabytes of temp files on
+    a large tenant, for a page of 50.  Both CTEs are MATERIALIZED so
+    the planner cannot fold the LIMIT back behind the joins.
+
+    Endpoints are LEFT JOINed: an edge whose endpoint vertex no longer
+    exists comes back with NULL labels, and the caller skips it.
+    """
+    return f"""
+        WITH page AS MATERIALIZED (
+            SELECT e.id, e.start_id, e.end_id, e.properties
+            FROM "{tenant}"."{edge_type}" e
+            WHERE {where_sql}
+            ORDER BY e.id
+            LIMIT ${limit_param}
+        ),
+        ends AS MATERIALIZED (
+            SELECT v.id, v.properties -> '"id"'::agtype AS ext_id, v.tableoid
+            FROM "{tenant}"."_ag_label_vertex" v
+            WHERE v.id IN (SELECT start_id FROM page UNION SELECT end_id FROM page)
+        )
+        SELECT
+            p.id::text                                AS edge_gid,
+            trim(both '"' from s.ext_id::text)        AS src_id,
+            c_src.relname                             AS src_label,
+            trim(both '"' from d.ext_id::text)        AS dst_id,
+            c_dst.relname                             AS dst_label,
+            p.properties::text                        AS props_text
+        FROM page p
+        LEFT JOIN ends s ON s.id = p.start_id
+        LEFT JOIN ends d ON d.id = p.end_id
+        LEFT JOIN pg_class c_src ON c_src.oid = s.tableoid
+        LEFT JOIN pg_class c_dst ON c_dst.oid = d.tableoid
+        ORDER BY p.id;
+    """
+
+
 @router.post(
     "/edges:scan",
     response_model=EdgesScanResponse,
@@ -3125,94 +3171,88 @@ async def scan_edges(
         if remaining <= 0 or truncated:
             break
 
-        params: list[Any] = []
-        param_idx = 1
-        clauses: list[str] = []
-
-        if ti == 0 and cursor_gid is not None:
-            # Cursor advances along the edge graphid PK.  The PK btree
-            # on the edge label table makes this an index range scan.
-            clauses.append(
-                f"e.id > agtype_to_graphid(${param_idx}::text::agtype)"
-            )
-            params.append(str(int(cursor_gid)))
-            param_idx += 1
-
-        where_frags, where_params, param_idx = _compile_edge_scan_where(
-            body.where, next_param_idx=param_idx,
-        )
-        clauses.extend(where_frags)
-        params.extend(where_params)
-        where_sql = (" AND ".join(clauses)) if clauses else "TRUE"
-
-        # JOIN to the parent vertex inheritance table to resolve each
-        # endpoint's external id (``properties.id``) and label
-        # (``tableoid::regclass``).  AGE's per-label vertex tables all
-        # inherit from ``"<tenant>"."_ag_label_vertex"``, so a single
-        # JOIN covers every possible endpoint label.
-        sql = f"""
-            SELECT
-                e.id::text                                                AS edge_gid,
-                trim(both '"' from (v_src.properties -> '"id"'::agtype)::text)
-                                                                          AS src_id,
-                c_src.relname                                             AS src_label,
-                trim(both '"' from (v_dst.properties -> '"id"'::agtype)::text)
-                                                                          AS dst_id,
-                c_dst.relname                                             AS dst_label,
-                e.properties::text                                        AS props_text
-            FROM "{tenant}"."{edge_type}" e
-            JOIN "{tenant}"."_ag_label_vertex" v_src ON v_src.id = e.start_id
-            JOIN "{tenant}"."_ag_label_vertex" v_dst ON v_dst.id = e.end_id
-            JOIN pg_class c_src ON c_src.oid = v_src.tableoid
-            JOIN pg_class c_dst ON c_dst.oid = v_dst.tableoid
-            WHERE {where_sql}
-            ORDER BY e.id
-            LIMIT ${param_idx};
-        """
-        params.append(remaining)
-
-        try:
-            async with pool.acquire() as conn:
-                rows = await conn.fetch(sql, *params)
-        except asyncpg.exceptions.UndefinedTableError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"edge type '{edge_type}' not registered for tenant "
-                    f"'{tenant}': {exc}"
-                ),
-            ) from exc
-
+        # Position along the edge graphid order: the request cursor for
+        # the first type, then the last edge fetched, page after page.
+        after_gid: int | None = cursor_gid if ti == 0 else None
         last_edge_gid: int | None = None
-        for row in rows:
-            props = _safe_decode_props(row["props_text"])
-            projected = _project_properties(props, body.project)
-            edge_gid = int(row["edge_gid"])
-            row_bytes = len(_json.dumps(projected).encode("utf-8")) + 64
-            if (
-                items
-                and accumulated_bytes + row_bytes > SCAN_PAYLOAD_CAP_BYTES
-            ):
-                if last_edge_gid is not None:
-                    next_cursor = _encode_edge_scan_cursor(
-                        edge_type, last_edge_gid,
-                    )
-                truncated = True
-                break
-            items.append(EdgesScanItem(
-                src_id=str(row["src_id"]),
-                src_label=str(row["src_label"]),
-                dst_id=str(row["dst_id"]),
-                dst_label=str(row["dst_label"]),
-                type=edge_type,
-                properties=projected,
-            ))
-            last_edge_gid = edge_gid
-            accumulated_bytes += row_bytes
-            remaining -= 1
-            if remaining <= 0:
-                next_cursor = _encode_edge_scan_cursor(edge_type, edge_gid)
-                break
+        while remaining > 0 and not truncated:
+            params: list[Any] = []
+            param_idx = 1
+            clauses: list[str] = []
+            if after_gid is not None:
+                clauses.append(
+                    f"e.id > agtype_to_graphid(${param_idx}::text::agtype)"
+                )
+                params.append(str(int(after_gid)))
+                param_idx += 1
+
+            where_frags, where_params, param_idx = _compile_edge_scan_where(
+                body.where, next_param_idx=param_idx,
+            )
+            clauses.extend(where_frags)
+            params.extend(where_params)
+            where_sql = (" AND ".join(clauses)) if clauses else "TRUE"
+
+            page_size = remaining
+            sql = _edge_scan_page_sql(
+                tenant, edge_type, where_sql, limit_param=param_idx,
+            )
+            params.append(page_size)
+
+            try:
+                async with pool.acquire() as conn, conn.transaction():
+                    # The endpoint lookup appends every vertex label table;
+                    # on tenants never ANALYZEd the planner's row estimates
+                    # are inflated enough to trigger JIT, which then spends
+                    # seconds compiling a query that runs in milliseconds.
+                    await conn.execute("SET LOCAL jit = off;")
+                    rows = await conn.fetch(sql, *params)
+            except asyncpg.exceptions.UndefinedTableError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"edge type '{edge_type}' not registered for tenant "
+                        f"'{tenant}': {exc}"
+                    ),
+                ) from exc
+
+            for row in rows:
+                edge_gid = int(row["edge_gid"])
+                after_gid = edge_gid
+                if row["src_label"] is None or row["dst_label"] is None:
+                    # An endpoint vertex no longer exists: such edges were
+                    # never returned, and still are not.
+                    continue
+                props = _safe_decode_props(row["props_text"])
+                projected = _project_properties(props, body.project)
+                row_bytes = len(_json.dumps(projected).encode("utf-8")) + 64
+                if (
+                    items
+                    and accumulated_bytes + row_bytes > SCAN_PAYLOAD_CAP_BYTES
+                ):
+                    if last_edge_gid is not None:
+                        next_cursor = _encode_edge_scan_cursor(
+                            edge_type, last_edge_gid,
+                        )
+                    truncated = True
+                    break
+                items.append(EdgesScanItem(
+                    src_id=str(row["src_id"]),
+                    src_label=str(row["src_label"]),
+                    dst_id=str(row["dst_id"]),
+                    dst_label=str(row["dst_label"]),
+                    type=edge_type,
+                    properties=projected,
+                ))
+                last_edge_gid = edge_gid
+                accumulated_bytes += row_bytes
+                remaining -= 1
+                if remaining <= 0:
+                    next_cursor = _encode_edge_scan_cursor(edge_type, edge_gid)
+                    break
+
+            if len(rows) < page_size:
+                break  # this edge type is exhausted
 
         if remaining <= 0 or truncated:
             break
