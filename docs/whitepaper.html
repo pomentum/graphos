@@ -205,7 +205,7 @@ html{scroll-behavior:smooth}
       <ul>
         <li><span class="k">The problem</span><span>Connected data turns up in most systems. Once several services need it, each one ends up holding database credentials, its own Cypher, and its own answers to bulk loading, indexing and isolation.</span></li>
         <li><span class="k">The approach</span><span>One service owns the graph. Consumers call a typed REST API; graphos alone talks to PostgreSQL + Apache AGE on a private network.</span></li>
-        <li><span class="k">What you get</span><span>A graph per tenant, token-scoped access, COPY-speed idempotent writes, composable reads, optional Louvain communities with stable ids, rule-based edges, background jobs for long operations and ordinary Postgres operations.</span></li>
+        <li><span class="k">What you get</span><span>A graph per tenant, tokens scoped to tenants and to read or write, COPY-speed idempotent writes, in-place edits of single nodes and edges, composable reads, optional Louvain communities with stable ids, rule-based edges, background jobs for long operations and ordinary Postgres operations.</span></li>
         <li><span class="k">What it is not</span><span>Not a general query console, not a new database engine, and not tied to any domain: graphos ships no labels of its own.</span></li>
         <li><span class="k">Licence</span><span>Apache 2.0, like the Apache AGE extension it is built on.</span></li>
       </ul>
@@ -349,7 +349,7 @@ html{scroll-behavior:smooth}
     <dl class="gloss">
       <div><dt>Postgres, not a new engine</dt><dd>The graph lives in PostgreSQL through the Apache AGE extension. You keep MVCC, disk-backed storage, <code>pg_dump</code>, streaming replication and <code>pg_stat_statements</code>, and still query with openCypher.</dd></div>
       <div><dt>The boundary is HTTP</dt><dd>Consumers speak typed JSON. The queries are written inside graphos, once, as SQL over AGE's tables, with checked identifiers and capped limits. No connection string leaves the service.</dd></div>
-      <div><dt>A tenant is a graph</dt><dd>Each tenant gets its own AGE graph. A token lists the tenants it may touch; the tenant is in the URL and is checked before any SQL runs.</dd></div>
+      <div><dt>A tenant is a graph</dt><dd>Each tenant gets its own AGE graph. A token lists the tenants it may touch and whether it may write; the tenant is in the URL and is checked before any SQL runs.</dd></div>
       <div><dt>The schema is the consumer's</dt><dd>graphos ships no labels and interprets no properties. Consumers declare labels at registration; every endpoint takes label, property and edge names as parameters.</dd></div>
     </dl>
     <blockquote><p>graphos owns the data plane and generic graph operations. The meaning of the data stays with whoever wrote it.</p></blockquote>
@@ -360,7 +360,7 @@ html{scroll-behavior:smooth}
     <figure class="fig pic">
       <!--fig:architecture-light--><svg class="pic-light" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 516" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" role="img" aria-labelledby="architecture-light-title architecture-light-desc">
 <title id="architecture-light-title">How graphos is deployed</title>
-<desc id="architecture-light-desc">Consumers such as a loader job, an application, an analytics UI and an operator call graphos-api over the graphos-net network with a bearer token. graphos-api checks the token against the tenant in the path, validates typed request contracts, builds SQL internally with checked identifiers and capped limits, runs each query under a statement timeout, and emits metrics, JSON logs and an audit trail; it also runs Louvain community detection, in a separate process, and a key/value cache. Only graphos-api reaches graphos-db, PostgreSQL 16 with Apache AGE, over an internal network with no external port. Each tenant is its own AGE graph, and graphos_meta holds registrations and the cache. Consumers never receive a connection string and never send raw Cypher or SQL.</desc>
+<desc id="architecture-light-desc">Consumers such as a loader job, an application, an analytics UI and an operator call graphos-api over the graphos-net network with a bearer token. graphos-api checks the token against the tenant in the path and the read or write access each operation needs, validates typed request contracts, builds SQL internally with checked identifiers and capped limits, runs each query under a statement timeout, and emits metrics, JSON logs and an audit trail; it also runs Louvain community detection, in a separate process, and a key/value cache. Only graphos-api reaches graphos-db, PostgreSQL 16 with Apache AGE, over an internal network with no external port. Each tenant is its own AGE graph, and graphos_meta holds registrations and the cache. Consumers never receive a connection string and never send raw Cypher or SQL.</desc>
 <defs>
   <marker id="architecture-light-h0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1D5BD6"/></marker>
   <marker id="architecture-light-h1" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5B45B0"/></marker>
@@ -390,7 +390,7 @@ html{scroll-behavior:smooth}
 <text x="326" y="88" font-size="18" font-weight="700" fill="#1D5BD6">graphos-api</text>
 <text x="326" y="108" font-size="12.5" font-weight="400" fill="#4A5563">FastAPI · asyncpg · one process per replica</text>
 <rect x="324" y="124" width="294" height="42" rx="4" fill="#F7F8F9" stroke="#C4CDD6" stroke-width="1.2"/>
-<text x="338" y="142" font-size="13" font-weight="600" fill="#131A22">bearer token → tenant scope</text>
+<text x="338" y="142" font-size="13" font-weight="600" fill="#131A22">bearer token → tenant, read/write</text>
 <text x="338" y="158" font-size="11.5" font-weight="400" fill="#4A5563">403 / 404 before any SQL</text>
 <rect x="324" y="174" width="294" height="42" rx="4" fill="#F7F8F9" stroke="#C4CDD6" stroke-width="1.2"/>
 <text x="338" y="192" font-size="13" font-weight="600" fill="#131A22">typed REST contracts</text>
@@ -427,7 +427,7 @@ html{scroll-behavior:smooth}
 </svg><!--/fig:architecture-light-->
       <!--fig:architecture-dark--><svg class="pic-dark" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 516" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" role="img" aria-labelledby="architecture-dark-title architecture-dark-desc">
 <title id="architecture-dark-title">How graphos is deployed</title>
-<desc id="architecture-dark-desc">Consumers such as a loader job, an application, an analytics UI and an operator call graphos-api over the graphos-net network with a bearer token. graphos-api checks the token against the tenant in the path, validates typed request contracts, builds SQL internally with checked identifiers and capped limits, runs each query under a statement timeout, and emits metrics, JSON logs and an audit trail; it also runs Louvain community detection, in a separate process, and a key/value cache. Only graphos-api reaches graphos-db, PostgreSQL 16 with Apache AGE, over an internal network with no external port. Each tenant is its own AGE graph, and graphos_meta holds registrations and the cache. Consumers never receive a connection string and never send raw Cypher or SQL.</desc>
+<desc id="architecture-dark-desc">Consumers such as a loader job, an application, an analytics UI and an operator call graphos-api over the graphos-net network with a bearer token. graphos-api checks the token against the tenant in the path and the read or write access each operation needs, validates typed request contracts, builds SQL internally with checked identifiers and capped limits, runs each query under a statement timeout, and emits metrics, JSON logs and an audit trail; it also runs Louvain community detection, in a separate process, and a key/value cache. Only graphos-api reaches graphos-db, PostgreSQL 16 with Apache AGE, over an internal network with no external port. Each tenant is its own AGE graph, and graphos_meta holds registrations and the cache. Consumers never receive a connection string and never send raw Cypher or SQL.</desc>
 <defs>
   <marker id="architecture-dark-h0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8AB0FF"/></marker>
   <marker id="architecture-dark-h1" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B7A6F2"/></marker>
@@ -457,7 +457,7 @@ html{scroll-behavior:smooth}
 <text x="326" y="88" font-size="18" font-weight="700" fill="#8AB0FF">graphos-api</text>
 <text x="326" y="108" font-size="12.5" font-weight="400" fill="#9AA5B3">FastAPI · asyncpg · one process per replica</text>
 <rect x="324" y="124" width="294" height="42" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
-<text x="338" y="142" font-size="13" font-weight="600" fill="#E6EAEF">bearer token → tenant scope</text>
+<text x="338" y="142" font-size="13" font-weight="600" fill="#E6EAEF">bearer token → tenant, read/write</text>
 <text x="338" y="158" font-size="11.5" font-weight="400" fill="#9AA5B3">403 / 404 before any SQL</text>
 <rect x="324" y="174" width="294" height="42" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
 <text x="338" y="192" font-size="13" font-weight="600" fill="#E6EAEF">typed REST contracts</text>
@@ -505,9 +505,11 @@ html{scroll-behavior:smooth}
         <tr><td>Small upserts</td><td>Up to ~1,000 rows per call</td><td>Upsert on your id; property updates are additive</td></tr>
         <tr><td>NDJSON bulk</td><td>Streaming loads of any size</td><td>Flushes in batches; bad rows reported, not fatal</td></tr>
         <tr><td>Snapshot import</td><td>One file holding a whole graph</td><td>Nodes and edges in one stream, nodes flushed before edges</td></tr>
+        <tr><td>One node or edge</td><td>An editor changing one item</td><td>JSON Merge Patch of its properties; an edge is read, patched or deleted by its type and end ids</td></tr>
       </tbody>
     </table></div>
     <p>All three write through the same path: a binary <code>COPY</code> into a staging table, then one <code>INSERT … ON CONFLICT</code> per label. graphos writes no rows through Cypher. That is faster, and it also avoids an AGE 1.6 crash: a Cypher write into a label table that carries extra columns (graphos adds one to edge tables; generated columns add more) takes down the database backend. Edges whose endpoints do not exist yet are counted in <code>edges_skipped</code> rather than failing the batch, so ordering mistakes are visible without losing work. Nodes can be deleted by id or by a property predicate, for example everything belonging to one dataset; each delete removes the nodes and every edge touching them in one statement, so they go together or not at all.</p>
+    <p>To change one item in place, a <code>PATCH</code> applies a JSON Merge Patch to one node or one edge: <code>null</code> removes a key, nested objects merge, everything else replaces. The row is read, locked, patched and written back in one transaction. Ids are unique within a label but not across labels, so an id can name nodes in two labels; a call that would match more than one row is refused with the candidate labels (<code>409</code>) and changes nothing, rather than landing on an arbitrary row or on all of them.</p>
 
     <h3>Reading</h3>
     <p>Reads are small primitives that compose: substring <strong>search</strong>, one-hop <strong>neighbors</strong>, multi-seed <strong>expand</strong> up to five hops, the <strong>induced subgraph</strong> of a node set, a paginated <strong>node scan</strong> with filters and projection, a stratified <strong>sample</strong> for visualisation, <strong>histograms</strong>, <strong>top-K by degree</strong>, node and edge <strong>aggregates</strong>, and an <strong>export</strong> in graphology JSON that sigma.js and Gephi read directly.</p>
@@ -518,6 +520,7 @@ html{scroll-behavior:smooth}
       <li>Every statement runs under a server-side <code>statement_timeout</code> (60 s by default); one that runs too long is cancelled by Postgres and the request returns <code>504</code> as <code>problem+json</code> instead of holding the pool. The few deliberately long operations (index builds, Louvain, rule resolution, vacuum) raise the limit for their own statements only, and Louvain, rule resolution and vacuum can also run as background jobs (section 6). Every endpoint is plain SQL, never Cypher: on a large graph, AGE's Cypher executor was seen ignoring both the timeout and a cancel for over ten minutes.</li>
       <li>Label and property names are checked against an identifier pattern and the tenant's registered schema, and index or generated-column DDL supplied at registration must be a single <code>CREATE INDEX</code> / <code>ADD COLUMN … GENERATED</code> statement on the tenant's own tables, so neither can carry arbitrary SQL.</li>
       <li>Authentication fails closed: without a tokens file graphos will not start unless local-only anonymous mode is switched on explicitly.</li>
+      <li>Tokens can be read-only. Every operation declares whether it reads or writes, and the OpenAPI schema shows it; a test fails if an operation declares neither, if any tenant operation accepts another tenant's token, or if any write accepts a read-only one. A dashboard or a viewer can hold a token that cannot change anything.</li>
       <li>graphos-api connects to Postgres as an unprivileged role (no superuser, cannot create roles or databases); the superuser is only used to initialise the database.</li>
       <li>Endpoints that need no token (health, readiness, service info) report counts, never tenant names or database error text.</li>
     </ul>
@@ -637,7 +640,7 @@ html{scroll-behavior:smooth}
     <ul>
       <li><strong>Health:</strong> <code>/healthz</code>, <code>/readyz</code> and <code>/v1/info</code> with service and AGE versions.</li>
       <li><strong>Metrics:</strong> Prometheus request counts and latency histograms per route and status, connection-pool size, registered tenants, and rate-limit rejections.</li>
-      <li><strong>Logs and audit:</strong> structured JSON logs carrying a W3C <code>traceparent</code> trace id; every write also produces an audit record with tenant, calling consumer, status, latency and a hash of the request body.</li>
+      <li><strong>Logs and audit:</strong> structured JSON logs carrying a W3C <code>traceparent</code> trace id; every write (an operation declared as a write, whatever its HTTP method, including one refused for its token) also produces an audit record with tenant, calling consumer, status, latency and a hash of the request body.</li>
       <li><strong>Database introspection</strong> for admins: table and index sizes, dead tuples, slow queries from <code>pg_stat_statements</code>, and a validated vacuum call.</li>
       <li><strong>Background jobs:</strong> community recompute, rule resolution and vacuum accept <code>Prefer: respond-async</code> and answer <code>202</code> at once with a job to poll at <code>/v1/jobs/{id}</code>. A finished job holds exactly what the synchronous call returns; each job runs once, on any replica, and can be cancelled, which stops the work rather than just the wait.</li>
       <li><strong>Tokens</strong> reload on <code>SIGHUP</code>, so rotation needs no restart. An optional per-token rate limiter protects shared deployments.</li>
@@ -650,7 +653,7 @@ html{scroll-behavior:smooth}
       <tbody>
         <tr><td>Application developers</td><td>A typed client and OpenAPI contract instead of a driver and query strings. Bulk loading, traversal and aggregation are calls, not projects.</td></tr>
         <tr><td>Platform and operations</td><td>One service to run, on PostgreSQL. Standard backups and monitoring, bounded memory, per-query timeouts and slow-query visibility out of the box.</td></tr>
-        <tr><td>Security</td><td>No database credentials outside one container. Token-scoped tenants, a network that makes the database unreachable, validated identifiers and an audit trail of every write.</td></tr>
+        <tr><td>Security</td><td>No database credentials outside one container. Tokens scoped to tenants and to read or write, a network that makes the database unreachable, validated identifiers and an audit trail of every write.</td></tr>
         <tr><td>Data and analytics</td><td>Communities with stable ids, histograms, top-K and aggregates computed where the data lives, and exports that visualisation tools open directly.</td></tr>
         <tr><td>The organisation</td><td>One graph capability shared by many teams, each in its own tenant, rather than one graph database per team. Open source under Apache 2.0, with no vendor lock-in beyond PostgreSQL.</td></tr>
       </tbody>

@@ -156,7 +156,7 @@ function architecture(t) {
     ['Operator', 'admin token: tenants, Louvain', 344],
   ];
   const layers = [
-    ['bearer token → tenant scope', '403 / 404 before any SQL'],
+    ['bearer token → tenant, read/write', '403 / 404 before any SQL'],
     ['typed REST contracts', 'Pydantic models, OpenAPI'],
     ['SQL built inside', 'identifiers checked, limits capped'],
     ['statement_timeout per query', 'a bad query cannot starve the pool'],
@@ -197,7 +197,7 @@ ${text(840, 384, 'pg_trgm · pg_stat_statements', { size: 12, fill: t.soft, anch
 <path d="M48 475 l12 12 M60 475 l-12 12" stroke="${t.stop}" stroke-width="2" stroke-linecap="round"/>
 ${text(72, 486, 'Consumers never receive a database connection string and never send raw Cypher or SQL.', { size: 13.5, weight: 600, fill: t.stop })}`;
   return k.svg(1000, 516, 'How graphos is deployed',
-    'Consumers such as a loader job, an application, an analytics UI and an operator call graphos-api over the graphos-net network with a bearer token. graphos-api checks the token against the tenant in the path, validates typed request contracts, builds SQL internally with checked identifiers and capped limits, runs each query under a statement timeout, and emits metrics, JSON logs and an audit trail; it also runs Louvain community detection, in a separate process, and a key/value cache. Only graphos-api reaches graphos-db, PostgreSQL 16 with Apache AGE, over an internal network with no external port. Each tenant is its own AGE graph, and graphos_meta holds registrations and the cache. Consumers never receive a connection string and never send raw Cypher or SQL.',
+    'Consumers such as a loader job, an application, an analytics UI and an operator call graphos-api over the graphos-net network with a bearer token. graphos-api checks the token against the tenant in the path and the read or write access each operation needs, validates typed request contracts, builds SQL internally with checked identifiers and capped limits, runs each query under a statement timeout, and emits metrics, JSON logs and an audit trail; it also runs Louvain community detection, in a separate process, and a key/value cache. Only graphos-api reaches graphos-db, PostgreSQL 16 with Apache AGE, over an internal network with no external port. Each tenant is its own AGE graph, and graphos_meta holds registrations and the cache. Consumers never receive a connection string and never send raw Cypher or SQL.',
     body);
 }
 

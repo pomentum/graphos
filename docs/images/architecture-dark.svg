@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 516" width="1000" height="516" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" role="img" aria-labelledby="title desc">
 <title id="title">How graphos is deployed</title>
-<desc id="desc">Consumers such as a loader job, an application, an analytics UI and an operator call graphos-api over the graphos-net network with a bearer token. graphos-api checks the token against the tenant in the path, validates typed request contracts, builds SQL internally with checked identifiers and capped limits, runs each query under a statement timeout, and emits metrics, JSON logs and an audit trail; it also runs Louvain community detection, in a separate process, and a key/value cache. Only graphos-api reaches graphos-db, PostgreSQL 16 with Apache AGE, over an internal network with no external port. Each tenant is its own AGE graph, and graphos_meta holds registrations and the cache. Consumers never receive a connection string and never send raw Cypher or SQL.</desc>
+<desc id="desc">Consumers such as a loader job, an application, an analytics UI and an operator call graphos-api over the graphos-net network with a bearer token. graphos-api checks the token against the tenant in the path and the read or write access each operation needs, validates typed request contracts, builds SQL internally with checked identifiers and capped limits, runs each query under a statement timeout, and emits metrics, JSON logs and an audit trail; it also runs Louvain community detection, in a separate process, and a key/value cache. Only graphos-api reaches graphos-db, PostgreSQL 16 with Apache AGE, over an internal network with no external port. Each tenant is its own AGE graph, and graphos_meta holds registrations and the cache. Consumers never receive a connection string and never send raw Cypher or SQL.</desc>
 <defs>
   <marker id="h0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8AB0FF"/></marker>
   <marker id="h1" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B7A6F2"/></marker>
@@ -30,7 +30,7 @@
 <text x="326" y="88" font-size="18" font-weight="700" fill="#8AB0FF">graphos-api</text>
 <text x="326" y="108" font-size="12.5" font-weight="400" fill="#9AA5B3">FastAPI · asyncpg · one process per replica</text>
 <rect x="324" y="124" width="294" height="42" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
-<text x="338" y="142" font-size="13" font-weight="600" fill="#E6EAEF">bearer token → tenant scope</text>
+<text x="338" y="142" font-size="13" font-weight="600" fill="#E6EAEF">bearer token → tenant, read/write</text>
 <text x="338" y="158" font-size="11.5" font-weight="400" fill="#9AA5B3">403 / 404 before any SQL</text>
 <rect x="324" y="174" width="294" height="42" rx="4" fill="#161A20" stroke="#2E3642" stroke-width="1.2"/>
 <text x="338" y="192" font-size="13" font-weight="600" fill="#E6EAEF">typed REST contracts</text>
