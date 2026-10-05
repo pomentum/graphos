@@ -10,8 +10,7 @@ from fastapi.responses import JSONResponse
 
 from graphos.api.graph import _check_tenant
 from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, wants_async
-from graphos.api.tenants import Principal
-from graphos.auth import require_admin
+from graphos.auth import WritePrincipal, require_admin
 from graphos.contracts.louvain import (
     RecomputeCommunitiesRequest,
     RecomputeCommunitiesResponse,
@@ -41,7 +40,7 @@ async def recompute(
     tenant: str,
     body: RecomputeCommunitiesRequest,
     request: Request,
-    principal: Principal,
+    principal: WritePrincipal,
 ) -> RecomputeCommunitiesResponse | JSONResponse:
     require_admin(principal)
     if not LOUVAIN_AVAILABLE:

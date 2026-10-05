@@ -193,6 +193,31 @@ class NodeGetResponse(BaseModel):
     elapsed_ms: int
 
 
+# ── One edge, by identity ──────────────────────────────────────────────────
+
+
+class EdgeGetResponse(BaseModel):
+    """One edge, named by its type and the ids of its two ends."""
+
+    tenant: str
+    type: str
+    src_id: str
+    src_label: str
+    dst_id: str
+    dst_label: str
+    properties: dict[str, object] = Field(default_factory=dict)
+    elapsed_ms: int
+
+
+class DeleteEdgeResponse(BaseModel):
+    tenant: str
+    type: str
+    src_id: str
+    dst_id: str
+    edges_deleted: int = Field(..., description="1, or 0 when there was no such edge.")
+    elapsed_ms: int
+
+
 # ── Edge upsert ────────────────────────────────────────────────────────────
 
 

@@ -412,3 +412,64 @@ async def test_list_and_cancel_jobs() -> None:
     assert cancelled.cancel_requested
     assert seen[1].method == "POST" and seen[1].url.path.endswith(":cancel")
     await cli.close()
+
+
+_EDGE = {
+    "tenant": "demo", "type": "CITES", "src_id": "a", "src_label": "Doc",
+    "dst_id": "b/1", "dst_label": "Doc", "properties": {"w": 1}, "elapsed_ms": 1,
+}
+
+
+@pytest.mark.asyncio
+async def test_patch_node_sends_a_merge_patch() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={
+            "tenant": "demo", "external_id": "a/1", "label": "Doc",
+            "properties": {"id": "a/1", "x": 2}, "elapsed_ms": 1,
+        })
+
+    cli = GraphosClient(base_url="http://x", tenant="demo", transport=_mock_transport(handler))
+    node = await cli.patch_node("a/1", {"x": 2, "old": None}, label="Doc")
+    assert node.properties == {"id": "a/1", "x": 2}
+    (req,) = seen
+    assert req.method == "PATCH"
+    assert req.url.raw_path == b"/v1/demo/graph/nodes/a%2F1?label=Doc"
+    assert req.headers["content-type"] == "application/merge-patch+json"
+    assert json.loads(req.content) == {"x": 2, "old": None}
+    await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_edge_get_patch_delete() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.method == "DELETE":
+            return httpx.Response(200, json={
+                "tenant": "demo", "type": "CITES", "src_id": "a", "dst_id": "b/1",
+                "edges_deleted": 1, "elapsed_ms": 1,
+            })
+        if request.url.params.get("dst") == "missing":
+            return httpx.Response(404, json={"detail": "no CITES edge"})
+        return httpx.Response(200, json=_EDGE)
+
+    cli = GraphosClient(base_url="http://x", tenant="demo", transport=_mock_transport(handler))
+    edge = await cli.get_edge("CITES", "a", "b/1", dst_label="Doc")
+    assert edge is not None and edge.properties == {"w": 1}
+    assert seen[0].url.path == "/v1/demo/graph/edges/CITES"
+    assert dict(seen[0].url.params) == {"src": "a", "dst": "b/1", "dst_label": "Doc"}
+    assert await cli.get_edge("CITES", "a", "missing") is None
+
+    await cli.patch_edge("CITES", "a", "b/1", {"w": None})
+    assert seen[2].method == "PATCH"
+    assert seen[2].headers["content-type"] == "application/merge-patch+json"
+    assert json.loads(seen[2].content) == {"w": None}
+
+    deleted = await cli.delete_edge("CITES", "a", "b/1", src_label="Doc")
+    assert deleted.edges_deleted == 1
+    assert dict(seen[3].url.params) == {"src": "a", "dst": "b/1", "src_label": "Doc"}
+    await cli.close()

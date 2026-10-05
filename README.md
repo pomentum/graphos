@@ -13,7 +13,7 @@ Your services send JSON over HTTP. graphos owns the database, writes the SQL aga
 
 ## Features
 
-- **Tenants are isolated AGE graphs.** Each consumer registers its own labels; tokens are scoped to tenants (wrong tenant → `403`, unknown → `404`).
+- **Tenants are isolated AGE graphs.** Each consumer registers its own labels; tokens are scoped to tenants (wrong tenant → `403`, unknown → `404`) and to `read` or `write`.
 - **Schema-agnostic.** No built-in labels or property names. Every endpoint takes label / property / edge names as parameters.
 - **Fast, idempotent writes:** small batches, NDJSON streaming bulk and single-file snapshot import all go through COPY-staged SQL upserts (`INSERT … ON CONFLICT`); in our measurements this was 37–156× faster than per-row Cypher `MERGE` (see [AGE notes](docs/apache-age.md)).
 - **Composable reads:** search, neighbors, multi-hop expand, induced subgraph, paginated node scan, stratified sampling, graphology export (sigma.js / Gephi).
@@ -39,7 +39,7 @@ docker compose -f docker-compose.graphos.yml up -d
 curl -s http://127.0.0.1:8080/readyz
 ```
 
-Tokens live in `services/graphos/deploy/secrets/graphos_tokens.json` (gitignored). Add one entry per consumer, scoped to its tenants (`{"<token>": {"consumer": "app", "tenants": ["acme"], "admin": false}}`), then `docker kill -s HUP graphos-api` to reload without a restart. The examples below use the admin token for brevity.
+Tokens live in `services/graphos/deploy/secrets/graphos_tokens.json` (gitignored). Add one entry per consumer, scoped to its tenants and to read or write (`{"<token>": {"consumer": "app", "tenants": ["acme"], "admin": false, "access": "read"}}`), then `docker kill -s HUP graphos-api` to reload without a restart. The examples below use the admin token for brevity.
 
 **Register a tenant** (idempotent — safe to call on every consumer start):
 

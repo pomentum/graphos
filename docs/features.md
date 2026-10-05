@@ -46,9 +46,13 @@ inheritance), and free-form `meta`.
   starts.
 
 **Tokens** are loaded from the JSON file named by `GRAPHOS_AUTH_TOKENS_FILE`
-and reloaded on `SIGHUP`. A token's scope is a tenant list plus an `admin`
-flag. The file must be a JSON object; malformed entries are skipped (logged)
-and the rest load.
+and reloaded on `SIGHUP`. A token's scope is a tenant list, an `admin` flag
+and its `access`: `read` (operations that change nothing) or `write`. A token
+without `access` gets `write`, with a warning in the log. The file must be a
+JSON object; malformed entries are skipped (logged) and the rest load.
+
+- Every operation declares `read` or `write`, shown as its bearer scope in
+  `/openapi.json`; a read-only token gets 403 on a write, admin or not.
 
 - Without a tokens file, graphos refuses to start unless
   `GRAPHOS_AUTH_DISABLED=true` (development only: every request becomes an
@@ -88,7 +92,14 @@ one id (or one src/dst pair) in a batch collapse into one row.
   rows.
 - **Property merge** (`POST …/graph/nodes/{external_id}/properties`): merges a
   property bag onto an existing node found by external id across all labels.
-  Echoes the label; 404 if no node has that id.
+  Echoes the label; 404 if no node has that id; 409 if the id is in several
+  labels and `label` does not pick one.
+- **Patch one node or one edge** (`PATCH …/graph/nodes/{external_id}`,
+  `PATCH …/graph/edges/{type}?src=&dst=`): JSON Merge Patch (RFC 7396) of its
+  properties (`null` removes a key, nested objects merge), read, locked and
+  written back in one transaction; returns the row as written. An edge is
+  named by its type and end ids; `GET` and `DELETE` on the same path read or
+  remove it.
 - **NDJSON bulk** (`POST …/graph/nodes:bulk`, `…/graph/edges:bulk`): one row
   per line, flushed in 500-row batches per label / edge key, each batch in its
   own transaction. Invalid lines are skipped and reported (`rows_invalid`, up
@@ -385,8 +396,9 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
 - **Logging:** structured JSON. Each request's lines carry `method`, `route`,
   and `trace_id` taken from an inbound W3C `traceparent` (echoed back). No
   spans are produced.
-- **Audit:** on by default for POST/PUT/PATCH/DELETE. One JSON log line per
-  request with `method`, `path`, `tenant`, `consumer` (the token's consumer
+- **Audit:** on by default for writes: the operations declared `write`,
+  whatever their method (a `POST` read such as `nodes:scan` is not audited).
+  One JSON log line per request with `method`, `path`, `tenant`, `consumer` (the token's consumer
   name), `args_hash` (truncated SHA-256 of the body), `status`, and
   `elapsed_ms`.
 - **Rate limiting:** per-token in-memory sliding window keyed by a SHA-256

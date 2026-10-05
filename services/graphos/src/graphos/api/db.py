@@ -22,11 +22,11 @@ import time
 from typing import Annotated
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, wants_async
-from graphos.auth import TokenPrincipal, require_admin, require_principal
+from graphos.auth import ReadPrincipal, TokenPrincipal, WritePrincipal, require_admin
 from graphos.contracts.db import (
     DbStatsResponse,
     SlowQueriesResponse,
@@ -40,8 +40,6 @@ from graphos.db import allow_long_statements
 _VACUUM_TIMEOUT_S = 3600.0
 
 router = APIRouter(tags=["db"], prefix="/db")
-
-AdminPrincipal = Annotated[TokenPrincipal, Depends(require_principal)]
 
 # Whitelist of identifier characters for table names supplied to /vacuum.
 # We do NOT interpolate untrusted strings into VACUUM commands; the regex
@@ -64,7 +62,7 @@ def _ensure_admin(principal: TokenPrincipal) -> None:
     response_model=DbStatsResponse,
     summary="Database stats: sizes, dead-tuple counts, vacuum timestamps",
 )
-async def db_stats(request: Request, principal: AdminPrincipal) -> DbStatsResponse:
+async def db_stats(request: Request, principal: ReadPrincipal) -> DbStatsResponse:
     _ensure_admin(principal)
 
     pool = request.app.state.pool
@@ -130,7 +128,7 @@ async def db_stats(request: Request, principal: AdminPrincipal) -> DbStatsRespon
 )
 async def slow_queries(
     request: Request,
-    principal: AdminPrincipal,
+    principal: ReadPrincipal,
     limit: Annotated[int, Query(ge=1, le=200)] = 25,
 ) -> SlowQueriesResponse:
     _ensure_admin(principal)
@@ -230,7 +228,7 @@ def _validated_table_names(tables: list[str] | None) -> list[str]:
 async def vacuum(
     body: VacuumRequest,
     request: Request,
-    principal: AdminPrincipal,
+    principal: WritePrincipal,
 ) -> VacuumResponse | JSONResponse:
     _ensure_admin(principal)
     _validated_table_names(body.tables)   # reject bad names before queueing

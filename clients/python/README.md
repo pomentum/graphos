@@ -82,8 +82,8 @@ Runnable scripts in [`examples/`](examples/). Each reads `GRAPHOS_URL` (default 
 | Area | Methods |
 |---|---|
 | Tenants | `register_tenant`, `list_tenants`, `get_tenant`, `unregister_tenant` |
-| Writes | `upsert_nodes`, `upsert_edges`, `bulk_upsert_nodes`, `bulk_upsert_edges`, `snapshot_import`, `upsert_node_properties`, `delete_node`, `delete_by_property` |
-| Reads | `search`, `get_node`, `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `scan_nodes` / `scan_nodes_iter`, `scan_edges` / `scan_edges_iter`, `export_graph` |
+| Writes | `upsert_nodes`, `upsert_edges`, `bulk_upsert_nodes`, `bulk_upsert_edges`, `snapshot_import`, `upsert_node_properties`, `patch_node`, `patch_edge`, `delete_node`, `delete_edge`, `delete_by_property` |
+| Reads | `search`, `get_node`, `get_edge`, `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `scan_nodes` / `scan_nodes_iter`, `scan_edges` / `scan_edges_iter`, `export_graph` |
 | Aggregates | `label_histogram`, `label_top_by_edge`, `aggregate_nodes`, `aggregate_edges`, `tenant_stats` |
 | Communities | `recompute_communities`, `list_communities`, `community_summary`, `community_ids` |
 | Rule-based edges | `resolve_edges`, `catalogue` |

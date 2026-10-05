@@ -1,7 +1,8 @@
 """Every write to a tenant's graph data goes through this module.
 
-Nodes, edges, property merges, deletes, rule-resolved edges and community
-write-back: each function here is the only place its SQL lives.  Nothing
+Nodes, edges, property merges and patches, deletes, rule-resolved edges
+and community write-back: each function here is the only place its SQL
+lives.  Nothing
 else in graphos inserts, updates or deletes rows of the AGE label tables
 (``tests/test_write_path.py`` enforces it).  Revisions and a change log,
 when they come, are added here once instead of at every call site.
@@ -11,6 +12,10 @@ Conventions every function follows:
 * **One transaction per call**, owned by the function.  The one exception
   is :func:`set_edge_end_communities`, which commits each edge label
   separately so a failure on one label keeps the others.
+* **One node or edge by identity** (merge, patch, single-edge delete) is
+  found with :mod:`graphos.lookup` inside the write's transaction, its row
+  locked, so an id in several labels raises
+  :class:`graphos.lookup.AmbiguousMatchError` instead of writing them all.
 * **Names are trusted.** Tenant, label and edge-type names are
   interpolated into SQL; callers pass names already checked against the
   tenant's registered spec.  Values always go in as bind parameters.
@@ -40,6 +45,7 @@ from typing import TYPE_CHECKING, Any
 
 import asyncpg
 
+from graphos import lookup
 from graphos.cypher import CypherError
 from graphos.db import allow_long_statements
 
@@ -233,38 +239,175 @@ async def merge_node_properties(
     tenant: str,
     external_id: str,
     properties: Mapping[str, Any],
+    label: str | None = None,
 ) -> str | None:
-    """Merge ``properties`` onto the node(s) whose ``id`` is ``external_id``.
+    """Merge ``properties`` onto the node whose ``id`` is ``external_id``.
 
-    One UPDATE on the parent ``_ag_label_vertex`` reaches every label table
-    through inheritance, each served by its ``<Label>_id_unique`` index.
-    Keys in the payload overwrite, keys absent are preserved.
+    Top-level keys in the payload overwrite, keys absent are preserved
+    (agtype ``||``).  ``label`` picks the node when the id exists in more
+    than one label.
 
     Returns:
-        The label of a node that was updated, or ``None`` if no node has
-        that id.
+        The label of the node updated, or ``None`` if no node has that id.
+
+    Raises:
+        graphos.lookup.AmbiguousMatchError: the id exists in several labels
+            and no ``label`` was given.  Nothing is written.
     """
     with _db_errors(
-        "node property merge failed", query="UPDATE _ag_label_vertex SET properties",
-        graph=tenant,
+        "node property merge failed", query="UPDATE <label> SET properties ||", graph=tenant,
     ):
         async with pool.acquire() as conn, conn.transaction():
-            return await conn.fetchval(
-                f"""
-                WITH updated AS (
-                  UPDATE "{tenant}"."_ag_label_vertex" v
-                  SET properties = v.properties || $1::agtype
-                  WHERE (v.properties->'"id"') = ('"' || $2::text || '"')::agtype
-                  RETURNING tableoid
-                )
-                SELECT c.relname
-                FROM updated u
-                JOIN pg_class c ON c.oid = u.tableoid
-                LIMIT 1;
-                """,
-                json.dumps(dict(properties)),
-                external_id,
+            node = await lookup.find_node(
+                conn, tenant=tenant, external_id=external_id, label=label, for_update=True,
             )
+            if node is None:
+                return None
+            await conn.execute(
+                f'UPDATE "{tenant}"."{node.label}" '
+                f"SET properties = properties || $2::text::agtype WHERE {lookup.ID_MATCH};",
+                json.dumps(external_id),
+                json.dumps(dict(properties)),
+            )
+            return node.label
+
+
+def apply_merge_patch(target: Any, patch: Any) -> Any:
+    """``target`` with JSON Merge Patch ``patch`` applied (RFC 7396).
+
+    An object patch merges key by key, recursing into nested objects; a
+    ``None`` (JSON ``null``) value removes the key; any other value, arrays
+    included, replaces it.  ``target`` is not modified.
+    """
+    if not isinstance(patch, dict):
+        return patch
+    result = dict(target) if isinstance(target, dict) else {}
+    for key, value in patch.items():
+        if value is None:
+            result.pop(key, None)
+        else:
+            result[key] = apply_merge_patch(result.get(key), value)
+    return result
+
+
+async def patch_node(
+    pool: asyncpg.Pool,
+    *,
+    tenant: str,
+    external_id: str,
+    patch: Mapping[str, Any],
+    label: str | None = None,
+) -> lookup.NodeRow | None:
+    """Apply a JSON Merge Patch to the properties of one node.
+
+    The node is read and locked, patched, and written back in one
+    transaction.  ``label`` picks the node when the id exists in more than
+    one label.
+
+    Returns:
+        The node as written, or ``None`` if no node has that id.
+
+    Raises:
+        ValueError: the patch touches ``id``, which names the node.
+        graphos.lookup.AmbiguousMatchError: see :func:`merge_node_properties`.
+    """
+    if "id" in patch:
+        raise ValueError("'id' names the node and cannot be patched")
+    with _db_errors("node patch failed", query="UPDATE <label> SET properties", graph=tenant):
+        async with pool.acquire() as conn, conn.transaction():
+            node = await lookup.find_node(
+                conn, tenant=tenant, external_id=external_id, label=label, for_update=True,
+            )
+            if node is None:
+                return None
+            properties = apply_merge_patch(node.properties, dict(patch))
+            await conn.execute(
+                f'UPDATE "{tenant}"."{node.label}" '
+                f"SET properties = $2::text::agtype WHERE {lookup.ID_MATCH};",
+                json.dumps(external_id),
+                json.dumps(properties),
+            )
+    return lookup.NodeRow(label=node.label, properties=properties)
+
+
+async def patch_edge(  # noqa: PLR0913 — the edge's identity has this many parts
+    pool: asyncpg.Pool,
+    *,
+    tenant: str,
+    edge_type: str,
+    src_id: str,
+    dst_id: str,
+    patch: Mapping[str, Any],
+    src_label: str | None = None,
+    dst_label: str | None = None,
+) -> lookup.EdgeRow | None:
+    """Apply a JSON Merge Patch to the properties of one edge.
+
+    Returns:
+        The edge as written, or ``None`` if there is no such edge.
+
+    Raises:
+        graphos.lookup.AmbiguousMatchError: an end id exists in several
+            labels, more than one such edge exists, and the labels given
+            don't pick one.  Nothing is written.
+    """
+    with _db_errors(
+        "edge patch failed", query=f"UPDATE {edge_type} SET properties", graph=tenant,
+    ):
+        async with pool.acquire() as conn, conn.transaction():
+            edge = await lookup.find_edge(
+                conn, tenant=tenant, edge_type=edge_type, src_id=src_id, dst_id=dst_id,
+                src_label=src_label, dst_label=dst_label, for_update=True,
+            )
+            if edge is None:
+                return None
+            properties = apply_merge_patch(edge.properties, dict(patch))
+            await conn.execute(
+                f'UPDATE "{tenant}"."{edge_type}" SET properties = $3::text::agtype '
+                f"WHERE start_id = $1::text::graphid AND end_id = $2::text::graphid;",
+                edge.start_gid,
+                edge.end_gid,
+                json.dumps(properties),
+            )
+    return lookup.EdgeRow(
+        src_label=edge.src_label, dst_label=edge.dst_label,
+        start_gid=edge.start_gid, end_gid=edge.end_gid, properties=properties,
+    )
+
+
+async def delete_edge(  # noqa: PLR0913 — the edge's identity has this many parts
+    pool: asyncpg.Pool,
+    *,
+    tenant: str,
+    edge_type: str,
+    src_id: str,
+    dst_id: str,
+    src_label: str | None = None,
+    dst_label: str | None = None,
+) -> int:
+    """Delete one edge; its end nodes stay.
+
+    Returns:
+        1, or 0 if there is no such edge (idempotent).
+
+    Raises:
+        graphos.lookup.AmbiguousMatchError: see :func:`patch_edge`.
+    """
+    with _db_errors("edge delete failed", query=f"DELETE {edge_type}", graph=tenant):
+        async with pool.acquire() as conn, conn.transaction():
+            edge = await lookup.find_edge(
+                conn, tenant=tenant, edge_type=edge_type, src_id=src_id, dst_id=dst_id,
+                src_label=src_label, dst_label=dst_label, for_update=True,
+            )
+            if edge is None:
+                return 0
+            await conn.execute(
+                f'DELETE FROM "{tenant}"."{edge_type}" '
+                f"WHERE start_id = $1::text::graphid AND end_id = $2::text::graphid;",
+                edge.start_gid,
+                edge.end_gid,
+            )
+    return 1
 
 
 async def delete_nodes(
@@ -273,9 +416,11 @@ async def delete_nodes(
     tenant: str,
     property_key: str,
     property_value: str,
+    label: str | None = None,
 ) -> tuple[int, int]:
     """Delete every node whose ``property_key`` equals the string
-    ``property_value``, with every edge that touches one of them.
+    ``property_value`` (in ``label`` only, when given), with every edge that
+    touches one of them.
 
     One statement, so nodes and edges go together or not at all.  ``id`` is
     matched through the per-label unique index; any other key through the
@@ -295,7 +440,7 @@ async def delete_nodes(
         arg = json.dumps({property_key: property_value})
     sql = f"""
         WITH v AS (
-            DELETE FROM "{tenant}"."_ag_label_vertex"
+            DELETE FROM "{tenant}"."{label or '_ag_label_vertex'}"
             WHERE {match}
             RETURNING id
         ), e AS (

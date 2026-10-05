@@ -8,6 +8,7 @@ import logging
 from collections.abc import Iterable, Mapping
 from http import HTTPStatus
 from typing import Any
+from urllib.parse import quote
 from uuid import UUID
 
 import httpx
@@ -21,7 +22,9 @@ from graphos_client._models import (
     CommunityIdsResponse,
     CommunitySummary,
     DeleteByPropertyResponse,
+    DeleteEdgeResponse,
     DeleteNodeResponse,
+    EdgeGetResponse,
     EdgesAggregateResponse,
     EdgesScanResponse,
     EdgesUpsertResponse,
@@ -47,6 +50,12 @@ from graphos_client._models import (
 )
 
 log = logging.getLogger(__name__)
+
+_MERGE_PATCH = "application/merge-patch+json"
+
+
+def _label_param(label: str | None) -> dict[str, str] | None:
+    return None if label is None else {"label": label}
 
 
 # Sentinel for "argument not passed" — distinguished from explicit
@@ -748,9 +757,13 @@ class GraphosClient:
 
     # ── deletes ────────────────────────────────────────────────────────────
 
-    async def delete_node(self, node_id: str) -> DeleteNodeResponse:
+    async def delete_node(
+        self, node_id: str, *, label: str | None = None,
+    ) -> DeleteNodeResponse:
+        """Delete the node(s) with this id and their edges; only in ``label``
+        when given."""
         resp = await self._request(
-            "DELETE", f"/v1/{self._tenant}/graph/nodes/{node_id}",
+            "DELETE", self._node_path(node_id), params=_label_param(label),
         )
         return DeleteNodeResponse.model_validate(resp.json())
 
@@ -901,11 +914,20 @@ class GraphosClient:
         )
         return TopByEdgeResponse.model_validate(resp.json())
 
-    async def get_node(self, external_id: str) -> NodeGetResponse | None:
-        """Fetch one node by external id.  Returns None on 404."""
+    def _node_path(self, external_id: str) -> str:
+        return f"/v1/{self._tenant}/graph/nodes/{quote(external_id, safe='')}"
+
+    async def get_node(
+        self, external_id: str, *, label: str | None = None,
+    ) -> NodeGetResponse | None:
+        """Fetch one node by external id.  Returns None on 404.
+
+        An id that exists in several labels raises ``GraphosError`` (409)
+        unless ``label`` picks one.
+        """
         try:
             resp = await self._request(
-                "GET", f"/v1/{self._tenant}/graph/nodes/{external_id}",
+                "GET", self._node_path(external_id), params=_label_param(label),
             )
         except GraphosError as exc:
             if getattr(exc, "status_code", None) == HTTPStatus.NOT_FOUND:
@@ -914,17 +936,89 @@ class GraphosClient:
         return NodeGetResponse.model_validate(resp.json())
 
     async def upsert_node_properties(
-        self, external_id: str, properties: dict[str, Any],
+        self, external_id: str, properties: dict[str, Any], *, label: str | None = None,
     ) -> NodePropertiesUpsertResponse:
         """Merge a property bag onto the node whose ``properties.id``
-        matches *external_id*.  Schema-agnostic; one SQL UPDATE.
+        matches *external_id* (top-level keys overwrite, others are kept).
+        ``label`` picks the node when the id exists in several labels.
         """
         resp = await self._request(
             "POST",
-            f"/v1/{self._tenant}/graph/nodes/{external_id}/properties",
+            f"{self._node_path(external_id)}/properties",
+            params=_label_param(label),
             json_body={"properties": properties},
         )
         return NodePropertiesUpsertResponse.model_validate(resp.json())
+
+    async def patch_node(
+        self, external_id: str, patch: Mapping[str, Any], *, label: str | None = None,
+    ) -> NodeGetResponse:
+        """Apply a JSON Merge Patch (RFC 7396) to one node's properties.
+
+        ``None`` removes a key, a nested dict merges key by key, any other
+        value replaces; keys not in ``patch`` are kept.  Returns the node as
+        written.
+        """
+        resp = await self._request(
+            "PATCH",
+            self._node_path(external_id),
+            params=_label_param(label),
+            content=json.dumps(dict(patch)),
+            content_type=_MERGE_PATCH,
+        )
+        return NodeGetResponse.model_validate(resp.json())
+
+    # ── One edge, by identity ──────────────────────────────────────────────
+    #
+    # An edge is named by its type and its end ids; ``src_label`` /
+    # ``dst_label`` pick one when an end id exists in several labels (the
+    # server answers 409 until they do).
+
+    def _edge_request_args(
+        self, edge_type: str, src_id: str, dst_id: str,
+        src_label: str | None, dst_label: str | None,
+    ) -> tuple[str, dict[str, str]]:
+        params = {"src": src_id, "dst": dst_id}
+        if src_label is not None:
+            params["src_label"] = src_label
+        if dst_label is not None:
+            params["dst_label"] = dst_label
+        return f"/v1/{self._tenant}/graph/edges/{quote(edge_type, safe='')}", params
+
+    async def get_edge(
+        self, edge_type: str, src_id: str, dst_id: str, *,
+        src_label: str | None = None, dst_label: str | None = None,
+    ) -> EdgeGetResponse | None:
+        """Fetch one edge.  Returns None on 404."""
+        path, params = self._edge_request_args(edge_type, src_id, dst_id, src_label, dst_label)
+        try:
+            resp = await self._request("GET", path, params=params)
+        except GraphosError as exc:
+            if getattr(exc, "status_code", None) == HTTPStatus.NOT_FOUND:
+                return None
+            raise
+        return EdgeGetResponse.model_validate(resp.json())
+
+    async def patch_edge(  # noqa: PLR0913 — the edge's identity has this many parts
+        self, edge_type: str, src_id: str, dst_id: str, patch: Mapping[str, Any], *,
+        src_label: str | None = None, dst_label: str | None = None,
+    ) -> EdgeGetResponse:
+        """Apply a JSON Merge Patch (RFC 7396) to one edge's properties."""
+        path, params = self._edge_request_args(edge_type, src_id, dst_id, src_label, dst_label)
+        resp = await self._request(
+            "PATCH", path, params=params,
+            content=json.dumps(dict(patch)), content_type=_MERGE_PATCH,
+        )
+        return EdgeGetResponse.model_validate(resp.json())
+
+    async def delete_edge(
+        self, edge_type: str, src_id: str, dst_id: str, *,
+        src_label: str | None = None, dst_label: str | None = None,
+    ) -> DeleteEdgeResponse:
+        """Delete one edge; its end nodes stay.  Idempotent."""
+        path, params = self._edge_request_args(edge_type, src_id, dst_id, src_label, dst_label)
+        resp = await self._request("DELETE", path, params=params)
+        return DeleteEdgeResponse.model_validate(resp.json())
 
     # ── Schema-agnostic K/V cache ──────────────────────────────────────────
 

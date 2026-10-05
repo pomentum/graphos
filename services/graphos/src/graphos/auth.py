@@ -1,4 +1,4 @@
-"""Bearer-token auth middleware.
+"""Bearer-token auth and per-route access.
 
 Tokens are loaded from a JSON file at startup (and on SIGHUP — see app.py).
 File shape::
@@ -7,14 +7,31 @@ File shape::
       "tok_abc...": {
         "consumer": "app-reader",
         "tenants":  ["demo"],
-        "admin":    false
+        "admin":    false,
+        "access":   "read"
       },
       "tok_xyz...": {
         "consumer": "ops",
         "tenants":  ["demo"],
-        "admin":    true
+        "admin":    true,
+        "access":   "write"
       }
     }
+
+``access`` is ``"read"`` or ``"write"``.  A token without it gets
+``"write"`` (what every token could do before the field existed), and a
+warning is logged until the file says so explicitly.  It is independent of
+``admin``: a read-only admin can list tenants and database statistics but
+change nothing.
+
+Every authenticated route declares the access it needs by taking its
+principal as :data:`ReadPrincipal` or :data:`WritePrincipal`: a FastAPI
+``Security`` dependency whose scope (``read`` / ``write``) the OpenAPI
+schema shows on each operation.  ``tests/test_access.py`` fails on an
+operation that declares neither and is not one of the few public ones.
+The same dependency enforces the tenant scope of any route with a
+``{tenant}`` path parameter, so a tenant route cannot forget it, and
+records the access in the request scope, where the audit log reads it.
 
 Lookup is O(1). Reload is atomic — the token map is swapped under a lock.
 """
@@ -25,11 +42,25 @@ import json
 import logging
 import threading
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, Security, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, SecurityScopes
 
 log = logging.getLogger(__name__)
+
+
+class Access(StrEnum):
+    """What a token may do, and what a route requires."""
+
+    READ = "read"
+    WRITE = "write"
+
+
+# Request-scope key under which require_principal records a route's access.
+ACCESS_SCOPE_KEY = "graphos.access"
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +68,7 @@ class TokenPrincipal:
     consumer: str
     tenants: frozenset[str]
     admin: bool
+    access: Access = Access.WRITE
 
 
 class TokenStore:
@@ -75,14 +107,19 @@ class TokenStore:
             with self._lock:
                 return len(self._tokens)
         new_map: dict[str, TokenPrincipal] = {}
+        implicit_write: list[str] = []
         for token, principal in raw.items():
             try:
+                access = principal.get("access")
                 new_map[str(token)] = TokenPrincipal(
                     consumer=str(principal["consumer"]),
                     tenants=frozenset(str(t) for t in principal.get("tenants", [])),
                     admin=bool(principal.get("admin", False)),
+                    access=Access.WRITE if access is None else _token_access(access),
                 )
-            except (KeyError, TypeError, AttributeError):
+                if access is None:
+                    implicit_write.append(str(principal["consumer"]))
+            except (KeyError, TypeError, AttributeError, ValueError):
                 # Never log the token itself; skip the bad entry, keep the rest.
                 log.error(
                     "auth tokens file: skipping malformed entry",
@@ -92,6 +129,12 @@ class TokenStore:
             self._tokens = new_map
         self.load_error = None
         log.info("auth tokens reloaded", extra={"count": len(new_map)})
+        if implicit_write:
+            log.warning(
+                'auth tokens without "access" are given write access; set '
+                '"access": "read" or "write" on each',
+                extra={"path": str(self._path), "consumers": sorted(implicit_write)},
+            )
         return len(new_map)
 
     def lookup(self, token: str) -> TokenPrincipal | None:
@@ -99,26 +142,20 @@ class TokenStore:
             return self._tokens.get(token)
 
 
-def extract_bearer(request: Request) -> str:
-    auth = request.headers.get("authorization", "")
-    if not auth.lower().startswith("bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="missing or malformed Authorization header",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return auth.split(" ", 1)[1].strip()
-
-
 _ANONYMOUS_ADMIN = TokenPrincipal(consumer="anonymous", tenants=frozenset(), admin=True)
 
+_bearer = HTTPBearer(
+    auto_error=False,
+    description=(
+        "A token from GRAPHOS_AUTH_TOKENS_FILE.  Each operation's scope is the "
+        "access its token needs: `read` or `write`."
+    ),
+)
 
-def require_principal(request: Request) -> TokenPrincipal:
-    """FastAPI dependency: returns principal or raises 401.
 
-    The principal is also stored in ``request.scope["principal"]`` so the
-    audit middleware can record which consumer made a write.
-    """
+def _authenticate(
+    request: Request, credentials: HTTPAuthorizationCredentials | None,
+) -> TokenPrincipal:
     store: TokenStore | None = getattr(request.app.state, "token_store", None)
     if store is None:
         settings = getattr(request.app.state, "settings", None)
@@ -129,18 +166,64 @@ def require_principal(request: Request) -> TokenPrincipal:
                 detail="authentication is not configured on this server",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        request.scope["principal"] = _ANONYMOUS_ADMIN
         return _ANONYMOUS_ADMIN
-    token = extract_bearer(request)
-    principal = store.lookup(token)
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="missing or malformed Authorization header",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    principal = store.lookup(credentials.credentials.strip())
     if principal is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    request.scope["principal"] = principal
     return principal
+
+
+def require_principal(
+    request: Request,
+    security_scopes: SecurityScopes,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> TokenPrincipal:
+    """FastAPI dependency: the caller's principal, held to the route's access.
+
+    Use it through :data:`ReadPrincipal` / :data:`WritePrincipal`, which
+    set its scope.  Raises 401 without a valid token, and 403 when the
+    token has no access to the path's ``{tenant}`` or the route needs write
+    and the token is read-only.  A route that declares no scope is held to
+    write.
+
+    The access is recorded in ``request.scope[ACCESS_SCOPE_KEY]`` before the
+    token is checked, and the principal in ``request.scope["principal"]``,
+    so the audit middleware can tell a write (even a refused one) and who
+    made it.
+    """
+    needed = Access.READ if security_scopes.scopes == [Access.READ.value] else Access.WRITE
+    request.scope[ACCESS_SCOPE_KEY] = needed
+    principal = _authenticate(request, credentials)
+    request.scope["principal"] = principal
+    tenant = request.path_params.get("tenant")
+    if tenant is not None:
+        require_tenant_access(principal, tenant)
+    if needed is Access.WRITE and principal.access is not Access.WRITE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="this token is read-only",
+        )
+    return principal
+
+
+ReadPrincipal = Annotated[TokenPrincipal, Security(require_principal, scopes=[Access.READ.value])]
+WritePrincipal = Annotated[TokenPrincipal, Security(require_principal, scopes=[Access.WRITE.value])]
+
+
+def _token_access(value: object) -> Access:
+    if value not in (Access.READ, Access.WRITE):
+        raise ValueError(f"access must be 'read' or 'write', not {value!r}")
+    return Access(value)
 
 
 def require_tenant_access(principal: TokenPrincipal, tenant: str) -> None:
@@ -164,3 +247,4 @@ def require_admin(principal: TokenPrincipal) -> None:
 def require_tenant(principal: TokenPrincipal, tenant: str) -> None:
     """Caller's token must include this tenant (or be admin-scoped)."""
     require_tenant_access(principal, tenant)
+

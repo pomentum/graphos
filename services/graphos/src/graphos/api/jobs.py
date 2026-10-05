@@ -16,8 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from graphos import jobs
-from graphos.api.tenants import Principal
-from graphos.auth import TokenPrincipal
+from graphos.auth import ReadPrincipal, TokenPrincipal, WritePrincipal
 from graphos.contracts.jobs import Job, JobList, JobStatus
 
 router = APIRouter(tags=["jobs"], prefix="/jobs")
@@ -86,7 +85,7 @@ def _not_found(job_id: UUID) -> HTTPException:
 
 
 @router.get("/{job_id}", response_model=Job, summary="One job's status and outcome")
-async def get_job(job_id: UUID, request: Request, principal: Principal) -> Job:
+async def get_job(job_id: UUID, request: Request, principal: ReadPrincipal) -> Job:
     job = await jobs.get(request.app.state.pool, job_id)
     if job is None or not _visible(principal, job):
         raise _not_found(job_id)
@@ -96,7 +95,7 @@ async def get_job(job_id: UUID, request: Request, principal: Principal) -> Job:
 @router.get("", response_model=JobList, summary="Recent jobs, newest first")
 async def list_jobs(
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
     tenant: Annotated[str | None, Query(description="Only this tenant's jobs.")] = None,
     status_: Annotated[JobStatus | None, Query(alias="status")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
@@ -125,7 +124,7 @@ async def list_jobs(
         "needs admin scope."
     ),
 )
-async def cancel_job(job_id: UUID, request: Request, principal: Principal) -> Job:
+async def cancel_job(job_id: UUID, request: Request, principal: WritePrincipal) -> Job:
     pool = request.app.state.pool
     runner: jobs.JobRunner = request.app.state.job_runner
     job = await jobs.get(pool, job_id)

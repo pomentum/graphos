@@ -108,17 +108,27 @@ that setting for local development only.
 
 ```json
 {
-  "tok_admin_…":  {"consumer": "ops",      "tenants": [],       "admin": true},
-  "tok_acme_app": {"consumer": "acme-app", "tenants": ["acme"], "admin": false}
+  "tok_admin_…":  {"consumer": "ops",      "tenants": [],       "admin": true,  "access": "write"},
+  "tok_acme_app": {"consumer": "acme-app", "tenants": ["acme"], "admin": false, "access": "write"},
+  "tok_acme_ui":  {"consumer": "acme-ui",  "tenants": ["acme"], "admin": false, "access": "read"}
 }
 ```
 
-Send the token as `Authorization: Bearer <token>`. There are only two scopes.
+Send the token as `Authorization: Bearer <token>`. A token has three settings.
 
-| Scope | Grants |
+| Setting | Grants |
 |---|---|
-| tenant membership (`tenants`) | read **and** write on `/v1/{tenant}/graph/...` for the listed tenants |
+| `tenants` | `/v1/{tenant}/...` for the listed tenants |
 | `admin: true` | every tenant, plus `/v1/tenants*`, `POST /v1/{tenant}/recompute-communities`, `/v1/db/*` |
+| `access` | `"read"`: only operations that change nothing; `"write"`: every operation the other two settings allow |
+
+`access` is independent of `admin`: a read-only admin can list tenants and database statistics but
+change nothing. A token without `access` gets `"write"`, which is what every token could do before
+the setting existed, and graphos logs a warning naming its consumer until the file sets it.
+`/openapi.json` shows the access each operation needs as its bearer scope (`read` or `write`). Reads
+sent as `POST` (`nodes:scan`, `edges:scan`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`,
+`nodes/aggregate`, `edges/aggregate`, `community-ids`) need only `read`. A read-only token gets 403 on
+a write.
 
 These endpoints need no token: `/healthz`, `/readyz`, `/metrics`, `/v1/info`, `/` and `/docs`.
 
@@ -215,9 +225,28 @@ are 1–512 characters; labels and `type` must match `^[A-Z][A-Za-z0-9_]{0,62}$`
 | Path | Endpoint | Body | Use when |
 |---|---|---|---|
 | Small batch | `POST /v1/{t}/graph/nodes`, `/edges` | JSON `{"nodes": [...]}` / `{"edges": [...]}`, 1–1000 rows | interactive or incremental writes |
-| Property merge | `POST /v1/{t}/graph/nodes/{external_id}/properties` | `{"properties": {...}}` (at least one key) | adding values to an existing node without knowing its label (404 if the node is absent) |
+| Property merge | `POST /v1/{t}/graph/nodes/{external_id}/properties[?label=]` | `{"properties": {...}}` (at least one key) | adding top-level values to an existing node without knowing its label (404 if the node is absent) |
+| Patch a node | `PATCH /v1/{t}/graph/nodes/{external_id}[?label=]` | JSON Merge Patch | changing or removing properties of one node; returns the node as written |
+| Patch an edge | `PATCH /v1/{t}/graph/edges/{type}?src=&dst=[&src_label=&dst_label=]` | JSON Merge Patch | changing or removing properties of one edge; returns the edge as written |
 | NDJSON bulk | `POST /v1/{t}/graph/nodes:bulk`, `/edges:bulk` | NDJSON, one `NodeUpsert` / `EdgeUpsert` per line | large loads; bad lines are skipped and reported |
 | Snapshot import | `POST /v1/{t}/graph/snapshot-import` | NDJSON mixing nodes and edges, with `_kind` on each line | one request for a mixed file |
+
+**One node or edge by identity.** A node is named by its `id`, an edge by its type and the ids
+of its two ends. Ids are unique within a label but not across labels, so an id can name a node in
+two labels; an identity that matches more than one node or edge answers 409 with the candidate
+labels, and nothing is written, until `label` (nodes) or `src_label` / `dst_label` (edges) picks
+one. The patch is a JSON Merge Patch (RFC 7396), sent as `application/merge-patch+json` or
+`application/json`: a key set to `null` is removed, a nested object merges key by key, any other
+value (arrays included) replaces the old one, and keys not in the patch are kept. A node's `id`
+cannot be patched (422). The row is read, locked, patched and written back in one transaction.
+
+```bash
+curl -s -X PATCH "$G/v1/acme/graph/edges/AUTHORED?src=u1&dst=d1" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/merge-patch+json" \
+  -d '{"role": "editor", "draft": null}'
+# → {"tenant":"acme","type":"AUTHORED","src_id":"u1","src_label":"User","dst_id":"d1",
+#    "dst_label":"Document","properties":{"role":"editor"},"elapsed_ms":…}
+```
 
 **Atomicity.** A small-batch call runs one transaction per label (nodes) or per
 `(src_label, dst_label, type)` group (edges). The NDJSON endpoints commit in batches: 500 rows per label or edge
@@ -282,20 +311,24 @@ and `snapshot-import` bodies. Size requests with that in mind.
 
 | Call | Effect |
 |---|---|
-| `DELETE /v1/{t}/graph/nodes/{node_id}` | Delete the node(s) with that external id and their edges, in one transaction; idempotent (`nodes_deleted: 0` if absent) |
+| `DELETE /v1/{t}/graph/nodes/{node_id}[?label=]` | Delete the node(s) with that external id (in any label, or only in `label`) and their edges, in one transaction; idempotent (`nodes_deleted: 0` if absent) |
+| `DELETE /v1/{t}/graph/edges/{type}?src=&dst=[&src_label=&dst_label=]` | Delete one edge; its end nodes stay; idempotent (`edges_deleted: 0` if absent); 409 when several edges match |
 | `DELETE /v1/{t}/graph/nodes?property_key=team&property_value=core` | Delete every node whose property equals that string, and their edges, in one transaction; returns node and edge counts (each edge once) |
 
 ---
 
 ## 5. Reads that compose
 
-Reads identify nodes by external `id` alone. Bootstrap enforces id uniqueness only *within* a label,
-so keep ids unique across the whole tenant, for example `user:42` and `doc:42`.
+Reads identify nodes by external `id`. Bootstrap enforces id uniqueness only *within* a label, so
+keep ids unique across the whole tenant, for example `user:42` and `doc:42`. Where an id is in
+several labels anyway, `GET /graph/nodes/{external_id}` answers 409 until `label` picks one; the
+other reads return every match.
 
 | Endpoint (`/v1/{t}` prefix) | Method | Key inputs (default / max) | Returns |
 |---|---|---|---|
 | `/graph/search` | GET | `q` (1–200 chars), `label`, `limit` (20 / 200) | `nodes[{id, label, properties}]`, `truncated`; `id` is the AGE graphid (integer), the external id is `properties.id` |
-| `/graph/nodes/{external_id}` | GET | – | `label`, `properties` (404 if absent) |
+| `/graph/nodes/{external_id}` | GET | `label` | `label`, `properties` (404 if absent) |
+| `/graph/edges/{type}` | GET | `src`, `dst`, `src_label`, `dst_label` | one edge: `src_label`, `dst_label`, `properties` (404 if absent) |
 | `/graph/neighbors` | GET | `node_id`, `rel_types` (repeatable), `limit` (50 / 500) | 1-hop `neighbors[{neighbor_id, neighbor_label, direction, edge_type, …}]` |
 | `/graph/expand` | GET | `node_id` (always required), `seeds` (repeatable), `rel_types`, `max_hops` (2 / 5), `direction` `in\|out\|both`, `limit` (100 / 1000), `communities` | `paths[{end_id, end_label, hops, rel_path}]` |
 | `/graph/induced_edges` | POST | `node_ids` (1–1000), `rel_types`, `limit` (500 / 5000) | edges within the set |
@@ -657,9 +690,9 @@ timeout is the exception: it returns `application/problem+json`.
 |---|---|
 | 400 | unregistered label or edge type on a write, Cypher/SQL error, bad `where` value or `cursor`, edge type without a rule, bad cache key |
 | 401 | missing or malformed `Authorization` header, or unknown token |
-| 403 | token lacks access to the tenant, or the endpoint needs admin |
-| 404 | tenant not registered; node (`GET`, `POST …/properties`) or cache key not found; unknown tenant on `GET`/`DELETE /v1/tenants/{name}` |
-| 409 | `recompute-communities` already running (or queued as a job) for the tenant; cancelling a finished job |
+| 403 | token lacks access to the tenant, the endpoint needs admin, or a read-only token on a write |
+| 404 | tenant not registered; node (`GET`, `PATCH`, `POST …/properties`), edge (`GET`, `PATCH`), unregistered edge type in the path, or cache key not found; unknown tenant on `GET`/`DELETE /v1/tenants/{name}` |
+| 409 | `recompute-communities` already running (or queued as a job) for the tenant; cancelling a finished job; an id or edge that matches in several labels (pass `label` / `src_label` / `dst_label`) |
 | 413 | `snapshot-import` over 50M rows |
 | 422 | body or query validation (patterns, ranges, DDL, `resolve_rule`, `label_hierarchy`), or `order_by: null` sent with a `cursor` |
 | 429 | rate limited (when enabled) |

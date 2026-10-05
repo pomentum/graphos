@@ -19,7 +19,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from graphos.api.graph import _check_tenant
-from graphos.api.tenants import Principal
+from graphos.auth import ReadPrincipal
 from graphos.bootstrap import registered_tenants
 from graphos.contracts.communities import (
     CommunitiesResponse,
@@ -171,7 +171,7 @@ async def _communities_with_labels(
 async def list_communities(
     tenant: str,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
     min_size: Annotated[int, Query(ge=1)] = DEFAULT_MIN_COMMUNITY_READ_SIZE,
     include_members: Annotated[bool, Query()] = False,
     limit: Annotated[
@@ -235,7 +235,7 @@ async def list_communities(
 async def community_summary(
     tenant: str,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
     top: Annotated[int, Query(ge=1, le=MAX_TOP_N)] = DEFAULT_TOP_N,
 ) -> CommunitySummary:
     _check_tenant(tenant, principal)
@@ -293,7 +293,7 @@ async def community_summary(
 async def tenant_stats(
     tenant: str,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
 ) -> TenantStatsResponse:
     _check_tenant(tenant, principal)
     started = time.perf_counter()
@@ -385,7 +385,7 @@ MAX_COMMUNITY_IDS_LOOKUP = 500
 async def community_ids(
     tenant: str,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
     body: CommunityIdsRequest,
 ) -> CommunityIdsResponse:
     _check_tenant(tenant, principal)
@@ -523,7 +523,7 @@ async def label_histogram(
     tenant: str,
     label: str,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
     property: Annotated[
         str, Query(..., min_length=1, max_length=128,
                    description="Property name to bucket on."),
@@ -614,7 +614,7 @@ async def label_top_by_edge(
     tenant: str,
     label: str,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
     by_edge: Annotated[
         str, Query(..., min_length=1, max_length=128,
                    description="Edge label / relationship type to count."),

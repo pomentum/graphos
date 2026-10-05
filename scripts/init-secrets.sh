@@ -46,7 +46,7 @@ ensure_tokens() {
     return 0
   fi
   local token="tok_$(gen_secret)"
-  printf '{\n  "%s": {"consumer": "admin", "tenants": [], "admin": true}\n}\n' "${token}" > "${target}"
+  printf '{\n  "%s": {"consumer": "admin", "tenants": [], "admin": true, "access": "write"}\n}\n' "${token}" > "${target}"
   printf '%s' "${token}" > "${secrets_dir}/admin_token.txt"
   chmod 644 "${target}" "${secrets_dir}/admin_token.txt" 2>/dev/null || true
   echo "created: graphos_tokens.json with one admin token (also in admin_token.txt)"

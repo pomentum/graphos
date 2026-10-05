@@ -79,7 +79,8 @@ class Settings(BaseSettings):
     rate_limit_window_s: float = 1.0
 
     # ── Auth ─────────────────────────────────────────────────────────────
-    # JSON file: { "<token>": { "consumer": "...", "tenants": ["..."], "admin": false } }
+    # JSON file: { "<token>": { "consumer": "...", "tenants": ["..."], "admin": false,
+    #                           "access": "read" | "write" } }
     auth_tokens_file: Path | None = None
     # Explicit opt-out for local development only.  Without a tokens file
     # graphos refuses to start unless this is true; when it is, every

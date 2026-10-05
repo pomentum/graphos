@@ -44,7 +44,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from graphos.api.graph import _check_tenant
-from graphos.api.tenants import Principal
+from graphos.auth import ReadPrincipal, WritePrincipal
 
 MAX_CACHE_KEY_LEN = 256
 
@@ -194,7 +194,7 @@ async def cache_put(
     key: str,
     body: CachePutRequest,
     request: Request,
-    principal: Principal,
+    principal: WritePrincipal,
 ) -> CachePutResponse:
     _check_tenant(tenant, principal)
     if not key or len(key) > MAX_CACHE_KEY_LEN:
@@ -258,7 +258,7 @@ async def cache_get(
     tenant: str,
     key: str,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
 ) -> CacheGetResponse:
     _check_tenant(tenant, principal)
     started = time.perf_counter()
@@ -328,7 +328,7 @@ async def cache_delete(
     tenant: str,
     key: str,
     request: Request,
-    principal: Principal,
+    principal: WritePrincipal,
 ) -> None:
     _check_tenant(tenant, principal)
     pool = request.app.state.pool

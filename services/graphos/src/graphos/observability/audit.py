@@ -1,6 +1,9 @@
 """Write audit log middleware.
 
-Emits one structured log line per state-changing request. Reads:
+Emits one structured log line per state-changing request: one whose route
+declares ``write`` access (``graphos.auth``), whatever its HTTP method, so a
+read sent as ``POST`` (``nodes:scan``, ``edges/aggregate``) is not logged.
+A request that reached no route's auth falls back to its method.  Reads:
 
   - method, path, route template (from request scope)
   - tenant (when the path includes ``/v1/{tenant}/...``)
@@ -28,6 +31,8 @@ from collections.abc import Awaitable, Callable
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
+
+from graphos.auth import ACCESS_SCOPE_KEY, Access
 
 _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -74,12 +79,13 @@ class AuditMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         if not self._enabled:
             return await call_next(request)
-        if self._writes_only and request.method not in _WRITE_METHODS:
-            return await call_next(request)
+        if self._writes_only and request.method == "GET":
+            return await call_next(request)   # no GET route writes
 
         # Buffer the body once so the downstream handler can re-read it.
         # FastAPI buffers JSON bodies in memory anyway; this is the same
-        # cost in a different place.
+        # cost in a different place.  Whether the request is a write is only
+        # known once its route's auth has run, after the call.
         body = await request.body()
         args_hash = _hash_body(body)
 
@@ -94,13 +100,22 @@ class AuditMiddleware(BaseHTTPMiddleware):
         except Exception:
             # A write that crashed is the one an audit trail most needs:
             # record it as a 500 before the error propagates.
-            _emit(request, args_hash, _INTERNAL_ERROR, started)
+            if not self._writes_only or _is_write(request):
+                _emit(request, args_hash, _INTERNAL_ERROR, started)
             raise
-        _emit(request, args_hash, response.status_code, started)
+        if not self._writes_only or _is_write(request):
+            _emit(request, args_hash, response.status_code, started)
         return response
 
 
 _INTERNAL_ERROR = 500
+
+
+def _is_write(request: Request) -> bool:
+    access = request.scope.get(ACCESS_SCOPE_KEY)
+    if access is None:
+        return request.method in _WRITE_METHODS
+    return access is Access.WRITE
 
 
 def _emit(request: Request, args_hash: str, status: int, started: float) -> None:

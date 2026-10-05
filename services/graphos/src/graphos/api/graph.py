@@ -27,16 +27,16 @@ import logging
 import time
 from collections import defaultdict
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Annotated, Any
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
-from graphos import writes
+from graphos import lookup, writes
 from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, wants_async
-from graphos.api.tenants import Principal  # re-export the auth dep
-from graphos.auth import require_tenant
+from graphos.auth import ReadPrincipal, WritePrincipal, require_tenant
 from graphos.bootstrap import registered_tenants
 from graphos.contracts.export import (
     DEFAULT_EXPORT_NODE_LIMIT,
@@ -58,7 +58,9 @@ from graphos.contracts.graph import (
     AggregateRow,
     CatalogueResponse,
     DeleteByPropertyResponse,
+    DeleteEdgeResponse,
     DeleteNodeResponse,
+    EdgeGetResponse,
     EdgeHit,
     EdgesAggregateRequest,
     EdgesAggregateResponse,
@@ -146,6 +148,24 @@ def _check_tenant(name: str, principal) -> None:    # type: ignore[no-untyped-de
         )
 
 
+def _check_vertex_label(tenant: str, label: str | None) -> None:
+    if label is not None and label not in registered_tenants()[tenant].vertex_labels:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"vertex label '{label}' is not registered for tenant '{tenant}'",
+        )
+
+
+def _node_ambiguous(external_id: str, exc: lookup.AmbiguousMatchError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+            f"id {external_id!r} exists in labels {exc.candidates}; "
+            "pass ?label= to pick one"
+        ),
+    )
+
+
 @router.get(
     "/search",
     response_model=SearchResponse,
@@ -160,7 +180,7 @@ def _check_tenant(name: str, principal) -> None:    # type: ignore[no-untyped-de
 async def search(
     tenant: str,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
     q: Annotated[str, Query(min_length=1, max_length=200, description="Substring to match")],
     label: Annotated[
         str | None,
@@ -300,7 +320,7 @@ async def upsert_nodes(
     tenant: str,
     body: NodesUpsertRequest,
     request: Request,
-    principal: Principal,
+    principal: WritePrincipal,
 ) -> NodesUpsertResponse:
     _check_tenant(tenant, principal)
 
@@ -362,45 +382,106 @@ async def upsert_nodes(
     summary="Fetch one node by external id",
     description=(
         "Returns the full property bag of the node whose "
-        "``properties.id`` matches ``external_id``.  Schema-agnostic: "
-        "matches any label via the parent inheritance.  ~5-20ms via "
-        "the per-label ``*_id_unique`` btree."
+        "``properties.id`` matches ``external_id``, in any label (served by "
+        "each label's ``*_id_unique`` btree).  An id that exists in several "
+        "labels answers 409 unless ``label`` picks one."
     ),
+    responses={409: {"description": "The id exists in several labels; pass `label`."}},
 )
 async def get_node_by_external_id(
     tenant: str,
     external_id: str,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
+    label: Annotated[
+        str | None,
+        Query(description="The node's label; needed only when the id exists in several labels."),
+    ] = None,
 ) -> NodeGetResponse:
     _check_tenant(tenant, principal)
+    _check_vertex_label(tenant, label)
     started = time.perf_counter()
-    pool = request.app.state.pool
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            f"""
-            SELECT
-              v.properties::text AS props_text,
-              c.relname          AS label
-            FROM "{tenant}"."_ag_label_vertex" v
-            JOIN pg_class c ON c.oid = v.tableoid
-            WHERE (v.properties->'"id"') = ('"' || $1::text || '"')::agtype
-            LIMIT 1;
-            """,
-            external_id,
-        )
-    if row is None:
+    async with request.app.state.pool.acquire() as conn:
+        try:
+            node = await lookup.find_node(
+                conn, tenant=tenant, external_id=external_id, label=label,
+            )
+        except lookup.AmbiguousMatchError as exc:
+            raise _node_ambiguous(external_id, exc) from exc
+    if node is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"no node with id={external_id!r} in tenant {tenant!r}",
         )
-    elapsed_ms = int((time.perf_counter() - started) * 1000)
     return NodeGetResponse(
         tenant=tenant,
         external_id=external_id,
-        label=str(row["label"]),
-        properties=_safe_decode_props(row["props_text"]),
-        elapsed_ms=elapsed_ms,
+        label=node.label,
+        properties=node.properties,
+        elapsed_ms=int((time.perf_counter() - started) * 1000),
+    )
+
+
+@router.patch(
+    "/nodes/{external_id}",
+    response_model=NodeGetResponse,
+    summary="Patch one node's properties (JSON Merge Patch)",
+    description=(
+        "Applies the body as a JSON Merge Patch (RFC 7396, `Content-Type: "
+        "application/merge-patch+json` or `application/json`) to the "
+        "properties of the node whose `id` is `external_id`: a key set to "
+        "`null` is removed, a nested object is merged key by key, any other "
+        "value replaces the old one, keys not in the patch are kept.  `id` "
+        "names the node and cannot be patched.  Returns the node as written."
+    ),
+    responses={
+        404: {"description": "No node has that id."},
+        409: {"description": "The id exists in several labels; pass `label`."},
+    },
+)
+async def patch_node(  # noqa: PLR0913 — FastAPI route parameters
+    tenant: str,
+    external_id: str,
+    request: Request,
+    principal: WritePrincipal,
+    patch: Annotated[
+        dict[str, Any],
+        Body(media_type="application/merge-patch+json", description="JSON Merge Patch."),
+    ],
+    label: Annotated[
+        str | None,
+        Query(description="The node's label; needed only when the id exists in several labels."),
+    ] = None,
+) -> NodeGetResponse:
+    _check_tenant(tenant, principal)
+    _check_vertex_label(tenant, label)
+    started = time.perf_counter()
+    try:
+        node = await writes.patch_node(
+            request.app.state.pool, tenant=tenant, external_id=external_id,
+            patch=patch, label=label,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc),
+        ) from exc
+    except lookup.AmbiguousMatchError as exc:
+        raise _node_ambiguous(external_id, exc) from exc
+    except CypherError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"patch failed: {exc}",
+        ) from exc
+    if node is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"no node with id={external_id!r} in tenant {tenant!r}",
+        )
+    return NodeGetResponse(
+        tenant=tenant,
+        external_id=external_id,
+        label=node.label,
+        properties=node.properties,
+        elapsed_ms=int((time.perf_counter() - started) * 1000),
     )
 
 
@@ -416,23 +497,35 @@ async def get_node_by_external_id(
         "Designed for stamping aggregates / materialised summaries onto "
         "metadata-bearing nodes (e.g. ``:Team`` for team-wide stats, "
         "``:Collection`` for per-collection document counts).  No coupling to any "
-        "specific schema — every consumer brings its own label conventions."
+        "specific schema — every consumer brings its own label conventions.\n\n"
+        "An id that exists in several labels answers 409 unless ``label`` "
+        "picks one; nothing is written."
     ),
+    responses={409: {"description": "The id exists in several labels; pass `label`."}},
 )
-async def upsert_node_properties(
+async def upsert_node_properties(  # noqa: PLR0913 — FastAPI route parameters
     tenant: str,
     external_id: str,
     body: NodePropertiesUpsertRequest,
     request: Request,
-    principal: Principal,
+    principal: WritePrincipal,
+    label: Annotated[
+        str | None,
+        Query(description="The node's label; needed only when the id exists in several labels."),
+    ] = None,
 ) -> NodePropertiesUpsertResponse:
     _check_tenant(tenant, principal)
+    _check_vertex_label(tenant, label)
     started = time.perf_counter()
     pool = request.app.state.pool
 
-    label = await writes.merge_node_properties(
-        pool, tenant=tenant, external_id=external_id, properties=body.properties,
-    )
+    try:
+        label = await writes.merge_node_properties(
+            pool, tenant=tenant, external_id=external_id, properties=body.properties,
+            label=label,
+        )
+    except lookup.AmbiguousMatchError as exc:
+        raise _node_ambiguous(external_id, exc) from exc
     if label is None:
         # Node not found — distinguish from "found but unchanged" because
         # the caller may have a stale view of which nodes exist.
@@ -489,7 +582,7 @@ async def upsert_edges(
     tenant: str,
     body: EdgesUpsertRequest,
     request: Request,
-    principal: Principal,
+    principal: WritePrincipal,
 ) -> EdgesUpsertResponse:
     _check_tenant(tenant, principal)
 
@@ -557,6 +650,196 @@ async def upsert_edges(
     )
 
 
+# ── One edge, by identity ──────────────────────────────────────────────────
+#
+# An edge is named by its type and the ids of its two ends: there is at most
+# one edge of a type between two vertices.  An end id that exists in several
+# labels can make that more than one edge; the end labels then pick one.
+
+
+@dataclass(frozen=True, slots=True)
+class _EdgeRef:
+    src: str
+    dst: str
+    src_label: str | None
+    dst_label: str | None
+
+
+def _edge_ref(
+    src: Annotated[str, Query(min_length=1, description="`id` of the source node.")],
+    dst: Annotated[str, Query(min_length=1, description="`id` of the target node.")],
+    src_label: Annotated[
+        str | None, Query(description="Source label; needed only when the id is in several."),
+    ] = None,
+    dst_label: Annotated[
+        str | None, Query(description="Target label; needed only when the id is in several."),
+    ] = None,
+) -> _EdgeRef:
+    return _EdgeRef(src, dst, src_label, dst_label)
+
+
+EdgeRef = Annotated[_EdgeRef, Depends(_edge_ref)]
+
+_EDGE_RESPONSES: dict[int | str, dict[str, Any]] = {
+    404: {"description": "Unregistered edge type, or no such edge."},
+    409: {"description": "Several edges match; pass `src_label` / `dst_label`."},
+}
+
+
+def _check_edge_ref(tenant: str, edge_type: str, ref: _EdgeRef) -> None:
+    if edge_type not in registered_tenants()[tenant].edge_labels:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"edge type '{edge_type}' is not registered for tenant '{tenant}'",
+        )
+    _check_vertex_label(tenant, ref.src_label)
+    _check_vertex_label(tenant, ref.dst_label)
+
+
+def _edge_ambiguous(edge_type: str, exc: lookup.AmbiguousMatchError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+            f"{len(exc.candidates)} {edge_type} edges match, between labels "
+            f"{exc.candidates}; pass src_label and/or dst_label to pick one"
+        ),
+    )
+
+
+def _no_edge(tenant: str, edge_type: str, ref: _EdgeRef) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"no {edge_type} edge from {ref.src!r} to {ref.dst!r} in tenant {tenant!r}",
+    )
+
+
+def _edge_response(
+    tenant: str, edge_type: str, ref: _EdgeRef, edge: lookup.EdgeRow, started: float,
+) -> EdgeGetResponse:
+    return EdgeGetResponse(
+        tenant=tenant,
+        type=edge_type,
+        src_id=ref.src,
+        src_label=edge.src_label,
+        dst_id=ref.dst,
+        dst_label=edge.dst_label,
+        properties=edge.properties,
+        elapsed_ms=int((time.perf_counter() - started) * 1000),
+    )
+
+
+@router.get(
+    "/edges/{edge_type}",
+    response_model=EdgeGetResponse,
+    summary="Fetch one edge by its type and the ids of its ends",
+    responses=_EDGE_RESPONSES,
+)
+async def get_edge(
+    tenant: str,
+    edge_type: str,
+    ref: EdgeRef,
+    request: Request,
+    principal: ReadPrincipal,
+) -> EdgeGetResponse:
+    _check_tenant(tenant, principal)
+    _check_edge_ref(tenant, edge_type, ref)
+    started = time.perf_counter()
+    async with request.app.state.pool.acquire() as conn:
+        try:
+            edge = await lookup.find_edge(
+                conn, tenant=tenant, edge_type=edge_type, src_id=ref.src, dst_id=ref.dst,
+                src_label=ref.src_label, dst_label=ref.dst_label,
+            )
+        except lookup.AmbiguousMatchError as exc:
+            raise _edge_ambiguous(edge_type, exc) from exc
+    if edge is None:
+        raise _no_edge(tenant, edge_type, ref)
+    return _edge_response(tenant, edge_type, ref, edge, started)
+
+
+@router.patch(
+    "/edges/{edge_type}",
+    response_model=EdgeGetResponse,
+    summary="Patch one edge's properties (JSON Merge Patch)",
+    description=(
+        "Applies the body as a JSON Merge Patch (RFC 7396, `Content-Type: "
+        "application/merge-patch+json` or `application/json`) to the "
+        "properties of one edge: a key set to `null` is removed, a nested "
+        "object is merged key by key, any other value replaces the old one, "
+        "keys not in the patch are kept.  Returns the edge as written."
+    ),
+    responses=_EDGE_RESPONSES,
+)
+async def patch_edge(  # noqa: PLR0913 — FastAPI route parameters
+    tenant: str,
+    edge_type: str,
+    ref: EdgeRef,
+    request: Request,
+    principal: WritePrincipal,
+    patch: Annotated[
+        dict[str, Any],
+        Body(media_type="application/merge-patch+json", description="JSON Merge Patch."),
+    ],
+) -> EdgeGetResponse:
+    _check_tenant(tenant, principal)
+    _check_edge_ref(tenant, edge_type, ref)
+    started = time.perf_counter()
+    try:
+        edge = await writes.patch_edge(
+            request.app.state.pool, tenant=tenant, edge_type=edge_type,
+            src_id=ref.src, dst_id=ref.dst, patch=patch,
+            src_label=ref.src_label, dst_label=ref.dst_label,
+        )
+    except lookup.AmbiguousMatchError as exc:
+        raise _edge_ambiguous(edge_type, exc) from exc
+    except CypherError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"patch failed: {exc}",
+        ) from exc
+    if edge is None:
+        raise _no_edge(tenant, edge_type, ref)
+    return _edge_response(tenant, edge_type, ref, edge, started)
+
+
+@router.delete(
+    "/edges/{edge_type}",
+    response_model=DeleteEdgeResponse,
+    summary="Delete one edge; its end nodes stay",
+    description="Idempotent: deleting an edge that does not exist returns `edges_deleted: 0`.",
+    responses={409: _EDGE_RESPONSES[409]},
+)
+async def delete_edge(
+    tenant: str,
+    edge_type: str,
+    ref: EdgeRef,
+    request: Request,
+    principal: WritePrincipal,
+) -> DeleteEdgeResponse:
+    _check_tenant(tenant, principal)
+    _check_edge_ref(tenant, edge_type, ref)
+    started = time.perf_counter()
+    try:
+        deleted = await writes.delete_edge(
+            request.app.state.pool, tenant=tenant, edge_type=edge_type,
+            src_id=ref.src, dst_id=ref.dst,
+            src_label=ref.src_label, dst_label=ref.dst_label,
+        )
+    except lookup.AmbiguousMatchError as exc:
+        raise _edge_ambiguous(edge_type, exc) from exc
+    except CypherError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"delete failed: {exc}",
+        ) from exc
+    return DeleteEdgeResponse(
+        tenant=tenant,
+        type=edge_type,
+        src_id=ref.src,
+        dst_id=ref.dst,
+        edges_deleted=deleted,
+        elapsed_ms=int((time.perf_counter() - started) * 1000),
+    )
+
+
 # ── Neighbors ──────────────────────────────────────────────────────────────
 
 
@@ -574,7 +857,7 @@ async def upsert_edges(
 async def neighbors(
     tenant: str,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
     node_id: Annotated[
         str,
         Query(min_length=1, description="Consumer-assigned id of the seed node."),
@@ -770,7 +1053,7 @@ async def induced_edges(
     tenant: str,
     body: InducedEdgesRequest,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
 ) -> InducedEdgesResponse:
     _check_tenant(tenant, principal)
 
@@ -944,7 +1227,7 @@ async def scoped_subgraph(
     tenant: str,
     body: ScopedSubgraphRequest,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
 ) -> ScopedSubgraphResponse:
     _check_tenant(tenant, principal)
     started = time.perf_counter()
@@ -1084,7 +1367,7 @@ async def scoped_subgraph(
 async def catalogue(
     tenant: str,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
     refresh: Annotated[
         bool,
         Query(description="Force a rebuild from live DB state."),
@@ -1122,7 +1405,7 @@ async def catalogue(
 async def expand(
     tenant: str,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
     node_id: Annotated[
         str,
         Query(
@@ -1453,7 +1736,7 @@ async def aggregate_edges(
     tenant: str,
     body: EdgesAggregateRequest,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
 ) -> EdgesAggregateResponse:
     _check_tenant(tenant, principal)
 
@@ -1652,7 +1935,7 @@ async def aggregate_nodes(
     tenant: str,
     body: NodesAggregateRequest,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
 ) -> NodesAggregateResponse:
     _check_tenant(tenant, principal)
 
@@ -1720,7 +2003,7 @@ async def sample_subgraph(
     tenant: str,
     body: SampleSubgraphRequest,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
 ) -> SampleSubgraphResponse:
     _check_tenant(tenant, principal)
 
@@ -1953,23 +2236,27 @@ async def sample_subgraph(
     summary="Delete a node and its edges by its consumer-assigned id",
     description=(
         "Idempotent: missing nodes return 0/0. Every node with that id (in "
-        "any label) is removed together with all its incident edges, in one "
-        "transaction."
+        "any label, or only in ``label`` when given) is removed together with "
+        "all its incident edges, in one transaction."
     ),
 )
 async def delete_node(
     tenant: str,
     node_id: str,
     request: Request,
-    principal: Principal,
+    principal: WritePrincipal,
+    label: Annotated[
+        str | None, Query(description="Delete the node in this label only."),
+    ] = None,
 ) -> DeleteNodeResponse:
     _check_tenant(tenant, principal)
+    _check_vertex_label(tenant, label)
 
     pool = request.app.state.pool
     started = time.perf_counter()
     try:
         nodes_n, edges_n = await writes.delete_nodes(
-            pool, tenant=tenant, property_key="id", property_value=node_id,
+            pool, tenant=tenant, property_key="id", property_value=node_id, label=label,
         )
     except CypherError as exc:
         raise HTTPException(
@@ -2002,7 +2289,7 @@ async def delete_node(
 async def delete_by_property(
     tenant: str,
     request: Request,
-    principal: Principal,
+    principal: WritePrincipal,
     property_key: Annotated[
         str,
         Query(min_length=1, max_length=63, description="Property name (e.g. project_id)."),
@@ -2069,7 +2356,7 @@ async def delete_by_property(
 async def export_graph(
     tenant: str,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
     node_ids: Annotated[
         list[str] | None,
         Query(description="If set, export only these nodes + edges among them."),
@@ -2556,7 +2843,7 @@ async def scan_nodes(
     tenant: str,
     body: NodesScanRequest,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
 ) -> NodesScanResponse:
     _check_tenant(tenant, principal)
 
@@ -2945,7 +3232,7 @@ async def scan_edges(
     tenant: str,
     body: EdgesScanRequest,
     request: Request,
-    principal: Principal,
+    principal: ReadPrincipal,
 ) -> EdgesScanResponse:
     _check_tenant(tenant, principal)
 
@@ -3101,7 +3388,7 @@ async def resolve_edges(
     tenant: str,
     body: ResolveEdgesRequest,
     request: Request,
-    principal: Principal,
+    principal: WritePrincipal,
 ) -> ResolveEdgesResponse | JSONResponse:
     _check_tenant(tenant, principal)
     _resolve_plan(tenant, body)   # reject unknown edge types before queueing

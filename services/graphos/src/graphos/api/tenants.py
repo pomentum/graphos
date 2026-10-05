@@ -21,11 +21,10 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 
-from graphos.auth import TokenPrincipal, require_admin, require_principal
+from graphos.auth import ReadPrincipal, WritePrincipal, require_admin
 from graphos.bootstrap import (
     TenantSpec,
     bootstrap_tenant,
@@ -48,8 +47,6 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["tenants"], prefix="/tenants")
 
-Principal = Annotated[TokenPrincipal, Depends(require_principal)]
-
 
 def _spec_to_info(spec: TenantSpec) -> TenantInfo:
     return TenantInfo(
@@ -65,13 +62,13 @@ def _spec_to_info(spec: TenantSpec) -> TenantInfo:
 
 
 @router.get("", summary="List registered tenants")
-async def list_tenants(principal: Principal) -> dict[str, list[TenantInfo]]:
+async def list_tenants(principal: ReadPrincipal) -> dict[str, list[TenantInfo]]:
     require_admin(principal)
     return {"tenants": [_spec_to_info(s) for s in registered_tenants().values()]}
 
 
 @router.get("/{name}", summary="Inspect one registered tenant")
-async def get_tenant(name: str, principal: Principal) -> TenantInfo:
+async def get_tenant(name: str, principal: ReadPrincipal) -> TenantInfo:
     require_admin(principal)
     specs = registered_tenants()
     if name not in specs:
@@ -86,7 +83,7 @@ async def get_tenant(name: str, principal: Principal) -> TenantInfo:
 async def register(
     body: TenantSpecBody,
     request: Request,
-    principal: Principal,
+    principal: WritePrincipal,
     force_shrink: bool = False,
 ) -> RegisterResponse:
     """Register or re-apply a tenant spec.
@@ -222,7 +219,7 @@ async def register(
 async def unregister(
     name: str,
     request: Request,
-    principal: Principal,
+    principal: WritePrincipal,
 ) -> dict[str, object]:
     require_admin(principal)
     pool = request.app.state.pool

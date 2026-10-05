@@ -181,7 +181,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version=__version__,
         description=(
             "Multi-tenant graph service backed by PostgreSQL + Apache AGE. "
-            "Consumers speak typed HTTP; graphos owns the Cypher and SQL."
+            "Consumers speak typed HTTP; graphos owns the SQL."
         ),
         lifespan=_lifespan,
     )

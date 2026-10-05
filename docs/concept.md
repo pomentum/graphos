@@ -319,7 +319,8 @@ Paths under `/v1/{tenant}/graph/...` are abbreviated to `…/graph/...`.
 | `DELETE /v1/tenants/{name}` | Unregister (see below) | admin |
 | **Reads** | | |
 | `GET …/graph/search?q=&label=&limit=` | Case-insensitive literal substring (`ILIKE`, with `%` / `_` in `q` escaped) on `name`, served by the trigram index; limit ≤200. Hit `id` = AGE graphid (integer); external id in `properties.id` | tenant |
-| `GET …/graph/nodes/{external_id}` | One node by external id | tenant |
+| `GET …/graph/nodes/{external_id}?label=` | One node by external id; 409 if the id is in several labels and `label` is absent | tenant |
+| `GET …/graph/edges/{type}?src=&dst=&src_label=&dst_label=` | One edge by type and end ids; 409 if several match | tenant |
 | `GET …/graph/neighbors?node_id=&rel_types=&limit=` | 1-hop out + in edges; limit default 50, ≤500 | tenant |
 | `GET …/graph/expand?node_id=&seeds=&rel_types=&max_hops=&direction=&communities=&limit=` | BFS; `max_hops` default 2, ≤5; limit default 100, ≤1000 | tenant |
 | `POST …/graph/induced_edges` `{node_ids, rel_types?, limit}` | Edges with both ends in the set; ≤1000 ids, limit ≤5000 | tenant |
@@ -343,12 +344,15 @@ Paths under `/v1/{tenant}/graph/...` are abbreviated to `…/graph/...`.
 | **Writes** | | |
 | `POST …/graph/nodes` `{nodes}` | Upsert ≤1000 nodes | tenant |
 | `POST …/graph/edges` `{edges}` | Upsert ≤1000 edges | tenant |
-| `POST …/graph/nodes/{external_id}/properties` `{properties}` | Merge properties onto an existing node | tenant |
+| `POST …/graph/nodes/{external_id}/properties?label=` `{properties}` | Merge top-level properties onto an existing node | tenant |
+| `PATCH …/graph/nodes/{external_id}?label=` | JSON Merge Patch of one node's properties (§4) | tenant |
+| `PATCH …/graph/edges/{type}?src=&dst=&src_label=&dst_label=` | JSON Merge Patch of one edge's properties (§4) | tenant |
 | `POST …/graph/nodes:bulk` (NDJSON) | Streamed node upsert (§4) | tenant |
 | `POST …/graph/edges:bulk` (NDJSON) | Streamed edge upsert (§4) | tenant |
 | `POST …/graph/snapshot-import` (NDJSON) | Mixed node + edge import (§4) | tenant |
 | `POST …/graph/edges:resolve` `{edge_types?}` | Run registered resolve rules | tenant |
-| `DELETE …/graph/nodes/{node_id}` | Delete one node and its edges | tenant |
+| `DELETE …/graph/nodes/{node_id}?label=` | Delete one node and its edges | tenant |
+| `DELETE …/graph/edges/{type}?src=&dst=&src_label=&dst_label=` | Delete one edge | tenant |
 | `DELETE …/graph/nodes?property_key=&property_value=` | Delete every node with that property value, and their edges | tenant |
 | **Community detection** | | |
 | `POST /v1/{tenant}/recompute-communities` | Louvain (§5); 501 without the extra | admin |
@@ -359,6 +363,12 @@ Paths under `/v1/{tenant}/graph/...` are abbreviated to `…/graph/...`.
 | **Background jobs** (§2.6) | | |
 | `GET /v1/jobs/{id}`, `GET /v1/jobs?tenant=&status=&limit=` | A job's status and outcome; recent jobs | the job's tenant, or admin |
 | `POST /v1/jobs/{id}:cancel` | Cancel a queued or running job | as to start it |
+
+The last column is the tenant or admin scope.  Each operation also needs
+`read` or `write` access (§2.5.3): `read` for every row under **Reads** and
+**Aggregates & communities**, cache `GET`, `GET /v1/tenants*`,
+`GET /v1/db/*` and `GET /v1/jobs*`; `write` for the rest.
+`/openapi.json` lists it per operation as the bearer scope.
 
 `DELETE /v1/tenants/{name}` deletes the row in `graphos_meta.tenants` and the
 in-process registry entry, then returns `{"tenant": name, "status":
@@ -410,14 +420,26 @@ Error shapes:
   If the variable is set but the file is missing, unreadable or not a JSON
   object, graphos also refuses to start.
 - **Tokens file:**
-  `{"<token>": {"consumer": "<name>", "tenants": ["acme"], "admin": false}}`.
-  A token's scope is its tenant list plus the `admin` flag; nothing finer.
-  A malformed entry is skipped with an error log and the rest still load.
+  `{"<token>": {"consumer": "<name>", "tenants": ["acme"], "admin": false, "access": "read"}}`.
+  A token's scope is its tenant list, the `admin` flag and its `access`
+  (`read` or `write`). A token without `access` gets `write` and graphos
+  logs a warning naming its consumer. A malformed entry (an `access` other
+  than `read` / `write` included) is skipped with an error log and the rest
+  still load.
+- **Read and write access.** Every authenticated operation declares `read`
+  or `write`: its handler takes the caller as `ReadPrincipal` or
+  `WritePrincipal`, a FastAPI `Security` dependency whose scope OpenAPI
+  shows on the operation. A read-only token gets 403 on a write, admin or
+  not. A test fails if an operation declares neither and is not one of the
+  public ones, and checks every tenant operation against a token for
+  another tenant.
   The file is reloaded on `SIGHUP` (Unix); a reload that finds the file
   unusable logs the error and keeps the tokens already loaded.
 - **Tenant access.** The tenant is in the URL path. A non-admin token gets
   403 for a tenant it does not list; admin tokens may access every tenant.
-  Unregistered tenants return 404 (after the scope check).
+  The same dependency that checks access checks the tenant, before the
+  request body is validated, so a tenant route cannot skip it. Unregistered
+  tenants return 404 (after the scope check).
 - **Admin-only routes:** `/v1/tenants*`, `/recompute-communities`, `/v1/db/*`.
   There is no `/admin` prefix.
 - `/healthz`, `/readyz`, `/v1/info`, `/metrics`, `/docs`, and `/openapi.json`
@@ -487,17 +509,19 @@ and `route`, plus `trace_id` when a valid W3C `traceparent` header is present;
 the header is echoed on the response. graphos does not create spans or export
 traces.
 
-**Audit log.** On by default (`GRAPHOS_AUDIT_ENABLED`), covering POST, PUT,
-PATCH, and DELETE only (`GRAPHOS_AUDIT_ENDPOINTS_ONLY_WRITES`). Because the
-filter is by method, POST-bodied reads (`nodes:scan`, aggregates,
-`community-ids`, …) are audited too. Each record is a `write` line from the
+**Audit log.** On by default (`GRAPHOS_AUDIT_ENABLED`), covering writes
+only (`GRAPHOS_AUDIT_ENDPOINTS_ONLY_WRITES`): the operations that declare
+`write` access, whatever their method, including writes refused with 401 or
+403. POST-bodied reads (`nodes:scan`, aggregates, `community-ids`, …) are not
+audited; a request that reaches no operation's auth (an unknown path) falls
+back to its method. Each record is a `write` line from the
 `graphos.audit` logger, rendered with all its fields in the JSON log
 (structlog's `ExtraAdder` in `observability/logging.py`): `method`, `path`,
 `tenant` (parsed from the path), `consumer` (the token's consumer name;
 `anonymous` without one), `args_hash` (first 16 hex characters of the
 SHA-256 of the request body), `status`, and `elapsed_ms`. A request that
 raises is recorded as 500 before the error propagates. To compute the hash the
-middleware reads the full request body into memory.
+middleware reads the full body of every non-`GET` request into memory.
 
 **Rate limiting.** Off by default (`GRAPHOS_RATE_LIMIT_ENABLED`). When on, it
 is an in-memory sliding window per bearer token (`GRAPHOS_RATE_LIMIT_RPS`,
@@ -738,7 +762,7 @@ without stopping at either.)
 | Every edge upsert (`/edges`, `edges:bulk`, `snapshot-import`) | SQL: binary `COPY` into a temp table, `INSERT … ON CONFLICT (start_id, end_id) DO UPDATE` |
 | `nodes/aggregate`, `export`, `communities?include_members=true` member lists | SQL |
 | Node deletes (by id, by property) | SQL: one statement deletes the matching nodes (unique `id` index, or GIN containment for other keys) and every edge touching them |
-| `search`, `nodes/{id}`, `nodes/{id}/properties`, `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `nodes:scan`, `edges:scan`, `edges/aggregate` | SQL |
+| `search`, `nodes/{id}` (GET, PATCH), `nodes/{id}/properties`, `edges/{type}` (GET, PATCH, DELETE), `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `nodes:scan`, `edges:scan`, `edges/aggregate` | SQL |
 | `histogram`, `top`, `stats`, `communities`, `community-summary`, `community-ids`, `catalogue` | SQL |
 | `edges:resolve` | SQL: one `INSERT … SELECT … ON CONFLICT (start_id, end_id) DO NOTHING` per edge type |
 | Louvain edge stream and writeback | SQL (`COPY` + `UPDATE … FROM`) |
@@ -816,7 +840,18 @@ they go together or not at all. (A Cypher `DETACH DELETE` does not crash, but
 its node-plus-edges pattern on a large tenant ran for many minutes and did
 not stop at `statement_timeout`.)
 
-With audit enabled (the default), the audit middleware reads each write
+**One node or one edge by identity.** The property merge, the patches and
+the single-edge delete name their row by external id (a node) or by type and
+end ids (an edge). Ids are unique only within a label, so the same id can be
+in two labels. `graphos.lookup` finds the rows inside the write's
+transaction and locks them (`FOR UPDATE`): exactly one is written; more than
+one is refused with the candidate labels (409), and nothing changes, until
+the caller names the label(s). The property merge is agtype `||` (top-level
+keys). The patches are JSON Merge Patch (RFC 7396), applied to the locked
+row's properties in Python and written back whole, so `null` removes a key and
+nested objects merge. A node's `id` cannot be patched.
+
+With audit enabled (the default), the audit middleware reads each non-`GET`
 request's full body into memory before the handler parses it (§2.5.6).
 
 ---

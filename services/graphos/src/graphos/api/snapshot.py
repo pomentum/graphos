@@ -41,7 +41,7 @@ from pydantic import ValidationError
 from graphos import writes
 from graphos.api.bulk import _iter_ndjson_lines
 from graphos.api.graph import _check_tenant
-from graphos.api.tenants import Principal
+from graphos.auth import WritePrincipal
 from graphos.bootstrap import registered_tenants
 from graphos.contracts.graph import EdgeUpsert, NodeUpsert
 from graphos.contracts.snapshot import (
@@ -74,7 +74,7 @@ _MAX_ERROR_LINES = 50
 async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; splitting harms readability
     tenant: str,
     request: Request,
-    principal: Principal,
+    principal: WritePrincipal,
 ) -> SnapshotImportResponse:
     _check_tenant(tenant, principal)
 
