@@ -102,88 +102,51 @@ async def _communities_with_labels(
 ) -> tuple[list[tuple[int, int, list[str]]], int, int]:
     """Return ``[(community_id, size, sample_labels), …]`` + assigned/unassigned.
 
-    Single SQL: GROUP BY ``community_id`` over the parent
-    ``_ag_label_vertex`` inheritance table — inheritance scans every
-    leaf label child once.  ``tableoid::regclass`` resolves each row's
-    leaf table name (same pattern as :mod:`graphos.api.graph` search
-    endpoints); ``array_agg(DISTINCT label)`` rolls labels up per
-    community.  The size order is preserved by ``ORDER BY count(*)
-    DESC``, matching the prior :func:`_community_counts` contract.
-
-    Replaces the prior N+1 pattern (one Cypher per community for top-N
-    labels): ~31 s on a 164-community graph → ~50-200 ms in one round
-    trip.
+    One scan of the parent ``_ag_label_vertex`` table (inheritance reaches
+    every label table), grouped by ``community_id``: the vertices without
+    one form the NULL group, which gives the unassigned count, and the sum
+    of the other groups gives the assigned count, so no second or third
+    scan is needed.  ``array_agg(DISTINCT relname)`` rolls the labels up per
+    community, alphabetically, first ``sample_labels`` of them.  Filtering
+    by ``min_size``, ordering (size descending, then id) and ``limit``
+    apply to the grouped rows, one per community.
     """
     pool = request.app.state.pool
-    # Two SQL queries:
-    #   1. group-by community_id with size + sample_labels
-    #   2. count NULL community_id rows for n_unassigned
-    # Both run against the parent label table so they cover every
-    # registered vertex label automatically.
-    #
-    # These aggregate over every assigned vertex, so they scan rather than
-    # use the per-label ``community_id`` index; casting to ::text then
-    # ::int matches the pattern the /community-ids endpoint uses.
-    #
-    # ``(array_agg(DISTINCT c.relname ORDER BY c.relname))[1:N]`` keeps
-    # the sample stable across runs (alphabetical) and bounded.  We
-    # don't promise top-by-frequency anymore — the old Cypher's
-    # ORDER BY count() was per-community and only sliced the top 5
-    # anyway; ordering alphabetically is deterministic and cheaper.
-    # ``sample_labels`` is a hard-coded small int (default 5, bounded
-    # at the module level); safe to interpolate into the array slice
-    # upper bound where a parameter placeholder would force a
-    # ``$N::int`` cast that asyncpg can't always plan inside
-    # subscripts.
+    # ``sample_labels`` is a small bounded int, interpolated into the array
+    # slice (a ``$N::int`` placeholder inside a subscript does not always plan).
     sample_n = int(sample_labels)
     if sample_n < 1 or sample_n > MAX_SAMPLE_LABELS:
         sample_n = SAMPLE_LABELS_PER_COMMUNITY
-    sql_groups = f"""
+    cid = """((v.properties->'"community_id"')::text)::int"""
+    sql = f"""
         SELECT
-          ((v.properties->'"community_id"')::text)::int    AS cid,
-          count(*)                                          AS sz,
-          (array_agg(DISTINCT c.relname ORDER BY c.relname))[1:{sample_n}]
-                                                            AS sample_labels
+          {cid} AS cid,
+          count(*) AS sz,
+          (array_agg(DISTINCT c.relname ORDER BY c.relname)
+             FILTER (WHERE {cid} IS NOT NULL))[1:{sample_n}] AS sample_labels
         FROM "{tenant}"."_ag_label_vertex" v
         JOIN pg_class c ON c.oid = v.tableoid
-        WHERE (v.properties->'"community_id"') IS NOT NULL
-        GROUP BY ((v.properties->'"community_id"')::text)::int
-        HAVING count(*) >= $1
-        ORDER BY count(*) DESC, cid ASC
-    """
-    if limit is not None and limit > 0:
-        sql_groups += " LIMIT $2"
-    sql_unassigned = f"""
-        SELECT count(*) AS c
-        FROM "{tenant}"."_ag_label_vertex" v
-        WHERE (v.properties->'"community_id"') IS NULL
-    """
-    # The total assigned count includes *all* communities — even those
-    # below ``min_size`` — so it matches the prior contract.  Compute
-    # it from a separate cheap aggregate; the GROUP BY's HAVING /
-    # LIMIT clauses would otherwise hide rows from the sum.
-    sql_total_assigned = f"""
-        SELECT count(*) AS c
-        FROM "{tenant}"."_ag_label_vertex" v
-        WHERE (v.properties->'"community_id"') IS NOT NULL
+        GROUP BY {cid}
     """
     async with pool.acquire() as conn:
-        if limit is not None and limit > 0:
-            rows = await conn.fetch(sql_groups, min_size, limit)
-        else:
-            rows = await conn.fetch(sql_groups, min_size)
-        n_assigned = int(
-            (await conn.fetchval(sql_total_assigned)) or 0,
-        )
-        n_unassigned = int((await conn.fetchval(sql_unassigned)) or 0)
+        rows = await conn.fetch(sql)
 
+    n_unassigned = sum(int(r["sz"]) for r in rows if r["cid"] is None)
+    groups = [r for r in rows if r["cid"] is not None]
+    n_assigned = sum(int(r["sz"]) for r in groups)
+    kept = sorted(
+        (r for r in groups if int(r["sz"]) >= min_size),
+        key=lambda r: (-int(r["sz"]), int(r["cid"])),
+    )
+    if limit is not None and limit > 0:
+        kept = kept[:limit]
     out = [
         (
             int(r["cid"]),
             int(r["sz"]),
             [str(lbl) for lbl in (r["sample_labels"] or []) if lbl],
         )
-        for r in rows
+        for r in kept
     ]
     return out, n_assigned, n_unassigned
 
