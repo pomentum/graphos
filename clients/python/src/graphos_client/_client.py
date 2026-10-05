@@ -41,6 +41,7 @@ from graphos_client._models import (
     NodesScanResponse,
     NodesUpsertResponse,
     NodeUpsert,
+    PathsResponse,
     RecomputeCommunitiesResponse,
     SampleSubgraphResponse,
     SearchResponse,
@@ -56,6 +57,10 @@ _MERGE_PATCH = "application/merge-patch+json"
 
 def _label_param(label: str | None) -> dict[str, str] | None:
     return None if label is None else {"label": label}
+
+
+def _if_match_header(if_match: str | None) -> dict[str, str] | None:
+    return None if if_match is None else {"If-Match": if_match}
 
 
 # Sentinel for "argument not passed" — distinguished from explicit
@@ -758,12 +763,14 @@ class GraphosClient:
     # ── deletes ────────────────────────────────────────────────────────────
 
     async def delete_node(
-        self, node_id: str, *, label: str | None = None,
+        self, node_id: str, *, label: str | None = None, if_match: str | None = None,
     ) -> DeleteNodeResponse:
         """Delete the node(s) with this id and their edges; only in ``label``
-        when given."""
+        when given.  With ``if_match`` (an ETag from a read), the id must name
+        one node, deleted only if it still has that ETag (412 otherwise)."""
         resp = await self._request(
             "DELETE", self._node_path(node_id), params=_label_param(label),
+            headers=_if_match_header(if_match),
         )
         return DeleteNodeResponse.model_validate(resp.json())
 
@@ -936,28 +943,34 @@ class GraphosClient:
         return NodeGetResponse.model_validate(resp.json())
 
     async def upsert_node_properties(
-        self, external_id: str, properties: dict[str, Any], *, label: str | None = None,
+        self, external_id: str, properties: dict[str, Any], *,
+        label: str | None = None, if_match: str | None = None,
     ) -> NodePropertiesUpsertResponse:
         """Merge a property bag onto the node whose ``properties.id``
         matches *external_id* (top-level keys overwrite, others are kept).
-        ``label`` picks the node when the id exists in several labels.
+        ``label`` picks the node when the id exists in several labels;
+        ``if_match`` writes only if the node still has that ETag.
         """
         resp = await self._request(
             "POST",
             f"{self._node_path(external_id)}/properties",
             params=_label_param(label),
             json_body={"properties": properties},
+            headers=_if_match_header(if_match),
         )
         return NodePropertiesUpsertResponse.model_validate(resp.json())
 
     async def patch_node(
-        self, external_id: str, patch: Mapping[str, Any], *, label: str | None = None,
+        self, external_id: str, patch: Mapping[str, Any], *,
+        label: str | None = None, if_match: str | None = None,
     ) -> NodeGetResponse:
         """Apply a JSON Merge Patch (RFC 7396) to one node's properties.
 
         ``None`` removes a key, a nested dict merges key by key, any other
-        value replaces; keys not in ``patch`` are kept.  Returns the node as
-        written.
+        value replaces; keys not in ``patch`` are kept.  With ``if_match``
+        (the ``etag`` of a read) the patch is applied only if the node has
+        not changed since; otherwise ``GraphosError`` 412.  Returns the node
+        as written, with its new ``etag``.
         """
         resp = await self._request(
             "PATCH",
@@ -965,6 +978,7 @@ class GraphosClient:
             params=_label_param(label),
             content=json.dumps(dict(patch)),
             content_type=_MERGE_PATCH,
+            headers=_if_match_header(if_match),
         )
         return NodeGetResponse.model_validate(resp.json())
 
@@ -1002,23 +1016,58 @@ class GraphosClient:
     async def patch_edge(  # noqa: PLR0913 — the edge's identity has this many parts
         self, edge_type: str, src_id: str, dst_id: str, patch: Mapping[str, Any], *,
         src_label: str | None = None, dst_label: str | None = None,
+        if_match: str | None = None,
     ) -> EdgeGetResponse:
-        """Apply a JSON Merge Patch (RFC 7396) to one edge's properties."""
+        """Apply a JSON Merge Patch (RFC 7396) to one edge's properties;
+        with ``if_match``, only if the edge still has that ETag."""
         path, params = self._edge_request_args(edge_type, src_id, dst_id, src_label, dst_label)
         resp = await self._request(
             "PATCH", path, params=params,
             content=json.dumps(dict(patch)), content_type=_MERGE_PATCH,
+            headers=_if_match_header(if_match),
         )
         return EdgeGetResponse.model_validate(resp.json())
 
-    async def delete_edge(
+    async def delete_edge(  # noqa: PLR0913 — the edge's identity has this many parts
         self, edge_type: str, src_id: str, dst_id: str, *,
         src_label: str | None = None, dst_label: str | None = None,
+        if_match: str | None = None,
     ) -> DeleteEdgeResponse:
-        """Delete one edge; its end nodes stay.  Idempotent."""
+        """Delete one edge; its end nodes stay.  Idempotent; with
+        ``if_match``, only if the edge still has that ETag."""
         path, params = self._edge_request_args(edge_type, src_id, dst_id, src_label, dst_label)
-        resp = await self._request("DELETE", path, params=params)
+        resp = await self._request(
+            "DELETE", path, params=params, headers=_if_match_header(if_match),
+        )
         return DeleteEdgeResponse.model_validate(resp.json())
+
+    # ── Shortest paths ─────────────────────────────────────────────────────
+
+    async def find_paths(  # noqa: PLR0913 — the search's options
+        self, src: str, dst: str, *,
+        src_label: str | None = None, dst_label: str | None = None,
+        rel_types: Iterable[str] | None = None, direction: str = "both",
+        max_hops: int = 4, limit: int = 1, include_properties: bool = False,
+    ) -> PathsResponse:
+        """The shortest paths from node ``src`` to node ``dst``.
+
+        ``direction``: ``out`` follows edges the way they point, ``in``
+        against it, ``both`` either way.  Up to ``limit`` paths, all of the
+        shortest length within ``max_hops``; ``hops`` is None when there is
+        none, and ``truncated`` when the search hit its edge cap.
+        """
+        body: dict[str, Any] = {
+            "src": src, "dst": dst, "direction": direction,
+            "max_hops": max_hops, "limit": limit, "include_properties": include_properties,
+        }
+        if src_label is not None:
+            body["src_label"] = src_label
+        if dst_label is not None:
+            body["dst_label"] = dst_label
+        if rel_types is not None:
+            body["rel_types"] = list(rel_types)
+        resp = await self._request("POST", f"/v1/{self._tenant}/graph/paths", json_body=body)
+        return PathsResponse.model_validate(resp.json())
 
     # ── Schema-agnostic K/V cache ──────────────────────────────────────────
 

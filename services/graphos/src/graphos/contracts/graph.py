@@ -180,6 +180,10 @@ class NodePropertiesUpsertResponse(BaseModel):
     properties_merged: int = Field(
         ..., description="Number of top-level keys merged from the payload.",
     )
+    rev: int = Field(..., description="Revision: 1 when created, +1 on every write.")
+    etag: str = Field(
+        ..., description="Also the `ETag` header; send it as `If-Match` to write this version.",
+    )
     elapsed_ms: int
 
 
@@ -190,6 +194,10 @@ class NodeGetResponse(BaseModel):
     external_id: str
     label: str
     properties: dict[str, object] = Field(default_factory=dict)
+    rev: int = Field(..., description="Revision: 1 when created, +1 on every write.")
+    etag: str = Field(
+        ..., description="Also the `ETag` header; send it as `If-Match` to write this version.",
+    )
     elapsed_ms: int
 
 
@@ -206,6 +214,10 @@ class EdgeGetResponse(BaseModel):
     dst_id: str
     dst_label: str
     properties: dict[str, object] = Field(default_factory=dict)
+    rev: int = Field(..., description="Revision: 1 when created, +1 on every write.")
+    etag: str = Field(
+        ..., description="Also the `ETag` header; send it as `If-Match` to write this version.",
+    )
     elapsed_ms: int
 
 

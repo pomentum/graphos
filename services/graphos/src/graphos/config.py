@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     rate_limit_rps: int = 100
     rate_limit_window_s: float = 1.0
 
+    # ── Revisions ────────────────────────────────────────────────────────
+    # When true, every write to one node or edge (PATCH, DELETE, the
+    # property merge) must send If-Match with an ETag from a read, or gets
+    # 428.  Off by default: If-Match is then honoured when sent.
+    require_if_match: bool = False
+
     # ── Auth ─────────────────────────────────────────────────────────────
     # JSON file: { "<token>": { "consumer": "...", "tenants": ["..."], "admin": false,
     #                           "access": "read" | "write" } }

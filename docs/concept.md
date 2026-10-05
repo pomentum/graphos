@@ -132,14 +132,22 @@ tables without re-initialisation.
   `ALTER TABLE <tenant>.<table> ADD COLUMN [IF NOT EXISTS] <col> <type> GENERATED ALWAYS AS (...) STORED`,
   where `<tenant>` is the tenant being registered and `<table>` is one of its
   own labels (or `_ag_label_vertex` / `_ag_label_edge`). `;` (other than one
-  trailing), SQL comments, and `$` (dollar quoting) are rejected anywhere.
+  trailing), SQL comments, and `$` (dollar quoting) are rejected anywhere. A
+  generated column may not take a name graphos uses itself (`id`,
+  `properties`, `start_id`, `end_id`, `end_community_id`, any `graphos_…`).
   Expressions inside parentheses are not inspected; Postgres enforces their
   immutability.
 
 `bootstrap.py::bootstrap_tenant` then applies the spec under a per-tenant
 `pg_advisory_lock`, so concurrent registrations of the same tenant serialise:
 
-1. `create_graph` (duplicate swallowed).
+1. `create_graph` (duplicate swallowed), then the revision column
+   `graphos_rev bigint NOT NULL DEFAULT 1` on AGE's parent tables
+   `_ag_label_vertex` and `_ag_label_edge`, when it is missing: Postgres adds
+   it to every existing label table through inheritance, and every label
+   created later inherits it. A constant default is metadata-only, so no table
+   is rewritten (on a copy with an 8M-row edge table, all 149 label tables got
+   it in under 0.1 s); existing rows read as revision 1.
 2. `create_vlabel` per vertex label plus the per-label indexes in §2.3.
 3. `end_community_id text` column on `_ag_label_edge`; `create_elabel` per
    edge label plus the per-label edge indexes and column in §2.3.
@@ -324,6 +332,7 @@ Paths under `/v1/{tenant}/graph/...` are abbreviated to `…/graph/...`.
 | `GET …/graph/neighbors?node_id=&rel_types=&limit=` | 1-hop out + in edges; limit default 50, ≤500 | tenant |
 | `GET …/graph/expand?node_id=&seeds=&rel_types=&max_hops=&direction=&communities=&limit=` | BFS; `max_hops` default 2, ≤5; limit default 100, ≤1000 | tenant |
 | `POST …/graph/induced_edges` `{node_ids, rel_types?, limit}` | Edges with both ends in the set; ≤1000 ids, limit ≤5000 | tenant |
+| `POST …/graph/paths` `{src, dst, rel_types?, direction, max_hops, limit}` | Shortest paths between two nodes (bidirectional BFS, one statement per level); hops ≤8 | tenant |
 | `POST …/graph/scoped_subgraph` | Nodes sharing one property value plus their induced edges; nodes are `{id (external id), label, properties}` | tenant |
 | `POST …/graph/sample_subgraph` | First `per_rel` edges of each type plus endpoint properties; `filter_property` works with or without `include_properties` | tenant |
 | `POST …/graph/nodes:scan` | Paginated node enumeration with filters/projection | tenant |
@@ -850,6 +859,19 @@ the caller names the label(s). The property merge is agtype `||` (top-level
 keys). The patches are JSON Merge Patch (RFC 7396), applied to the locked
 row's properties in Python and written back whole, so `null` removes a key and
 nested objects merge. A node's `id` cannot be patched.
+
+**Revisions.** Every label table has `graphos_rev` (bootstrap step 1), and
+every write in `graphos.writes` sets it: inserts take the default 1, and
+updates, including the upserts' `ON CONFLICT DO UPDATE` and the Louvain
+write-back, add 1. The revision counts writes, not changes. One node or edge
+is returned with `ETag: "<graphid>.<rev>"` (the graphid part keeps a row
+deleted and recreated from matching an old ETag). `If-Match` on its `PATCH`,
+`DELETE` or property merge is checked against the locked row inside the
+write's transaction, so a concurrent writer cannot slip in between the
+check and the write: a mismatch is 412 with the current ETag, and nothing is
+written. `GRAPHOS_REQUIRE_IF_MATCH=true` turns a missing `If-Match` on those
+writes into 428. The single-row `UPDATE` / `DELETE` statements use `ONLY`, so
+they never reach a row of an inheriting label (`label_hierarchy`).
 
 With audit enabled (the default), the audit middleware reads each non-`GET`
 request's full body into memory before the handler parses it (§2.5.6).

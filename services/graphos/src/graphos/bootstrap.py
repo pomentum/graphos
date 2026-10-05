@@ -31,6 +31,7 @@ from dataclasses import asdict, dataclass, field
 import asyncpg
 
 from graphos.db import DDL_TIMEOUT_S, allow_long_statements
+from graphos.lookup import REV
 
 log = logging.getLogger(__name__)
 
@@ -165,6 +166,26 @@ async def _ensure_index_concurrently(
 # ── Bootstrap routine ───────────────────────────────────────────────────────
 
 
+async def _add_column_if_missing(
+    conn: asyncpg.Connection, schema: str, table: str, column: str, definition: str,
+) -> None:
+    """``ALTER TABLE … ADD COLUMN`` only when the column is missing.
+
+    ``ADD COLUMN IF NOT EXISTS`` still takes an ACCESS EXCLUSIVE lock on the
+    table and all its children, which every restart would then queue behind
+    running queries; checking the catalog first takes none.
+    """
+    exists = await conn.fetchval(
+        "SELECT 1 FROM pg_attribute a "
+        "JOIN pg_class c ON c.oid = a.attrelid "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = $1 AND c.relname = $2 AND a.attname = $3 AND NOT a.attisdropped;",
+        schema, table, column,
+    )
+    if not exists:
+        await conn.execute(f'ALTER TABLE "{schema}"."{table}" ADD COLUMN {column} {definition};')
+
+
 async def _inherit_if_missing(
     conn: asyncpg.Connection,
     graph: str,
@@ -292,6 +313,17 @@ async def bootstrap_tenant(
                 f"SELECT create_graph('{spec.name}');",
                 swallow=_SWALLOW_DUPLICATE_OBJECT,
             )
+
+            # 1b. The revision column (graphos.writes bumps it on every
+            # write).  Added to AGE's two parent tables: Postgres adds it to
+            # every existing label table through inheritance, and every label
+            # created later inherits it, default and NOT NULL included.  A
+            # constant default is metadata-only, so even a table of millions
+            # of rows is not rewritten; existing rows read as revision 1.
+            for parent in ("_ag_label_vertex", "_ag_label_edge"):
+                await _add_column_if_missing(
+                    conn, spec.name, parent, REV, "bigint NOT NULL DEFAULT 1",
+                )
 
             # 2. Vertex labels + per-label GIN(properties) index
             # AGE's ``MATCH (n:Label {id: X})`` compiles to

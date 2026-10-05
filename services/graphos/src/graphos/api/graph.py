@@ -31,7 +31,17 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from fastapi.responses import JSONResponse
 
 from graphos import lookup, writes
@@ -163,6 +173,66 @@ def _node_ambiguous(external_id: str, exc: lookup.AmbiguousMatchError) -> HTTPEx
             f"id {external_id!r} exists in labels {exc.candidates}; "
             "pass ?label= to pick one"
         ),
+    )
+
+
+# ── Revisions: ETag / If-Match ─────────────────────────────────────────────
+
+IfMatchHeader = Annotated[
+    str | None,
+    Header(
+        description=(
+            "ETag(s) from an earlier read, or `*`: the write happens only if the "
+            "node or edge still has one of them (412 otherwise)."
+        ),
+    ),
+]
+
+_PRECONDITION_RESPONSES: dict[int | str, dict[str, Any]] = {
+    412: {"description": "`If-Match` did not match: the row changed (or is gone) since read."},
+    428: {"description": "`If-Match` is required (`GRAPHOS_REQUIRE_IF_MATCH`) and was absent."},
+}
+
+
+def _if_match(request: Request, header: str | None) -> lookup.IfMatch | None:
+    if header is None:
+        if request.app.state.settings.require_if_match:
+            raise HTTPException(
+                status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+                detail=(
+                    "this write needs an If-Match header with the ETag of a read "
+                    "(GRAPHOS_REQUIRE_IF_MATCH)"
+                ),
+            )
+        return None
+    return lookup.IfMatch.parse(header)
+
+
+def _precondition_failed(exc: lookup.PreconditionFailedError) -> HTTPException:
+    if exc.current is None:
+        return HTTPException(
+            status_code=status.HTTP_412_PRECONDITION_FAILED,
+            detail="If-Match failed: there is no such node or edge (any more)",
+        )
+    return HTTPException(
+        status_code=status.HTTP_412_PRECONDITION_FAILED,
+        detail=f"If-Match failed: changed since it was read; its ETag is now {exc.current}",
+        headers={"ETag": exc.current},
+    )
+
+
+def _node_response(
+    tenant: str, external_id: str, node: lookup.NodeRow, started: float, response: Response,
+) -> NodeGetResponse:
+    response.headers["ETag"] = node.etag
+    return NodeGetResponse(
+        tenant=tenant,
+        external_id=external_id,
+        label=node.label,
+        properties=node.properties,
+        rev=node.rev,
+        etag=node.etag,
+        elapsed_ms=int((time.perf_counter() - started) * 1000),
     )
 
 
@@ -388,10 +458,11 @@ async def upsert_nodes(
     ),
     responses={409: {"description": "The id exists in several labels; pass `label`."}},
 )
-async def get_node_by_external_id(
+async def get_node_by_external_id(  # noqa: PLR0913 — FastAPI route parameters
     tenant: str,
     external_id: str,
     request: Request,
+    response: Response,
     principal: ReadPrincipal,
     label: Annotated[
         str | None,
@@ -413,13 +484,7 @@ async def get_node_by_external_id(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"no node with id={external_id!r} in tenant {tenant!r}",
         )
-    return NodeGetResponse(
-        tenant=tenant,
-        external_id=external_id,
-        label=node.label,
-        properties=node.properties,
-        elapsed_ms=int((time.perf_counter() - started) * 1000),
-    )
+    return _node_response(tenant, external_id, node, started, response)
 
 
 @router.patch(
@@ -432,17 +497,20 @@ async def get_node_by_external_id(
         "properties of the node whose `id` is `external_id`: a key set to "
         "`null` is removed, a nested object is merged key by key, any other "
         "value replaces the old one, keys not in the patch are kept.  `id` "
-        "names the node and cannot be patched.  Returns the node as written."
+        "names the node and cannot be patched.  Returns the node as written, "
+        "with its new `ETag`."
     ),
     responses={
         404: {"description": "No node has that id."},
         409: {"description": "The id exists in several labels; pass `label`."},
+        **_PRECONDITION_RESPONSES,
     },
 )
 async def patch_node(  # noqa: PLR0913 — FastAPI route parameters
     tenant: str,
     external_id: str,
     request: Request,
+    response: Response,
     principal: WritePrincipal,
     patch: Annotated[
         dict[str, Any],
@@ -452,15 +520,19 @@ async def patch_node(  # noqa: PLR0913 — FastAPI route parameters
         str | None,
         Query(description="The node's label; needed only when the id exists in several labels."),
     ] = None,
+    if_match: IfMatchHeader = None,
 ) -> NodeGetResponse:
     _check_tenant(tenant, principal)
     _check_vertex_label(tenant, label)
+    precondition = _if_match(request, if_match)
     started = time.perf_counter()
     try:
         node = await writes.patch_node(
             request.app.state.pool, tenant=tenant, external_id=external_id,
-            patch=patch, label=label,
+            patch=patch, label=label, if_match=precondition,
         )
+    except lookup.PreconditionFailedError as exc:
+        raise _precondition_failed(exc) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc),
@@ -476,13 +548,7 @@ async def patch_node(  # noqa: PLR0913 — FastAPI route parameters
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"no node with id={external_id!r} in tenant {tenant!r}",
         )
-    return NodeGetResponse(
-        tenant=tenant,
-        external_id=external_id,
-        label=node.label,
-        properties=node.properties,
-        elapsed_ms=int((time.perf_counter() - started) * 1000),
-    )
+    return _node_response(tenant, external_id, node, started, response)
 
 
 @router.post(
@@ -501,32 +567,40 @@ async def patch_node(  # noqa: PLR0913 — FastAPI route parameters
         "An id that exists in several labels answers 409 unless ``label`` "
         "picks one; nothing is written."
     ),
-    responses={409: {"description": "The id exists in several labels; pass `label`."}},
+    responses={
+        409: {"description": "The id exists in several labels; pass `label`."},
+        **_PRECONDITION_RESPONSES,
+    },
 )
 async def upsert_node_properties(  # noqa: PLR0913 — FastAPI route parameters
     tenant: str,
     external_id: str,
     body: NodePropertiesUpsertRequest,
     request: Request,
+    response: Response,
     principal: WritePrincipal,
     label: Annotated[
         str | None,
         Query(description="The node's label; needed only when the id exists in several labels."),
     ] = None,
+    if_match: IfMatchHeader = None,
 ) -> NodePropertiesUpsertResponse:
     _check_tenant(tenant, principal)
     _check_vertex_label(tenant, label)
+    precondition = _if_match(request, if_match)
     started = time.perf_counter()
     pool = request.app.state.pool
 
     try:
-        label = await writes.merge_node_properties(
+        node = await writes.merge_node_properties(
             pool, tenant=tenant, external_id=external_id, properties=body.properties,
-            label=label,
+            label=label, if_match=precondition,
         )
+    except lookup.PreconditionFailedError as exc:
+        raise _precondition_failed(exc) from exc
     except lookup.AmbiguousMatchError as exc:
         raise _node_ambiguous(external_id, exc) from exc
-    if label is None:
+    if node is None:
         # Node not found — distinguish from "found but unchanged" because
         # the caller may have a stale view of which nodes exist.
         raise HTTPException(
@@ -537,13 +611,15 @@ async def upsert_node_properties(  # noqa: PLR0913 — FastAPI route parameters
             ),
         )
 
-    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    response.headers["ETag"] = node.etag
     return NodePropertiesUpsertResponse(
         tenant=tenant,
         external_id=external_id,
-        label=label,
+        label=node.label,
         properties_merged=len(body.properties),
-        elapsed_ms=elapsed_ms,
+        rev=node.rev,
+        etag=node.etag,
+        elapsed_ms=int((time.perf_counter() - started) * 1000),
     )
 
 
@@ -713,9 +789,11 @@ def _no_edge(tenant: str, edge_type: str, ref: _EdgeRef) -> HTTPException:
     )
 
 
-def _edge_response(
+def _edge_response(  # noqa: PLR0913 — everything the response echoes
     tenant: str, edge_type: str, ref: _EdgeRef, edge: lookup.EdgeRow, started: float,
+    response: Response,
 ) -> EdgeGetResponse:
+    response.headers["ETag"] = edge.etag
     return EdgeGetResponse(
         tenant=tenant,
         type=edge_type,
@@ -724,6 +802,8 @@ def _edge_response(
         dst_id=ref.dst,
         dst_label=edge.dst_label,
         properties=edge.properties,
+        rev=edge.rev,
+        etag=edge.etag,
         elapsed_ms=int((time.perf_counter() - started) * 1000),
     )
 
@@ -734,11 +814,12 @@ def _edge_response(
     summary="Fetch one edge by its type and the ids of its ends",
     responses=_EDGE_RESPONSES,
 )
-async def get_edge(
+async def get_edge(  # noqa: PLR0913 — FastAPI route parameters
     tenant: str,
     edge_type: str,
     ref: EdgeRef,
     request: Request,
+    response: Response,
     principal: ReadPrincipal,
 ) -> EdgeGetResponse:
     _check_tenant(tenant, principal)
@@ -754,7 +835,7 @@ async def get_edge(
             raise _edge_ambiguous(edge_type, exc) from exc
     if edge is None:
         raise _no_edge(tenant, edge_type, ref)
-    return _edge_response(tenant, edge_type, ref, edge, started)
+    return _edge_response(tenant, edge_type, ref, edge, started, response)
 
 
 @router.patch(
@@ -766,30 +847,36 @@ async def get_edge(
         "application/merge-patch+json` or `application/json`) to the "
         "properties of one edge: a key set to `null` is removed, a nested "
         "object is merged key by key, any other value replaces the old one, "
-        "keys not in the patch are kept.  Returns the edge as written."
+        "keys not in the patch are kept.  Returns the edge as written, with its "
+        "new `ETag`."
     ),
-    responses=_EDGE_RESPONSES,
+    responses={**_EDGE_RESPONSES, **_PRECONDITION_RESPONSES},
 )
 async def patch_edge(  # noqa: PLR0913 — FastAPI route parameters
     tenant: str,
     edge_type: str,
     ref: EdgeRef,
     request: Request,
+    response: Response,
     principal: WritePrincipal,
     patch: Annotated[
         dict[str, Any],
         Body(media_type="application/merge-patch+json", description="JSON Merge Patch."),
     ],
+    if_match: IfMatchHeader = None,
 ) -> EdgeGetResponse:
     _check_tenant(tenant, principal)
     _check_edge_ref(tenant, edge_type, ref)
+    precondition = _if_match(request, if_match)
     started = time.perf_counter()
     try:
         edge = await writes.patch_edge(
             request.app.state.pool, tenant=tenant, edge_type=edge_type,
             src_id=ref.src, dst_id=ref.dst, patch=patch,
-            src_label=ref.src_label, dst_label=ref.dst_label,
+            src_label=ref.src_label, dst_label=ref.dst_label, if_match=precondition,
         )
+    except lookup.PreconditionFailedError as exc:
+        raise _precondition_failed(exc) from exc
     except lookup.AmbiguousMatchError as exc:
         raise _edge_ambiguous(edge_type, exc) from exc
     except CypherError as exc:
@@ -798,32 +885,39 @@ async def patch_edge(  # noqa: PLR0913 — FastAPI route parameters
         ) from exc
     if edge is None:
         raise _no_edge(tenant, edge_type, ref)
-    return _edge_response(tenant, edge_type, ref, edge, started)
+    return _edge_response(tenant, edge_type, ref, edge, started, response)
 
 
 @router.delete(
     "/edges/{edge_type}",
     response_model=DeleteEdgeResponse,
     summary="Delete one edge; its end nodes stay",
-    description="Idempotent: deleting an edge that does not exist returns `edges_deleted: 0`.",
-    responses={409: _EDGE_RESPONSES[409]},
+    description=(
+        "Idempotent: deleting an edge that does not exist returns `edges_deleted: 0` "
+        "(with `If-Match`, 412)."
+    ),
+    responses={409: _EDGE_RESPONSES[409], **_PRECONDITION_RESPONSES},
 )
-async def delete_edge(
+async def delete_edge(  # noqa: PLR0913 — FastAPI route parameters
     tenant: str,
     edge_type: str,
     ref: EdgeRef,
     request: Request,
     principal: WritePrincipal,
+    if_match: IfMatchHeader = None,
 ) -> DeleteEdgeResponse:
     _check_tenant(tenant, principal)
     _check_edge_ref(tenant, edge_type, ref)
+    precondition = _if_match(request, if_match)
     started = time.perf_counter()
     try:
         deleted = await writes.delete_edge(
             request.app.state.pool, tenant=tenant, edge_type=edge_type,
             src_id=ref.src, dst_id=ref.dst,
-            src_label=ref.src_label, dst_label=ref.dst_label,
+            src_label=ref.src_label, dst_label=ref.dst_label, if_match=precondition,
         )
+    except lookup.PreconditionFailedError as exc:
+        raise _precondition_failed(exc) from exc
     except lookup.AmbiguousMatchError as exc:
         raise _edge_ambiguous(edge_type, exc) from exc
     except CypherError as exc:
@@ -2237,10 +2331,16 @@ async def sample_subgraph(
     description=(
         "Idempotent: missing nodes return 0/0. Every node with that id (in "
         "any label, or only in ``label`` when given) is removed together with "
-        "all its incident edges, in one transaction."
+        "all its incident edges, in one transaction.\n\n"
+        "With ``If-Match`` the id must name exactly one node (409 otherwise), "
+        "deleted only if it still has that ETag (412 otherwise)."
     ),
+    responses={
+        409: {"description": "With `If-Match`: the id exists in several labels."},
+        **_PRECONDITION_RESPONSES,
+    },
 )
-async def delete_node(
+async def delete_node(  # noqa: PLR0913 — FastAPI route parameters
     tenant: str,
     node_id: str,
     request: Request,
@@ -2248,16 +2348,27 @@ async def delete_node(
     label: Annotated[
         str | None, Query(description="Delete the node in this label only."),
     ] = None,
+    if_match: IfMatchHeader = None,
 ) -> DeleteNodeResponse:
     _check_tenant(tenant, principal)
     _check_vertex_label(tenant, label)
+    precondition = _if_match(request, if_match)
 
     pool = request.app.state.pool
     started = time.perf_counter()
     try:
-        nodes_n, edges_n = await writes.delete_nodes(
-            pool, tenant=tenant, property_key="id", property_value=node_id, label=label,
-        )
+        if precondition is None:
+            nodes_n, edges_n = await writes.delete_nodes(
+                pool, tenant=tenant, property_key="id", property_value=node_id, label=label,
+            )
+        else:
+            nodes_n, edges_n = await writes.delete_node(
+                pool, tenant=tenant, external_id=node_id, label=label, if_match=precondition,
+            )
+    except lookup.PreconditionFailedError as exc:
+        raise _precondition_failed(exc) from exc
+    except lookup.AmbiguousMatchError as exc:
+        raise _node_ambiguous(node_id, exc) from exc
     except CypherError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

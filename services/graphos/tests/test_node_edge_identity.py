@@ -87,10 +87,11 @@ async def test_merge_refuses_an_id_in_two_labels(db_pool: asyncpg.Pool) -> None:
     assert await _node(db_pool, "shared", "Document") == {"id": "shared", "kind": "doc"}
     assert await _node(db_pool, "shared", "Collection") == {"id": "shared", "kind": "coll"}
 
-    label = await writes.merge_node_properties(
+    node = await writes.merge_node_properties(
         db_pool, tenant=TENANT, external_id="shared", properties={"x": 1}, label="Collection",
     )
-    assert label == "Collection"
+    assert node is not None
+    assert node.label == "Collection"
     assert await _node(db_pool, "shared", "Collection") == {"id": "shared", "kind": "coll", "x": 1}
     assert await _node(db_pool, "shared", "Document") == {"id": "shared", "kind": "doc"}
 
@@ -104,7 +105,8 @@ async def test_patch_node_is_a_json_merge_patch(db_pool: asyncpg.Pool) -> None:
         patch={"n": None, "meta": {"y": None, "z": 3}, "tags": ["q"], "new": True},
     )
     expected = {"id": "a", "meta": {"x": 1, "z": 3}, "tags": ["q"], "new": True}
-    assert node == lookup.NodeRow(label="Document", properties=expected)
+    assert node is not None
+    assert (node.label, node.properties) == ("Document", expected)
     assert await _node(db_pool, "a", "Document") == expected
     with pytest.raises(ValueError, match="'id'"):
         await writes.patch_node(db_pool, tenant=TENANT, external_id="a", patch={"id": "b"})
@@ -118,9 +120,11 @@ async def test_patch_node_is_a_json_merge_patch(db_pool: asyncpg.Pool) -> None:
 async def test_ids_with_quotes_are_matched_exactly(db_pool: asyncpg.Pool) -> None:
     await _seed(db_pool)
     assert await _node(db_pool, QUOTED, "Document") == {"id": QUOTED, "k": "v"}
-    assert await writes.merge_node_properties(
+    node = await writes.merge_node_properties(
         db_pool, tenant=TENANT, external_id=QUOTED, properties={"k": "w"},
-    ) == "Document"
+    )
+    assert node is not None
+    assert node.label == "Document"
     assert await _node(db_pool, QUOTED, "Document") == {"id": QUOTED, "k": "w"}
 
 
@@ -218,10 +222,12 @@ async def test_edge_routes(api: httpx.AsyncClient) -> None:
     to_coll = {**ends, "dst_label": "Collection"}
     resp = await api.get("/edges/CITES", params=to_coll)
     assert resp.status_code == HTTPStatus.OK, resp.text
-    assert resp.json() | {"elapsed_ms": 0} == {
+    body = resp.json()
+    assert body["etag"] == resp.headers["etag"]
+    assert body | {"elapsed_ms": 0, "etag": ""} == {
         "tenant": TENANT, "type": "CITES", "src_id": "a", "src_label": "Document",
         "dst_id": "shared", "dst_label": "Collection", "properties": {"w": 2},
-        "elapsed_ms": 0,
+        "rev": 1, "etag": "", "elapsed_ms": 0,
     }
 
     resp = await api.patch(

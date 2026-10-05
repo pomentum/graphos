@@ -16,7 +16,8 @@ Your services send JSON over HTTP. graphos owns the database, writes the SQL aga
 - **Tenants are isolated AGE graphs.** Each consumer registers its own labels; tokens are scoped to tenants (wrong tenant → `403`, unknown → `404`) and to `read` or `write`.
 - **Schema-agnostic.** No built-in labels or property names. Every endpoint takes label / property / edge names as parameters.
 - **Fast, idempotent writes:** small batches, NDJSON streaming bulk and single-file snapshot import all go through COPY-staged SQL upserts (`INSERT … ON CONFLICT`); in our measurements this was 37–156× faster than per-row Cypher `MERGE` (see [AGE notes](docs/apache-age.md)).
-- **Composable reads:** search, neighbors, multi-hop expand, induced subgraph, paginated node scan, stratified sampling, graphology export (sigma.js / Gephi).
+- **Composable reads:** search, neighbors, multi-hop expand, shortest paths, induced subgraph, paginated node scan, stratified sampling, graphology export (sigma.js / Gephi).
+- **Edit in place, safely:** read, patch (JSON Merge Patch) or delete one node or edge; each carries a revision and an `ETag`, and `If-Match` turns a concurrent edit into a `412` instead of a lost update.
 - **Graph analytics:** label histograms, top-K by degree, node/edge aggregates, and (optional extra) Louvain communities with IDs that stay stable across runs; the same graph gives the same communities, computed in a separate process so the API keeps serving.
 - **Rule-based edge derivation:** declare a property-match rule once at registration; `edges:resolve` writes the edges server-side in one SQL statement.
 - **Background jobs:** long operations (community recompute, edge resolution, vacuum) run as jobs with `Prefer: respond-async`: answered `202` at once, polled at `/v1/jobs/{id}`, cancellable.
@@ -138,6 +139,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | `GRAPHOS_JOB_RETENTION_H` | `168` | Hours finished jobs are kept |
 | `GRAPHOS_VERTEX_GRAPHID_INDEXES` | `false` | Also index the graphid of every vertex table: faster endpoint resolution, 20–30% slower bulk vertex writes |
 | `GRAPHOS_DB_JIT` | `false` | PostgreSQL JIT for graphos's connections |
+| `GRAPHOS_REQUIRE_IF_MATCH` | `false` | Writes to one node or edge must send `If-Match` (428 without it) |
 
 ## Documentation
 

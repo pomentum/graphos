@@ -100,6 +100,11 @@ one id (or one src/dst pair) in a batch collapse into one row.
   written back in one transaction; returns the row as written. An edge is
   named by its type and end ids; `GET` and `DELETE` on the same path read or
   remove it.
+- **Revisions and optimistic concurrency:** every node and edge carries a
+  revision, bumped by every write. One node or edge is returned with an
+  `ETag`; `If-Match` on its patch, delete or property merge writes only if it
+  has not changed since (412 otherwise). `GRAPHOS_REQUIRE_IF_MATCH=true`
+  makes `If-Match` mandatory on those writes (428).
 - **NDJSON bulk** (`POST …/graph/nodes:bulk`, `…/graph/edges:bulk`): one row
   per line, flushed in 500-row batches per label / edge key, each batch in its
   own transaction. Invalid lines are skipped and reported (`rows_invalid`, up
@@ -132,6 +137,12 @@ reported in the response.
 - **Neighbors** (`GET …/graph/neighbors`): one hop, outgoing and incoming, with
   direction, edge type, and both property bags; the neighbor is identified by
   external id (`neighbor_id`). Optional `rel_types`. Limit default 50, max 500.
+- **Shortest paths** (`POST …/graph/paths`): every shortest path between two
+  nodes, up to `limit` (≤100) and `max_hops` (≤8), by a bidirectional
+  breadth-first search that issues one batched SQL statement per level.
+  `direction` (`out|in|both`) and `rel_types` narrow it; a level touching
+  more than 100,000 edges stops it with `truncated`. AGE's own
+  `shortestPath` is not used.
 - **Expand** (`GET …/graph/expand`): breadth-first traversal from `node_id`,
   or from several `seeds`.
   - Options: `direction` (`out|in|both`), `rel_types`, `max_hops` (default 2,

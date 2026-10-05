@@ -74,6 +74,18 @@ def test_generated_column_ddl() -> None:
             TenantSpecBody(**_BASE, generated_columns=[bad])
 
 
+@pytest.mark.parametrize(
+    "column", ["graphos_rev", "GRAPHOS_X", '"graphos_rev"', "end_community_id"],
+)
+def test_generated_column_cannot_take_a_graphos_column_name(column: str) -> None:
+    ddl = (
+        f'ALTER TABLE "demo"."Doc" ADD COLUMN {column} bigint '
+        "GENERATED ALWAYS AS (1) STORED"
+    )
+    with pytest.raises(ValueError, match="reserved"):
+        TenantSpecBody(**_BASE, generated_columns=[ddl])
+
+
 # ── statement timeout → 504 ────────────────────────────────────────────────
 
 

@@ -245,7 +245,27 @@ curl -s -X PATCH "$G/v1/acme/graph/edges/AUTHORED?src=u1&dst=d1" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/merge-patch+json" \
   -d '{"role": "editor", "draft": null}'
 # → {"tenant":"acme","type":"AUTHORED","src_id":"u1","src_label":"User","dst_id":"d1",
-#    "dst_label":"Document","properties":{"role":"editor"},"elapsed_ms":…}
+#    "dst_label":"Document","properties":{"role":"editor"},"rev":2,
+#    "etag":"\"1125899906842625.2\"","elapsed_ms":…}
+```
+
+**Revisions and `If-Match`.** Every node and edge has a revision: 1 when created, plus one on
+every write to it (upserts, merges, patches and the community write-back; a write of the same
+values counts too). Reads and writes of one node or edge return it as `rev` and as the `ETag`
+header (also `etag` in the body), `"<graphid>.<rev>"`, so a node deleted and created again never
+matches an old ETag. Send it back as `If-Match` on `PATCH`, `DELETE` or the property merge to
+write only if nobody else has written since your read. On a mismatch the answer is 412 with the
+current `ETag`, and nothing is written. `If-Match: *` means "if it still exists". With `If-Match`,
+`DELETE /nodes/{id}` must name exactly one node (409 if the id is in several labels).
+`GRAPHOS_REQUIRE_IF_MATCH=true` makes `If-Match` mandatory on those writes (428 without it);
+batch upserts are not affected.
+
+```bash
+ETAG=$(curl -s -D - -o /dev/null "$G/v1/acme/graph/nodes/u1" -H "Authorization: Bearer $TOKEN" \
+  | tr -d '\r' | sed -n 's/^etag: //Ip')
+curl -s -X PATCH "$G/v1/acme/graph/nodes/u1" -H "Authorization: Bearer $TOKEN" \
+  -H "If-Match: $ETAG" -H "Content-Type: application/merge-patch+json" -d '{"name": "Ada L."}'
+# → 200 with the new ETag, or 412 if u1 changed after the GET
 ```
 
 **Atomicity.** A small-batch call runs one transaction per label (nodes) or per
@@ -329,6 +349,7 @@ other reads return every match.
 | `/graph/search` | GET | `q` (1–200 chars), `label`, `limit` (20 / 200) | `nodes[{id, label, properties}]`, `truncated`; `id` is the AGE graphid (integer), the external id is `properties.id` |
 | `/graph/nodes/{external_id}` | GET | `label` | `label`, `properties` (404 if absent) |
 | `/graph/edges/{type}` | GET | `src`, `dst`, `src_label`, `dst_label` | one edge: `src_label`, `dst_label`, `properties` (404 if absent) |
+| `/graph/paths` | POST | `src`, `dst` (+ labels), `rel_types`, `direction` (`both`), `max_hops` (4 / 8), `limit` (1 / 100), `include_properties` | the shortest paths: `hops`, `paths[{hops, nodes[], edges[]}]`, `truncated` |
 | `/graph/neighbors` | GET | `node_id`, `rel_types` (repeatable), `limit` (50 / 500) | 1-hop `neighbors[{neighbor_id, neighbor_label, direction, edge_type, …}]` |
 | `/graph/expand` | GET | `node_id` (always required), `seeds` (repeatable), `rel_types`, `max_hops` (2 / 5), `direction` `in\|out\|both`, `limit` (100 / 1000), `communities` | `paths[{end_id, end_label, hops, rel_path}]` |
 | `/graph/induced_edges` | POST | `node_ids` (1–1000), `rel_types`, `limit` (500 / 5000) | edges within the set |
@@ -365,6 +386,29 @@ curl -s -X POST "$G/v1/acme/graph/induced_edges" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"node_ids": ["u1", "u2", "d1"], "rel_types": ["AUTHORED", "FOLLOWS"], "limit": 1000}'
 ```
+
+### paths
+
+`POST /graph/paths` finds the shortest paths between two nodes. It searches from both ends at
+once, one SQL statement per level over the edge indexes, always growing the smaller side, so a
+path of n hops costs n statements. It returns every path of the shortest length it finds, up to
+`limit`; `hops` is null when there is no path within `max_hops`. `direction` is relative to the
+path: `out` follows edges the way they point from `src` to `dst`, `in` against it, `both` either
+way (the default). Each edge on a path keeps its stored direction in `src_id` / `dst_id`, which
+can run against the path with `in` or `both`. A level that would touch more than 100,000 edges
+stops the search with `truncated: true`; narrow `rel_types` or `direction` and retry.
+
+```bash
+curl -s -X POST "$G/v1/acme/graph/paths" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"src": "u1", "dst": "u7", "direction": "both", "max_hops": 4, "limit": 5}'
+# → {"hops":2,"paths":[{"hops":2,"nodes":[{"id":"u1","label":"User"},{"id":"d1","label":"Document"},
+#    {"id":"u7","label":"User"}],"edges":[{"type":"AUTHORED","src_id":"u1","dst_id":"d1"},
+#    {"type":"AUTHORED","src_id":"u7","dst_id":"d1"}]}],"truncated":false,"visited":…,...}
+```
+
+The vertices on the paths are read back by graphid. AGE does not index vertex graphids, so that
+is one scan per label on the paths unless `GRAPHOS_VERTEX_GRAPHID_INDEXES=true`.
 
 ### nodes:scan
 
@@ -681,7 +725,7 @@ timeout is the exception: it returns `application/problem+json`.
 | Limit | Value |
 |---|---|
 | writes | small batch 1–1000 rows; ids 1–512 chars; `snapshot-import` ≤ 50,000,000 rows |
-| point reads | `search` `q` 1–200 chars, `limit` ≤ 200; `neighbors` ≤ 500; `expand` hops ≤ 5, `limit` ≤ 1000 |
+| point reads | `search` `q` 1–200 chars, `limit` ≤ 200; `neighbors` ≤ 500; `expand` hops ≤ 5, `limit` ≤ 1000; `paths` hops ≤ 8, ≤ 100 paths, ≤ 100,000 edges per search level |
 | set reads | `induced_edges` ≤ 1000 ids / 5000 edges; `*:scan` ≤ 2000 rows and 10 MiB per page; `scoped_subgraph` ≤ 4000 nodes / 12000 edges; `sample_subgraph` `per_rel` ≤ 500; `export` ≤ 50000 nodes |
 | aggregates | `limit` ≤ 5000; histogram ≤ 1000; top `k` ≤ 200; `community-ids` first 500 (`truncated`) |
 | cache | key 1–256 chars; TTL ≤ 30 days |
@@ -693,6 +737,7 @@ timeout is the exception: it returns `application/problem+json`.
 | 403 | token lacks access to the tenant, the endpoint needs admin, or a read-only token on a write |
 | 404 | tenant not registered; node (`GET`, `PATCH`, `POST …/properties`), edge (`GET`, `PATCH`), unregistered edge type in the path, or cache key not found; unknown tenant on `GET`/`DELETE /v1/tenants/{name}` |
 | 409 | `recompute-communities` already running (or queued as a job) for the tenant; cancelling a finished job; an id or edge that matches in several labels (pass `label` / `src_label` / `dst_label`) |
+| 412 | `If-Match` did not match: the node or edge changed (or is gone) since it was read |
 | 413 | `snapshot-import` over 50M rows |
 | 422 | body or query validation (patterns, ranges, DDL, `resolve_rule`, `label_hierarchy`), or `order_by: null` sent with a `cursor` |
 | 429 | rate limited (when enabled) |

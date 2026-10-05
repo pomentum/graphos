@@ -78,10 +78,12 @@ async def _edges(pool: asyncpg.Pool) -> set[tuple[str, str, str]]:
 @pytest.mark.asyncio
 async def test_merge_node_properties(db_pool: asyncpg.Pool) -> None:
     await _seed(db_pool)
-    label = await writes.merge_node_properties(
+    node = await writes.merge_node_properties(
         db_pool, tenant=TEST_TENANT, external_id="a", properties={"n": 2, "x": True},
     )
-    assert label == "Document"
+    assert node is not None
+    assert node.label == "Document"
+    assert node.properties == {"id": "a", "team": "red", "n": 2, "x": True}
     rows = await query_cypher(
         db_pool, graph=TEST_TENANT,
         cypher="MATCH (n {id: 'a'}) RETURN properties(n) AS p",

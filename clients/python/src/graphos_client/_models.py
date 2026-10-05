@@ -426,6 +426,8 @@ class NodePropertiesUpsertResponse(BaseModel):
     external_id: str
     label: str
     properties_merged: int
+    rev: int | None = None    # None from a server older than 0.2
+    etag: str | None = None   # send back as ``if_match`` to write only this version
     elapsed_ms: int
 
 
@@ -434,6 +436,8 @@ class NodeGetResponse(BaseModel):
     external_id: str
     label: str
     properties: dict[str, Any] = Field(default_factory=dict)
+    rev: int | None = None    # None from a server older than 0.2
+    etag: str | None = None   # send back as ``if_match`` to write only this version
     elapsed_ms: int
 
 
@@ -447,6 +451,8 @@ class EdgeGetResponse(BaseModel):
     dst_id: str
     dst_label: str
     properties: dict[str, Any] = Field(default_factory=dict)
+    rev: int | None = None    # None from a server older than 0.2
+    etag: str | None = None   # send back as ``if_match`` to write only this version
     elapsed_ms: int
 
 
@@ -517,3 +523,41 @@ class GraphologyExport(BaseModel):
     options: dict[str, object] = Field(default_factory=dict)
     nodes: list[GraphologyNode] = Field(default_factory=list)
     edges: list[GraphologyEdge] = Field(default_factory=list)
+
+
+# ── Shortest paths ───────────────────────────────────────────────────
+
+
+class PathNode(BaseModel):
+    id: str
+    label: str
+    properties: dict[str, Any] | None = None
+
+
+class PathEdge(BaseModel):
+    """An edge on a path, in its stored direction ``src_id`` → ``dst_id``."""
+
+    type: str
+    src_id: str
+    dst_id: str
+    properties: dict[str, Any] | None = None
+
+
+class GraphPath(BaseModel):
+    """``edges[i]`` joins ``nodes[i]`` and ``nodes[i + 1]``."""
+
+    hops: int
+    nodes: list[PathNode]
+    edges: list[PathEdge]
+
+
+class PathsResponse(BaseModel):
+    tenant: str
+    src: str
+    dst: str
+    direction: str
+    hops: int | None    # None when no path was found
+    paths: list[GraphPath]
+    truncated: bool     # the search stopped at its edge cap: a path may exist
+    visited: int
+    elapsed_ms: int

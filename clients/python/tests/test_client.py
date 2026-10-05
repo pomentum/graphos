@@ -473,3 +473,53 @@ async def test_edge_get_patch_delete() -> None:
     assert deleted.edges_deleted == 1
     assert dict(seen[3].url.params) == {"src": "a", "dst": "b/1", "src_label": "Doc"}
     await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_if_match_is_sent_and_etag_read() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.headers.get("if-match") == '"1.1"':
+            return httpx.Response(412, json={"detail": "If-Match failed"})
+        return httpx.Response(200, json={
+            "tenant": "demo", "external_id": "a", "label": "Doc",
+            "properties": {"id": "a"}, "rev": 3, "etag": '"1.3"', "elapsed_ms": 1,
+        })
+
+    cli = GraphosClient(base_url="http://x", tenant="demo", transport=_mock_transport(handler))
+    node = await cli.patch_node("a", {"x": 1}, if_match='"1.2"')
+    assert (node.rev, node.etag) == (3, '"1.3"')
+    assert seen[0].headers["if-match"] == '"1.2"'
+    with pytest.raises(GraphosError) as exc:
+        await cli.patch_node("a", {"x": 1}, if_match='"1.1"')
+    assert exc.value.status_code == 412
+    await cli.patch_node("a", {"x": 1})
+    assert "if-match" not in seen[2].headers
+    await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_find_paths() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={
+            "tenant": "demo", "src": "a", "dst": "c", "direction": "out", "hops": 1,
+            "paths": [{"hops": 1,
+                       "nodes": [{"id": "a", "label": "P"}, {"id": "c", "label": "P"}],
+                       "edges": [{"type": "KNOWS", "src_id": "a", "dst_id": "c"}]}],
+            "truncated": False, "visited": 2, "elapsed_ms": 1,
+        })
+
+    cli = GraphosClient(base_url="http://x", tenant="demo", transport=_mock_transport(handler))
+    found = await cli.find_paths("a", "c", direction="out", rel_types=["KNOWS"], limit=3)
+    assert found.hops == 1 and found.paths[0].edges[0].type == "KNOWS"
+    assert seen[0].url.path == "/v1/demo/graph/paths"
+    assert json.loads(seen[0].content) == {
+        "src": "a", "dst": "c", "direction": "out", "max_hops": 4, "limit": 3,
+        "include_properties": False, "rel_types": ["KNOWS"],
+    }
+    await cli.close()

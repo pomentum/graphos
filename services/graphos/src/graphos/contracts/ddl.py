@@ -57,7 +57,7 @@ _COLUMN_TYPES = (
 
 _GENERATED_SKELETON = re.compile(
     rf"^ALTER TABLE (?:ONLY )?(?P<schema>{_IDENT}) ?\. ?(?P<table>{_IDENT}) "
-    rf"ADD (?:COLUMN )?(?:IF NOT EXISTS )?{_IDENT} "
+    rf"ADD (?:COLUMN )?(?:IF NOT EXISTS )?(?P<column>{_IDENT}) "
     rf"(?:{_COLUMN_TYPES})(?: ?\(\))?(?: ?\[\])? "
     r"GENERATED ALWAYS AS ?\(\) STORED$",
     re.IGNORECASE,
@@ -72,6 +72,11 @@ _PREFIX_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0
 _UNICODE_IDENT = re.compile(r"[Uu]&")
 
 AGE_PARENT_TABLES = frozenset({"_ag_label_vertex", "_ag_label_edge"})
+
+# Columns graphos adds to label tables itself; a generated column may not
+# take these names (or any other ``graphos_`` name).
+_RESERVED_COLUMNS = frozenset({"id", "properties", "start_id", "end_id", "end_community_id"})
+_RESERVED_COLUMN_PREFIX = "graphos_"
 
 
 def _skeleton(stmt: str) -> str:
@@ -188,4 +193,8 @@ def validate_ddl(
         raise ValueError(
             f"{kind} DDL targets {table!r}, which is not a label of tenant {tenant!r}: {stmt!r}"
         )
+    if kind != "index":
+        column = _unquote(m.group("column")).lower()
+        if column in _RESERVED_COLUMNS or column.startswith(_RESERVED_COLUMN_PREFIX):
+            raise ValueError(f"column name {column!r} is reserved by graphos: {stmt!r}")
     return body
