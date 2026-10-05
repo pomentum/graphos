@@ -3,6 +3,7 @@
 Lifespan responsibilities:
 - Build the asyncpg pool.
 - Load the auth token store (idempotent SIGHUP reload registered too).
+- Start the background job runner (stopped before the pool closes).
 - Mark the service ready.
 
 graphos does **not** bootstrap any tenants on startup — consumers register
@@ -18,8 +19,9 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import asyncpg
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from graphos import __version__
 from graphos.api import (
@@ -30,6 +32,7 @@ from graphos.api import (
     graph,
     health,
     info,
+    jobs,
     louvain,
     snapshot,
     tenants,
@@ -41,7 +44,12 @@ from graphos.bootstrap import (
     registered_tenants,
 )
 from graphos.config import Settings
+from graphos.contracts.db import VacuumRequest
+from graphos.contracts.louvain import RecomputeCommunitiesRequest
+from graphos.contracts.tenants import ResolveEdgesRequest
 from graphos.db import create_pool, ensure_internal_schema
+from graphos.jobs import JobKind, JobRunner
+from graphos.louvain_compute import terminate_running
 from graphos.observability.audit import AuditMiddleware
 from graphos.observability.logging import RequestContextMiddleware, configure_logging
 from graphos.observability.metrics import MetricsMiddleware, metrics_handler
@@ -57,6 +65,35 @@ def _install_sighup_handler(token_store: TokenStore) -> None:
     except (AttributeError, ValueError):
         # Windows lacks SIGHUP; or we're not on the main thread.
         log.info("SIGHUP handler not installed (likely Windows)")
+
+
+def _registered(tenant: str | None) -> str:
+    """A queued job's tenant may have been unregistered since."""
+    if tenant is None or tenant not in registered_tenants():
+        raise HTTPException(status_code=404, detail=f"tenant '{tenant}' is not registered")
+    return tenant
+
+
+async def _run_recompute(pool: asyncpg.Pool, tenant: str | None, params: dict) -> BaseModel:
+    body = RecomputeCommunitiesRequest.model_validate(params)
+    return await louvain.run_recompute(pool, _registered(tenant), body)
+
+
+async def _run_resolve(pool: asyncpg.Pool, tenant: str | None, params: dict) -> BaseModel:
+    body = ResolveEdgesRequest.model_validate(params)
+    return await graph.run_resolve(pool, _registered(tenant), body)
+
+
+async def _run_vacuum(pool: asyncpg.Pool, _tenant: str | None, params: dict) -> BaseModel:
+    return await db.run_vacuum(pool, VacuumRequest.model_validate(params))
+
+
+# Operations that accept ``Prefer: respond-async``.
+JOB_KINDS: dict[str, JobKind] = {
+    "recompute_communities": JobKind(run=_run_recompute, admin_only=True),
+    "resolve_edges": JobKind(run=_run_resolve),
+    "vacuum": JobKind(run=_run_vacuum, admin_only=True),
+}
 
 
 @asynccontextmanager
@@ -107,6 +144,17 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception:  # noqa: BLE001
             log.exception("tenant bootstrap failed at startup", extra={"tenant": spec.name})
 
+    # 4. Background jobs.
+    runner = JobRunner(
+        pool, JOB_KINDS,
+        concurrency=settings.job_concurrency,
+        poll_s=settings.job_poll_s,
+        heartbeat_s=settings.job_heartbeat_s,
+        retention_h=settings.job_retention_h,
+    )
+    runner.start()
+    app.state.job_runner = runner
+
     log.info(
         "graphos ready",
         extra={"version": __version__, "tenants_restored": restored},
@@ -115,6 +163,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await runner.stop()
+        terminate_running()
         await pool.close()
         log.info("graphos shutdown complete")
 
@@ -194,6 +244,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(communities.router, prefix="/v1")
     app.include_router(cache.router, prefix="/v1")
     app.include_router(snapshot.router, prefix="/v1")
+    app.include_router(jobs.router, prefix="/v1")
 
     @app.get("/")
     async def _root() -> dict[str, Any]:

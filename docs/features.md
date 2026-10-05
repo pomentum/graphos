@@ -181,9 +181,10 @@ reported in the response.
 > `--build-arg GRAPHOS_EXTRAS=louvain`. Without it, `recompute-communities`
 > answers 501 and `GET /v1/info` reports `features.louvain: false`.
 
-`POST /v1/{tenant}/recompute-communities` (admin) runs Louvain in-process and
-synchronously. It is single-flight per tenant via a Postgres advisory lock
-(concurrent calls get 409).
+`POST /v1/{tenant}/recompute-communities` (admin) runs Louvain in a separate
+worker process, so the API keeps serving meanwhile, and answers when done, or
+at once as a background job with `Prefer: respond-async`. It is single-flight
+per tenant via a Postgres advisory lock (concurrent calls get 409).
 
 ```mermaid
 flowchart LR
@@ -360,6 +361,12 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
     or `available: false` when it is missing.
   - `POST /v1/db/vacuum`: named tables or the whole database; `analyze`
     defaults on, `full` off.
+- **Background jobs:** community recompute, `edges:resolve` and vacuum accept
+  `Prefer: respond-async` and answer 202 with a job (`Location: /v1/jobs/{id}`).
+  `GET /v1/jobs/{id}` returns its status and, when done, the synchronous
+  response body or the error it would have returned; `GET /v1/jobs` lists
+  recent jobs; `POST /v1/jobs/{id}:cancel` cancels. Jobs run on any replica,
+  once each, and are not re-run automatically.
 - **Timeouts:** every statement runs under a server-side `statement_timeout`
   (`GRAPHOS_STATEMENT_TIMEOUT_S`, default 60 s); it is the only per-statement
   limit (no client-side command timeout). Tenant bootstrap and the startup

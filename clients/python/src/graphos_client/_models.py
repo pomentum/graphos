@@ -14,7 +14,8 @@ service contract changes, this file is updated alongside.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -309,6 +310,37 @@ class RecomputeCommunitiesResponse(BaseModel):
     writeback_ms: int
     elapsed_ms: int
     dry_run: bool
+
+
+# ── Background jobs ─────────────────────────────────────────────────────────
+
+
+class JobError(BaseModel):
+    """The HTTP status and detail the synchronous call would have returned."""
+
+    status: int
+    detail: str
+
+
+class Job(BaseModel):
+    """A background job (``submit_*`` methods, ``GET /v1/jobs/{id}``)."""
+
+    id: UUID
+    kind: str
+    tenant: str | None = None
+    status: Literal["queued", "running", "succeeded", "failed", "cancelled"]
+    params: dict[str, Any] = Field(default_factory=dict)
+    result: dict[str, Any] | None = None
+    error: JobError | None = None
+    consumer: str | None = None
+    cancel_requested: bool = False
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+    @property
+    def done(self) -> bool:
+        return self.status in ("succeeded", "failed", "cancelled")
 
 
 # ── Community reads + tenant stats ─────────────────────────────────────────

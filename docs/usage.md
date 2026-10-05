@@ -446,7 +446,10 @@ Louvain is an optional extra because python-igraph is GPL-2.0-or-later: `pip ins
 file includes it unless `GRAPHOS_EXTRAS=` is set. Without it, `recompute-communities` returns **501**;
 `GET /v1/info` reports availability in `features.louvain`.
 
-`POST /v1/{tenant}/recompute-communities` requires admin and runs synchronously.
+`POST /v1/{tenant}/recompute-communities` requires admin. It answers when the recompute is done,
+or at once as a background job with `Prefer: respond-async` (§10). The graph computation runs in a
+child process, so the API keeps serving other requests meanwhile; cancelling the job terminates it.
+The result depends only on the edges, not on the order rows are stored in.
 
 | Field | Default | Rule |
 |---|---|---|
@@ -550,6 +553,39 @@ edge-label strings).
 The endpoints without auth report tenant counts, never names; admins list tenants with
 `GET /v1/tenants`.
 
+### Background jobs
+
+Community recompute, `edges:resolve` and vacuum can take minutes on a large graph. Send them with
+`Prefer: respond-async` to run them as a background job: graphos validates the request exactly as
+it would synchronously (so a bad body, scope or tenant still fails at once), queues it and answers
+**202** with the job, `Location: /v1/jobs/{id}`, `Retry-After: 2` and
+`Preference-Applied: respond-async`. Without the header the endpoints behave as before.
+
+```bash
+curl -s -X POST "$G/v1/acme/recompute-communities" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -H "Prefer: respond-async" -d '{"rel_types": ["FOLLOWS"]}'
+# → 202 {"id": "…", "kind": "recompute_communities", "tenant": "acme", "status": "queued", …}
+curl -s "$G/v1/jobs/<id>" -H "Authorization: Bearer $TOKEN"
+# → {"status": "succeeded", "result": {<the body the synchronous call returns>}, …}
+```
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /v1/jobs/{id}` | `status` (`queued`, `running`, `succeeded`, `failed`, `cancelled`); on success `result` is the synchronous response body, on failure `error` is `{"status", "detail"}`: what the synchronous call would have answered |
+| `GET /v1/jobs?tenant=&status=&limit=50` | newest first |
+| `POST /v1/jobs/{id}:cancel` | a queued job is cancelled at once; a running one is stopped: its database statement is cancelled and a community computation's process is terminated; 409 once finished |
+
+A job id is a UUID. Jobs are visible to admins and to tokens with access to their tenant; vacuum
+jobs, which have no tenant, to admins only; anything else answers 404. Cancelling a recompute or
+vacuum job needs admin scope, as starting one does. One recompute per tenant can be queued or
+running at a time; another is refused with **409**.
+
+Every API replica runs queued jobs, `GRAPHOS_JOB_CONCURRENCY` at a time (default 1), and the
+database hands each job to exactly one replica. A job whose replica stops (crash or shutdown) is
+recorded as failed; jobs are never re-run automatically. Finished jobs are kept for
+`GRAPHOS_JOB_RETENTION_H` hours (default 168).
+
 **Metrics.** graphos exports `graphos_requests_total{method,route,status}`,
 `graphos_request_duration_seconds{method,route}`, `graphos_db_pool_size{state=total|idle|active}`,
 `graphos_registered_tenants` and `graphos_rate_limited_total{token_id}`. `route` is the path
@@ -619,7 +655,7 @@ timeout is the exception: it returns `application/problem+json`.
 | 401 | missing or malformed `Authorization` header, or unknown token |
 | 403 | token lacks access to the tenant, or the endpoint needs admin |
 | 404 | tenant not registered; node (`GET`, `POST …/properties`) or cache key not found; unknown tenant on `GET`/`DELETE /v1/tenants/{name}` |
-| 409 | `recompute-communities` already running for the tenant |
+| 409 | `recompute-communities` already running (or queued as a job) for the tenant; cancelling a finished job |
 | 413 | `snapshot-import` over 50M rows |
 | 422 | body or query validation (patterns, ranges, DDL, `resolve_rule`, `label_hierarchy`), or `order_by: null` sent with a `cursor` |
 | 429 | rate limited (when enabled) |

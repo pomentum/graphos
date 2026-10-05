@@ -348,3 +348,67 @@ async def test_never_retries_long_operations_or_timeouts() -> None:
         await cli.search("x")
     assert len(calls) == 1          # a statement timeout is not retried
     await cli.close()
+
+
+def _job(status: str, **extra) -> dict:
+    return {"id": "8c1f3f6e-2f0a-4c55-9a64-7c1f0e2b9a10", "kind": "recompute_communities",
+            "tenant": "demo", "status": status, "params": {}, "created_at": "2026-10-05T10:00:00Z",
+            **extra}
+
+
+@pytest.mark.asyncio
+async def test_submit_sends_prefer_and_is_never_retried() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(503, json={"detail": "down"})
+
+    cli = GraphosClient(base_url="http://x", tenant="demo", transport=_mock_transport(handler),
+                        retries=3, retry_backoff_s=0)
+    with pytest.raises(GraphosError):
+        await cli.submit_recompute_communities(rel_types=["CITES"])
+    assert len(seen) == 1                               # a retry could queue it twice
+    assert seen[0].headers["prefer"] == "respond-async"
+    assert seen[0].url.path == "/v1/demo/recompute-communities"
+    assert json.loads(seen[0].content)["rel_types"] == ["CITES"]
+    await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_wait_for_job_polls_until_finished() -> None:
+    states = iter(["queued", "running", "succeeded"])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(202, json=_job("queued"))
+        status = next(states)
+        result = {"n_communities": 3} if status == "succeeded" else None
+        return httpx.Response(200, json=_job(status, result=result))
+
+    cli = GraphosClient(base_url="http://x", tenant="demo", transport=_mock_transport(handler))
+    job = await cli.submit_resolve_edges()
+    assert job.status == "queued" and not job.done
+    done = await cli.wait_for_job(job.id, poll_s=0)
+    assert done.status == "succeeded" and done.result == {"n_communities": 3}
+    await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_list_and_cancel_jobs() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/v1/jobs":
+            return httpx.Response(200, json={"jobs": [_job("running")]})
+        return httpx.Response(200, json=_job("running", cancel_requested=True))
+
+    cli = GraphosClient(base_url="http://x", tenant="demo", transport=_mock_transport(handler))
+    jobs = await cli.list_jobs(tenant="demo", status="running", limit=5)
+    assert [j.status for j in jobs] == ["running"]
+    assert dict(seen[0].url.params) == {"tenant": "demo", "status": "running", "limit": "5"}
+    cancelled = await cli.cancel_job(jobs[0].id)
+    assert cancelled.cancel_requested
+    assert seen[1].method == "POST" and seen[1].url.path.endswith(":cancel")
+    await cli.close()

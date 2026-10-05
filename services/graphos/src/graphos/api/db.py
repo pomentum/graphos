@@ -21,8 +21,11 @@ import re
 import time
 from typing import Annotated
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 
+from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, wants_async
 from graphos.auth import TokenPrincipal, require_admin, require_principal
 from graphos.contracts.db import (
     DbStatsResponse,
@@ -219,16 +222,27 @@ def _validated_table_names(tables: list[str] | None) -> list[str]:
     description=(
         "Without `tables`: VACUUM the whole database. With `tables`: VACUUM "
         "only the named ones (whitelist-validated). Use `full=true` "
-        "sparingly — it takes an exclusive lock."
+        "sparingly — it takes an exclusive lock. With `Prefer: "
+        "respond-async` it runs as a background job (202, see `/v1/jobs`)."
     ),
+    responses=ACCEPTED_RESPONSE,
 )
 async def vacuum(
     body: VacuumRequest,
     request: Request,
     principal: AdminPrincipal,
-) -> VacuumResponse:
+) -> VacuumResponse | JSONResponse:
     _ensure_admin(principal)
+    _validated_table_names(body.tables)   # reject bad names before queueing
+    if wants_async(request):
+        return await respond_async(
+            request, kind="vacuum", tenant=None, body=body, principal=principal,
+        )
+    return await run_vacuum(request.app.state.pool, body)
 
+
+async def run_vacuum(pool: asyncpg.Pool, body: VacuumRequest) -> VacuumResponse:
+    """The vacuum itself, for the endpoint and for background jobs."""
     target_idents = _validated_table_names(body.tables)
     parts: list[str] = ["VACUUM"]
     options: list[str] = []
@@ -239,7 +253,6 @@ async def vacuum(
     if options:
         parts.append("(" + ", ".join(options) + ")")
 
-    pool = request.app.state.pool
     started = time.perf_counter()
 
     # VACUUM cannot run inside a transaction; asyncpg's default behaviour

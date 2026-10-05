@@ -139,6 +139,44 @@ CREATE TABLE IF NOT EXISTS graphos_meta.cache (
 CREATE INDEX IF NOT EXISTS cache_expires_at
     ON graphos_meta.cache (expires_at)
     WHERE expires_at IS NOT NULL;
+
+-- Background jobs (``graphos.jobs``): long operations a caller asked to
+-- run asynchronously.  ``tenant`` is NULL for instance-wide jobs (vacuum).
+-- ``heartbeat_at`` is refreshed by the process running the job; a running
+-- job whose heartbeat stops is marked failed by any replica.
+CREATE TABLE IF NOT EXISTS graphos_meta.jobs (
+    id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    kind             text NOT NULL,
+    tenant           text,
+    status           text NOT NULL DEFAULT 'queued'
+                     CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+    params           jsonb NOT NULL DEFAULT '{}'::jsonb,
+    result           jsonb,
+    error            jsonb,
+    consumer         text,
+    cancel_requested boolean NOT NULL DEFAULT false,
+    created_at       timestamptz NOT NULL DEFAULT now(),
+    started_at       timestamptz,
+    heartbeat_at     timestamptz,
+    finished_at      timestamptz
+);
+
+-- Claiming the oldest queued job, and the stale-heartbeat sweep.
+CREATE INDEX IF NOT EXISTS jobs_active
+    ON graphos_meta.jobs (status, created_at)
+    WHERE status IN ('queued', 'running');
+
+-- Retention sweep and per-tenant listing.
+CREATE INDEX IF NOT EXISTS jobs_finished_at
+    ON graphos_meta.jobs (finished_at)
+    WHERE finished_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS jobs_tenant_created
+    ON graphos_meta.jobs (tenant, created_at DESC);
+
+-- At most one community recompute queued or running per tenant.
+CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_recompute
+    ON graphos_meta.jobs (tenant)
+    WHERE kind = 'recompute_communities' AND status IN ('queued', 'running');
 """
 
 

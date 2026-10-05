@@ -337,6 +337,9 @@ Paths under `/v1/{tenant}/graph/...` are abbreviated to `…/graph/...`.
 | `GET /v1/db/stats` | Version, DB size, top 200 tables by size with tuple counts and vacuum/analyze times | admin |
 | `GET /v1/db/slow-queries?limit=` | Top-N by mean time from `pg_stat_statements` (default 25, ≤200); `available: false` without the extension | admin |
 | `POST /v1/db/vacuum` `{tables?, full=false, analyze=true}` | `VACUUM` named tables (identifier-validated) or the whole database | admin |
+| **Background jobs** (§2.6) | | |
+| `GET /v1/jobs/{id}`, `GET /v1/jobs?tenant=&status=&limit=` | A job's status and outcome; recent jobs | the job's tenant, or admin |
+| `POST /v1/jobs/{id}:cancel` | Cancel a queued or running job | as to start it |
 
 `DELETE /v1/tenants/{name}` deletes the row in `graphos_meta.tenants` and the
 in-process registry entry, then returns `{"tenant": name, "status":
@@ -413,9 +416,9 @@ most endpoints. Behaviour (`_client.py`):
 - Connection pool of up to 20 connections, 10 s keep-alive expiry, default
   30 s timeout.
 - Retries (default 3, exponential backoff from 0.5 s) on connection-level
-  errors and on 5xx responses other than 504. `edges:resolve` and
-  `recompute-communities` are never retried. Read/write timeouts are not
-  retried.
+  errors and on 5xx responses other than 504. `edges:resolve`,
+  `recompute-communities`, vacuum and every `submit_*` (job) call are never
+  retried. Read/write timeouts are not retried.
 - 4xx raises `GraphosError`; 503 raises `GraphosNotReady`.
 - `bulk_upsert_nodes` / `bulk_upsert_edges` serialise the whole iterable into
   one NDJSON request body; there is no client-side batching or streaming.
@@ -623,6 +626,41 @@ curl -X DELETE "$G/v1/acme/graph/cache/dashboard:home" -H "Authorization: Bearer
   sweeper.
 - Nothing else in graphos reads the cache.
 
+### 2.6 Background jobs
+
+`POST …/recompute-communities`, `POST …/graph/edges:resolve` and
+`POST /v1/db/vacuum` take `Prefer: respond-async` (RFC 7240). The endpoint
+runs its usual validation (scope, tenant, body, edge types, table names),
+then inserts a row into `graphos_meta.jobs` and answers 202 with the job and
+`Location: /v1/jobs/{id}`. Without the header nothing changes.
+
+- **Runner** (`graphos/jobs.py`). Each API process starts one at lifespan
+  start. It claims the oldest queued job with `UPDATE … WHERE id = (SELECT …
+  FOR UPDATE SKIP LOCKED LIMIT 1)`, so replicas never run the same job, up to
+  `GRAPHOS_JOB_CONCURRENCY` at a time. A job queued by the same process starts
+  at once; otherwise the runner looks every `GRAPHOS_JOB_POLL_S` (5 s).
+- **Same code as the synchronous call.** The kinds are declared in `app.py`:
+  each calls the endpoint's own `run_*` function, so a job's `result` is
+  exactly the synchronous response body, and a failure stores the HTTP status
+  and detail the synchronous call would have returned (`{"status", "detail"}`;
+  unexpected errors store 500 and a generic detail, the traceback goes to the
+  log).
+- **Heartbeat.** A running job refreshes `heartbeat_at` every
+  `GRAPHOS_JOB_HEARTBEAT_S` (10 s); any replica marks a job silent for three
+  heartbeats as failed (`interrupted`). Graceful shutdown records running jobs
+  as failed with 503. Nothing is re-run automatically.
+- **Cancel.** A queued job becomes `cancelled` at once. For a running one,
+  `cancel_requested` is set; the process running it cancels its task (at once
+  if it is the same process, otherwise at the next heartbeat), which cancels
+  the statement in progress and terminates a community computation's process.
+  Cancelling needs the scope that starting needs; a kind the receiving
+  replica does not know (during a rolling upgrade) counts as admin-only.
+- **One recompute per tenant**: a partial unique index on
+  `graphos_meta.jobs (tenant) WHERE kind = 'recompute_communities' AND status IN
+  ('queued', 'running')`; the advisory lock still guards the synchronous path.
+- **Retention:** finished jobs are deleted after `GRAPHOS_JOB_RETENTION_H`
+  (168 h).
+
 ---
 
 ## 3. Internal layout
@@ -766,9 +804,37 @@ request's full body into memory before the handler parses it (§2.5.6).
 > `--build-arg GRAPHOS_EXTRAS=louvain`. Without it, `recompute-communities`
 > answers 501 and `GET /v1/info` reports `features.louvain: false`.
 
-`POST /v1/{tenant}/recompute-communities` (admin) runs synchronously and
-in-process. It is single-flight per tenant via
-`pg_try_advisory_lock(hashtext(tenant))`; a concurrent call gets 409.
+`POST /v1/{tenant}/recompute-communities` (admin) answers when done, or
+runs as a background job with `Prefer: respond-async` (§2.6). It is
+single-flight per tenant via `pg_try_advisory_lock(hashtext(tenant))`; a
+concurrent call gets 409.
+
+The edges are read through a server-side cursor into compact arrays (two
+graphids and a type code per edge, about 20 bytes). Building the igraph graph
+and running Louvain happen in a child process started for each recompute
+(`multiprocessing`, `spawn`; `graphos/louvain_compute.py`, which imports only
+igraph, so it starts in well under a second). The edges go to it over a pipe
+and the partition comes back the same way; starting it and sending the data
+run off the event loop. Why a child process:
+
+- igraph holds Python's GIL for the whole computation, which in the API
+  process would stall every request and job heartbeat for that long. With
+  the child, `/healthz` stayed under ~160 ms during a 600k-edge recompute,
+  against 3.4–4.5 s when Louvain ran in the API process.
+- Cancelling a recompute terminates the child: the computation stops and its
+  memory is freed at once, and the next recompute does not wait behind it.
+- Memory goes back to the system after every run.
+
+One computation runs at a time per API process, which bounds memory to one
+in-memory graph. If the child dies (typically killed for memory), that
+recompute fails and the next one starts a new child.
+
+**Order independence.** Vertices are numbered by ascending graphid before the
+graph is built, and `simplify` then leaves the edges in canonical order, so
+the partition depends only on the edges and the seed, not on the order the
+rows are stored or read in. (Rewriting rows, by re-upserting them or by a
+recompute writing `end_community_id`, changes their physical order; before
+this, the next run could produce a slightly different partition.)
 
 Request:
 

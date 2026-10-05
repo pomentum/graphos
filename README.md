@@ -19,6 +19,7 @@ Your services send JSON over HTTP. graphos owns the database, writes the Cypher 
 - **Composable reads:** search, neighbors, multi-hop expand, induced subgraph, paginated node scan, stratified sampling, graphology export (sigma.js / Gephi).
 - **Graph analytics:** label histograms, top-K by degree, node/edge aggregates, and (optional extra) Louvain communities with IDs that stay stable across runs.
 - **Rule-based edge derivation:** declare a property-match rule once at registration; `edges:resolve` writes the edges server-side in one SQL statement.
+- **Background jobs:** long operations (community recompute, edge resolution, vacuum) run as jobs with `Prefer: respond-async`: answered `202` at once, polled at `/v1/jobs/{id}`, cancellable.
 - **Safe by default:** bearer tokens required (the service refuses to start without them unless told otherwise), every query under a server-side `statement_timeout` (504 when exceeded), registration DDL validated, the database on a network consumers cannot reach.
 - **Operable by people who don't know your domain:** Prometheus metrics, JSON logs with W3C `traceparent`, write audit log naming the caller, per-token rate limiting, token reload on `SIGHUP`.
 
@@ -131,6 +132,8 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | `GRAPHOS_DB_USER` | `graphos` (compose: `graphos_app`) | Database role; compose uses an unprivileged role created at init |
 | `GRAPHOS_FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxies whose `X-Forwarded-*` headers are trusted |
 | `GRAPHOS_DB_POOL_MAX_SIZE` | `16` | asyncpg pool size per replica |
+| `GRAPHOS_JOB_CONCURRENCY` | `1` | Background jobs each replica runs at once |
+| `GRAPHOS_JOB_RETENTION_H` | `168` | Hours finished jobs are kept |
 
 ## Documentation
 

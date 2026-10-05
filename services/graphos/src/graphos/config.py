@@ -38,6 +38,19 @@ class Settings(BaseSettings):
     # rule-based edge resolution, vacuum) raise it for their own statement.
     statement_timeout_s: float = Field(default=60.0, gt=0)
 
+    # ── Background jobs (``Prefer: respond-async``) ──────────────────────
+    # Jobs each process runs at once.  They are the heavy operations, so the
+    # default keeps one at a time; queued jobs wait in the database.
+    job_concurrency: int = Field(default=1, ge=1)
+    # How often an idle process looks for jobs queued by another replica
+    # (a job queued on this process starts at once).
+    job_poll_s: float = Field(default=5.0, gt=0)
+    # A running job refreshes its heartbeat this often; one silent for three
+    # heartbeats is marked failed (its process died).
+    job_heartbeat_s: float = Field(default=10.0, gt=0)
+    # Finished jobs are deleted after this long.
+    job_retention_h: float = Field(default=168.0, gt=0)
+
     # ── HTTP bind ────────────────────────────────────────────────────────
     bind_host: str = "0.0.0.0"
     bind_port: int = 8080

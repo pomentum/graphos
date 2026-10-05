@@ -33,8 +33,10 @@ from typing import Annotated, Any
 
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 
 from graphos import writes
+from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, wants_async
 from graphos.api.tenants import Principal  # re-export the auth dep
 from graphos.auth import require_tenant
 from graphos.bootstrap import registered_tenants
@@ -3206,16 +3208,31 @@ async def scan_edges(
         "parameterised INSERT and execute it server-side.  Returns "
         "per-type edges-written counts.  Idempotent via "
         "``ON CONFLICT (start_id, end_id) DO NOTHING`` — re-running for "
-        "an unchanged graph is a no-op."
+        "an unchanged graph is a no-op.  With ``Prefer: respond-async`` it "
+        "runs as a background job (202, see ``/v1/jobs``)."
     ),
+    responses=ACCEPTED_RESPONSE,
 )
 async def resolve_edges(
     tenant: str,
     body: ResolveEdgesRequest,
     request: Request,
     principal: Principal,
-) -> ResolveEdgesResponse:
+) -> ResolveEdgesResponse | JSONResponse:
     _check_tenant(tenant, principal)
+    _resolve_plan(tenant, body)   # reject unknown edge types before queueing
+    if wants_async(request):
+        return await respond_async(
+            request, kind="resolve_edges", tenant=tenant, body=body,
+            principal=principal,
+        )
+    return await run_resolve(request.app.state.pool, tenant, body)
+
+
+def _resolve_plan(
+    tenant: str, body: ResolveEdgesRequest,
+) -> tuple[dict[str, list[dict[str, object]]], list[str]]:
+    """The tenant's rules grouped by edge type, and the types to run."""
     spec = registered_tenants()[tenant]
 
     # Build the candidate edge-type list.  ``spec.resolve_rules`` is a
@@ -3246,8 +3263,14 @@ async def resolve_edges(
                     f"Re-POST /v1/tenants with `resolve_rule` set on each."
                 ),
             )
+    return rules_by_type, requested
 
-    pool = request.app.state.pool
+
+async def run_resolve(
+    pool: asyncpg.Pool, tenant: str, body: ResolveEdgesRequest,
+) -> ResolveEdgesResponse:
+    """The resolution itself, for the endpoint and for background jobs."""
+    rules_by_type, requested = _resolve_plan(tenant, body)
 
     # Catalogue drives the FROM-list label inference.  Refresh on every
     # request so the resolver picks up new vertex labels / freshly

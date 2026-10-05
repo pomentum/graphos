@@ -6,8 +6,10 @@ import time
 
 import asyncpg
 from fastapi import APIRouter, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 
 from graphos.api.graph import _check_tenant
+from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, wants_async
 from graphos.api.tenants import Principal
 from graphos.auth import require_admin
 from graphos.contracts.louvain import (
@@ -30,15 +32,17 @@ router = APIRouter(tags=["communities"], prefix="/{tenant}")
         "postgres advisory lock keyed on the tenant name — concurrent "
         "recomputes for the same tenant return 409. Admin-scoped. Returns "
         "501 when the optional `louvain` extra (python-igraph) is not "
-        "installed."
+        "installed. With `Prefer: respond-async` it runs as a background job "
+        "(202, see `/v1/jobs`)."
     ),
+    responses=ACCEPTED_RESPONSE,
 )
 async def recompute(
     tenant: str,
     body: RecomputeCommunitiesRequest,
     request: Request,
     principal: Principal,
-) -> RecomputeCommunitiesResponse:
+) -> RecomputeCommunitiesResponse | JSONResponse:
     require_admin(principal)
     if not LOUVAIN_AVAILABLE:
         raise HTTPException(
@@ -46,9 +50,18 @@ async def recompute(
             detail=LOUVAIN_INSTALL_HINT,
         )
     _check_tenant(tenant, principal)
+    if wants_async(request):
+        return await respond_async(
+            request, kind="recompute_communities", tenant=tenant, body=body,
+            principal=principal,
+        )
+    return await run_recompute(request.app.state.pool, tenant, body)
 
-    pool: asyncpg.Pool = request.app.state.pool
 
+async def run_recompute(
+    pool: asyncpg.Pool, tenant: str, body: RecomputeCommunitiesRequest,
+) -> RecomputeCommunitiesResponse:
+    """The recompute itself, for the endpoint and for background jobs."""
     # Single-flight per tenant via advisory lock. We hash the tenant name
     # to fit in a bigint lock key.
     async with pool.acquire() as lock_conn:

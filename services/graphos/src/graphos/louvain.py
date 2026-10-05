@@ -1,16 +1,16 @@
-"""In-process Louvain community detection over a tenant's graph.
+"""Louvain community detection over a tenant's graph.
 
 Edges are streamed out of the AGE edge tables with plain SQL (integer
-graphids only), fed to python-igraph's ``community_multilevel`` (Louvain
-modularity optimisation, deterministic given a seed), and the assignments
-are written back to vertex properties with COPY + one ``UPDATE ... FROM``.
+graphids only), handed to python-igraph's ``community_multilevel`` (Louvain
+modularity optimisation) in a child process (:mod:`graphos.louvain_compute`),
+and the assignments are written back to vertex properties with COPY + one
+``UPDATE ... FROM``.
 
-Running Louvain in-process gives a deterministic memory ceiling and
-keeps the storage backend free for reads during iteration.
-
-Determinism: same edge set + same seed → same community_id integers.
-Communities are relabelled by descending size so the IDs are stable
-across runs, which makes diff-based monitoring (how many nodes changed community) cheap.
+Determinism: the same edge set and seed give the same partition, whatever
+order the rows are stored or read in.  Communities are relabelled by
+descending size, and Greene matching carries ids over from the previous run,
+so ids stay stable across runs, which makes diff-based monitoring (how many
+nodes changed community) cheap.
 
 Single-flight: callers acquire a postgres advisory lock keyed on
 ``hashtext(tenant_name)`` before invoking. Two concurrent recomputes
@@ -22,7 +22,6 @@ from __future__ import annotations
 import array
 import bisect
 import logging
-import random
 import time as _t
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -30,7 +29,7 @@ from typing import Any
 
 import asyncpg
 
-from graphos import writes
+from graphos import louvain_compute, writes
 from graphos.contracts.graph import _validate_prop_key
 from graphos.db import allow_long_statements
 
@@ -38,12 +37,7 @@ from graphos.db import allow_long_statements
 # because it is GPL-licensed; the rest of graphos is Apache-2.0 and must
 # import cleanly without it.  The recompute endpoint checks
 # ``LOUVAIN_AVAILABLE`` and answers 501 when the extra is missing.
-try:
-    import igraph as ig
-except ImportError:  # pragma: no cover - exercised by installs without the extra
-    ig = None
-
-LOUVAIN_AVAILABLE = ig is not None
+LOUVAIN_AVAILABLE = louvain_compute.ig is not None
 LOUVAIN_INSTALL_HINT = (
     'Louvain community detection is not installed in this build. Install the '
     'optional extra (pip install "graphos[louvain]") or build the image with '
@@ -78,80 +72,6 @@ class LouvainResult:
     edge_stream_ms: int
     igraph_ms: int
     writeback_ms: int
-
-
-def _build_igraph(
-    rows: list[tuple[int, int, str]],
-    rel_weights: Mapping[str, float] | None,
-) -> ig.Graph:
-    """Turn (src_gid, dst_gid, rel_type) rows into an undirected igraph.
-
-    Vertices are identified by AGE ``graphid`` (bigint).  Each row's
-    weight comes from ``rel_weights`` (default 1.0).  Parallel edges
-    between the same vertex pair are summed via
-    ``simplify(combine_edges={"weight": "sum"})``.
-
-    ``TupleList`` over ints (vs strings) is faster + smaller; igraph's
-    own internal vertex naming uses the input value directly, so the
-    caller's mapping to ``ext_id`` happens later via a single DB JOIN.
-    """
-    edges: list[tuple[int, int]] = []
-    weights: list[float] = []
-    for src_gid, dst_gid, rel_type in rows:
-        if src_gid == dst_gid:
-            continue
-        edges.append((src_gid, dst_gid))
-        w = (rel_weights or {}).get(rel_type, 1.0)
-        weights.append(float(w))
-
-    g = ig.Graph.TupleList(edges, directed=False)
-    if weights:
-        # TupleList preserves input ordering -- attach weights aligned
-        # with the original ``edges`` list.
-        g.es["weight"] = weights
-        g.simplify(combine_edges={"weight": "sum"})
-    else:
-        g.simplify()
-    return g
-
-
-def _louvain(g: ig.Graph, *, resolution: float, seed: int) -> tuple[list[set[int]], float]:
-    """Run Louvain. Returns (member-sets-per-community, modularity)."""
-    if g.vcount() == 0:
-        return [], 0.0
-    weights = g.es["weight"] if "weight" in g.es.attributes() else None
-    partition = g.community_multilevel(
-        weights=weights, resolution=resolution, return_levels=False,
-    )
-    modularity = g.modularity(partition, weights=weights)
-    return [set(c) for c in partition], float(modularity)
-
-
-def _assign_and_relabel(
-    partition: list[set[int]],
-    vertex_names: list[int],
-    min_size: int,
-) -> tuple[dict[int, int], dict[int, int]]:
-    """Drop tiny communities, relabel by descending size for stable IDs.
-
-    ``vertex_names`` are AGE graphids (bigints) -- the keys of the
-    returned ``assignments`` map.  The writeback step does ONE bulk
-    UPDATE on the parent vertex inheritance table keyed by ``id``
-    (primary-key) -- no agtype property lookup needed.
-
-    Returns:
-        (graphid → community_id, community_id → size)
-    """
-    sized = [(cid, members) for cid, members in enumerate(partition) if len(members) >= min_size]
-    sized.sort(key=lambda p: (-len(p[1]), p[0]))  # ties broken by original cid
-
-    assignments: dict[int, int] = {}
-    sizes: dict[int, int] = {}
-    for new_id, (_old_id, members) in enumerate(sized):
-        sizes[new_id] = len(members)
-        for vid in members:
-            assignments[vertex_names[vid]] = new_id
-    return assignments, sizes
 
 
 def _greene_match(
@@ -324,7 +244,7 @@ async def _stream_semantic_edges(
     tenant: str,
     rel_types: list[str] | None,
     node_filter: Mapping[str, Any] | None = None,
-) -> list[tuple[int, int, str]]:
+) -> louvain_compute.EdgeArrays:
     """Pull every (start_id, end_id, rel_type) row for the tenant.
 
     GRAPHID-ONLY transfer: the previous incarnation decoded
@@ -347,7 +267,9 @@ async def _stream_semantic_edges(
       - ``node_filter``: per-endpoint property filter; needs the
         vertex inheritance JOIN to extract the property.  Rare path.
 
-    Returns list of (src_graphid_bigint, dst_graphid_bigint, rel_type).
+    Rows are read through a server-side cursor in batches straight into
+    :class:`~graphos.louvain_compute.EdgeArrays`, so neither a full result set nor a tuple per edge
+    is ever held in memory, and the event loop runs between batches.
     """
     safe_rels: list[str] = []
     if rel_types:
@@ -399,16 +321,26 @@ async def _stream_semantic_edges(
             f"{rel_clause};"
         )
 
-    async with pool.acquire() as conn:
+    edges = louvain_compute.EdgeArrays()
+    code_of: dict[str, int] = {}
+    async with pool.acquire() as conn, conn.transaction():
         # 10-min budget for the one-shot all-edges sweep.  The pool's
         # default ``statement_timeout`` (60 s) would clip runs on large graphs.
         await allow_long_statements(conn, 600.0)
-        rows = await conn.fetch(sql, *filter_params, timeout=600.0)
+        cursor = await conn.cursor(sql, *filter_params)
+        while batch := await cursor.fetch(_EDGE_BATCH, timeout=600.0):
+            for src_gid, dst_gid, rel_type in batch:
+                code = code_of.get(rel_type)
+                if code is None:
+                    code = code_of[rel_type] = len(edges.rel_names)
+                    edges.rel_names.append(rel_type)
+                edges.src.append(src_gid)
+                edges.dst.append(dst_gid)
+                edges.rel.append(code)
+    return edges
 
-    return [
-        (int(r["src_gid"]), int(r["dst_gid"]), str(r["rel_type"]))
-        for r in rows
-    ]
+
+_EDGE_BATCH = 20_000
 
 
 async def _writeback_assignments(
@@ -587,22 +519,18 @@ async def recompute_communities(
                without persisting `community_id`. Used for dry-run inspect.
     """
     t0 = _t.perf_counter()
-    rows = await _stream_semantic_edges(
+    edges = await _stream_semantic_edges(
         pool, tenant=tenant, rel_types=rel_types, node_filter=node_filter,
     )
     t1 = _t.perf_counter()
 
-    g = _build_igraph(rows, rel_weights)
-    # python-igraph community_multilevel doesn't yet expose `seed=` as
-    # a kwarg in 0.11 (it picks it up from the random state). We seed
-    # via the module-level RNG before the call.
-    ig.set_random_number_generator(random.Random(seed))
-    partition, modularity = _louvain(g, resolution=resolution, seed=seed)
+    # In a child process: see graphos.louvain_compute for why.
+    result = await louvain_compute.compute_in_process(
+        edges, rel_weights=rel_weights,
+        resolution=resolution, seed=seed, min_community_size=min_community_size,
+    )
+    assignments, sizes = result.assignments, result.sizes
     t2 = _t.perf_counter()
-
-    vertex_names = [v["name"] for v in g.vs] if g.vcount() else []
-    assignments, sizes = _assign_and_relabel(partition, vertex_names, min_community_size)
-    n_singletons = sum(1 for members in partition if 0 < len(members) < min_community_size)
     largest = max(sizes.values(), default=0)
 
     written = 0
@@ -614,22 +542,22 @@ async def recompute_communities(
         "louvain recompute complete",
         extra={
             "tenant": tenant,
-            "n_nodes": g.vcount(),
-            "n_edges": len(rows),
+            "n_nodes": result.n_nodes,
+            "n_edges": len(edges),
             "n_communities": len(sizes),
             "n_assigned": len(assignments),
-            "modularity": modularity,
+            "modularity": result.modularity,
         },
     )
 
     return LouvainResult(
-        n_nodes=g.vcount(),
-        n_edges_scanned=len(rows),
+        n_nodes=result.n_nodes,
+        n_edges_scanned=len(edges),
         n_communities=len(sizes),
         n_assigned=written if write else len(assignments),
-        n_singletons=n_singletons,
+        n_singletons=result.n_singletons,
         largest_community_size=largest,
-        modularity=modularity,
+        modularity=result.modularity,
         edge_stream_ms=int((t1 - t0) * 1000),
         igraph_ms=int((t2 - t1) * 1000),
         writeback_ms=int((t3 - t2) * 1000),

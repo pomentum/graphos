@@ -75,6 +75,7 @@ Runnable scripts in [`examples/`](examples/). Each reads `GRAPHOS_URL` (default 
 | [`04_communities.py`](examples/04_communities.py) | Louvain communities: compute, summarise, look up |
 | [`05_tenant_pool.py`](examples/05_tenant_pool.py) | `GraphosPool` serving several tenants with one schema |
 | [`06_rule_based_edges.py`](examples/06_rule_based_edges.py) | declaring a property-match rule and letting the server write the edges |
+| [`07_background_jobs.py`](examples/07_background_jobs.py) | long operations as background jobs: submit, wait, the one-recompute rule, cancel |
 
 ## What the client covers
 
@@ -88,11 +89,12 @@ Runnable scripts in [`examples/`](examples/). Each reads `GRAPHOS_URL` (default 
 | Rule-based edges | `resolve_edges`, `catalogue` |
 | Cache | `cache_put`, `cache_get`, `cache_delete` |
 | Operations (admin) | `healthz`, `readyz`, `info`, `db_stats`, `slow_queries`, `vacuum` |
+| Background jobs | `submit_recompute_communities`, `submit_resolve_edges`, `submit_vacuum` (each returns a `Job`), `get_job`, `list_jobs`, `cancel_job`, `wait_for_job` |
 
 ## Behaviour
 
 - **Errors.** Non-2xx responses raise `GraphosError` (`status_code`, `detail`); a 503 raises `GraphosNotReady`. A statement timeout on the server is a `504` with an `application/problem+json` body.
-- **Retries.** Network errors and 5xx responses are retried with exponential backoff (`retries`, `retry_backoff_s`), except `504` timeouts and long-running operations (Louvain recompute, rule-based edge resolution, snapshot import, vacuum), which are never re-run automatically. 4xx errors are raised at once.
+- **Retries.** Network errors and 5xx responses are retried with exponential backoff (`retries`, `retry_backoff_s`), except `504` timeouts and long-running operations (Louvain recompute, rule-based edge resolution, snapshot import, vacuum) and job submissions, which are never re-run automatically. 4xx errors are raised at once.
 - **One tenant per client.** The tenant is part of every data-plane URL; what a token may touch is enforced by the server.
 - **Connections.** One pooled `httpx.AsyncClient` per client; use `async with` or call `close()`. Pass `transport=` to supply your own `httpx` transport (tests, proxies).
 

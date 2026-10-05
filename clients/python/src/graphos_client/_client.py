@@ -8,6 +8,7 @@ import logging
 from collections.abc import Iterable, Mapping
 from http import HTTPStatus
 from typing import Any
+from uuid import UUID
 
 import httpx
 
@@ -29,6 +30,7 @@ from graphos_client._models import (
     GraphologyExport,
     HistogramResponse,
     InducedEdgesResponse,
+    Job,
     NeighborsResponse,
     NodeGetResponse,
     NodePropertiesUpsertResponse,
@@ -160,6 +162,7 @@ class GraphosClient:
         json_body: Any = None,
         content: bytes | str | None = None,
         content_type: str | None = None,
+        headers: Mapping[str, str] | None = None,
         idempotent: bool = True,
     ) -> httpx.Response:
         """Send a request with retry on transient failures.
@@ -175,16 +178,16 @@ class GraphosClient:
         while True:
             attempt += 1
             try:
-                headers = (
-                    {"content-type": content_type} if content_type else None
-                )
+                request_headers = dict(headers or {})
+                if content_type:
+                    request_headers["content-type"] = content_type
                 resp = await self._http.request(
                     method,
                     url,
                     params=params,
                     json=json_body,
                     content=content,
-                    headers=headers,
+                    headers=request_headers or None,
                 )
             except (
                 httpx.NetworkError,
@@ -317,16 +320,19 @@ class GraphosClient:
         wall-clock budget is seconds even on large tenants.  Idempotent
         via ``ON CONFLICT (start_id, end_id) DO NOTHING``.
         """
-        body: dict[str, Any] = {}
-        if edge_types is not None:
-            body["edge_types"] = list(edge_types)
         resp = await self._request(
             "POST",
             f"/v1/{self._tenant}/graph/edges:resolve",
-            json_body=body,
+            json_body=_resolve_body(edge_types),
             idempotent=False,   # long-running: never re-run on a 5xx
         )
         return resp.json()
+
+    async def submit_resolve_edges(self, *, edge_types: Iterable[str] | None = None) -> Job:
+        """:meth:`resolve_edges` as a background job; see :meth:`wait_for_job`."""
+        return await self._submit(
+            f"/v1/{self._tenant}/graph/edges:resolve", _resolve_body(edge_types),
+        )
 
     # ── writes ─────────────────────────────────────────────────────────────
 
@@ -847,11 +853,21 @@ class GraphosClient:
     ) -> dict[str, Any]:
         """``POST /v1/db/vacuum``.  Without ``tables`` it vacuums the whole
         database.  Long-running, so never retried automatically."""
-        body: dict[str, Any] = {"full": full, "analyze": analyze}
-        if tables:
-            body["tables"] = list(tables)
-        resp = await self._request("POST", "/v1/db/vacuum", json_body=body, idempotent=False)
+        resp = await self._request(
+            "POST", "/v1/db/vacuum", json_body=_vacuum_body(tables, full, analyze),
+            idempotent=False,
+        )
         return resp.json()
+
+    async def submit_vacuum(
+        self,
+        *,
+        tables: list[str] | None = None,
+        full: bool = False,
+        analyze: bool = True,
+    ) -> Job:
+        """:meth:`vacuum` as a background job; see :meth:`wait_for_job`."""
+        return await self._submit("/v1/db/vacuum", _vacuum_body(tables, full, analyze))
 
     async def label_histogram(
         self, label: str, *, property: str, limit: int = 100,
@@ -987,22 +1003,123 @@ class GraphosClient:
         of every traversed edge must match. A per-project
         recompute is ``node_filter={"project_id": "<sid>"}``.
         """
-        body: dict[str, Any] = {
-            "resolution": resolution,
-            "min_community_size": min_community_size,
-            "dry_run": dry_run,
-        }
-        if rel_types:
-            body["rel_types"] = rel_types
-        if rel_weights:
-            body["rel_weights"] = dict(rel_weights)
-        if node_filter:
-            body["node_filter"] = dict(node_filter)
+        body = _recompute_body(
+            rel_types=rel_types, rel_weights=rel_weights, node_filter=node_filter,
+            resolution=resolution, min_community_size=min_community_size, dry_run=dry_run,
+        )
         resp = await self._request(
             "POST", f"/v1/{self._tenant}/recompute-communities", json_body=body,
             idempotent=False,   # long-running: never re-run on a 5xx
         )
         return RecomputeCommunitiesResponse.model_validate(resp.json())
+
+    async def submit_recompute_communities(
+        self,
+        *,
+        rel_types: list[str] | None = None,
+        rel_weights: Mapping[str, float] | None = None,
+        node_filter: Mapping[str, Any] | None = None,
+        resolution: float = 1.0,
+        min_community_size: int = 3,
+        dry_run: bool = False,
+    ) -> Job:
+        """:meth:`recompute_communities` as a background job.  On success the
+        job's ``result`` is the :class:`RecomputeCommunitiesResponse` body.
+        A second submission while one is queued or running raises 409."""
+        body = _recompute_body(
+            rel_types=rel_types, rel_weights=rel_weights, node_filter=node_filter,
+            resolution=resolution, min_community_size=min_community_size, dry_run=dry_run,
+        )
+        return await self._submit(f"/v1/{self._tenant}/recompute-communities", body)
+
+    # ── Background jobs ───────────────────────────────────────────────────
+
+    async def _submit(self, path: str, body: dict[str, Any]) -> Job:
+        # Never retried: a retry after a lost response would queue it twice.
+        resp = await self._request(
+            "POST", path, json_body=body, headers={"Prefer": "respond-async"},
+            idempotent=False,
+        )
+        return Job.model_validate(resp.json())
+
+    async def get_job(self, job_id: UUID | str) -> Job:
+        """``GET /v1/jobs/{id}``."""
+        resp = await self._request("GET", f"/v1/jobs/{job_id}")
+        return Job.model_validate(resp.json())
+
+    async def list_jobs(
+        self,
+        *,
+        tenant: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[Job]:
+        """``GET /v1/jobs``: newest first, only jobs this token may see."""
+        params: dict[str, Any] = {"limit": limit}
+        if tenant is not None:
+            params["tenant"] = tenant
+        if status is not None:
+            params["status"] = status
+        resp = await self._request("GET", "/v1/jobs", params=params)
+        return [Job.model_validate(j) for j in resp.json()["jobs"]]
+
+    async def cancel_job(self, job_id: UUID | str) -> Job:
+        """``POST /v1/jobs/{id}:cancel``.  A queued job is cancelled at once;
+        a running one is stopped (poll for the final status).  409 if it has
+        already finished."""
+        resp = await self._request("POST", f"/v1/jobs/{job_id}:cancel", idempotent=False)
+        return Job.model_validate(resp.json())
+
+    async def wait_for_job(
+        self,
+        job_id: UUID | str,
+        *,
+        poll_s: float = 2.0,
+        timeout_s: float | None = None,
+    ) -> Job:
+        """Poll until the job has finished and return it, whatever the
+        outcome; check ``job.status`` (and ``job.error``).  Raises
+        ``TimeoutError`` after ``timeout_s``."""
+        async with asyncio.timeout(timeout_s):
+            while True:
+                job = await self.get_job(job_id)
+                if job.done:
+                    return job
+                await asyncio.sleep(poll_s)
+
+
+def _resolve_body(edge_types: Iterable[str] | None) -> dict[str, Any]:
+    return {} if edge_types is None else {"edge_types": list(edge_types)}
+
+
+def _vacuum_body(tables: list[str] | None, full: bool, analyze: bool) -> dict[str, Any]:
+    body: dict[str, Any] = {"full": full, "analyze": analyze}
+    if tables:
+        body["tables"] = list(tables)
+    return body
+
+
+def _recompute_body(
+    *,
+    rel_types: list[str] | None,
+    rel_weights: Mapping[str, float] | None,
+    node_filter: Mapping[str, Any] | None,
+    resolution: float,
+    min_community_size: int,
+    dry_run: bool,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "resolution": resolution,
+        "min_community_size": min_community_size,
+        "dry_run": dry_run,
+    }
+    if rel_types:
+        body["rel_types"] = rel_types
+    if rel_weights:
+        body["rel_weights"] = dict(rel_weights)
+    if node_filter:
+        body["node_filter"] = dict(node_filter)
+    return body
 
 
 def _extract_detail(resp: httpx.Response) -> str:
