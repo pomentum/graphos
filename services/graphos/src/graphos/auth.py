@@ -49,6 +49,8 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, SecurityScopes
 
+from graphos.changes import ACTOR, Actor
+
 log = logging.getLogger(__name__)
 
 
@@ -183,7 +185,7 @@ def _authenticate(
     return principal
 
 
-def require_principal(
+async def require_principal(
     request: Request,
     security_scopes: SecurityScopes,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
@@ -199,12 +201,15 @@ def require_principal(
     The access is recorded in ``request.scope[ACCESS_SCOPE_KEY]`` before the
     token is checked, and the principal in ``request.scope["principal"]``,
     so the audit middleware can tell a write (even a refused one) and who
-    made it.
+    made it.  The consumer also goes into :data:`graphos.changes.ACTOR` for
+    the change records of the request's writes; this dependency is async so
+    that it runs in the request's own task, where the endpoint sees it.
     """
     needed = Access.READ if security_scopes.scopes == [Access.READ.value] else Access.WRITE
     request.scope[ACCESS_SCOPE_KEY] = needed
     principal = _authenticate(request, credentials)
     request.scope["principal"] = principal
+    ACTOR.set(Actor(consumer=principal.consumer))
     tenant = request.path_params.get("tenant")
     if tenant is not None:
         require_tenant_access(principal, tenant)

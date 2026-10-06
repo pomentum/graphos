@@ -28,7 +28,7 @@ it creates four files: `graphos_pw.txt` (the database superuser's password, used
 scripts), `graphos_app_pw.txt` (the password of `graphos_app`, the role the API connects as),
 `graphos_tokens.json` (one random admin token) and `admin_token.txt` (the same token). The compose
 file publishes the API on `127.0.0.1:8080` only; put a reverse proxy in front of it for anything
-beyond local use, and set `GRAPHOS_FORWARDED_ALLOW_IPS` to the proxy's address (§10).
+beyond local use, and set `GRAPHOS_FORWARDED_ALLOW_IPS` to the proxy's address (§11).
 
 `graphos_app` is created by `services/graphos/deploy/db-init/01-app-role.sh`. Like every script in
 `db-init/`, it runs only when the data volume is empty. A volume created before that script existed
@@ -524,7 +524,7 @@ file includes it unless `GRAPHOS_EXTRAS=` is set. Without it, `recompute-communi
 `GET /v1/info` reports availability in `features.louvain`.
 
 `POST /v1/{tenant}/recompute-communities` requires admin. It answers when the recompute is done,
-or at once as a background job with `Prefer: respond-async` (§10). The graph computation runs in a
+or at once as a background job with `Prefer: respond-async` (§11). The graph computation runs in a
 child process, so the API keeps serving other requests meanwhile; cancelling the job terminates it.
 The result depends only on the edges, not on the order rows are stored in.
 
@@ -615,7 +615,90 @@ edge-label strings).
 
 ---
 
-## 10. Operations
+## 10. Change feed
+
+Every write to a tenant is recorded in an ordered feed, in the same transaction as the write, so a
+record exists exactly when the data committed and a write that fails or rolls back leaves none. A
+consumer keeps a cursor and reads what changed after it, or follows the feed live. Records say what
+changed, not the new values: re-read what you need.
+
+| Endpoint (`/v1/{t}` prefix) | Returns |
+|---|---|
+| `GET /changes?after=&limit=` (100 / 1000) | `changes[]` after the cursor (from the oldest kept without one), `next` (pass it as `after`), `more` (the page was full) |
+| `GET /changes/head` | `cursor`: where to start following after reading the data afresh |
+| `GET /changes/stream?after=` | Server-Sent Events: a `change` event per record with the cursor as its `id`; resumes after `Last-Event-ID` |
+
+Read access is enough for all three. A record:
+
+```json
+{"cursor": "48211.903", "at": "2026-10-06T09:14:03Z", "op": "patch", "kind": "node",
+ "label": "User", "ids": ["u1"], "edges": null, "rev": 4, "count": 1, "detail": null,
+ "consumer": "editor", "trace_id": "0af7651916cd43dd8448eb211c80319c"}
+```
+
+| Write | Records |
+|---|---|
+| node upsert (small batch, `nodes:bulk`, snapshot) | one per committed batch and label: `op: upsert`, `ids` of the nodes written |
+| edge upsert | one per committed batch and edge group: `edges` as `[src_id, dst_id]` pairs written (skipped rows are not listed), `src_label` / `dst_label` |
+| property merge, node or edge patch | `merge` / `patch` with the one id or pair and the new `rev` |
+| node delete (by id or by property) | `delete`, one per label, with the ids; `detail.edges_removed` counts the edges deleted with them (for the whole statement), `detail.where` the property for a delete by property |
+| edge delete | `delete` with the pair |
+| `edges:resolve` | one `resolve` summary per edge type, `count` edges, no ids: re-read the type |
+| Louvain write-back | one `communities` summary, `count` nodes, no ids |
+
+`consumer` is the token's consumer (a job's records name who submitted it, with `trace_id` set to
+`job:<id>`); `trace_id` is the request's W3C trace id when it sent `traceparent`.
+
+**Order and delivery.** The feed never skips a committed change: a record becomes visible once
+every write transaction that started before it has finished, so a slow write delays the records
+after it rather than being overtaken. The delay is the length of the longest write transaction
+running anywhere on the database server at that moment, usually milliseconds; a long write-back
+(Louvain on a large graph) holds the feed of every tenant until it ends, and loses nothing.
+Delivery is at least once: a client that resumes from an older cursor sees records again. Feed
+order is transaction *start* order, so two records of the same node can show the later revision
+first; re-read the item, or compare `rev`.
+
+**Syncing from scratch.** Take `GET /changes/head`, then read the data (`nodes:scan`,
+`edges:scan`), then follow the feed from the head. A change the read already saw may be delivered
+again; none is missed.
+
+**Live.**
+
+```bash
+curl -N "$G/v1/acme/changes/stream" -H "Authorization: Bearer $TOKEN" -H "Last-Event-ID: 48211.903"
+# retry: 2000
+#
+# id: 48212.17
+# event: change
+# data: {"cursor":"48212.17","op":"upsert","kind":"node","label":"User","ids":["u9"],...}
+```
+
+A commit wakes the stream at once (Postgres `LISTEN` / `NOTIFY`); streams also look every
+`GRAPHOS_CHANGES_POLL_S` seconds, so a lost notification only delays an event. An idle stream sends
+a `: keep-alive` comment every `GRAPHOS_CHANGES_HEARTBEAT_S` seconds (15) for proxies (graphos also
+sends `X-Accel-Buffering: no`). When graphos stops, open streams are closed after
+`GRAPHOS_SHUTDOWN_GRACE_S` (5 s); clients reconnect with `Last-Event-ID` and continue.
+
+**Retention.** Records older than `GRAPHOS_CHANGES_RETENTION_H` hours (168) are pruned in batches of
+5,000, a short transaction each. A cursor whose records were pruned gets **410**, on a page request
+or when a stream starts; a stream that falls that far behind ends with an `event: gone`. Either way,
+resync from the head.
+
+Python: `changes(after)`, `changes_head()`, `iter_changes(after)` (pages until caught up) and
+`stream_changes(after)`, which follows the stream forever, reconnecting with back-off and
+`Last-Event-ID`, and raises `GraphosError` 410 when it is time to resync.
+
+```python
+async with GraphosClient(base_url=G, token=TOKEN, tenant="acme") as g:
+    cursor = await g.changes_head()
+    ...                                   # read the data
+    async for change in g.stream_changes(cursor):
+        refresh(change.kind, change.label, change.ids or change.edges)
+```
+
+---
+
+## 11. Operations
 
 | Endpoint | Auth | Purpose |
 |---|---|---|
@@ -717,7 +800,7 @@ and skipped, and the service starts anyway.
 
 ---
 
-## 11. Limits and errors
+## 12. Limits and errors
 
 Error bodies are FastAPI's `{"detail": ...}`. For 422 validation errors, `detail` is a list. The 504
 timeout is the exception: it returns `application/problem+json`.
@@ -737,6 +820,7 @@ timeout is the exception: it returns `application/problem+json`.
 | 403 | token lacks access to the tenant, the endpoint needs admin, or a read-only token on a write |
 | 404 | tenant not registered; node (`GET`, `PATCH`, `POST …/properties`), edge (`GET`, `PATCH`), unregistered edge type in the path, or cache key not found; unknown tenant on `GET`/`DELETE /v1/tenants/{name}` |
 | 409 | `recompute-communities` already running (or queued as a job) for the tenant; cancelling a finished job; an id or edge that matches in several labels (pass `label` / `src_label` / `dst_label`) |
+| 410 | a change-feed cursor whose records were pruned (§10) |
 | 412 | `If-Match` did not match: the node or edge changed (or is gone) since it was read |
 | 413 | `snapshot-import` over 50M rows |
 | 422 | body or query validation (patterns, ranges, DDL, `resolve_rule`, `label_hierarchy`), or `order_by: null` sent with a `cursor` |

@@ -4,14 +4,18 @@ Nodes, edges, property merges and patches, deletes, rule-resolved edges
 and community write-back: each function here is the only place its SQL
 lives.  Nothing
 else in graphos inserts, updates or deletes rows of the AGE label tables
-(``tests/test_write_path.py`` enforces it), so revisions are kept here once
-instead of at every call site, and a change log will be too.
+(``tests/test_write_path.py`` enforces it), so revisions and the change
+feed are kept here once instead of at every call site.
 
 Conventions every function follows:
 
 * **One transaction per call**, owned by the function.  The one exception
   is :func:`set_edge_end_communities`, which commits each edge label
   separately so a failure on one label keeps the others.
+* **Every write logs a change** with :func:`graphos.changes.record`, in
+  the same transaction, so the change feed has a record exactly when the
+  data commits (``tests/test_changes.py`` checks that every write function
+  here records).
 * **Every write to a row bumps its revision** (``graphos_rev``, on every
   label table): inserts start at 1, updates add 1.  A write that sets the
   same values still bumps it; the revision counts writes, not changes.
@@ -50,7 +54,7 @@ from typing import TYPE_CHECKING, Any
 
 import asyncpg
 
-from graphos import lookup
+from graphos import changes, lookup
 from graphos.cypher import CypherError
 from graphos.db import allow_long_statements
 
@@ -156,8 +160,13 @@ async def upsert_nodes(
                 f'DO UPDATE SET properties = "{label}".properties || EXCLUDED.properties, '
                 f'{lookup.REV} = "{label}".{lookup.REV} + 1;'
             )
+            written = _rows_written(status, default=len(rows))
+            await changes.record(
+                conn, tenant=tenant, op="upsert", kind="node", label=label,
+                ids=list(dict.fromkeys(ext_id for ext_id, _ in records)), count=written,
+            )
 
-    return _rows_written(status, default=len(rows))
+    return written
 
 
 async def upsert_edges(
@@ -212,18 +221,23 @@ async def upsert_edges(
             await conn.copy_records_to_table(
                 "_stg_e", records=records, columns=("src_ext", "dst_ext", "props"),
             )
-            # NOT EXISTS (anti-semi-join) keeps index-only probes; a LEFT JOIN
-            # ... IS NULL planned a hash anti-join over the whole label table.
-            skipped = int(await conn.fetchval(
-                f"SELECT count(*) FROM _stg_e stg "
-                f"WHERE NOT EXISTS ("
-                f'  SELECT 1 FROM "{tenant}"."{src_label}" src '
-                f"   WHERE src.properties->'\"id\"' = to_jsonb(stg.src_ext)::text::agtype"
-                f") OR NOT EXISTS ("
-                f'  SELECT 1 FROM "{tenant}"."{dst_label}" dst '
-                f"   WHERE dst.properties->'\"id\"' = to_jsonb(stg.dst_ext)::text::agtype"
-                f");"
-            ))
+            # The pairs whose two ends exist: the edges the INSERT writes
+            # (for the change record), and by difference the skipped rows.
+            # EXISTS (semi-join) keeps index-only probes; a join planned a
+            # hash join over the whole label table.
+            present = {
+                (r["src_ext"], r["dst_ext"]) for r in await conn.fetch(
+                    f"SELECT DISTINCT src_ext, dst_ext FROM _stg_e stg "
+                    f"WHERE EXISTS ("
+                    f'  SELECT 1 FROM "{tenant}"."{src_label}" src '
+                    f"   WHERE src.properties->'\"id\"' = to_jsonb(stg.src_ext)::text::agtype"
+                    f") AND EXISTS ("
+                    f'  SELECT 1 FROM "{tenant}"."{dst_label}" dst '
+                    f"   WHERE dst.properties->'\"id\"' = to_jsonb(stg.dst_ext)::text::agtype"
+                    f");"
+                )
+            }
+            skipped = sum(1 for s, d, _ in records if (s, d) not in present)
             status = await conn.execute(
                 f'INSERT INTO "{tenant}"."{edge_type}" (start_id, end_id, properties) '
                 f"SELECT src.id, dst.id, (stg.props)::text::agtype "
@@ -240,8 +254,16 @@ async def upsert_edges(
                 f'DO UPDATE SET properties = "{edge_type}".properties || EXCLUDED.properties, '
                 f'{lookup.REV} = "{edge_type}".{lookup.REV} + 1;'
             )
+            written = _rows_written(status, default=len(rows) - skipped)
+            if written:
+                pairs = dict.fromkeys((s, d) for s, d, _ in records if (s, d) in present)
+                await changes.record(
+                    conn, tenant=tenant, op="upsert", kind="edge", label=edge_type,
+                    src_label=src_label, dst_label=dst_label,
+                    ids=[list(p) for p in pairs], count=written,
+                )
 
-    return _rows_written(status, default=len(rows) - skipped), skipped
+    return written, skipped
 
 
 async def merge_node_properties(
@@ -281,6 +303,10 @@ async def merge_node_properties(
                 f"RETURNING properties::text::jsonb AS props, {lookup.REV} AS rev;",
                 json.dumps(external_id),
                 json.dumps(dict(properties)),
+            )
+            await changes.record(
+                conn, tenant=tenant, op="merge", kind="node", label=node.label,
+                ids=[external_id], rev=int(row["rev"]), count=1,
             )
     return lookup.NodeRow(
         label=node.label, gid=node.gid, rev=int(row["rev"]), properties=json.loads(row["props"]),
@@ -343,6 +369,10 @@ async def patch_node(  # noqa: PLR0913 — identity, patch and precondition
                 json.dumps(external_id),
                 json.dumps(properties),
             )
+            await changes.record(
+                conn, tenant=tenant, op="patch", kind="node", label=node.label,
+                ids=[external_id], rev=int(rev), count=1,
+            )
     return lookup.NodeRow(label=node.label, gid=node.gid, rev=int(rev), properties=properties)
 
 
@@ -373,12 +403,12 @@ async def delete_node(
             node = await _locked_node(conn, tenant, external_id, label, if_match)
             if node is None:
                 return 0, 0
-            row = await conn.fetchrow(
+            return await _delete_nodes_recorded(
+                conn, tenant,
                 _DELETE_NODES_SQL.format(table=f'ONLY "{tenant}"."{node.label}"',
                                          tenant=tenant, match=lookup.ID_MATCH),
                 json.dumps(external_id),
             )
-    return int(row["nodes"]), int(row["edges"])
 
 
 async def patch_edge(  # noqa: PLR0913 — the edge's identity has this many parts
@@ -426,6 +456,11 @@ async def patch_edge(  # noqa: PLR0913 — the edge's identity has this many par
                 edge.end_gid,
                 json.dumps(properties),
             )
+            await changes.record(
+                conn, tenant=tenant, op="patch", kind="edge", label=edge_type,
+                src_label=edge.src_label, dst_label=edge.dst_label,
+                ids=[[src_id, dst_id]], rev=int(rev), count=1,
+            )
     return lookup.EdgeRow(
         src_label=edge.src_label, dst_label=edge.dst_label, gid=edge.gid,
         start_gid=edge.start_gid, end_gid=edge.end_gid, rev=int(rev), properties=properties,
@@ -468,6 +503,11 @@ async def delete_edge(  # noqa: PLR0913 — the edge's identity has this many pa
                 edge.start_gid,
                 edge.end_gid,
             )
+            await changes.record(
+                conn, tenant=tenant, op="delete", kind="edge", label=edge_type,
+                src_label=edge.src_label, dst_label=edge.dst_label,
+                ids=[[src_id, dst_id]], count=1,
+            )
     return 1
 
 
@@ -487,20 +527,46 @@ async def _locked_node(
     return node
 
 
-# One statement, so nodes and their edges go together or not at all.
+# One statement, so nodes and their edges go together or not at all.  One
+# row per label of the deleted nodes, with their ids, for the change records.
 _DELETE_NODES_SQL = """
     WITH v AS (
         DELETE FROM {table}
         WHERE {match}
-        RETURNING id
+        RETURNING id, tableoid, properties::text::jsonb -> 'id' AS ext
     ), e AS (
         DELETE FROM "{tenant}"."_ag_label_edge"
         WHERE start_id = ANY(ARRAY(SELECT id FROM v))
            OR end_id = ANY(ARRAY(SELECT id FROM v))
         RETURNING id
     )
-    SELECT (SELECT count(*) FROM v) AS nodes, (SELECT count(*) FROM e) AS edges;
+    SELECT c.relname AS label, count(*) AS nodes,
+           jsonb_agg(v.ext ORDER BY v.ext)::text AS ids,
+           (SELECT count(*) FROM e) AS edges
+    FROM v JOIN pg_class c ON c.oid = v.tableoid
+    GROUP BY c.relname
+    ORDER BY c.relname;
 """
+
+
+async def _delete_nodes_recorded(
+    conn: asyncpg.Connection, tenant: str, sql: str, arg: str,
+    detail: dict[str, Any] | None = None,
+) -> tuple[int, int]:
+    """Run a node delete and record one change per label it deleted from.
+
+    ``edges_removed`` in each record is the count for the whole statement:
+    every edge that touched any of the deleted nodes.
+    """
+    rows = await conn.fetch(sql, arg)
+    edges = int(rows[0]["edges"]) if rows else 0
+    for r in rows:
+        await changes.record(
+            conn, tenant=tenant, op="delete", kind="node", label=r["label"],
+            ids=json.loads(r["ids"]), count=int(r["nodes"]),
+            detail={"edges_removed": edges, **(detail or {})},
+        )
+    return sum(int(r["nodes"]) for r in rows), edges
 
 
 async def delete_nodes(
@@ -539,8 +605,10 @@ async def delete_nodes(
         graph=tenant, property_key=property_key,
     ):
         async with pool.acquire() as conn, conn.transaction():
-            row = await conn.fetchrow(sql, arg)
-    return int(row["nodes"]), int(row["edges"])
+            return await _delete_nodes_recorded(
+                conn, tenant, sql, arg,
+                None if property_key == "id" else {"where": {property_key: property_value}},
+            )
 
 
 # ── Rule-resolved edges ─────────────────────────────────────────────────────
@@ -549,6 +617,7 @@ async def delete_nodes(
 async def insert_resolved_edges(
     pool: asyncpg.Pool,
     *,
+    tenant: str,
     compiled: CompiledEdgeType,
     timeout_s: float,
 ) -> int:
@@ -571,6 +640,12 @@ async def insert_resolved_edges(
         async with pool.acquire() as conn, conn.transaction():
             await allow_long_statements(conn, timeout_s)
             rows = await conn.fetch(compiled.sql, *compiled.params, timeout=timeout_s)
+            if rows:
+                # Too many to list: consumers re-read the edge type.
+                await changes.record(
+                    conn, tenant=tenant, op="resolve", kind="edge",
+                    label=compiled.edge_type, count=len(rows),
+                )
     return len(rows)
 
 
@@ -612,6 +687,10 @@ async def set_node_communities(
                 f"FROM _stg_assignments s "
                 f"WHERE t.id = (s.gid::text)::graphid;",
                 timeout=600.0,
+            )
+            # One summary: every node in ``assignments`` got a community_id.
+            await changes.record(
+                conn, tenant=tenant, op="communities", kind="node", count=len(assignments),
             )
 
 

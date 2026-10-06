@@ -27,6 +27,7 @@ from graphos import __version__
 from graphos.api import (
     bulk,
     cache,
+    changes,
     communities,
     db,
     graph,
@@ -44,6 +45,7 @@ from graphos.bootstrap import (
     load_registered_tenants,
     registered_tenants,
 )
+from graphos.changes import ChangeFeed
 from graphos.config import Settings
 from graphos.contracts.db import VacuumRequest
 from graphos.contracts.louvain import RecomputeCommunitiesRequest
@@ -158,6 +160,13 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     runner.start()
     app.state.job_runner = runner
 
+    # 5. Change feed: wakes live streams, prunes expired records.
+    feed = ChangeFeed(
+        pool, retention_h=settings.changes_retention_h, poll_s=settings.changes_poll_s,
+    )
+    feed.start()
+    app.state.change_feed = feed
+
     log.info(
         "graphos ready",
         extra={"version": __version__, "tenants_restored": restored},
@@ -166,6 +175,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await feed.stop()
         await runner.stop()
         terminate_running()
         await pool.close()
@@ -249,6 +259,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(cache.router, prefix="/v1")
     app.include_router(snapshot.router, prefix="/v1")
     app.include_router(jobs.router, prefix="/v1")
+    app.include_router(changes.router, prefix="/v1")
 
     @app.get("/")
     async def _root() -> dict[str, Any]:

@@ -183,6 +183,37 @@ CREATE INDEX IF NOT EXISTS jobs_tenant_created
 CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_recompute
     ON graphos_meta.jobs (tenant)
     WHERE kind = 'recompute_communities' AND status IN ('queued', 'running');
+
+-- The change feed (``graphos.changes``): one row per write, inserted in the
+-- write's own transaction.  A record's position is (txid, seq); readers see
+-- only rows of transactions older than every one still running, so no
+-- position is ever skipped.  The primary key serves the per-tenant reads.
+CREATE TABLE IF NOT EXISTS graphos_meta.changes (
+    tenant     text NOT NULL,
+    txid       xid8 NOT NULL DEFAULT pg_current_xact_id(),
+    seq        bigint GENERATED ALWAYS AS IDENTITY,
+    at         timestamptz NOT NULL DEFAULT now(),
+    op         text NOT NULL,
+    kind       text NOT NULL,
+    label      text,
+    src_label  text,
+    dst_label  text,
+    ids        jsonb,
+    rev        bigint,
+    count      integer NOT NULL,
+    detail     jsonb,
+    consumer   text,
+    trace_id   text,
+    PRIMARY KEY (tenant, txid, seq)
+);
+CREATE INDEX IF NOT EXISTS changes_at ON graphos_meta.changes (at);
+
+-- The highest pruned position per tenant: a cursor behind it gets 410.
+CREATE TABLE IF NOT EXISTS graphos_meta.change_horizon (
+    tenant  text PRIMARY KEY,
+    txid    xid8 NOT NULL,
+    seq     bigint NOT NULL
+);
 """
 
 

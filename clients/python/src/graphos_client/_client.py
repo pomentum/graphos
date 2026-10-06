@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import AsyncIterator, Iterable, Mapping
 from http import HTTPStatus
 from typing import Any
 from urllib.parse import quote
@@ -18,6 +18,8 @@ from graphos_client._models import (
     BulkNodesResponse,
     CacheGetResponse,
     CachePutResponse,
+    ChangeItem,
+    ChangesPage,
     CommunitiesResponse,
     CommunityIdsResponse,
     CommunitySummary,
@@ -1069,6 +1071,96 @@ class GraphosClient:
         resp = await self._request("POST", f"/v1/{self._tenant}/graph/paths", json_body=body)
         return PathsResponse.model_validate(resp.json())
 
+    # ── Change feed ────────────────────────────────────────────────────────
+    #
+    # Every write to the tenant, in an order that never skips a committed
+    # change.  Records say what changed, not the new values; re-read those.
+    # Delivery is at least once: after a reconnect a record can repeat.
+
+    async def changes(self, after: str | None = None, *, limit: int = 100) -> ChangesPage:
+        """One page of records after ``after`` (the oldest kept when None).
+
+        Raises ``GraphosError`` 410 when the records after ``after`` were
+        pruned: read the data again and follow from :meth:`changes_head`.
+        """
+        params: dict[str, Any] = {"limit": limit}
+        if after is not None:
+            params["after"] = after
+        resp = await self._request("GET", f"/v1/{self._tenant}/changes", params=params)
+        return ChangesPage.model_validate(resp.json())
+
+    async def changes_head(self) -> str:
+        """The position to follow the feed from after reading the data afresh."""
+        resp = await self._request("GET", f"/v1/{self._tenant}/changes/head")
+        return str(resp.json()["cursor"])
+
+    async def iter_changes(
+        self, after: str | None = None, *, page_size: int = 500,
+    ) -> AsyncIterator[ChangeItem]:
+        """Every record after ``after`` that is visible now, page by page;
+        stops when caught up.  The last record's ``cursor`` is where to
+        continue."""
+        while True:
+            page = await self.changes(after, limit=page_size)
+            for change in page.changes:
+                yield change
+            after = page.next
+            if not page.more:
+                return
+
+    async def stream_changes(
+        self,
+        after: str | None = None,
+        *,
+        reconnect: bool = True,
+        read_timeout_s: float = 60.0,
+        max_backoff_s: float = 30.0,
+    ) -> AsyncIterator[ChangeItem]:
+        """Follow the feed live (Server-Sent Events), forever.
+
+        After a dropped connection, a server restart or a 5xx, it reconnects
+        with back-off and resumes after the last record it yielded
+        (``Last-Event-ID``), so nothing is skipped.  ``read_timeout_s``
+        without a byte (the server sends a keep-alive every 15 s) counts as
+        a dropped connection.  Raises ``GraphosError`` on 410 (resync) and on
+        any other 4xx.
+        """
+        last = after
+        backoff = self._retry_backoff_s
+        path = f"/v1/{self._tenant}/changes/stream"
+        while True:
+            headers = {"Last-Event-ID": last} if last else {}
+            try:
+                async with self._http.stream(
+                    "GET", path, headers=headers,
+                    timeout=httpx.Timeout(self._http.timeout.connect, read=read_timeout_s),
+                ) as resp:
+                    if resp.status_code >= httpx.codes.BAD_REQUEST:
+                        await resp.aread()
+                        error = GraphosError(resp.status_code, _extract_detail(resp), "GET", path)
+                        if resp.status_code < httpx.codes.INTERNAL_SERVER_ERROR or not reconnect:
+                            raise error
+                        log.warning("change stream: %s; reconnecting", error)
+                    else:
+                        backoff = self._retry_backoff_s
+                        async for event, data in _sse_events(resp):
+                            if event == "change":
+                                change = ChangeItem.model_validate_json(data)
+                                last = change.cursor
+                                yield change
+                            elif event == "gone":
+                                raise GraphosError(
+                                    httpx.codes.GONE, json.loads(data)["detail"], "GET", path,
+                                )
+            except (httpx.TransportError, httpx.StreamError) as exc:
+                if not reconnect:
+                    raise GraphosError(0, f"change stream: {exc}", "GET", path) from exc
+                log.warning("change stream dropped (%s); reconnecting", type(exc).__name__)
+            if not reconnect:
+                return
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, max_backoff_s)
+
     # ── Schema-agnostic K/V cache ──────────────────────────────────────────
 
     async def cache_put(
@@ -1263,6 +1355,25 @@ def _recompute_body(
     if node_filter:
         body["node_filter"] = dict(node_filter)
     return body
+
+
+async def _sse_events(resp: httpx.Response) -> AsyncIterator[tuple[str, str]]:
+    """``(event, data)`` per Server-Sent Event; comments and ``retry`` skipped."""
+    event, data = "message", []
+    async for line in resp.aiter_lines():
+        if line == "":
+            if data:
+                yield event, "\n".join(data)
+            event, data = "message", []
+        elif line.startswith(":"):
+            continue
+        else:
+            field, _, value = line.partition(":")
+            value = value[1:] if value.startswith(" ") else value
+            if field == "event":
+                event = value
+            elif field == "data":
+                data.append(value)
 
 
 def _extract_detail(resp: httpx.Response) -> str:

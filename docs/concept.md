@@ -369,6 +369,10 @@ Paths under `/v1/{tenant}/graph/...` are abbreviated to `…/graph/...`.
 | `GET /v1/db/stats` | Version, DB size, top 200 tables by size with tuple counts and vacuum/analyze times | admin |
 | `GET /v1/db/slow-queries?limit=` | Top-N by mean time from `pg_stat_statements` (default 25, ≤200); `available: false` without the extension | admin |
 | `POST /v1/db/vacuum` `{tables?, full=false, analyze=true}` | `VACUUM` named tables (identifier-validated) or the whole database | admin |
+| **Change feed** (§4.1) | | |
+| `GET …/changes?after=&limit=` | Records after a cursor; `next`, `more` | tenant |
+| `GET …/changes/head` | The cursor to start following from after a fresh read | tenant |
+| `GET …/changes/stream` | Server-Sent Events, resumable with `Last-Event-ID` | tenant |
 | **Background jobs** (§2.6) | | |
 | `GET /v1/jobs/{id}`, `GET /v1/jobs?tenant=&status=&limit=` | A job's status and outcome; recent jobs | the job's tenant, or admin |
 | `POST /v1/jobs/{id}:cancel` | Cancel a queued or running job | as to start it |
@@ -555,6 +559,9 @@ to the others until they restart.
   to the server log. There is no dedicated mapping for data endpoints; they
   fail with a 5xx.
 - `graphos-api` down: consumers have no path to the data (by design, §2.4).
+- `graphos-api` stopping: requests still open after `GRAPHOS_SHUTDOWN_GRACE_S`
+  (5 s) are cancelled. Change-feed streams never end by themselves, so they
+  are the ones this closes; their clients resume with `Last-Event-ID`.
 
 #### 2.5.8 Generic analytics — examples
 
@@ -878,6 +885,85 @@ request's full body into memory before the handler parses it (§2.5.6).
 
 ---
 
+### 4.1 Change feed
+
+Every function in `graphos.writes` ends by calling `graphos.changes.record`,
+which inserts one row into `graphos_meta.changes` in the write's own
+transaction and sends `NOTIFY graphos_changes, '<tenant>'` (delivered on
+commit). A test fails if a write function does not record. A record names
+the op, node or edge, label, the ids or `[src, dst]` pairs written, the new
+revision for a single item, the count, the consumer and the trace id; not
+the values.
+
+**Positions.** A record's position is `(txid, seq)`: its transaction's id
+(`xid8`, `pg_current_xact_id()`) and an identity sequence; the cursor on the
+wire is `"<txid>.<seq>"`. A plain sequence would skip records, because
+transactions commit in a different order from the one they draw numbers in:
+with 99 uncommitted and 100 committed, a reader at 100 would never see 99.
+So a read returns only rows with `txid < pg_snapshot_xmin(pg_current_snapshot())`,
+the oldest transaction still running: every committed transaction below it
+is visible, and any transaction still running, or starting later, has a txid
+at or above it and so sorts after every cursor already handed out. The
+primary key `(tenant, txid, seq)` serves the read.
+
+The cost is latency: a record is visible once every write transaction that
+started before it has ended. That is server-wide (transaction ids are), so a
+long write transaction in any tenant (the Louvain write-back is the longest
+graphos makes) holds every feed until it commits. Read-only transactions do
+not count; they have no txid.
+
+**Head.** `GET …/changes/head` returns `(xmin, 0)`: positions at or above it
+are exactly the transactions not yet visible, so data read after taking the
+head, plus the feed from it, misses nothing.
+
+**Retention.** Each replica's `ChangeFeed` prunes records older than
+`GRAPHOS_CHANGES_RETENTION_H` every minute, 5,000 rows per transaction
+(`FOR UPDATE SKIP LOCKED`, so replicas share the work), and raises the
+tenant's horizon in `graphos_meta.change_horizon` to the highest position it
+deleted. A cursor below the horizon gets 410. Only rows with `txid < xmin`
+are pruned: if a transaction still running could fall below the horizon, its
+record would appear behind cursors already past it and be lost.
+
+**Live streams.** One connection per replica `LISTEN`s and wakes the streams
+of the tenant named in each notification; streams also re-read every
+`GRAPHOS_CHANGES_POLL_S`, so a dropped notification or listener connection
+delays an event and never loses it. A stream holds a pool connection only
+while it reads.
+
+**Who.** `require_principal` (async, so it runs in the request's own task)
+puts the token's consumer into the `ACTOR` context variable that `record`
+reads; a background job sets it to the consumer that submitted the job and
+the trace id to `job:<id>`. The request's trace id comes from the log
+context.
+
+**Cost.** Measured on the development setup (PostgreSQL in Docker Desktop,
+1.2 ms per round trip):
+
+| | |
+|---|---|
+| Recording a change | one extra round trip and a small insert per write transaction: +1.8 ms on a single patch; 0–14 % on 500-row bulk batches (varies run to run) |
+| A page of 500 records, 1.25M records in the table | 10 ms from the start, 9 ms from the middle, 2.6 ms when caught up; head 1.3 ms |
+| Pruning 1.25M records | 10 s in 251 transactions of 5,000; the longest 156 ms |
+
+**Testing.** Besides each write's exact record and the HTTP surface, the
+suite checks ordering under concurrency: two transactions committing out of
+order, the head with a transaction running, pruning next to a running
+transaction, and transaction ids across powers of ten (9 → 10 … 99,999 →
+100,000). A soak (`tests/test_changes_soak.py`, `GRAPHOS_SOAK_S`) runs
+writers, including slow and rolled-back transactions, against polling
+readers and an SSE reader over real HTTP that reconnects every few events;
+every reader must end with exactly the committed records in order. It ran
+for over half an hour in total, up to three at once. Nine deliberate
+breakages each make a named test fail: the watermark, the pruning guard, the
+410, one write's record, the head, the sort order, the `NOTIFY`,
+`Last-Event-ID`, and the consumer.
+
+The soak found one real bug: the read query selected `txid::text AS txid`
+and ordered by `txid`, which SQL resolves to the output column, so the feed
+was sorted as text and a page could skip records once transaction ids
+crossed a power of ten. The query now names `c.txid` throughout, and the
+powers-of-ten test fails against the old form.
+
 ## 5. Community detection (Louvain)
 
 > **Optional extra.** Louvain needs python-igraph (GPL-2.0-or-later),
@@ -1069,5 +1155,8 @@ Postgres instance.
    table carrying extra columns such as `end_community_id` or a generated
    column crashes the backend, so all rows are written through SQL, §4).
    Re-test on upgrade.
-9. **Backups** are operator-owned: `pg_dump` / `pg_basebackup` or a snapshot of
+9. **Change-feed latency follows the longest write transaction** on the
+   database server (§4.1); a Louvain write-back on a large graph holds every
+   tenant's feed until it commits.
+10. **Backups** are operator-owned: `pg_dump` / `pg_basebackup` or a snapshot of
    the `graphos_data` volume.

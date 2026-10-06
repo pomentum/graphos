@@ -34,6 +34,7 @@ import asyncpg
 from fastapi import HTTPException
 from pydantic import BaseModel
 
+from graphos.changes import ACTOR, Actor
 from graphos.contracts.jobs import Job
 
 log = logging.getLogger(__name__)
@@ -233,7 +234,7 @@ class JobRunner:
             "  SELECT id FROM graphos_meta.jobs "
             "  WHERE status = 'queued' AND kind = ANY($1::text[]) "
             "  ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1"
-            ") RETURNING id, kind, tenant, params::text AS params;",
+            ") RETURNING id, kind, tenant, consumer, params::text AS params;",
             list(self.kinds),
         )
 
@@ -257,6 +258,9 @@ class JobRunner:
     async def _run(self, row: asyncpg.Record) -> None:
         job_id: UUID = row["id"]
         kind = self.kinds.get(row["kind"])
+        # Change records of the job's writes name who submitted it.  This
+        # task's own context: set here, it is seen by everything it awaits.
+        ACTOR.set(Actor(consumer=row["consumer"], trace_id=f"job:{job_id}"))
         heartbeat = asyncio.create_task(self._heartbeat(job_id, asyncio.current_task()))
         result: dict[str, Any] | None = None
         error: dict[str, Any] | None = None

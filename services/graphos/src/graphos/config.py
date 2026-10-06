@@ -78,6 +78,19 @@ class Settings(BaseSettings):
     rate_limit_rps: int = 100
     rate_limit_window_s: float = 1.0
 
+    # Seconds a stopping server waits for open requests (change-feed streams
+    # never finish on their own) before cancelling them.
+    shutdown_grace_s: float = Field(default=5.0, gt=0)
+
+    # ── Change feed ──────────────────────────────────────────────────────
+    # Records older than this are pruned; a cursor behind them gets 410.
+    changes_retention_h: float = Field(default=168.0, gt=0)
+    # Live streams look for new records at least this often, even without a
+    # notification (which normally wakes them at once).
+    changes_poll_s: float = Field(default=1.0, gt=0)
+    # A comment line sent on an idle stream so proxies keep it open.
+    changes_heartbeat_s: float = Field(default=15.0, gt=0)
+
     # ── Revisions ────────────────────────────────────────────────────────
     # When true, every write to one node or edge (PATCH, DELETE, the
     # property merge) must send If-Match with an ETag from a read, or gets

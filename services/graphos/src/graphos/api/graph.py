@@ -3623,7 +3623,7 @@ async def run_resolve(
             # so a runaway plan still fails.
             try:
                 written += await writes.insert_resolved_edges(
-                    pool, compiled=compiled, timeout_s=1800.0,
+                    pool, tenant=tenant, compiled=compiled, timeout_s=1800.0,
                 )
             except CypherError as exc:
                 raise HTTPException(

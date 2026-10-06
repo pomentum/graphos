@@ -370,7 +370,22 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
 
 ---
 
-## 9. Operational surface
+## 9. Change feed
+
+- Every write is recorded in the same transaction: upserts per batch with the
+  ids written, merges and patches with the new revision, deletes with the
+  ids and the edges removed with them, and one summary for a rule
+  resolution or a Louvain write-back. Records say what changed and who
+  changed it, not the values.
+- `GET …/changes?after=` pages through the records after a cursor;
+  `GET …/changes/head` is where to start after reading the data afresh;
+  `GET …/changes/stream` follows them live as Server-Sent Events, resumable
+  with `Last-Event-ID` and woken by Postgres `NOTIFY`.
+- Never skips a committed change, even when transactions commit out of
+  order; delivery is at least once. Records are kept for
+  `GRAPHOS_CHANGES_RETENTION_H` (7 days); an older cursor gets 410.
+
+## 10. Operational surface
 
 - **Health:** `GET /healthz` (process alive, no DB), `GET /readyz` (DB
   round-trip; 503 with only a reason code if not ready), `GET /v1/info`
@@ -423,7 +438,7 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
 
 ---
 
-## 10. What graphos does not do
+## 11. What graphos does not do
 
 - **No raw Cypher or SQL endpoint.** The surface stays typed so limits,
   timeouts, and tenant checks remain enforceable. The bundled compose gives
@@ -441,7 +456,7 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
 
 ---
 
-## 11. Performance and indexing
+## 12. Performance and indexing
 
 - **Built-in indexes per vertex label:** unique btree on `properties.id`, GIN
   on `properties`, an expression index on `community_id`, and a trigram GIN on

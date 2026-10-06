@@ -523,3 +523,93 @@ async def test_find_paths() -> None:
         "include_properties": False, "rel_types": ["KNOWS"],
     }
     await cli.close()
+
+
+def _change(n: int, op: str = "upsert") -> dict:
+    return {"cursor": f"100.{n}", "at": "2026-10-06T08:00:00Z", "op": op, "kind": "node",
+            "label": "Doc", "ids": [f"n{n}"], "count": 1}
+
+
+@pytest.mark.asyncio
+async def test_changes_pages_until_caught_up() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        after = request.url.params.get("after")
+        if after is None:
+            return httpx.Response(200, json={"tenant": "demo", "changes": [_change(1), _change(2)],
+                                             "next": "100.2", "more": True})
+        return httpx.Response(200, json={"tenant": "demo", "changes": [_change(3)],
+                                         "next": "100.3", "more": False})
+
+    cli = GraphosClient(base_url="http://x", tenant="demo", transport=_mock_transport(handler))
+    got = [c.cursor async for c in cli.iter_changes(page_size=2)]
+    assert got == ["100.1", "100.2", "100.3"]
+    assert dict(seen[1].url.params) == {"limit": "2", "after": "100.2"}
+    assert seen[0].url.path == "/v1/demo/changes"
+    await cli.close()
+
+
+def _sse(*chunks: str):  # noqa: ANN202
+    async def body():  # noqa: ANN202
+        for chunk in chunks:
+            yield chunk.encode()
+    return body()
+
+
+@pytest.mark.asyncio
+async def test_stream_parses_resumes_and_stops_on_gone() -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        n = len(calls)
+        if n == 1:   # two events split at odd places, then the connection ends
+            e1, e2 = json.dumps(_change(1)), json.dumps(_change(2))
+            return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=_sse(
+                "retry: 2000\n\n: keep-alive\n\nid: 100.1\nevent: change\nda",
+                f"ta: {e1}\n\nid: 100.2\nevent: change\ndata: {e2[:10]}",
+                f"{e2[10:]}\n\n",
+            ))
+        if n == 2:
+            raise httpx.ConnectError("refused")
+        if n == 3:
+            return httpx.Response(503, json={"detail": "not ready"})
+        if n == 4:
+            e3 = json.dumps(_change(3))
+            return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=_sse(
+                f"id: 100.3\nevent: change\ndata: {e3}\n\n",
+                'event: gone\ndata: {"status": 410, "detail": "pruned"}\n\n',
+            ))
+        raise AssertionError("no further request expected")
+
+    cli = GraphosClient(base_url="http://x", tenant="demo", retry_backoff_s=0.001,
+                        transport=_mock_transport(handler))
+    got = []
+    with pytest.raises(GraphosError) as exc:
+        async for change in cli.stream_changes("100.0"):
+            got.append(change.cursor)
+    assert exc.value.status_code == 410 and "pruned" in str(exc.value)
+    assert got == ["100.1", "100.2", "100.3"]
+    assert [r.headers.get("last-event-id") for r in calls] == ["100.0", "100.2", "100.2", "100.2"]
+    assert calls[0].url.path == "/v1/demo/changes/stream"
+    await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_stream_does_not_retry_a_client_error() -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(403, json={"detail": "token has no access to tenant 'demo'"})
+
+    cli = GraphosClient(base_url="http://x", tenant="demo", retry_backoff_s=0.001,
+                        transport=_mock_transport(handler))
+    with pytest.raises(GraphosError) as exc:
+        async for _ in cli.stream_changes():
+            pass
+    assert exc.value.status_code == 403 and len(calls) == 1
+    assert "last-event-id" not in calls[0].headers
+    await cli.close()

@@ -15,6 +15,8 @@ import asyncpg
 import pytest
 import pytest_asyncio
 
+from graphos.db import ensure_internal_schema
+
 
 def _has_db() -> bool:
     return bool(os.environ.get("GRAPHOS_TEST_DSN"))
@@ -58,6 +60,8 @@ async def db_pool() -> AsyncIterator[asyncpg.Pool]:
         dsn=dsn, min_size=1, max_size=2, init=_init, setup=_setup
     )
     assert pool is not None
+    # graphos_meta tables (the change feed's included): every write records.
+    await ensure_internal_schema(pool)
     try:
         yield pool
     finally:

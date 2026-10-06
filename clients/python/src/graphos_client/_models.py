@@ -561,3 +561,32 @@ class PathsResponse(BaseModel):
     truncated: bool     # the search stopped at its edge cap: a path may exist
     visited: int
     elapsed_ms: int
+
+
+# ── Change feed ──────────────────────────────────────────────────────
+
+
+class ChangeItem(BaseModel):
+    """One write: what it changed, not the new values (re-read those)."""
+
+    cursor: str            # this record's position; pass as ``after``
+    at: datetime
+    op: str                # upsert | merge | patch | delete | resolve | communities
+    kind: str              # node | edge
+    label: str | None = None
+    src_label: str | None = None
+    dst_label: str | None = None
+    ids: list[str] | None = None                  # node records
+    edges: list[tuple[str, str]] | None = None    # edge records: (src_id, dst_id)
+    rev: int | None = None
+    count: int
+    detail: dict[str, Any] | None = None
+    consumer: str | None = None
+    trace_id: str | None = None
+
+
+class ChangesPage(BaseModel):
+    tenant: str
+    changes: list[ChangeItem]
+    next: str              # pass as ``after`` for the next page
+    more: bool             # the page was full: more may be ready now

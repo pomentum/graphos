@@ -22,6 +22,11 @@ def main() -> None:
         # proxy's address when running behind one.
         proxy_headers=True,
         forwarded_allow_ips=settings.forwarded_allow_ips,
+        # A change-feed stream never ends by itself: without a limit, a
+        # graceful stop would wait on every open stream until the container
+        # is killed.  After this many seconds open requests are cancelled;
+        # stream clients resume on another replica with Last-Event-ID.
+        timeout_graceful_shutdown=settings.shutdown_grace_s,
     )
 
 

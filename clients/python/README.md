@@ -88,6 +88,7 @@ Runnable scripts in [`examples/`](examples/). Each reads `GRAPHOS_URL` (default 
 | Communities | `recompute_communities`, `list_communities`, `community_summary`, `community_ids` |
 | Rule-based edges | `resolve_edges`, `catalogue` |
 | Cache | `cache_put`, `cache_get`, `cache_delete` |
+| Change feed | `changes`, `changes_head`, `iter_changes`, `stream_changes` (reconnects with `Last-Event-ID`) |
 | Operations (admin) | `healthz`, `readyz`, `info`, `db_stats`, `slow_queries`, `vacuum` |
 | Background jobs | `submit_recompute_communities`, `submit_resolve_edges`, `submit_vacuum` (each returns a `Job`), `get_job`, `list_jobs`, `cancel_job`, `wait_for_job` |
 
