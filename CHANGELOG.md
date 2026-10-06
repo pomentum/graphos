@@ -3,17 +3,26 @@
 Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`) and client (`graphos-client`)
 are released together under one version.
 
-## Unreleased
+## 0.2.1 — 2026-10-06
 
-### Added
+graphos 0.2.1 makes several API replicas behind one database work correctly.
 
-- **Several API replicas.** Tenant registrations and the K/V cache are kept in step across
-  replicas: changes are announced with Postgres `NOTIFY` and applied at once, every replica
-  re-reads all registrations every `GRAPHOS_REGISTRY_SYNC_S` (30) seconds, a tenant a replica
-  does not know is looked up before it answers `404`, and a cache entry is served from memory for
-  at most `GRAPHOS_CACHE_MAX_AGE_S` (30) seconds. In 0.2.0 a registration made through one
-  replica stayed invisible to the others until they restarted, and a cached value could be served
-  stale indefinitely. The rate limit and the tokens file stay per replica.
+### Upgrading from 0.2.0
+
+Nothing to do: no schema change. Two optional settings are new, `GRAPHOS_REGISTRY_SYNC_S` and
+`GRAPHOS_CACHE_MAX_AGE_S` (both 30 seconds). Each replica now holds one `LISTEN` connection, as in
+0.2.0 (it is shared with the change feed).
+
+### Fixed
+
+- **Several API replicas.** In 0.2.0 a tenant registered, extended or unregistered through one
+  replica stayed invisible to the others until they restarted (a new tenant answered `404`, new
+  labels `400`), the resolver catalogue was never refreshed there, and a K/V cache value could be
+  served stale indefinitely after another replica changed or deleted it. Now changes are announced
+  with Postgres `NOTIFY` and applied by every replica at once; a replica that misses one looks an
+  unknown tenant up before answering `404` and re-reads every registration every
+  `GRAPHOS_REGISTRY_SYNC_S` seconds, and serves a cache entry from memory for at most
+  `GRAPHOS_CACHE_MAX_AGE_S` seconds. The rate limit and the tokens file stay per replica.
 
 ## 0.2.0 — 2026-10-06
 
