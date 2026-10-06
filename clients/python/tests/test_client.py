@@ -17,6 +17,7 @@ from graphos_client import (
     GraphosClient,
     GraphosError,
     NodeUpsert,
+    SearchHit,
 )
 
 
@@ -612,4 +613,43 @@ async def test_stream_does_not_retry_a_client_error() -> None:
             pass
     assert exc.value.status_code == 403 and len(calls) == 1
     assert "last-event-id" not in calls[0].headers
+    await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_ranked_search_and_search_index_registration() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if request.method == "POST":
+            return httpx.Response(200, json={"name": "demo"})
+        return httpx.Response(200, json={
+            "tenant": "demo", "query": "user svc", "label": None, "index": "names",
+            "limit": 5, "truncated": False, "elapsed_ms": 3,
+            "nodes": [{"id": 7, "label": "Class", "properties": {"name": "UserService"},
+                       "score": 0.97, "matched": "name"}],
+        })
+
+    cli = GraphosClient(base_url="http://x", token="tok", tenant="demo")
+    cli._http = httpx.AsyncClient(base_url="http://x", transport=_mock_transport(handler))
+    await cli.register_tenant(vertex_labels=["Class"], search_indexes={
+        "names": {"properties": ["name"], "analyzer": "identifier"},
+    })
+    resp = await cli.search("user svc", index="names", limit=5, fuzzy=True, min_score=0.5)
+    assert json.loads(captured[0].content)["search_indexes"] == {
+        "names": {"properties": ["name"], "analyzer": "identifier"},
+    }
+    params = dict(captured[1].url.params)
+    assert params == {"q": "user svc", "limit": "5", "index": "names", "fuzzy": "true",
+                      "min_score": "0.5"}
+    assert resp.index == "names"
+    hit = resp.nodes[0]
+    assert isinstance(hit, SearchHit) and (hit.score, hit.matched) == (0.97, "name")
+
+    # Plain search sends none of the ranked-search parameters.
+    await cli.search("auth")
+    assert set(captured[2].url.params) == {"q", "limit"}
+    await cli.register_tenant(vertex_labels=["Class"])
+    assert "search_indexes" not in json.loads(captured[3].content)
     await cli.close()

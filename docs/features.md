@@ -132,6 +132,16 @@ reported in the response.
   `label`. Served by the trigram index graphos
   creates on every vertex label. Each hit's `id` is the AGE internal graphid
   (an integer); the caller's external id is in `properties.id`.
+- **Ranked search** (`GET …/graph/search?index=`): through a named search
+  index the tenant declares at registration, as with Neo4j's full-text
+  indexes: chosen labels (or all) and properties, and an analyzer.
+  `identifier` reads names, identifiers and paths as words (camelCase,
+  acronyms and punctuation split; `getUserById` is found by
+  `get user by id`, `getuserbyid` or `GetUserByID`), ranks exact > prefix > contained > similar words, and
+  with `fuzzy=true` also finds misspellings when nothing matches literally. `text` is Postgres
+  full-text search with stemming and web-search syntax. Each hit has a
+  `score` in [0, 1] and the property it `matched`; the indexes are Postgres
+  GIN indexes, updated in the same transaction as the write.
 - **Point read** (`GET …/graph/nodes/{external_id}`): one node with label and
   properties.
 - **Neighbors** (`GET …/graph/neighbors`): one hop, outgoing and incoming, with

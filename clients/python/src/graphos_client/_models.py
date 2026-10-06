@@ -47,6 +47,7 @@ class TenantInfo(BaseModel):
     n_indexes: int = 0
     n_generated_columns: int = 0
     meta: dict[str, str] = Field(default_factory=dict)
+    search_indexes: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 # ── Reads ───────────────────────────────────────────────────────────────────
@@ -58,14 +59,20 @@ class NodeHit(BaseModel):
     properties: dict[str, object] = Field(default_factory=dict)
 
 
+class SearchHit(NodeHit):
+    score: float | None = None      # set when a search index answered
+    matched: str | None = None      # the property that matched best
+
+
 class SearchResponse(BaseModel):
     tenant: str
     query: str
     label: str | None = None
+    index: str | None = None
     limit: int
     truncated: bool
     elapsed_ms: int
-    nodes: list[NodeHit] = Field(default_factory=list)
+    nodes: list[SearchHit] = Field(default_factory=list)
 
 
 class EdgeHit(BaseModel):

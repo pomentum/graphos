@@ -28,6 +28,7 @@ from graphos.auth import ReadPrincipal, WritePrincipal, require_admin
 from graphos.bootstrap import (
     TenantSpec,
     bootstrap_tenant,
+    ensure_search_indexes,
     load_spec,
     persist_spec,
     persist_spec_replace,
@@ -58,6 +59,7 @@ def _spec_to_info(spec: TenantSpec) -> TenantInfo:
         n_resolve_rules=len(spec.resolve_rules),
         label_hierarchy={c: p for (c, p) in spec.label_hierarchy},
         meta=dict(spec.meta),
+        search_indexes=dict(spec.search_indexes),
     )
 
 
@@ -134,6 +136,7 @@ async def register(
         ),
         resolve_rules=resolve_rules,
         meta=dict(body.meta),
+        search_indexes={k: v.model_dump() for k, v in body.search_indexes.items()},
     )
 
     pool = request.app.state.pool
@@ -164,6 +167,10 @@ async def register(
     # or resolve rules registered earlier.
     spec = await load_spec(pool, spec.name) or spec
     remember(spec)
+    # A search index over every label ("*") also covers the labels this
+    # registration added; build what the merged spec now needs.
+    if spec.search_indexes:
+        await ensure_search_indexes(pool, spec)
 
     # Warm the per-tenant property→labels catalogue so the first
     # ``edges:resolve`` call doesn't pay the discovery cost.  Best-effort:

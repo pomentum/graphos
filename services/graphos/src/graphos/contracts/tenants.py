@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -199,6 +199,64 @@ def _validate_resolve_rule(rule_owner: str, rule: dict[str, Any]) -> None:
         )
 
 
+_SEARCH_INDEX_NAME = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+_SEARCH_PROPERTY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+_TS_LANGUAGE = re.compile(r"^[a-z_]{1,63}$")
+
+
+class SearchIndexSpec(BaseModel):
+    """A named search index (``graphos.search``): which labels and
+    properties, and how their text is analysed."""
+
+    labels: list[str] = Field(
+        default_factory=lambda: ["*"], min_length=1,
+        description='Vertex labels covered; `["*"]` (default) for every label, now and later.',
+    )
+    properties: list[str] = Field(
+        default_factory=lambda: ["name"], min_length=1, max_length=8,
+        description="String properties searched; a node scores by its best-matching one.",
+    )
+    analyzer: Literal["identifier", "text"] = Field(
+        "identifier",
+        description=(
+            "`identifier`: names, ids, paths: case-insensitive, camelCase and acronyms "
+            "split, punctuation as word breaks, typo-tolerant. `text`: prose: Postgres "
+            "full-text search with stemming for `language`."
+        ),
+    )
+    language: str = Field(
+        "simple",
+        description="`text` analyzer: a text-search configuration, e.g. `english`.",
+    )
+
+    @field_validator("labels")
+    @classmethod
+    def _labels(cls, v: list[str]) -> list[str]:
+        if "*" in v and len(v) > 1:
+            raise ValueError('use either ["*"] or a list of labels, not both')
+        for lab in v:
+            if lab != "*" and not _LABEL_PATTERN.fullmatch(lab):
+                raise ValueError(f"label {lab!r} must match {_LABEL_PATTERN.pattern}")
+        return v
+
+    @field_validator("properties")
+    @classmethod
+    def _properties(cls, v: list[str]) -> list[str]:
+        for p in v:
+            if not _SEARCH_PROPERTY.fullmatch(p):
+                raise ValueError(f"property {p!r} must match {_SEARCH_PROPERTY.pattern}")
+        if len(set(v)) != len(v):
+            raise ValueError("properties must not repeat")
+        return v
+
+    @field_validator("language")
+    @classmethod
+    def _language(cls, v: str) -> str:
+        if not _TS_LANGUAGE.fullmatch(v):
+            raise ValueError(f"language {v!r} must match {_TS_LANGUAGE.pattern}")
+        return v
+
+
 class EdgeLabelSpec(BaseModel):
     """One entry in ``edge_labels`` — name plus optional resolve rule.
 
@@ -270,6 +328,23 @@ class TenantSpecBody(BaseModel):
         ),
     )
     meta: dict[str, str] = Field(default_factory=dict)
+    search_indexes: dict[str, SearchIndexSpec] = Field(
+        default_factory=dict,
+        description=(
+            "Named search indexes, queried with `GET …/graph/search?index=<name>`. "
+            "Declaring a name again replaces its definition."
+        ),
+    )
+
+    @field_validator("search_indexes")
+    @classmethod
+    def _search_index_names(cls, v: dict[str, SearchIndexSpec]) -> dict[str, SearchIndexSpec]:
+        for name in v:
+            if not _SEARCH_INDEX_NAME.fullmatch(name):
+                raise ValueError(
+                    f"search index name {name!r} must match {_SEARCH_INDEX_NAME.pattern}"
+                )
+        return v
 
     @field_validator("name")
     @classmethod
@@ -358,6 +433,7 @@ class TenantInfo(BaseModel):
     n_resolve_rules: int = 0
     label_hierarchy: dict[str, str] = Field(default_factory=dict)
     meta: dict[str, str] = Field(default_factory=dict)
+    search_indexes: dict[str, SearchIndexSpec] = Field(default_factory=dict)
 
 
 class ResolveEdgesRequest(BaseModel):

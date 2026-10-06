@@ -237,6 +237,17 @@ Consequences:
   `CREATE INDEX IF NOT EXISTS "Document_category" ON acme."Document" ((((properties::text)::jsonb) ->> 'category'))`.
 - Resolve rules derive further indexes automatically
   ([features.md §7](features.md#7-schema-driven-edge-derivation)).
+- Search indexes (`search_indexes`) derive one GIN index per covered label
+  and property, built `CONCURRENTLY`: `identifier` gets two `gin_trgm_ops`
+  indexes, on the property's words (camelCase split, lower-cased,
+  punctuation as spaces) for similar-word matches and on the same words
+  run together for exact, prefix and contained matches, as Lucene's
+  word-delimiter filter can also index the catenated token; `text` gets one
+  on `to_tsvector(<language>, …)`. The query computes the identical
+  expression, the only form the planner matches to an expression index. An
+  index over every label (`*`) is extended to labels registered later. Over
+  `*`, one query on the AGE parent table `_ag_label_vertex` reaches each
+  label's own index through inheritance.
 
 Index effect measured during development: the `community_id` index took a
 lookup on a ~117k-row label from 2.4 s to 0.5 ms, and the trigram index took
@@ -327,6 +338,7 @@ Paths under `/v1/{tenant}/graph/...` are abbreviated to `…/graph/...`.
 | `DELETE /v1/tenants/{name}` | Unregister (see below) | admin |
 | **Reads** | | |
 | `GET …/graph/search?q=&label=&limit=` | Case-insensitive literal substring (`ILIKE`, with `%` / `_` in `q` escaped) on `name`, served by the trigram index; limit ≤200. Hit `id` = AGE graphid (integer); external id in `properties.id` | tenant |
+| `GET …/graph/search?q=&index=&label=&fuzzy=&min_score=&limit=` | Ranked search through a named search index (`identifier` or `text` analyzer); hits carry `score` and `matched` | tenant |
 | `GET …/graph/nodes/{external_id}?label=` | One node by external id; 409 if the id is in several labels and `label` is absent | tenant |
 | `GET …/graph/edges/{type}?src=&dst=&src_label=&dst_label=` | One edge by type and end ids; 409 if several match | tenant |
 | `GET …/graph/neighbors?node_id=&rel_types=&limit=` | 1-hop out + in edges; limit default 50, ≤500 | tenant |

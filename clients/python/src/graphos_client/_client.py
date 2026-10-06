@@ -289,8 +289,14 @@ class GraphosClient:
         generated_columns: Iterable[str] = (),
         label_hierarchy: Mapping[str, str] | None = None,
         meta: Mapping[str, str] | None = None,
+        search_indexes: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Register / re-register a tenant.
+
+        ``search_indexes`` declares named search indexes for :meth:`search`:
+        ``{"names": {"labels": ["*"], "properties": ["name"], "analyzer": "identifier"}}``;
+        ``analyzer`` is ``identifier`` (names, ids, paths) or ``text`` (prose,
+        with ``language``).  Declaring a name again replaces its definition.
 
         ``edge_labels`` entries are names or ``{"name": ..., "resolve_rule": {...}}``
         dicts (rule-based edges).  ``label_hierarchy`` maps ``{child_label: parent_label}``;
@@ -308,6 +314,8 @@ class GraphosClient:
             "label_hierarchy": dict(label_hierarchy or {}),
             "meta": dict(meta or {}),
         }
+        if search_indexes:
+            body["search_indexes"] = {k: dict(v) for k, v in search_indexes.items()}
         resp = await self._request("POST", "/v1/tenants", json_body=body)
         return resp.json()
 
@@ -549,10 +557,21 @@ class GraphosClient:
         *,
         label: str | None = None,
         limit: int = 20,
+        index: str | None = None,
+        fuzzy: bool = False,
+        min_score: float = 0.0,
     ) -> SearchResponse:
+        """Search nodes.  With ``index``: ranked by a search index of the tenant,
+        each hit with a ``score`` and the property it ``matched``; without:
+        unranked case-insensitive substring match on ``name``."""
         params: dict[str, Any] = {"q": q, "limit": limit}
         if label is not None:
             params["label"] = label
+        if index is not None:
+            params["index"] = index
+            params["fuzzy"] = "true" if fuzzy else "false"
+            if min_score:
+                params["min_score"] = min_score
         resp = await self._request(
             "GET", f"/v1/{self._tenant}/graph/search", params=params,
         )

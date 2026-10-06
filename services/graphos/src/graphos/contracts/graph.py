@@ -43,12 +43,20 @@ class NodeHit(BaseModel):
     properties: dict[str, object] = Field(default_factory=dict)
 
 
+class SearchHit(NodeHit):
+    """A search result; ``score`` and ``matched`` are set when a search index answered."""
+
+    score: float | None = Field(None, description="Relevance in [0, 1] (search index only).")
+    matched: str | None = Field(None, description="The property that matched best.")
+
+
 class SearchResponse(BaseModel):
     """Response for GET /v1/{tenant}/graph/search."""
 
     tenant: str
     query: str
     label: str | None = None
+    index: str | None = Field(None, description="The search index used; null for substring.")
     limit: int
     truncated: bool = Field(
         ...,
@@ -59,7 +67,7 @@ class SearchResponse(BaseModel):
         ),
     )
     elapsed_ms: int
-    nodes: list[NodeHit] = Field(default_factory=list)
+    nodes: list[SearchHit] = Field(default_factory=list)
 
 
 def validate_label_optional(value: str | None) -> str | None:

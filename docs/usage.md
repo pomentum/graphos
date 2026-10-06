@@ -153,10 +153,12 @@ the remaining entries still load.
 | `indexes`, `generated_columns` | list[str] | validated DDL (see below) |
 | `label_hierarchy` | dict child→parent | both labels must be in `vertex_labels`, and a label cannot be its own parent; reads on the parent see the child's rows |
 | `meta` | dict[str, str] | free-form |
+| `search_indexes` | dict name → `{labels, properties, analyzer, language}` | named search indexes for ranked search (§5, *search*); name `^[a-z][a-z0-9_]{0,39}$` |
 
 **Merge vs replace.** By default, re-registering merges the incoming spec into the stored one.
 Labels, indexes, generated columns, the hierarchy and rules are unioned, and `meta` keys are
-overwritten. A bare `{"name": "acme"}` therefore never shrinks a tenant. `?force_shrink=true`
+overwritten. Search indexes are merged by name: declaring a name again replaces its definition. A
+bare `{"name": "acme"}` therefore never shrinks a tenant. `?force_shrink=true`
 replaces the stored spec instead. Labels removed this way are **not** dropped from AGE; their tables
 and data stay in place. In both modes graphos then serves the stored (merged) spec: the response's
 `vertex_labels` / `edge_labels` are the merged sets, and a partial re-registration does not hide
@@ -346,7 +348,7 @@ other reads return every match.
 
 | Endpoint (`/v1/{t}` prefix) | Method | Key inputs (default / max) | Returns |
 |---|---|---|---|
-| `/graph/search` | GET | `q` (1–200 chars), `label`, `limit` (20 / 200) | `nodes[{id, label, properties}]`, `truncated`; `id` is the AGE graphid (integer), the external id is `properties.id` |
+| `/graph/search` | GET | `q` (1–200 chars), `label`, `limit` (20 / 200); `index`, `fuzzy` (false), `min_score` (0) | `nodes[{id, label, properties, score, matched}]`, `truncated`; `id` is the AGE graphid (integer), the external id is `properties.id` |
 | `/graph/nodes/{external_id}` | GET | `label` | `label`, `properties` (404 if absent) |
 | `/graph/edges/{type}` | GET | `src`, `dst`, `src_label`, `dst_label` | one edge: `src_label`, `dst_label`, `properties` (404 if absent) |
 | `/graph/paths` | POST | `src`, `dst` (+ labels), `rel_types`, `direction` (`both`), `max_hops` (4 / 8), `limit` (1 / 100), `include_properties` | the shortest paths: `hops`, `paths[{hops, nodes[], edges[]}]`, `truncated` |
@@ -360,10 +362,10 @@ other reads return every match.
 | `/graph/export` | GET | `node_ids`, `rel_types`, `limit_nodes` (5000 / 50000) | graphology JSON |
 | `/graph/catalogue` | GET | `refresh` | `by_property`: property → labels |
 
-- **search** matches the `name` property with a case-insensitive `ILIKE '%q%'`, served by the
-  trigram index `<Label>_name_trgm`. `q` is matched literally: `%` and `_` are escaped, not
-  wildcards. Each hit's `id` is the
-  AGE internal graphid, an integer; read the caller's external id from `properties.id`.
+- **search** without `index` matches the `name` property with a case-insensitive `ILIKE '%q%'`,
+  served by the trigram index `<Label>_name_trgm`, unranked. `q` is matched literally: `%` and `_`
+  are escaped, not wildcards. With `index`, it ranks through a search index (below). Each hit's
+  `id` is the AGE internal graphid, an integer; read the caller's external id from `properties.id`.
 - **neighbors** and **expand** report the other node by external id (`neighbor_id`, `end_id`),
   with its full property bag alongside. They return an empty result, not 404, when the seed is missing. With
   `seeds`, one BFS runs from every seed; `node_id` is then ignored, but you must still send it.
@@ -385,6 +387,56 @@ curl -s "$G/v1/acme/graph/expand?node_id=u1&seeds=u1&seeds=u2&rel_types=FOLLOWS&
 curl -s -X POST "$G/v1/acme/graph/induced_edges" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"node_ids": ["u1", "u2", "d1"], "rel_types": ["AUTHORED", "FOLLOWS"], "limit": 1000}'
+```
+
+### search indexes
+
+A search index is declared at registration, like a full-text index in Neo4j or an ArangoSearch
+view: a name, the vertex labels it covers, the string properties it searches, and an analyzer.
+
+```json
+"search_indexes": {
+  "names": {"labels": ["*"], "properties": ["name", "qualified_name"]},
+  "docs":  {"labels": ["Document"], "properties": ["summary"], "analyzer": "text", "language": "english"}
+}
+```
+
+| Field | Default | Rule |
+|---|---|---|
+| `labels` | `["*"]` | vertex labels, or `["*"]` for every label, including labels registered later |
+| `properties` | `["name"]` | 1–8 string properties; a node scores by its best-matching one, reported as `matched` |
+| `analyzer` | `identifier` | `identifier` or `text` |
+| `language` | `simple` | `text` only: a Postgres text-search configuration (`english`, `german`, …; `simple` = no stemming) |
+
+graphos builds the Postgres GIN indexes behind each (label, property) without blocking writes:
+`<Label>_<property>_words_search` and `<Label>_<property>_joined_search` for `identifier`,
+`<Label>_<property>_text_<language>_search` for `text`. An unknown label or language returns 422.
+
+`GET …/graph/search?q=…&index=names` then returns hits ordered by `score` in [0, 1]:
+
+- **`identifier`**, for names, identifiers, codes and paths. A value is read as lower-case words:
+  camelCase and acronyms are split and every other character is a word break, so
+  `parseHTTPResponse`, `parse_http_response` and `parse-http-response` are all
+  `parse http response`, and so is the query `Parse HTTP response`. Exact, prefix and contained
+  matches compare the words run together, so a query typed without separators matches too:
+  `parsehttpresponse` and `getuserbyid` are exact, `parsehttp` a prefix. An exact match scores 1, a
+  prefix [0.9, 1), a contained match [0.8, 0.9), a match on similar words (trigrams) below 0.8;
+  within a tier, whole words and shorter values score higher. Similar words already catch most
+  typos (`getUsrById`). `fuzzy=true` asks for misspellings too when nothing matches literally
+  (`UserSerivce`), as `term~` does in Lucene; it reads much more of the index, so it is off by
+  default. Queries under three characters match exact and prefix only. Letters outside ASCII are split and lower-cased by the database's
+  `LC_CTYPE` (the stock image uses `en_US.UTF-8`).
+- **`text`**, for prose: Postgres full-text search with stemming and stop words for `language`.
+  `q` takes web-search syntax: `"exact phrase"`, `or`, `-excluded`. The score is `ts_rank_cd`
+  normalised to rank / (rank + 1).
+
+`label` narrows to one label the index covers (400 otherwise), `min_score` drops weaker hits, and
+an unknown `index` is 404. Ranking is computed over a bounded set of candidates per label,
+property and kind of match (200), so with very common words the best hit can be missed; add words
+or a `label` to narrow it.
+
+```bash
+curl -s "$G/v1/acme/graph/search?q=parse%20http&index=names&limit=5" -H "Authorization: Bearer $TOKEN"
 ```
 
 ### paths

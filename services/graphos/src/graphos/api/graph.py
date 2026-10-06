@@ -45,6 +45,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 
 from graphos import lookup, writes
+from graphos import search as search_index
 from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, wants_async
 from graphos.auth import ReadPrincipal, WritePrincipal, require_tenant
 from graphos.bootstrap import registered_tenants
@@ -87,7 +88,6 @@ from graphos.contracts.graph import (
     NeighborsResponse,
     NodeAggregateRow,
     NodeGetResponse,
-    NodeHit,
     NodePropertiesUpsertRequest,
     NodePropertiesUpsertResponse,
     NodesAggregateRequest,
@@ -107,6 +107,7 @@ from graphos.contracts.graph import (
     ScopedSubgraphNode,
     ScopedSubgraphRequest,
     ScopedSubgraphResponse,
+    SearchHit,
     SearchResponse,
     _validate_prop_key,
     validate_label_optional,
@@ -239,13 +240,17 @@ def _node_response(
 @router.get(
     "/search",
     response_model=SearchResponse,
-    summary="Substring-match nodes by their `name` property",
+    summary="Search nodes: ranked through a search index, or substring on `name`",
     description=(
-        "Case-insensitive substring search (`ILIKE`) over the `name` "
-        "property of each vertex in the tenant graph. Optionally restrict "
-        "to one label. Served by the trigram index bootstrap creates on "
-        "`name` for every vertex label."
+        "With `index`: ranked search through that named search index (declared at "
+        "registration): each hit has a `score` in [0, 1] and the property it `matched`. "
+        "An `identifier` index matches exact, prefix, contained and similar words, and with "
+        "`fuzzy=true` also misspellings when nothing matches literally; a `text` index is "
+        "Postgres full-text search (`\"phrase\"`, `or`, `-word`).\n\n"
+        "Without `index`: case-insensitive substring search (`ILIKE`) over `name`, "
+        "unranked, served by the trigram index bootstrap creates on `name`."
     ),
+    responses={404: {"description": "No search index of that name."}},
 )
 async def search(
     tenant: str,
@@ -259,6 +264,16 @@ async def search(
     limit: Annotated[
         int, Query(ge=1, le=MAX_SEARCH_LIMIT, description="Max rows to return.")
     ] = DEFAULT_SEARCH_LIMIT,
+    index: Annotated[
+        str | None, Query(description="A search index of the tenant; ranked search."),
+    ] = None,
+    fuzzy: Annotated[
+        bool, Query(description="`identifier` index: when nothing matches literally, also "
+                                "look for misspellings (slower)."),
+    ] = False,
+    min_score: Annotated[
+        float, Query(ge=0, le=1, description="Search index: drop hits scoring lower."),
+    ] = 0.0,
 ) -> SearchResponse:
     _check_tenant(tenant, principal)
     try:
@@ -268,6 +283,11 @@ async def search(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+    if index is not None:
+        return await _ranked_search(
+            tenant, request, q=q, label=label, limit=limit, index=index,
+            fuzzy=fuzzy, min_score=min_score,
+        )
 
     # SQL-direct rewrite (was: ``MATCH (n) WHERE n.name CONTAINS $q``).
     # The Cypher path planned as a full parent-inheritance scan against
@@ -336,7 +356,7 @@ async def search(
     elapsed_ms = int((time.perf_counter() - started) * 1000)
 
     hits = [
-        NodeHit(
+        SearchHit(
             id=int(row["gid"]),
             label=str(row["label"]),
             properties=_safe_decode_props(row["props_text"]),
@@ -352,6 +372,44 @@ async def search(
         truncated=len(hits) == limit,
         elapsed_ms=elapsed_ms,
         nodes=hits,
+    )
+
+
+async def _ranked_search(  # noqa: PLR0913 — the query's options
+    tenant: str, request: Request, *, q: str, label: str | None, limit: int,
+    index: str, fuzzy: bool, min_score: float,
+) -> SearchResponse:
+    spec = registered_tenants()[tenant]
+    body = spec.search_indexes.get(index)
+    if body is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"no search index {index!r} in tenant {tenant!r}",
+        )
+    idx = search_index.SearchIndex.from_spec(index, dict(body))
+    if label is not None and not (label in spec.vertex_labels and idx.covers(label)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"search index {index!r} does not cover label {label!r}",
+        )
+    started = time.perf_counter()
+    async with request.app.state.pool.acquire() as conn:
+        hits = await search_index.query(
+            conn, tenant, idx, q, label=label, limit=limit, fuzzy=fuzzy, min_score=min_score,
+        )
+    return SearchResponse(
+        tenant=tenant,
+        query=q,
+        label=label,
+        index=index,
+        limit=limit,
+        truncated=len(hits) == limit,
+        elapsed_ms=int((time.perf_counter() - started) * 1000),
+        nodes=[
+            SearchHit(id=h.gid, label=h.label, properties=h.properties,
+                      score=h.score, matched=h.matched)
+            for h in hits
+        ],
     )
 
 

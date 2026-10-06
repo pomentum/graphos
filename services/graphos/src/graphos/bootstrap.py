@@ -30,6 +30,7 @@ from dataclasses import asdict, dataclass, field
 
 import asyncpg
 
+from graphos import search
 from graphos.db import DDL_TIMEOUT_S, allow_long_statements
 from graphos.lookup import REV
 
@@ -86,6 +87,9 @@ class TenantSpec:
     # of each pair must appear in ``vertex_labels``.
     label_hierarchy: tuple[tuple[str, str], ...] = ()
     meta: dict[str, str] = field(default_factory=dict)
+    # Named search indexes (``graphos.search``): name -> {labels, properties,
+    # analyzer, language}.
+    search_indexes: dict[str, dict[str, object]] = field(default_factory=dict)
 
 
 # ── In-process registry ─────────────────────────────────────────────────────
@@ -183,6 +187,19 @@ async def _ensure_index_concurrently(
 
 
 # ── Bootstrap routine ───────────────────────────────────────────────────────
+
+
+async def ensure_search_indexes(pool: asyncpg.Pool, spec: TenantSpec) -> None:
+    """Build any Postgres index the spec's search indexes still lack.
+
+    Bootstrap does this too; registration also calls it with the merged spec,
+    so an index over every label (``*``) covers labels added since.
+    """
+    async with pool.acquire() as conn:
+        await allow_long_statements(conn, DDL_TIMEOUT_S)
+        await search.ensure_indexes(
+            conn, spec.name, spec.search_indexes, _ensure_index_concurrently,
+        )
 
 
 async def _add_column_if_missing(
@@ -542,6 +559,13 @@ async def bootstrap_tenant(
                         conn, spec.name, label, f"{label}_graphid", "(id)",
                     )
 
+            # 7b. The Postgres indexes behind each search index, one per
+            # (label, property), built without blocking writes.  An unknown
+            # text-search language or label raises ValueError (422).
+            await search.ensure_indexes(
+                conn, spec.name, spec.search_indexes, _ensure_index_concurrently,
+            )
+
             # 8. Statistics for label tables never analyzed.  Autovacuum only
             # analyzes a table after 50+ changed rows, so small and empty
             # label tables can stay unknown forever; the planner then
@@ -612,6 +636,7 @@ def _spec_from_jsonable(payload: dict[str, object]) -> TenantSpec:
         label_hierarchy=hierarchy_pairs,
         resolve_rules=rules_pairs,
         meta=dict(payload.get("meta") or {}),
+        search_indexes=dict(payload.get("search_indexes") or {}),
     )
 
 
@@ -696,7 +721,11 @@ async def persist_spec(pool: asyncpg.Pool, spec: TenantSpec) -> None:
                         ),
                     'meta',
                         COALESCE(graphos_meta.tenants.spec->'meta', '{}'::jsonb)
-                        || COALESCE(EXCLUDED.spec->'meta', '{}'::jsonb)
+                        || COALESCE(EXCLUDED.spec->'meta', '{}'::jsonb),
+                    -- By name: an index declared again replaces its definition.
+                    'search_indexes',
+                        COALESCE(graphos_meta.tenants.spec->'search_indexes', '{}'::jsonb)
+                        || COALESCE(EXCLUDED.spec->'search_indexes', '{}'::jsonb)
                 ),
                 updated_at = now();
             """,

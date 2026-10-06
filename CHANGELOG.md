@@ -3,6 +3,24 @@
 Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`) and client (`graphos-client`)
 are released together under one version.
 
+## Unreleased
+
+### Added
+
+- **Ranked search through named search indexes.** A tenant declares `search_indexes` at
+  registration: a name, the vertex labels (or `["*"]`, every label now and later), up to 8 string
+  properties, and an analyzer. `GET …/graph/search?index=<name>` returns hits ordered by a `score`
+  in [0, 1] with the property that `matched`; `fuzzy` and `min_score` tune it.
+  - `identifier` (names, identifiers, paths): camelCase, acronyms and punctuation are word breaks,
+    so `parseHTTPResponse` is found by `parse http response` and by `parsehttpresponse`; exact >
+    prefix > contained > similar
+    words, which catch most typos; `fuzzy=true` adds misspellings when nothing matches literally.
+  - `text` (prose): Postgres full-text search with stemming for `language` and web-search syntax.
+
+  Each (label, property) gets its GIN indexes (two for `identifier`), built concurrently. Search without `index` is unchanged.
+  The client gains `search(index=, fuzzy=, min_score=)`, `register_tenant(search_indexes=)` and
+  `SearchHit`.
+
 ## 0.2.1 — 2026-10-06
 
 graphos 0.2.1 makes several API replicas behind one database work correctly.
