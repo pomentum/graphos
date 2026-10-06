@@ -205,7 +205,7 @@ html{scroll-behavior:smooth}
       <ul>
         <li><span class="k">The problem</span><span>Connected data turns up in most systems. Once several services need it, each one ends up holding database credentials, its own Cypher, and its own answers to bulk loading, indexing and isolation.</span></li>
         <li><span class="k">The approach</span><span>One service owns the graph. Consumers call a typed REST API; graphos alone talks to PostgreSQL + Apache AGE on a private network.</span></li>
-        <li><span class="k">What you get</span><span>A graph per tenant, tokens scoped to tenants and to read or write, COPY-speed idempotent writes, in-place edits of single nodes and edges guarded by revisions, composable reads including shortest paths, optional Louvain communities with stable ids, rule-based edges, background jobs for long operations and ordinary Postgres operations.</span></li>
+        <li><span class="k">What you get</span><span>A graph per tenant, tokens scoped to tenants and to read or write, COPY-speed idempotent writes, in-place edits of single nodes and edges guarded by revisions, composable reads including shortest paths, a change feed to follow every write, optional Louvain communities with stable ids, rule-based edges, background jobs for long operations and ordinary Postgres operations.</span></li>
         <li><span class="k">What it is not</span><span>Not a general query console, not a new database engine, and not tied to any domain: graphos ships no labels of its own.</span></li>
         <li><span class="k">Licence</span><span>Apache 2.0, like the Apache AGE extension it is built on.</span></li>
       </ul>
@@ -516,6 +516,10 @@ html{scroll-behavior:smooth}
     <p>Reads are small primitives that compose: substring <strong>search</strong>, one-hop <strong>neighbors</strong>, multi-seed <strong>expand</strong> up to five hops, the <strong>shortest paths</strong> between two nodes, the <strong>induced subgraph</strong> of a node set, a paginated <strong>node scan</strong> with filters and projection, a stratified <strong>sample</strong> for visualisation, <strong>histograms</strong>, <strong>top-K by degree</strong>, node and edge <strong>aggregates</strong>, and an <strong>export</strong> in graphology JSON that sigma.js and Gephi read directly.</p>
     <p>Shortest paths are found by searching from both ends at once, one batched SQL statement per level over the edge indexes, always growing the smaller side; every path of the shortest length is returned, up to a limit. A level that would touch more than 100,000 edges stops the search and says so, rather than wandering through a hub. AGE's own <code>shortestPath</code> is not used.</p>
 
+    <h3>Following changes</h3>
+    <p>Every write is also recorded in a change feed, in the same transaction, so a record exists exactly when the data committed and a write that rolls back leaves none. A record says what changed (the ids written, the new revision of a single item, who wrote it), not the new values. Consumers keep a cursor and read what changed after it, or follow the feed live as Server-Sent Events, resuming with <code>Last-Event-ID</code> after a dropped connection; a commit wakes the stream at once. To sync from scratch: take the feed's head, read the data, follow from the head. A cache, a search index or an open editor stays current by applying only what changed, instead of rescanning the graph or polling it.</p>
+    <p>The feed never skips a committed change, even when transactions commit in a different order from the one they started in: a record becomes visible once every write that started before it has finished. Records are kept for seven days by default; a consumer that falls further behind is told to resync (<code>410</code>) rather than silently missing changes.</p>
+
     <h3>Safety rails</h3>
     <ul>
       <li>Read endpoints cap their <code>limit</code> parameters and report <code>truncated</code> when a result was cut.</li>
@@ -644,6 +648,7 @@ html{scroll-behavior:smooth}
       <li><strong>Metrics:</strong> Prometheus request counts and latency histograms per route and status, connection-pool size, registered tenants, and rate-limit rejections.</li>
       <li><strong>Logs and audit:</strong> structured JSON logs carrying a W3C <code>traceparent</code> trace id; every write (an operation declared as a write, whatever its HTTP method, including one refused for its token) also produces an audit record with tenant, calling consumer, status, latency and a hash of the request body.</li>
       <li><strong>Database introspection</strong> for admins: table and index sizes, dead tuples, slow queries from <code>pg_stat_statements</code>, and a validated vacuum call.</li>
+      <li><strong>Change feed:</strong> records are pruned after the retention period in short transactions; on shutdown, open streams are closed after a few seconds so a stop never hangs, and their clients resume on another replica.</li>
       <li><strong>Background jobs:</strong> community recompute, rule resolution and vacuum accept <code>Prefer: respond-async</code> and answer <code>202</code> at once with a job to poll at <code>/v1/jobs/{id}</code>. A finished job holds exactly what the synchronous call returns; each job runs once, on any replica, and can be cancelled, which stops the work rather than just the wait.</li>
       <li><strong>Tokens</strong> reload on <code>SIGHUP</code>, so rotation needs no restart. An optional per-token rate limiter protects shared deployments.</li>
       <li><strong>Everything else is Postgres:</strong> backups, replicas, upgrades and tuning use the tools your team already runs.</li>
@@ -653,7 +658,7 @@ html{scroll-behavior:smooth}
     <div class="tbl"><table>
       <thead><tr><th>For</th><th>What changes</th></tr></thead>
       <tbody>
-        <tr><td>Application developers</td><td>A typed client and OpenAPI contract instead of a driver and query strings. Bulk loading, traversal and aggregation are calls, not projects.</td></tr>
+        <tr><td>Application developers</td><td>A typed client and OpenAPI contract instead of a driver and query strings. Bulk loading, traversal and aggregation are calls, not projects. Caches and views stay in sync by following the change feed.</td></tr>
         <tr><td>Platform and operations</td><td>One service to run, on PostgreSQL. Standard backups and monitoring, bounded memory, per-query timeouts and slow-query visibility out of the box.</td></tr>
         <tr><td>Security</td><td>No database credentials outside one container. Tokens scoped to tenants and to read or write, a network that makes the database unreachable, validated identifiers and an audit trail of every write.</td></tr>
         <tr><td>Data and analytics</td><td>Communities with stable ids, histograms, top-K and aggregates computed where the data lives, and exports that visualisation tools open directly.</td></tr>
@@ -714,6 +719,19 @@ html{scroll-behavior:smooth}
     </table></div>
     <p>The edge scan now fetches the page before resolving its endpoints, the delete is one SQL statement instead of three Cypher queries, and Louvain runs in a child process instead of the API's own. The edge aggregate joins edges to narrow maps of the grouping property instead of whole vertex rows (the earlier design wrote 4.4 GB of temporary files for one edge type, and a failing edge type was silently left out of the answer); the node aggregate, the export and the member lists moved from Cypher to indexed SQL; the community list reads the vertices once instead of three times.</p>
 
+    <h3>Change feed</h3>
+    <p>On the development setup (PostgreSQL in Docker Desktop, 1.2 ms per round trip). The feed was also tested under concurrent load for over half an hour: writers with slow and rolled-back transactions against readers that page, stream and reconnect, each ending with exactly the committed records, in order.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Operation</th><th>Measured</th></tr></thead>
+      <tbody>
+        <tr><td>Recording a change, on a single write</td><td class="n">+1.8 ms (one round trip)</td></tr>
+        <tr><td>Recording changes, on 500-row bulk batches</td><td class="n">0 – 14 %</td></tr>
+        <tr><td>A page of 500 records, 1.25M records stored</td><td class="n good">2.6 – 10 ms</td></tr>
+        <tr><td>Pruning 1.25M records</td><td class="n good">10 s, no transaction over 156 ms</td></tr>
+        <tr><td>Client following the stream across an API restart</td><td class="n good">all 120 records, none twice</td></tr>
+      </tbody>
+    </table></div>
+
     <h2 id="boundaries"><span class="sec"><span class="num">09</span></span>Boundaries and limits</h2>
     <p>Some choices are deliberate in the current design:</p>
     <ul>
@@ -724,6 +742,7 @@ html{scroll-behavior:smooth}
     <p>And some limits that are simply where the project stands today:</p>
     <ul>
       <li>The reference deployment is a single PostgreSQL node. It fits millions of nodes and tens of millions of edges in a few gigabytes of RAM. Going beyond one node (partitioning, read replicas) is a PostgreSQL exercise; graphos does not shard for you.</li>
+      <li>A change-feed record becomes visible once every write transaction that started before it has finished, on the whole database server. That is usually milliseconds, but a long write (a Louvain write-back on a large graph) holds every tenant's feed until it commits; nothing is lost.</li>
       <li>Louvain is an optional extra (see section 4). When installed, each recompute builds its graph in memory in a child process of the API: the API holds about 20 bytes per edge while streaming them, the child holds the graph, and the memory is released when the run ends. One recompute runs at a time per API process; the bundled compose file gives the API 2 GB.</li>
       <li>Apache AGE 1.6 has known Cypher gaps and quirks. graphos works around the ones it meets, and <a href="https://github.com/pomentum/graphos/blob/main/docs/apache-age.md">the AGE notes</a> record each one.</li>
     </ul>
