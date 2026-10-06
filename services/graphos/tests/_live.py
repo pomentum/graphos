@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from graphos.app import create_app
 from graphos.changes import ChangeFeed
 from graphos.config import Settings
+from graphos.sync import Listener
 
 
 @asynccontextmanager
@@ -63,11 +64,15 @@ async def stack(
         db_password="placeholder", auth_disabled=True, changes_poll_s=poll_s, **settings,
     ))
     app.state.pool = pool
-    change_feed = None
+    change_feed = listener = None
     if feed:
-        change_feed = ChangeFeed(pool, retention_h=168, poll_s=poll_s, prune_every_s=3600)
+        listener = Listener(pool)
+        change_feed = ChangeFeed(
+            pool, listener, retention_h=168, poll_s=poll_s, prune_every_s=3600,
+        )
+        listener.start()
         change_feed.start()
-        await asyncio.wait_for(change_feed.listening.wait(), timeout=10)
+        await asyncio.wait_for(listener.listening.wait(), timeout=10)
         app.state.change_feed = change_feed
     try:
         async with live_server(app) as url:
@@ -75,4 +80,6 @@ async def stack(
     finally:
         if change_feed is not None:
             await change_feed.stop()
+        if listener is not None:
+            await listener.stop()
         await pool.close()

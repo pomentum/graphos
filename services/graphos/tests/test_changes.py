@@ -368,7 +368,11 @@ async def test_order_is_numeric_across_powers_of_ten(db_pool: asyncpg.Pool) -> N
     """Transaction ids cross 9 -> 10, 99 -> 100, ...: a text sort anywhere
     would put "10000" before "9999" and the pages would skip records."""
     t = _tenant()
-    txids = [9, 10, 99, 100, 999, 1000, 9999, 10000, 99999, 100000]
+    # Only positions below the oldest running transaction are visible, so
+    # the boundaries must be below it too: as many as this server has passed.
+    xmin = int(await db_pool.fetchval("SELECT pg_snapshot_xmin(pg_current_snapshot())::text;"))
+    txids = [v for k in range(1, 19) for v in (10**k - 1, 10**k) if v < xmin]
+    assert len(txids) >= 4, f"server too young for this test (xmin {xmin})"
     for x in reversed(txids):            # inserted out of order on purpose
         await db_pool.execute(
             "INSERT INTO graphos_meta.changes (tenant, txid, op, kind, ids, count) "

@@ -450,8 +450,10 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   relationships.
 - **No `DROP` through the API.** Schema changes go through (validated)
   registration. Unregistering a tenant does not delete its data.
-- **No multi-replica coordination.** Tenant registry, cache LRU, and rate
-  limiter are per process; run one `graphos-api` replica.
+- **No shared rate limit.** Each replica limits on its own, and each reads
+  its own copy of the tokens file. Tenant registrations and the K/V cache are
+  kept in step across replicas (`LISTEN` / `NOTIFY`, with periodic
+  reconciliation as a fallback).
 - **No export formats besides graphology JSON**, and no server-side layout.
 
 ---

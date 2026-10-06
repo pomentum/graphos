@@ -43,10 +43,13 @@ from collections.abc import Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import asyncpg
 import structlog
+
+if TYPE_CHECKING:
+    from graphos.sync import Listener
 
 log = logging.getLogger(__name__)
 
@@ -289,15 +292,16 @@ async def prune(pool: asyncpg.Pool, retention_h: float, *, batch: int = 5000) ->
 class ChangeFeed:
     """Per-process service behind the live streams.
 
-    Listens on :data:`CHANNEL` on one dedicated connection and wakes the
-    streams of the tenant named in each notification; also prunes expired
-    records.  A notification only shortens the wait: streams poll every
-    ``poll_s`` anyway, so a lost notification or listener connection delays
-    a change, never loses it.
+    Wakes the streams of the tenant named in each :data:`CHANNEL`
+    notification (received through the process's shared
+    :class:`graphos.sync.Listener`), and prunes expired records.  A
+    notification only shortens the wait: streams poll every ``poll_s``
+    anyway, so a lost notification or listener connection delays a change,
+    never loses it.
     """
 
     def __init__(
-        self, pool: asyncpg.Pool, *, retention_h: float, poll_s: float,
+        self, pool: asyncpg.Pool, listener: Listener, *, retention_h: float, poll_s: float,
         prune_every_s: float = 60.0,
     ) -> None:
         self._pool = pool
@@ -306,11 +310,11 @@ class ChangeFeed:
         self._prune_every_s = prune_every_s
         self._waiters: dict[str, set[asyncio.Event]] = {}
         self._tasks: list[asyncio.Task[None]] = []
-        self.listening = asyncio.Event()
+        listener.subscribe(CHANNEL, self._notified)
+        listener.on_connect(self._wake_all)   # anything missed while not listening
 
     def start(self) -> None:
         self._tasks = [
-            asyncio.create_task(self._listen(), name="graphos-changes-listen"),
             asyncio.create_task(self._prune_loop(), name="graphos-changes-prune"),
         ]
 
@@ -334,7 +338,7 @@ class ChangeFeed:
                 if not waiters:
                     del self._waiters[tenant]
 
-    def _notified(self, _conn: object, _pid: int, _channel: str, tenant: str) -> None:
+    def _notified(self, tenant: str) -> None:
         for event in self._waiters.get(tenant, ()):
             event.set()
 
@@ -342,27 +346,6 @@ class ChangeFeed:
         for waiters in self._waiters.values():
             for event in waiters:
                 event.set()
-
-    async def _listen(self) -> None:
-        while True:
-            try:
-                async with self._pool.acquire() as conn:
-                    lost = asyncio.Event()
-                    conn.add_termination_listener(lambda _c, lost=lost: lost.set())
-                    await conn.add_listener(CHANNEL, self._notified)
-                    self.listening.set()
-                    self._wake_all()   # anything missed while not listening
-                    try:
-                        await lost.wait()
-                    finally:
-                        self.listening.clear()
-                        with contextlib.suppress(Exception):
-                            await conn.remove_listener(CHANNEL, self._notified)
-            except asyncio.CancelledError:
-                raise
-            except Exception:  # noqa: BLE001 — keep listening; streams still poll
-                log.warning("change feed listener lost its connection; retrying", exc_info=True)
-            await asyncio.sleep(2.0)
 
     async def _prune_loop(self) -> None:
         while True:

@@ -94,6 +94,10 @@ class TenantSpec:
 # Populated by ``register_tenant()``; read by the GET endpoint.
 _REGISTERED: dict[str, TenantSpec] = {}
 
+# Every change to ``graphos_meta.tenants`` is announced on this channel, in
+# the same transaction, so other replicas reload it (``graphos.sync``).
+TENANTS_CHANNEL = "graphos_tenants"
+
 
 def registered_tenants() -> dict[str, TenantSpec]:
     return dict(_REGISTERED)
@@ -101,6 +105,21 @@ def registered_tenants() -> dict[str, TenantSpec]:
 
 def remember(spec: TenantSpec) -> None:
     _REGISTERED[spec.name] = spec
+
+
+def forget(name: str) -> bool:
+    """Drop ``name`` from this process's registry.  True if it was there."""
+    return _REGISTERED.pop(name, None) is not None
+
+
+def spec_to_json(spec: TenantSpec) -> str:
+    """A spec as stored in ``graphos_meta.tenants.spec`` (JSON text)."""
+    return json.dumps(_spec_to_jsonable(spec))
+
+
+def spec_from_json(text: str) -> TenantSpec:
+    """A spec as stored in ``graphos_meta.tenants.spec`` (JSON text)."""
+    return _spec_from_jsonable(json.loads(text))
 
 
 # ── Idempotent execution helper ─────────────────────────────────────────────
@@ -616,7 +635,7 @@ async def persist_spec(pool: asyncpg.Pool, spec: TenantSpec) -> None:
     which calls ``persist_spec_replace`` below instead.
     """
     payload = json.dumps(_spec_to_jsonable(spec))
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction():
         await conn.execute(
             """
             INSERT INTO graphos_meta.tenants (name, spec)
@@ -683,6 +702,7 @@ async def persist_spec(pool: asyncpg.Pool, spec: TenantSpec) -> None:
             """,
             spec.name, payload,
         )
+        await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, spec.name)
 
 
 async def persist_spec_replace(pool: asyncpg.Pool, spec: TenantSpec) -> None:
@@ -695,7 +715,7 @@ async def persist_spec_replace(pool: asyncpg.Pool, spec: TenantSpec) -> None:
     a partial / bare registration cannot demote the schema.
     """
     payload = json.dumps(_spec_to_jsonable(spec))
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction():
         await conn.execute(
             """
             INSERT INTO graphos_meta.tenants (name, spec)
@@ -705,6 +725,7 @@ async def persist_spec_replace(pool: asyncpg.Pool, spec: TenantSpec) -> None:
             """,
             spec.name, payload,
         )
+        await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, spec.name)
 
 
 async def load_registered_tenants(pool: asyncpg.Pool) -> int:
@@ -766,10 +787,11 @@ async def unregister_tenant(pool: asyncpg.Pool, name: str) -> bool:
     endpoints first if you want to tombstone state. Returns True iff the
     name was registered.
     """
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction():
         result = await conn.execute(
             "DELETE FROM graphos_meta.tenants WHERE name = $1;", name,
         )
-    existed = _REGISTERED.pop(name, None) is not None
+        await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, name)
+    existed = forget(name)
     # asyncpg returns 'DELETE N'; we also count the in-memory removal as success.
     return existed or "DELETE 1" in result

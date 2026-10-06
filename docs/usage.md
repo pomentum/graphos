@@ -494,7 +494,9 @@ are `aggregate_nodes`, `aggregate_edges`, `label_histogram(label, property=…)`
 ## 7. K/V cache
 
 A per-tenant store for opaque JSON values, such as expensive aggregates. Reads check an in-process
-LRU first (256 entries per replica), then `graphos_meta.cache` in Postgres.
+LRU first (256 entries per replica), then `graphos_meta.cache` in Postgres. With several replicas,
+a `PUT` or `DELETE` through one evicts the key on the others at once; an entry is never served from
+memory for longer than `GRAPHOS_CACHE_MAX_AGE_S` (30 s).
 
 | Call | Body / result |
 |---|---|
@@ -712,6 +714,16 @@ async with GraphosClient(base_url=G, token=TOKEN, tenant="acme") as g:
 
 The endpoints without auth report tenant counts, never names; admins list tenants with
 `GET /v1/tenants`.
+
+### Several replicas
+
+Any number of `graphos-api` replicas can share one database behind a load balancer. A tenant
+registered, extended or unregistered through one replica is picked up by the others at once (they
+`LISTEN` for it), and a replica that missed the announcement looks an unknown tenant up before
+answering 404 and re-reads every registration each `GRAPHOS_REGISTRY_SYNC_S` (30 s). Background
+jobs run once across replicas, and change-feed streams can reconnect to any replica. Two things
+stay per replica: the rate limit (each allows the configured rate), and the tokens file (send
+`SIGHUP` to every replica after editing it).
 
 ### Background jobs
 

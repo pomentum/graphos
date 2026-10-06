@@ -78,6 +78,14 @@ class Settings(BaseSettings):
     rate_limit_rps: int = 100
     rate_limit_window_s: float = 1.0
 
+    # ── Several replicas (``graphos.sync``) ───────────────────────────────
+    # Each replica re-reads every tenant registration this often, in case a
+    # change notification was missed (they are normally applied at once).
+    registry_sync_s: float = Field(default=30.0, gt=0)
+    # Longest a K/V cache entry is served from this replica's memory without
+    # re-reading the table (bounds staleness if a change was not announced).
+    cache_max_age_s: float = Field(default=30.0, gt=0)
+
     # Seconds a stopping server waits for open requests (change-feed streams
     # never finish on their own) before cancelling them.
     shutdown_grace_s: float = Field(default=5.0, gt=0)

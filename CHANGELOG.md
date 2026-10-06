@@ -3,6 +3,18 @@
 Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`) and client (`graphos-client`)
 are released together under one version.
 
+## Unreleased
+
+### Added
+
+- **Several API replicas.** Tenant registrations and the K/V cache are kept in step across
+  replicas: changes are announced with Postgres `NOTIFY` and applied at once, every replica
+  re-reads all registrations every `GRAPHOS_REGISTRY_SYNC_S` (30) seconds, a tenant a replica
+  does not know is looked up before it answers `404`, and a cache entry is served from memory for
+  at most `GRAPHOS_CACHE_MAX_AGE_S` (30) seconds. In 0.2.0 a registration made through one
+  replica stayed invisible to the others until they restarted, and a cached value could be served
+  stale indefinitely. The rate limit and the tokens file stay per replica.
+
 ## 0.2.0 — 2026-10-06
 
 graphos 0.2.0 lets clients edit single nodes and edges safely (JSON Merge Patch with

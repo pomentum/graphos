@@ -213,6 +213,11 @@ async def require_principal(
     tenant = request.path_params.get("tenant")
     if tenant is not None:
         require_tenant_access(principal, tenant)
+        # Registered through another replica since this one last looked?
+        # Load it now rather than answer 404 (``graphos.sync``).
+        registry = getattr(request.app.state, "registry_sync", None)
+        if registry is not None:
+            await registry.ensure(tenant)
     if needed is Access.WRITE and principal.access is not Access.WRITE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

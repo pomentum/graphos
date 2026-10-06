@@ -57,6 +57,7 @@ from graphos.observability.audit import AuditMiddleware
 from graphos.observability.logging import RequestContextMiddleware, configure_logging
 from graphos.observability.metrics import MetricsMiddleware, metrics_handler
 from graphos.observability.rate_limit import RateLimitMiddleware
+from graphos.sync import CACHE_CHANNEL, Listener, RegistrySync
 
 log = logging.getLogger(__name__)
 
@@ -160,12 +161,24 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     runner.start()
     app.state.job_runner = runner
 
-    # 5. Change feed: wakes live streams, prunes expired records.
+    # 5. One LISTEN connection for this process: change-feed wake-ups, and
+    #    keeping the tenant registry and the cache LRU in step with the other
+    #    replicas (graphos.sync).
+    listener = Listener(pool)
     feed = ChangeFeed(
-        pool, retention_h=settings.changes_retention_h, poll_s=settings.changes_poll_s,
+        pool, listener,
+        retention_h=settings.changes_retention_h, poll_s=settings.changes_poll_s,
     )
+    registry_sync = RegistrySync(pool, listener, interval_s=settings.registry_sync_s)
+    cache.LRU.max_age_s = settings.cache_max_age_s
+    listener.subscribe(CACHE_CHANNEL, cache.on_notification)
+    listener.on_connect(cache.LRU.clear)
+    listener.start()
     feed.start()
+    registry_sync.start()
     app.state.change_feed = feed
+    app.state.registry_sync = registry_sync
+    app.state.listener = listener
 
     log.info(
         "graphos ready",
@@ -175,7 +188,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await registry_sync.stop()
         await feed.stop()
+        await listener.stop()
         await runner.stop()
         terminate_running()
         await pool.close()

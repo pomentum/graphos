@@ -6,7 +6,10 @@ Two-tier read path:
 
 * **In-process LRU** (per-replica, ``OrderedDict`` + TTL guard).  Sub-ms
   hits for hot snapshots.  Size-capped to keep memory bounded; defaults
-  ~256 entries / ~30 MB depending on payload size.
+  ~256 entries / ~30 MB depending on payload size.  Kept in step across
+  replicas: a PUT or DELETE is announced (``graphos.sync``) and the other
+  replicas evict the key; an entry is also served for at most
+  ``GRAPHOS_CACHE_MAX_AGE_S`` seconds, so a lost announcement only delays.
 * **PG-backed durable layer** (``graphos_meta.cache`` table).  Survives
   graphos-api restarts; cross-replica truth if/when graphos scales out.
   ~5-10 ms when LRU misses.
@@ -43,6 +46,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from graphos import sync
 from graphos.api.graph import _check_tenant
 from graphos.auth import ReadPrincipal, WritePrincipal
 
@@ -110,7 +114,7 @@ _DEFAULT_LRU_CAPACITY = 256
 class _Entry:
     """One LRU slot — value plus the absolute deadline for TTL."""
 
-    __slots__ = ("value", "expires_at", "cached_at")
+    __slots__ = ("value", "expires_at", "cached_at", "loaded_at")
 
     def __init__(
         self, value: Any, expires_at: datetime | None,
@@ -119,9 +123,12 @@ class _Entry:
         self.value = value
         self.expires_at = expires_at
         self.cached_at = cached_at
+        self.loaded_at = time.monotonic()   # when this replica took it in
 
-    def is_expired(self, now: datetime) -> bool:
-        return self.expires_at is not None and self.expires_at <= now
+    def is_expired(self, now: datetime, max_age_s: float) -> bool:
+        if self.expires_at is not None and self.expires_at <= now:
+            return True
+        return time.monotonic() - self.loaded_at > max_age_s
 
 
 class CacheLRU:
@@ -133,8 +140,11 @@ class CacheLRU:
     today's load.
     """
 
-    def __init__(self, capacity: int = _DEFAULT_LRU_CAPACITY) -> None:
+    def __init__(self, capacity: int = _DEFAULT_LRU_CAPACITY, max_age_s: float = 30.0) -> None:
         self._capacity = max(1, capacity)
+        # Longest an entry is served without re-reading the table: the bound
+        # on staleness when another replica's change was not announced.
+        self.max_age_s = max_age_s
         self._store: OrderedDict[tuple[str, str], _Entry] = OrderedDict()
         self._lock = Lock()
 
@@ -144,7 +154,7 @@ class CacheLRU:
             entry = self._store.get((tenant, key))
             if entry is None:
                 return None
-            if entry.is_expired(now):
+            if entry.is_expired(now, self.max_age_s):
                 # Lazy eviction — drop the slot on read so it doesn't
                 # occupy capacity for entries the caller will never see.
                 self._store.pop((tenant, key), None)
@@ -171,6 +181,10 @@ class CacheLRU:
         with self._lock:
             return self._store.pop((tenant, key), None) is not None
 
+    def clear(self) -> None:
+        with self._lock:
+            self._store.clear()
+
     def size(self) -> int:
         with self._lock:
             return len(self._store)
@@ -179,6 +193,16 @@ class CacheLRU:
 # Module-level singleton; ``GraphosState`` wires it onto ``app.state``
 # at startup so handlers reach it through ``request.app.state.cache_lru``.
 LRU = CacheLRU()
+
+
+def on_notification(payload: str) -> None:
+    """Another replica changed a key: drop it here (``graphos.sync``)."""
+    try:
+        note = _json.loads(payload)
+    except ValueError:
+        return
+    if note.get("by") != sync.INSTANCE_ID:
+        LRU.evict(str(note.get("tenant")), str(note.get("key")))
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────
@@ -216,7 +240,7 @@ async def cache_put(
     bytes_written = len(payload.encode("utf-8"))
 
     pool = request.app.state.pool
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction():
         await conn.execute(
             """
             INSERT INTO graphos_meta.cache (tenant, key, value, expires_at, updated_at)
@@ -228,6 +252,7 @@ async def cache_put(
             """,
             tenant, key, payload, expires_at,
         )
+        await sync.notify_cache(conn, tenant, key)
 
     # Populate the LRU so the next read (likely soon — caches are
     # written immediately before the first read) gets the warm path.
@@ -332,9 +357,10 @@ async def cache_delete(
 ) -> None:
     _check_tenant(tenant, principal)
     pool = request.app.state.pool
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction():
         await conn.execute(
             "DELETE FROM graphos_meta.cache WHERE tenant=$1 AND key=$2",
             tenant, key,
         )
+        await sync.notify_cache(conn, tenant, key)
     LRU.evict(tenant, key)

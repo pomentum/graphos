@@ -548,11 +548,32 @@ through to auth.
 #### 2.5.7 Failure model and process state
 
 `graphos-db` holds all durable state. `graphos-api` also keeps process-local
-state: the tenant registry (loaded at startup and updated by registrations on
-that process), the cache LRU, rate-limit buckets, the resolver catalogue, and
-the resolver-index memo. The service is built and deployed as a single
-replica; with several replicas, a registration on one would not be visible
-to the others until they restart.
+state for speed: the tenant registry, the resolver catalogue, the cache LRU,
+rate-limit buckets and the resolver-index memo. Several replicas can run
+against one database; `graphos.sync` keeps the first three in step:
+
+- **Tenant registry and resolver catalogue.** Every write to
+  `graphos_meta.tenants` (register, re-register, unregister) sends
+  `NOTIFY graphos_tenants, '<tenant>'` in the same transaction. Each replica
+  `LISTEN`s on one connection, shared with the change feed, reloads that
+  tenant's spec and drops its catalogue, normally within milliseconds. A
+  replica also reconciles the whole registry every `GRAPHOS_REGISTRY_SYNC_S`
+  (30 s) and whenever its listener (re)connects, comparing the md5 of each
+  stored spec, and a request for a tenant it does not know looks it up in
+  the table before answering 404 (a miss is remembered for 5 s). A lost
+  notification therefore delays nothing for new tenants and at most
+  `GRAPHOS_REGISTRY_SYNC_S` for changes to known ones.
+- **Cache LRU.** A `PUT` or `DELETE` sends `NOTIFY graphos_cache` with the
+  tenant, key and the writing process's id; the other replicas evict the key.
+  An entry is served from memory for at most `GRAPHOS_CACHE_MAX_AGE_S` (30 s),
+  and the LRU is cleared when the listener (re)connects, which bounds
+  staleness when a notification is lost or a read races a write.
+- **Per replica by design:** rate-limit buckets (each replica allows the
+  configured rate, so N replicas allow N times as much), and the tokens file,
+  read by each replica; send `SIGHUP` to every one after changing it.
+
+Background jobs, the Louvain lock, revisions and the change feed coordinate
+through the database (§2.6, §4.1).
 
 - DB unreachable: `/readyz` returns 503 with only
   `{"status": "not_ready", "reason": "db_unreachable"}`; the error itself goes
@@ -1137,8 +1158,10 @@ Postgres instance.
 
 ## 8. Known limitations
 
-1. **Single replica.** Tenant registry, cache LRU, rate limiter, and resolver
-   caches are per process (§2.5.7).
+1. **Replicas converge, they are not instantaneous.** A change made through
+   one replica normally reaches the others within milliseconds, at worst
+   within `GRAPHOS_REGISTRY_SYNC_S` / `GRAPHOS_CACHE_MAX_AGE_S`; the rate
+   limiter and the tokens file stay per replica (§2.5.7).
 2. **Bulk writes are not atomic per request.** Each 500-row (bulk) or
    5,000-row (snapshot) flush commits independently.
 3. **One edge per type per ordered node pair** (§2.3).
