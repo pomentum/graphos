@@ -513,8 +513,9 @@ html{scroll-behavior:smooth}
     <p>Every node and edge carries a revision that every write bumps, and a single node or edge is returned with an <code>ETag</code> made of its internal id and that revision. Sending it back as <code>If-Match</code> makes the write conditional: if anyone else has written the row since it was read, the answer is <code>412</code> with the current ETag and nothing changes, so two editors never silently overwrite each other. The check runs on the locked row inside the write's transaction, and a deployment can make <code>If-Match</code> mandatory for these writes.</p>
 
     <h3>Reading</h3>
-    <p>Reads are small primitives that compose: substring <strong>search</strong>, one-hop <strong>neighbors</strong>, multi-seed <strong>expand</strong> up to five hops, the <strong>shortest paths</strong> between two nodes, the <strong>induced subgraph</strong> of a node set, a paginated <strong>node scan</strong> with filters and projection, a stratified <strong>sample</strong> for visualisation, <strong>histograms</strong>, <strong>top-K by degree</strong>, node and edge <strong>aggregates</strong>, and an <strong>export</strong> in graphology JSON that sigma.js and Gephi read directly.</p>
+    <p>Reads are small primitives that compose: ranked <strong>search</strong>, one-hop <strong>neighbors</strong>, multi-seed <strong>expand</strong> up to five hops, the <strong>shortest paths</strong> between two nodes, the <strong>induced subgraph</strong> of a node set, a paginated <strong>node scan</strong> with filters and projection, a stratified <strong>sample</strong> for visualisation, <strong>histograms</strong>, <strong>top-K by degree</strong>, node and edge <strong>aggregates</strong>, and an <strong>export</strong> in graphology JSON that sigma.js and Gephi read directly.</p>
     <p>Shortest paths are found by searching from both ends at once, one batched SQL statement per level over the edge indexes, always growing the smaller side; every path of the shortest length is returned, up to a limit. A level that would touch more than 100,000 edges stops the search and says so, rather than wandering through a hub. AGE's own <code>shortestPath</code> is not used.</p>
+    <p>Search runs through search indexes a tenant declares at registration, as with the full-text indexes of other graph databases: a name, the labels it covers (or all of them, including labels added later), the properties it searches, and an analyzer. The <code>identifier</code> analyzer reads names, identifiers and paths as words, with camelCase, acronyms and punctuation split, so <code>getUserById</code> is found by <code>get user by id</code>, <code>getuserbyid</code> or <code>GetUserByID</code>. Hits rank exact, then prefix, then contained, then similar words, which also catch most typos; misspellings can be asked for on top. The <code>text</code> analyzer is Postgres full-text search, with stemming and phrase, <code>or</code> and exclusion syntax, for prose. Every hit carries a score and the property it matched. The indexes are ordinary Postgres GIN indexes, updated in the same transaction as the write, so a node is findable the moment it is committed.</p>
 
     <h3>Following changes</h3>
     <p>Every write is also recorded in a change feed, in the same transaction, so a record exists exactly when the data committed and a write that rolls back leaves none. A record says what changed (the ids written, the new revision of a single item, who wrote it), not the new values. Consumers keep a cursor and read what changed after it, or follow the feed live as Server-Sent Events, resuming with <code>Last-Event-ID</code> after a dropped connection; a commit wakes the stream at once. To sync from scratch: take the feed's head, read the data, follow from the head. A cache, a search index or an open editor stays current by applying only what changed, instead of rescanning the graph or polling it.</p>
@@ -659,7 +660,7 @@ html{scroll-behavior:smooth}
     <div class="tbl"><table>
       <thead><tr><th>For</th><th>What changes</th></tr></thead>
       <tbody>
-        <tr><td>Application developers</td><td>A typed client and OpenAPI contract instead of a driver and query strings. Bulk loading, traversal and aggregation are calls, not projects. Caches and views stay in sync by following the change feed.</td></tr>
+        <tr><td>Application developers</td><td>A typed client and OpenAPI contract instead of a driver and query strings. Bulk loading, traversal and aggregation are calls, not projects. Nodes are found by the words in their names, however a user types them. Caches and views stay in sync by following the change feed.</td></tr>
         <tr><td>Platform and operations</td><td>One service to run, on PostgreSQL, with as many replicas as the load needs. Standard backups and monitoring, bounded memory, per-query timeouts and slow-query visibility out of the box.</td></tr>
         <tr><td>Security</td><td>No database credentials outside one container. Tokens scoped to tenants and to read or write, a network that makes the database unreachable, validated identifiers and an audit trail of every write.</td></tr>
         <tr><td>Data and analytics</td><td>Communities with stable ids, histograms, top-K and aggregates computed where the data lives, and exports that visualisation tools open directly.</td></tr>
@@ -700,6 +701,18 @@ html{scroll-behavior:smooth}
       </tbody>
     </table></div>
     <p>Any other hot property is yours to index: declare it at registration and graphos creates it. graphos also indexes each edge table's graphid, which AGE leaves unindexed (built without blocking writes: 12 s for an 8M-row table), and collects statistics for label tables that have never had any, so the planner does not guess.</p>
+    <h3>Search</h3>
+    <p>A large tenant with 82 vertex labels, queried with names sampled from its own data: the name as stored, its words split apart, and the name with one typo. "Before" is the substring search on <code>name</code> that was the only search earlier.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Query</th><th>Before</th><th>Search index</th></tr></thead>
+      <tbody>
+        <tr><td>The name as stored</td><td class="n">found, unranked</td><td class="n good">first 96%, in the top 10 100%</td></tr>
+        <tr><td>Its words split apart (<code>get user by id</code>)</td><td class="n">no result for 95%</td><td class="n good">first 96%, in the top 10 99%</td></tr>
+        <tr><td>One typo</td><td class="n">no result for 94%</td><td class="n good">first 72%, in the top 10 82% (85% asking for misspellings)</td></tr>
+        <tr><td>Time per query, median / 95th percentile</td><td class="n">–</td><td class="n good">127 ms / 281 ms</td></tr>
+      </tbody>
+    </table></div>
+    <p>The indexes behind it took 104 MB for the whole tenant and 90 s to build, without blocking writes.</p>
     <h3>Large tenants</h3>
     <p>A 10.6M-row database whose largest edge type holds 8M rows, and a synthetic 600k-edge graph for Louvain. The earlier column is graphos's own previous design, kept for comparison.</p>
     <div class="tbl"><table>
@@ -745,6 +758,7 @@ html{scroll-behavior:smooth}
       <li>The reference deployment is a single PostgreSQL node. It fits millions of nodes and tens of millions of edges in a few gigabytes of RAM. Going beyond one node (partitioning, read replicas) is a PostgreSQL exercise; graphos does not shard for you.</li>
       <li>A change-feed record becomes visible once every write transaction that started before it has finished, on the whole database server. That is usually milliseconds, but a long write (a Louvain write-back on a large graph) holds every tenant's feed until it commits; nothing is lost.</li>
       <li>Louvain is an optional extra (see section 4). When installed, each recompute builds its graph in memory in a child process of the API: the API holds about 20 bytes per edge while streaming them, the child holds the graph, and the memory is released when the run ends. One recompute runs at a time per API process; the bundled compose file gives the API 2 GB.</li>
+      <li>Search ranks by kind of match and closeness, not by BM25 as Lucene-based engines do: strong for names and identifiers, basic for long prose, with no highlighting. It ranks a bounded set of candidates per label, so a query of one very common word may miss the best hit; more words or a label narrow it.</li>
       <li>Apache AGE 1.6 has known Cypher gaps and quirks. graphos works around the ones it meets, and <a href="https://github.com/pomentum/graphos/blob/main/docs/apache-age.md">the AGE notes</a> record each one.</li>
     </ul>
 
