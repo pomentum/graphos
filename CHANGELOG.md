@@ -5,9 +5,11 @@ are released together under one version.
 
 ## 0.2.0 — 2026-10-06
 
-An editor-ready release: single nodes and edges can be read, patched and deleted safely,
-tokens can be read-only, shortest paths are one call, and every write is published on a
-change feed. Long operations run as background jobs, and every endpoint is now plain SQL.
+graphos 0.2.0 lets clients edit single nodes and edges safely (JSON Merge Patch with
+revisions and `If-Match`), adds read-only tokens, shortest paths and a change feed that
+publishes every write, and runs long operations as background jobs. Every endpoint is now
+plain SQL, which makes large tenants much faster and keeps every query under the server's
+timeout.
 
 ### Upgrading from 0.1.0
 
