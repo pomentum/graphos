@@ -650,7 +650,8 @@ html{scroll-behavior:smooth}
       <li><strong>Database introspection</strong> for admins: table and index sizes, dead tuples, slow queries from <code>pg_stat_statements</code>, and a validated vacuum call.</li>
       <li><strong>Change feed:</strong> records are pruned after the retention period in short transactions; on shutdown, open streams are closed after a few seconds so a stop never hangs, and their clients resume on another replica.</li>
       <li><strong>Background jobs:</strong> community recompute, rule resolution and vacuum accept <code>Prefer: respond-async</code> and answer <code>202</code> at once with a job to poll at <code>/v1/jobs/{id}</code>. A finished job holds exactly what the synchronous call returns; each job runs once, on any replica, and can be cancelled, which stops the work rather than just the wait.</li>
-      <li><strong>Tokens</strong> reload on <code>SIGHUP</code>, so rotation needs no restart. An optional per-token rate limiter protects shared deployments.</li>
+      <li><strong>Several replicas:</strong> any number of API replicas can share one database behind a load balancer. A tenant registered or changed through one is picked up by the others at once (Postgres <code>LISTEN</code> / <code>NOTIFY</code>), and so are K/V cache writes; a replica that missed a notification looks an unknown tenant up before answering and re-reads every registration every 30 seconds, so nothing depends on the notification arriving. Jobs run once across replicas, and change streams resume on any of them.</li>
+      <li><strong>Tokens</strong> reload on <code>SIGHUP</code>, so rotation needs no restart (signal every replica). An optional per-token rate limiter protects shared deployments; each replica limits on its own.</li>
       <li><strong>Everything else is Postgres:</strong> backups, replicas, upgrades and tuning use the tools your team already runs.</li>
     </ul>
 
@@ -659,7 +660,7 @@ html{scroll-behavior:smooth}
       <thead><tr><th>For</th><th>What changes</th></tr></thead>
       <tbody>
         <tr><td>Application developers</td><td>A typed client and OpenAPI contract instead of a driver and query strings. Bulk loading, traversal and aggregation are calls, not projects. Caches and views stay in sync by following the change feed.</td></tr>
-        <tr><td>Platform and operations</td><td>One service to run, on PostgreSQL. Standard backups and monitoring, bounded memory, per-query timeouts and slow-query visibility out of the box.</td></tr>
+        <tr><td>Platform and operations</td><td>One service to run, on PostgreSQL, with as many replicas as the load needs. Standard backups and monitoring, bounded memory, per-query timeouts and slow-query visibility out of the box.</td></tr>
         <tr><td>Security</td><td>No database credentials outside one container. Tokens scoped to tenants and to read or write, a network that makes the database unreachable, validated identifiers and an audit trail of every write.</td></tr>
         <tr><td>Data and analytics</td><td>Communities with stable ids, histograms, top-K and aggregates computed where the data lives, and exports that visualisation tools open directly.</td></tr>
         <tr><td>The organisation</td><td>One graph capability shared by many teams, each in its own tenant, rather than one graph database per team. Open source under Apache 2.0, with no vendor lock-in beyond PostgreSQL.</td></tr>
