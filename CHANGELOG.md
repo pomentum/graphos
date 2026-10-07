@@ -14,7 +14,9 @@ each existing tenant once, in the background, to record its property names (abou
 
 ### Added
 
-- **Web UI** (`services/graphos-ui`, image `graphos-ui`). Explore (ranked search, a graph canvas,
+- **Web UI** (`services/graphos-ui`, image `graphos-ui`). Explore (opens on the whole
+  graph, or a 5,000-node sample of a larger one; ranked search with Ctrl K, ⌘K on Apple devices,
+  or `/`; a graph canvas,
   expand with a choice of relationship types when a node has many neighbours, inspect and edit
   properties, add and delete nodes and edges), Path (shortest paths between two nodes), Overview
   (counts and sizes per label, value counts of a property) and Activity (the change feed, live).

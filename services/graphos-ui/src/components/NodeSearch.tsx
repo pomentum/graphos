@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SearchHit } from "../api/types";
 import { useSchema, useSearch } from "../data/queries";
 import { pickSearchIndex } from "../data/searchIndex";
+import { searchShortcut } from "../lib/platform";
 import { displayName } from "../graph/GraphModel";
 
 export type PickMode = "open" | "add";
@@ -13,7 +14,7 @@ export interface NodeSearchProps {
   /** Called with the chosen hit; `add` when Shift was held (Shift Return / Shift click). */
   onPick: (hit: SearchHit, mode: PickMode) => void;
   placeholder?: string;
-  /** Focus with Ctrl K / ⌘K. Only one search on screen should claim it. */
+  /** Focus with Ctrl K (⌘K on Apple devices) or `/`. Only one search on screen should claim it. */
   hotkey?: boolean;
   /** Show the "Shift Return adds" hint. */
   allowAdd?: boolean;
@@ -44,7 +45,15 @@ export function NodeSearch({
   const search = useSearch({ q: debounced, index, limit: 8 });
   const hits = debounced.trim() ? (search.data?.nodes ?? []) : [];
 
-  useHotkeys(hotkey ? [["mod+K", () => input.current?.focus()]] : []);
+  const focus = () => input.current?.focus();
+  useHotkeys(
+    hotkey
+      ? [
+          ["mod+K", focus],
+          ["/", focus],
+        ]
+      : [],
+  );
 
   // The top hit is highlighted, so Return opens it without arrowing down.
   const firstHit = hits[0]?.id;
@@ -75,7 +84,9 @@ export function NodeSearch({
           placeholder={placeholder}
           aria-label={placeholder}
           leftSection={<IconSearch size={14} />}
-          rightSection={search.isFetching ? <Loader size={12} /> : hotkey ? <Kbd size="xs">Ctrl K</Kbd> : null}
+          rightSection={
+            search.isFetching ? <Loader size={12} /> : hotkey ? <Kbd size="xs">{searchShortcut()}</Kbd> : null
+          }
           rightSectionWidth={hotkey ? 56 : 28}
           onChange={(event) => {
             setQuery(event.currentTarget.value);

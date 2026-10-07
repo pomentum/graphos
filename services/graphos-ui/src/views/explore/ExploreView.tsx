@@ -14,7 +14,10 @@ import { useWorkspace } from "../../graph/WorkspaceProvider";
 import { useTenantSession } from "../../session/SessionProvider";
 import { usePalette } from "../../theme/usePalette";
 import classes from "./ExploreView.module.css";
+import { formatCount } from "../../lib/time";
+import { searchShortcut } from "../../lib/platform";
 import { useExpandNode } from "./useExpandNode";
+import { useWholeGraph } from "./useWholeGraph";
 import { useRecentlyChanged } from "./useRecentlyChanged";
 
 /**
@@ -23,7 +26,8 @@ import { useRecentlyChanged } from "./useRecentlyChanged";
  */
 export function ExploreView() {
   const { canWrite } = useTenantSession();
-  const { model, version, selected, select, open } = useWorkspace();
+  const { model, version, selected, select, open, overview, setOverview } = useWorkspace();
+  const { load } = useWholeGraph();
   const palette = usePalette();
   const schema = useSchema();
   const recent = useRecentlyChanged(model);
@@ -71,13 +75,28 @@ export function ExploreView() {
           onSelect={select}
           onExpand={(key) => void expand(key)}
         />
-        {model.isEmpty ? (
+        {overview.status === "loading" ? (
           <div className={classes.empty}>
-            <Text fw={600}>Start with a search</Text>
+            <Loader size="sm" />
             <Text size="sm" c="dimmed">
-              Find a node with the search field (Ctrl K), then double-click it to see its neighbours.
+              Loading the graph…
             </Text>
           </div>
+        ) : model.isEmpty ? (
+          <div className={classes.empty}>
+            <Text fw={600}>{overview.status === "failed" ? "Couldn't load the graph" : "The canvas is empty"}</Text>
+            <Text size="sm" c="dimmed">
+              Find a node with search ({searchShortcut()}), then double-click it to see its neighbours.
+            </Text>
+            <Button size="xs" variant="default" mt="sm" className={classes.emptyAction} onClick={() => void load()}>
+              Show the whole graph
+            </Button>
+          </div>
+        ) : null}
+        {overview.status === "shown" && overview.total && overview.shown && overview.total > overview.shown ? (
+          <Text size="xs" className={classes.note}>
+            A sample of {formatCount(overview.shown)} of {formatCount(overview.total)} nodes. Search to focus on one.
+          </Text>
         ) : null}
         <Group gap={6} className={classes.actions}>
           {canWrite ? (
@@ -108,7 +127,10 @@ export function ExploreView() {
               variant="subtle"
               color="gray"
               leftSection={<IconTrashX size={14} />}
-              onClick={() => model.clear()}
+              onClick={() => {
+                model.clear();
+                setOverview({ status: "dismissed" });
+              }}
             >
               Clear
             </Button>

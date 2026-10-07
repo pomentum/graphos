@@ -65,3 +65,32 @@ describe("GraphModel", () => {
     expect(model.isEmpty).toBe(true);
   });
 });
+
+describe("GraphModel.load", () => {
+  it("replaces the canvas with an exported graph, mapping edges onto label-scoped keys", () => {
+    const model = new GraphModel();
+    model.addNode({ id: "old", label: "Doc" }, {});
+    const drawn = model.load({
+      nodes: [
+        { key: "a", attributes: { _kind: "Person", label: "Ada", name: "Ada" } },
+        { key: "b", attributes: { _kind: "Doc", label: "b" } },
+        { key: "c", attributes: { _kind: "Doc", label: "c" } },
+      ],
+      edges: [
+        { key: "e1", source: "a", target: "b", attributes: { _type: "WROTE", label: "WROTE" } },
+        { key: "e2", source: "a", target: "missing", attributes: { _type: "WROTE", label: "WROTE" } },
+      ],
+    });
+    expect(drawn).toEqual({ nodes: 3, edges: 1 });
+    const a = nodeKey({ id: "a", label: "Person" });
+    expect(model.graph.hasNode(nodeKey({ id: "old", label: "Doc" }))).toBe(false);
+    expect(model.graph.getNodeAttributes(a)).toMatchObject({
+      id: "a",
+      vertexLabel: "Person",
+      properties: { name: "Ada" },
+    });
+    expect(model.graph.hasEdge(edgeKey("WROTE", a, nodeKey({ id: "b", label: "Doc" })))).toBe(true);
+    const positions = model.graph.mapNodes((_, attrs) => `${attrs.x},${attrs.y}`);
+    expect(new Set(positions).size).toBe(3);
+  });
+});

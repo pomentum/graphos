@@ -1,6 +1,6 @@
 import Graph from "graphology";
 import forceAtlas2 from "graphology-layout-forceatlas2";
-import type { GraphPath, Neighbor, Properties } from "../api/types";
+import type { GraphExport, GraphPath, Neighbor, Properties } from "../api/types";
 
 /** What the canvas stores on each node. */
 export interface NodeAttributes {
@@ -74,6 +74,42 @@ export class GraphModel {
     const key = this.putNode(ref, properties, near);
     this.notify();
     return key;
+  }
+
+  /**
+   * Replaces the canvas with an exported graph, nodes spread on a disc for
+   * the layout to start from. Returns how many nodes and edges were drawn.
+   */
+  load(exported: GraphExport): { nodes: number; edges: number } {
+    this.graph.clear();
+    const keyOf = new Map<string, string>();
+    const radius = Math.sqrt(exported.nodes.length) * 2 + 1;
+    exported.nodes.forEach((node, i) => {
+      const { _kind: label, label: _display, ...properties } = node.attributes;
+      const ref = { id: node.key, label };
+      const key = nodeKey(ref);
+      if (this.graph.hasNode(key)) return;
+      // Sunflower spiral: an even spread with no overlaps to untangle first.
+      const r = radius * Math.sqrt((i + 0.5) / exported.nodes.length);
+      const angle = i * 2.399963;
+      this.graph.addNode(key, {
+        id: ref.id,
+        vertexLabel: label,
+        properties,
+        size: BASE_SIZE,
+        x: r * Math.cos(angle),
+        y: r * Math.sin(angle),
+      });
+      if (!keyOf.has(node.key)) keyOf.set(node.key, key);
+    });
+    for (const edge of exported.edges) {
+      const src = keyOf.get(edge.source);
+      const dst = keyOf.get(edge.target);
+      if (src && dst) this.putEdge(edge.attributes._type, src, dst, {});
+    }
+    this.resize();
+    this.notify();
+    return { nodes: this.graph.order, edges: this.graph.size };
   }
 
   /** Adds the neighbours of `centerKey` and the edges to them, in a ring around it. */

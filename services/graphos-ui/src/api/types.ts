@@ -31,6 +31,15 @@ export interface TenantSchema {
   rule_edge_labels: string[];
 }
 
+/**
+ * `GET …/graph/export`: nodes and the edges among them, in graphology's format.
+ * Node keys are the nodes' own ids; `_kind` is the label, `_type` the edge type.
+ */
+export interface GraphExport {
+  nodes: { key: string; attributes: Properties & { _kind: string } }[];
+  edges: { key: string; source: string; target: string; attributes: Properties & { _type: string } }[];
+}
+
 /** `POST …/graph/nodes:scan`: one page of nodes in id order. */
 export interface NodesScanResponse {
   items: { id: string; label: string; properties: Properties }[];

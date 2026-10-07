@@ -3,6 +3,10 @@
 A web UI for graphos: search a tenant's graph, explore it on a canvas, edit nodes and edges,
 find the paths between two nodes, see what a tenant holds, and follow changes live.
 
+Explore opens on the whole graph (`GET …/graph/export`), laid out in a web worker; a tenant of
+more than 5,000 nodes shows a sample of that size, and search takes you to any node. Search
+opens with Ctrl K (⌘K on Apple devices) or `/`.
+
 It has no backend of its own. The image is static files served by nginx, which also forwards
 `/api/` to graphos on the same origin, so graphos needs no CORS setup. Every user signs in with
 their own graphos token; the token is kept in the browser tab only (`sessionStorage`) and is

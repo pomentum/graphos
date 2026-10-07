@@ -37,3 +37,20 @@
   padding: 0 24px;
   pointer-events: none;
 }
+
+.emptyAction {
+  pointer-events: auto;
+}
+
+.note {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: var(--mantine-radius-xl);
+  background: color-mix(in srgb, var(--gx-window) 85%, transparent);
+  border: 0.5px solid var(--gx-separator);
+  color: var(--gx-muted);
+  white-space: nowrap;
+}

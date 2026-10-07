@@ -12,6 +12,15 @@ import type { Properties } from "../api/types";
 import { useTenantSession } from "../session/SessionProvider";
 import { GraphModel, nodeKey, type NodeRef } from "./GraphModel";
 
+/** Whether the canvas holds the tenant as a whole (in full or as a sample). */
+export interface Overview {
+  /** `dismissed`: the user cleared it; it is not loaded again by itself. */
+  status: "idle" | "loading" | "shown" | "failed" | "dismissed";
+  /** Nodes drawn, and nodes in the tenant. */
+  shown?: number;
+  total?: number;
+}
+
 interface WorkspaceValue {
   /** The Explore canvas; kept while the user moves between views. */
   model: GraphModel;
@@ -21,19 +30,22 @@ interface WorkspaceValue {
   select: (key: string | null) => void;
   /** Puts a node on the canvas (if it isn't there) and selects it. */
   open: (ref: NodeRef, properties: Properties) => string;
+  overview: Overview;
+  setOverview: (overview: Overview) => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceValue | null>(null);
 
 /**
- * Holds what the user is working on in Explore: the nodes on the canvas and
- * the selection. Search, Activity and Path all hand nodes to it. A new tenant
- * starts with an empty canvas.
+ * Holds what the user is working on in Explore: the nodes on the canvas, the
+ * selection, and whether the whole graph was loaded. Search, Activity and Path
+ * all hand nodes to it. A new tenant starts with an empty canvas.
  */
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { tenant } = useTenantSession();
   const [model] = useState(() => new GraphModel());
   const [selected, setSelected] = useState<string | null>(null);
+  const [overview, setOverview] = useState<Overview>({ status: "idle" });
   const version = useSyncExternalStore(
     useCallback((onChange: () => void) => model.subscribe(onChange), [model]),
     () => model.revision,
@@ -42,6 +54,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     model.clear();
     setSelected(null);
+    setOverview({ status: "idle" });
   }, [model, tenant]);
 
   // A selected node that was deleted is no longer selected.
@@ -61,8 +74,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ model, version, selected, select: setSelected, open }),
-    [model, version, selected, open],
+    () => ({ model, version, selected, select: setSelected, open, overview, setOverview }),
+    [model, version, selected, open, overview],
   );
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

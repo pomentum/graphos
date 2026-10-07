@@ -2,6 +2,7 @@ import type { HttpClient, Tagged } from "./http";
 import type {
   DeleteNodeResponse,
   EdgeUpsert,
+  GraphExport,
   EdgesUpsertResponse,
   HistogramResponse,
   Me,
@@ -128,6 +129,11 @@ export class GraphosApi {
   /** Every shortest path between two nodes. */
   paths(request: PathsRequest): Promise<PathsResponse> {
     return this.http.post(`${this.graph}/paths`, request);
+  }
+
+  /** Up to `limitNodes` nodes and every edge among them. */
+  exportGraph(limitNodes: number): Promise<GraphExport> {
+    return this.http.get(`${this.graph}/export`, { limit_nodes: limitNodes });
   }
 
   /** Node and edge counts and sizes per label. */
