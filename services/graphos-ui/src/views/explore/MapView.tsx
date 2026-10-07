@@ -1,4 +1,4 @@
-import { Button, Group, Loader, Text } from "@mantine/core";
+import { Button, CloseButton, Group, Loader, Text } from "@mantine/core";
 import { useMemo, useState } from "react";
 import { GraphCanvas } from "../../components/GraphCanvas";
 import { useGraphMap } from "../../data/queries";
@@ -97,6 +97,7 @@ export function MapView({ onMode }: { onMode: (mode: ExploreMode) => void }) {
 
       {selected && map.data ? (
         <aside className={classes.inspector} aria-label="Label">
+          <CloseButton className={classes.close} aria-label="Close" onClick={() => setSelected(null)} />
           <MapPanel
             map={map.data}
             label={selected}

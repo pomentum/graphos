@@ -1,5 +1,6 @@
 import { ActionIcon, Group, Text } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
+import { useDisclosure, useMediaQuery } from "@mantine/hooks";
+import { useEffect } from "react";
 import { IconLayoutSidebar } from "@tabler/icons-react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { SearchHit } from "../api/types";
@@ -16,12 +17,23 @@ import { AccountMenu, ActivityBell, TenantSwitcher } from "./ToolbarMenus";
  * The window: one toolbar (tenant, view title, activity, search, account),
  * the sidebar menu, and the current view. A search hit opens in Explore.
  */
+/** Windows narrower than this get overlays instead of side-by-side panels. */
+const NARROW = "(max-width: 900px)";
+
 export function AppLayout() {
   const session = useTenantSession();
   const workspace = useWorkspace();
   const navigate = useNavigate();
   const location = useLocation();
-  const [sidebarOpen, sidebar] = useDisclosure(true);
+  // Below this width the sidebar lays over the view instead of taking room
+  // beside it: closed by default, and closed again after choosing a view.
+  const narrow = useMediaQuery(NARROW, false, { getInitialValueInEffect: false });
+  const [sidebarOpen, sidebar] = useDisclosure(!narrow);
+  useEffect(() => {
+    if (narrow) sidebar.close();
+    // On moving to another view, or the window becoming narrow.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [narrow, location.pathname]);
   const views = visibleViews(session);
   const current = views.find((view) => location.pathname.startsWith(view.path));
 
@@ -33,7 +45,7 @@ export function AppLayout() {
   };
 
   return (
-    <div className={classes.root} data-sidebar={sidebarOpen ? "open" : "closed"}>
+    <div className={classes.root} data-sidebar={sidebarOpen ? "open" : "closed"} data-narrow={narrow || undefined}>
       <header className={classes.toolbar}>
         <Group gap="sm" className={classes.toolbarStart} wrap="nowrap">
           <ActionIcon variant="subtle" color="gray" aria-label="Show or hide the sidebar" onClick={sidebar.toggle}>
@@ -46,7 +58,7 @@ export function AppLayout() {
         </Text>
         <Group gap="sm" justify="flex-end" wrap="nowrap" className={classes.toolbarEnd}>
           <ActivityBell />
-          <NodeSearch hotkey allowAdd onPick={openHit} width={220} />
+          <NodeSearch hotkey allowAdd onPick={openHit} width={narrow ? 150 : 220} />
           <AccountMenu />
         </Group>
       </header>

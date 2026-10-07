@@ -1,3 +1,4 @@
+import { CloseButton } from "@mantine/core";
 import { useHotkeys } from "@mantine/hooks";
 import { useCallback, useMemo, useState } from "react";
 import { ApiError } from "../../api/http";
@@ -199,6 +200,7 @@ export function ExploreView() {
 
       {selected && selectedNode?.more === undefined ? (
         <aside className={classes.inspector} aria-label="Inspector">
+          <CloseButton className={classes.close} aria-label="Close the inspector (Escape)" onClick={deselect} />
           <Inspector
             key={selected}
             model={model}
@@ -211,6 +213,7 @@ export function ExploreView() {
         </aside>
       ) : selectedEdge ? (
         <aside className={classes.inspector} aria-label="Inspector">
+          <CloseButton className={classes.close} aria-label="Close the inspector (Escape)" onClick={deselect} />
           <EdgeInspector
             key={selectedEdge}
             model={model}

@@ -38,3 +38,8 @@ button.row:hover {
   flex: 1;
   min-width: 0;
 }
+
+/* Room for the panel's close button, top right. */
+.root > :first-child {
+  padding-right: 28px;
+}

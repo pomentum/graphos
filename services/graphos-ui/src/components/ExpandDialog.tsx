@@ -25,7 +25,7 @@ export function ExpandDialog({ opened, nodeName, counts, truncated, onCancel, on
   return (
     <Modal opened={opened} onClose={onCancel} title={`${nodeName} has many neighbours`} centered radius="lg" size="sm">
       <Text size="sm" c="dimmed" mb="md">
-        Choose which connections to add{truncated ? ". Counts cover the first neighbours only." : "."}
+        Choose which relationships to follow{truncated ? ". Counts cover the first neighbours only." : "."}
       </Text>
       <Checkbox.Group value={chosen} onChange={setChosen}>
         <Stack gap="xs">

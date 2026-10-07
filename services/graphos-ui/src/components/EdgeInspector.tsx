@@ -28,7 +28,7 @@ export function EdgeInspector({ model, edge, onSelectNode, onDeleted }: EdgeInsp
     const node = model.graph.getNodeAttributes(key);
     return (
       <UnstyledButton onClick={() => onSelectNode(key)} title={`${node.vertexLabel} ${node.id}`}>
-        <Text size="sm" fw={600} truncate maw={110}>
+        <Text size="sm" fw={600} truncate maw={110} title={displayName(node.properties, node.id)}>
           {displayName(node.properties, node.id)}
         </Text>
       </UnstyledButton>
@@ -71,8 +71,8 @@ export function EdgeInspector({ model, edge, onSelectNode, onDeleted }: EdgeInsp
         onSaved={(saved) => model.updateEdge(edge, saved.properties)}
         actions={
           <ConfirmDelete
-            question="Delete this edge?"
-            confirmLabel="Delete edge"
+            question="Delete this relationship?"
+            confirmLabel="Delete relationship"
             busy={remove.isPending}
             onConfirm={() => void deleteEdge()}
           />

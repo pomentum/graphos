@@ -77,7 +77,7 @@ export function ConnectView() {
                   <ScrollArea.Autosize mah="min(360px, calc(100vh - 320px))" type="auto" className={classes.list}>
                     {shown.map((tenant) => (
                       <UnstyledButton key={tenant} className={classes.tenant} onClick={() => selectTenant(tenant)}>
-                        <Text size="sm" truncate>
+                        <Text size="sm" truncate title={tenant}>
                           {tenant}
                         </Text>
                         <IconChevronRight size={14} className="gx-muted" />

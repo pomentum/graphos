@@ -14,6 +14,7 @@
 }
 
 .inspector {
+  position: relative;
   overflow-y: auto;
   background: var(--gx-panel);
   border-left: 0.5px solid var(--gx-separator);
@@ -55,4 +56,32 @@
   border: 0.5px solid var(--gx-separator);
   color: var(--gx-muted);
   white-space: nowrap;
+}
+
+.close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+}
+
+/* Narrow windows: the inspector lays over the canvas instead of shrinking it. */
+@media (max-width: 900px) {
+  .root[data-inspector="open"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .root {
+    position: relative;
+  }
+
+  .inspector {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(320px, 92vw);
+    z-index: 5;
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.18);
+  }
 }

@@ -20,3 +20,9 @@
   padding: 64px 0;
   text-align: center;
 }
+
+@media (max-width: 600px) {
+  .root {
+    padding: 12px;
+  }
+}

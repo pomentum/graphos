@@ -115,7 +115,7 @@ export function ActivityView() {
                   {(change.consumer ?? "?").slice(0, 2).toUpperCase()}
                 </Avatar>
                 <div className={classes.text}>
-                  <Text size="sm" truncate>
+                  <Text size="sm" truncate title={describeChange(change)}>
                     <Text span fw={600}>
                       {change.consumer ?? "unknown"}
                     </Text>{" "}

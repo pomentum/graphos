@@ -34,3 +34,18 @@
   width: 100%;
   text-align: left;
 }
+
+/* Narrow windows: the options above the paths, not beside them. */
+@media (max-width: 900px) {
+  .root {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(320px, 1fr);
+    height: auto;
+    min-height: 100%;
+  }
+
+  .form {
+    border-right: 0;
+    border-bottom: 0.5px solid var(--gx-separator);
+  }
+}

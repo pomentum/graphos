@@ -83,7 +83,7 @@ export function TenantSwitcher() {
             {shown.map((tenant) => (
               <Combobox.Option key={tenant} value={tenant} active={tenant === session.tenant}>
                 <Group justify="space-between" wrap="nowrap" gap="xs">
-                  <Text size="sm" truncate>
+                  <Text size="sm" truncate title={tenant}>
                     {tenant}
                   </Text>
                   {tenant === session.tenant ? <IconCheck size={14} /> : null}

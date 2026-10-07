@@ -105,7 +105,7 @@ export function Inspector({ model, selected, onSelect, onSelectEdge, onExpand, o
         onSaved={(saved) => model.updateNode(selected, saved.properties)}
         actions={
           <ConfirmDelete
-            question="Delete this node and every edge touching it?"
+            question="Delete this node and all its relationships?"
             confirmLabel="Delete node"
             busy={removeNode.isPending}
             onConfirm={() => void deleteNode()}
@@ -115,7 +115,7 @@ export function Inspector({ model, selected, onSelect, onSelectEdge, onExpand, o
 
       <div>
         <Text size="xs" c="dimmed" mb={6}>
-          Connections on the canvas
+          Relationships on the canvas
         </Text>
         <ConnectionList model={model} nodeKey={selected} onSelect={onSelect} onSelectEdge={onSelectEdge} />
       </div>

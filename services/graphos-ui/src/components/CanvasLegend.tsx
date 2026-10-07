@@ -11,6 +11,11 @@ export function CanvasLegend({ categories }: { categories: Categories }) {
   const grey = ranked.length - coloured.length;
   return (
     <div className={classes.root}>
+      {colorBy === "group" ? (
+        <Text size="xs" c="dimmed" title="Communities found by clustering the graph (Louvain)">
+          Groups: communities by clustering
+        </Text>
+      ) : null}
       {coloured.map(([category, count]) => {
         const group = groupNames?.get(category);
         const title = group ? `${group.title}, group ${category} (${group.detail})` : category;

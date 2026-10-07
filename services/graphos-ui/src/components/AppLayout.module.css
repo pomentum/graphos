@@ -49,3 +49,37 @@
   min-height: 0;
   overflow: auto;
 }
+
+/* Narrow windows: the sidebar lays over the view, the title gives way to search. */
+.root[data-narrow] {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
+.root[data-narrow] .toolbar {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.root[data-narrow] .sidebar {
+  position: fixed;
+  top: 48px;
+  bottom: 0;
+  left: 0;
+  width: min(260px, 85vw);
+  z-index: 200;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+}
+
+.root[data-narrow] .main {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 600px) {
+  .title {
+    visibility: hidden;
+  }
+
+  .toolbarEnd {
+    padding: 0 8px;
+    gap: 6px;
+  }
+}

@@ -1,3 +1,8 @@
 .root {
   padding: 16px 12px;
 }
+
+/* Room for the panel's close button, top right. */
+.root > :first-child {
+  padding-right: 28px;
+}

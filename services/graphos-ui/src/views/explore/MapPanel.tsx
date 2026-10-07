@@ -55,8 +55,8 @@ export function MapPanel({ map, label, opening, onOpen, onSelectLabel }: MapPane
         </Stack>
       </div>
 
-      <LinkList title="Links to" rows={outgoing} approx={approx} arrow="→" onSelectLabel={onSelectLabel} />
-      <LinkList title="Linked from" rows={incoming} approx={approx} arrow="←" onSelectLabel={onSelectLabel} />
+      <LinkList title="Relationships to" rows={outgoing} approx={approx} arrow="→" onSelectLabel={onSelectLabel} />
+      <LinkList title="Relationships from" rows={incoming} approx={approx} arrow="←" onSelectLabel={onSelectLabel} />
     </Stack>
   );
 }
@@ -90,7 +90,7 @@ function LinkList({
             <Text size="xs" c="dimmed" className={classes.type}>
               {row.type} {arrow}
             </Text>
-            <Text size="sm" truncate className={classes.label}>
+            <Text size="sm" truncate className={classes.label} title={row.label}>
               {row.label}
             </Text>
             <Text size="xs" c="dimmed">
