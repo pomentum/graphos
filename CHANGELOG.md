@@ -14,6 +14,9 @@ each existing tenant once, in the background, to record its property names (abou
 
 ### Added
 
+- **Search any property without an index.** `GET …/graph/search?property=path` matches the
+  substring against that property instead of `name` (the default, which keeps its trigram index).
+  Other properties are read row by row, so declare a search index for those searched often.
 - **Web UI** (`services/graphos-ui`, image `graphos-ui`). Explore (opens on the whole
   graph, or a 5,000-node sample of a larger one; ranked search with Ctrl K, ⌘K on Apple devices,
   or `/`; a graph canvas,

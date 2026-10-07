@@ -542,6 +542,11 @@ def _validate_prop_key(key: str) -> str:
     return key
 
 
+def validate_property_key(key: str) -> str:
+    """A property name safe to put in SQL; raises ``ValueError`` otherwise."""
+    return _validate_prop_key(key)
+
+
 class EdgesAggregateRequest(BaseModel):
     """Body for POST /v1/{tenant}/graph/edges/aggregate.
 

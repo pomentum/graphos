@@ -112,6 +112,7 @@ from graphos.contracts.graph import (
     SearchResponse,
     _validate_prop_key,
     validate_label_optional,
+    validate_property_key,
 )
 from graphos.contracts.tenants import (
     ResolveEdgesRequest,
@@ -249,8 +250,11 @@ def _node_response(
         "An `identifier` index matches exact, prefix, contained and similar words, and with "
         "`fuzzy=true` also misspellings when nothing matches literally; a `text` index is "
         "Postgres full-text search (`\"phrase\"`, `or`, `-word`).\n\n"
-        "Without `index`: case-insensitive substring search (`ILIKE`) over `name`, "
-        "unranked, served by the trigram index bootstrap creates on `name`."
+        "Without `index`: case-insensitive substring search (`ILIKE`) over `property` "
+        "(default `name`), unranked. `name` is served by the trigram index bootstrap "
+        "creates; any other property is read row by row until `limit` hits are found, "
+        "which is slow on a large tenant when few nodes match. Declare a search index "
+        "for properties searched often."
     ),
     responses={404: {"description": "No search index of that name."}},
 )
@@ -276,10 +280,15 @@ async def search(
     min_score: Annotated[
         float, Query(ge=0, le=1, description="Search index: drop hits scoring lower."),
     ] = 0.0,
+    property: Annotated[  # noqa: A002 — the query parameter's name
+        str,
+        Query(description="Without `index`: the property to match (default `name`)."),
+    ] = "name",
 ) -> SearchResponse:
     _check_tenant(tenant, principal)
     try:
         validate_label_optional(label)
+        validate_property_key(property)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -309,8 +318,9 @@ async def search(
     # (consumer-side UI typically tints by label).  ``id::text`` is the
     # AGE graphid bigint as a string — same shape the Cypher path used
     # to return.
-    # A non-None label was already validated via ``validate_label_optional``
-    # above, so the identifier is safe to interpolate.
+    # A non-None label and the property name were validated above
+    # (``validate_label_optional`` / ``validate_property_key``), so both are
+    # safe to interpolate.
     from_clause = (
         f'"{tenant}"."_ag_label_vertex" v' if label is None else f'"{tenant}"."{label}" v'
     )
@@ -335,7 +345,7 @@ async def search(
           v.properties::text                         AS props_text
         FROM {from_clause}
         JOIN pg_class c ON c.oid = v.tableoid
-        WHERE ((((v.properties)::text)::jsonb) ->> 'name')
+        WHERE ((((v.properties)::text)::jsonb) ->> '{property}')
               ILIKE '%' || $1 || '%' ESCAPE '!'
         LIMIT $2;
     """
