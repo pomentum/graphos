@@ -1,11 +1,11 @@
 import { Combobox, Group, Kbd, Loader, Text, TextInput, useCombobox } from "@mantine/core";
-import { useDebouncedValue, useHotkeys } from "@mantine/hooks";
+import { useDebouncedValue, useHotkeys, type HotkeyItem } from "@mantine/hooks";
 import { IconSearch } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 import type { SearchHit } from "../api/types";
 import { useSchema, useSearch } from "../data/queries";
 import { pickSearchIndex } from "../data/searchIndex";
-import { searchShortcut } from "../lib/platform";
+import { isApple, searchShortcut } from "../lib/platform";
 import { displayName } from "../graph/GraphModel";
 
 export type PickMode = "open" | "add";
@@ -14,7 +14,7 @@ export interface NodeSearchProps {
   /** Called with the chosen hit; `add` when Shift was held (Shift Return / Shift click). */
   onPick: (hit: SearchHit, mode: PickMode) => void;
   placeholder?: string;
-  /** Focus with Ctrl K (⌘K on Apple devices) or `/`. Only one search on screen should claim it. */
+  /** Focus with `/` (or ⌘K on Apple devices). Only one search on screen should claim it. */
   hotkey?: boolean;
   /** Show the "Shift Return adds" hint. */
   allowAdd?: boolean;
@@ -46,14 +46,14 @@ export function NodeSearch({
   const hits = debounced.trim() ? (search.data?.nodes ?? []) : [];
 
   const focus = () => input.current?.focus();
-  useHotkeys(
-    hotkey
-      ? [
-          ["mod+K", focus],
-          ["/", focus],
-        ]
-      : [],
-  );
+  // ⌘K on Apple devices only: elsewhere Ctrl+K belongs to the browser.
+  const keys: HotkeyItem[] = isApple()
+    ? [
+        ["mod+K", focus],
+        ["/", focus],
+      ]
+    : [["/", focus]];
+  useHotkeys(hotkey ? keys : []);
 
   // The top hit is highlighted, so Return opens it without arrowing down.
   const firstHit = hits[0]?.id;

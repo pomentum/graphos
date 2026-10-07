@@ -1,14 +1,19 @@
 import {
   ActionIcon,
   Avatar,
+  Combobox,
+  Group,
   Indicator,
   Menu,
   Popover,
+  ScrollArea,
   Stack,
   Text,
   UnstyledButton,
+  useCombobox,
   useMantineColorScheme,
 } from "@mantine/core";
+import { useState } from "react";
 import { IconBell, IconCheck, IconChevronDown, IconLogout, IconMoon, IconSun, IconSunMoon } from "@tabler/icons-react";
 import { Link } from "react-router-dom";
 import { useActivity } from "../data/ActivityProvider";
@@ -16,34 +21,80 @@ import { describeChange } from "../lib/changes";
 import { relativeTime } from "../lib/time";
 import { useSessionContext, useTenantSession } from "../session/SessionProvider";
 
-/** The tenant name with a menu of the other tenants the token may use. */
+/** Above this many tenants the switcher offers a search box. */
+const TENANT_SEARCH_FROM = 8;
+
+/**
+ * The tenant name, opening a list of the tenants the token may use. The
+ * list scrolls within the window and can be searched, so a token with
+ * hundreds of tenants stays usable; arrows and Enter pick one.
+ */
 export function TenantSwitcher() {
   const { session, selectTenant } = useSessionContext();
+  const [query, setQuery] = useState("");
+  const combobox = useCombobox({
+    onDropdownOpen: () => combobox.focusSearchInput(),
+    onDropdownClose: () => {
+      combobox.resetSelectedOption();
+      setQuery("");
+    },
+  });
   if (!session?.tenant) return null;
-  const others = session.me.tenants;
+  const tenants = session.me.tenants;
+  const needle = query.trim().toLowerCase();
+  const shown = needle ? tenants.filter((t) => t.toLowerCase().includes(needle)) : tenants;
+
   return (
-    <Menu position="bottom-start" width={200} disabled={others.length < 2}>
-      <Menu.Target>
-        <UnstyledButton aria-label="Switch tenant">
+    <Combobox
+      store={combobox}
+      width={240}
+      position="bottom-start"
+      onOptionSubmit={(tenant) => {
+        selectTenant(tenant);
+        combobox.closeDropdown();
+      }}
+    >
+      <Combobox.Target withAriaAttributes={false}>
+        <UnstyledButton
+          aria-label="Switch tenant"
+          disabled={tenants.length < 2}
+          onClick={() => combobox.toggleDropdown()}
+        >
           <Text fw={600} size="sm" span>
             {session.tenant}
           </Text>
-          {others.length > 1 ? <IconChevronDown size={12} style={{ marginLeft: 4 }} /> : null}
+          {tenants.length > 1 ? <IconChevronDown size={12} style={{ marginLeft: 4 }} /> : null}
         </UnstyledButton>
-      </Menu.Target>
-      <Menu.Dropdown>
-        <Menu.Label>Tenants</Menu.Label>
-        {others.map((tenant) => (
-          <Menu.Item
-            key={tenant}
-            onClick={() => selectTenant(tenant)}
-            rightSection={tenant === session.tenant ? <IconCheck size={14} /> : null}
-          >
-            {tenant}
-          </Menu.Item>
-        ))}
-      </Menu.Dropdown>
-    </Menu>
+      </Combobox.Target>
+      <Combobox.Dropdown>
+        {tenants.length > TENANT_SEARCH_FROM ? (
+          <Combobox.Search
+            value={query}
+            onChange={(event) => {
+              setQuery(event.currentTarget.value);
+              combobox.updateSelectedOptionIndex();
+            }}
+            placeholder={`Find among ${tenants.length} tenants`}
+            aria-label="Find a tenant"
+          />
+        ) : null}
+        <Combobox.Options>
+          <ScrollArea.Autosize mah="min(360px, calc(100vh - 140px))" type="auto">
+            {shown.map((tenant) => (
+              <Combobox.Option key={tenant} value={tenant} active={tenant === session.tenant}>
+                <Group justify="space-between" wrap="nowrap" gap="xs">
+                  <Text size="sm" truncate>
+                    {tenant}
+                  </Text>
+                  {tenant === session.tenant ? <IconCheck size={14} /> : null}
+                </Group>
+              </Combobox.Option>
+            ))}
+            {shown.length === 0 ? <Combobox.Empty>No tenant matches</Combobox.Empty> : null}
+          </ScrollArea.Autosize>
+        </Combobox.Options>
+      </Combobox.Dropdown>
+    </Combobox>
   );
 }
 

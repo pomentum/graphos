@@ -3,7 +3,11 @@ export function isApple(nav: Pick<Navigator, "platform" | "userAgent"> = navigat
   return /Mac|iPhone|iPad|iPod/.test(nav.platform || nav.userAgent);
 }
 
-/** The search shortcut as this platform writes it: "⌘K" or "Ctrl K". */
+/**
+ * The key that focuses search on this platform: ⌘K on Apple devices, else
+ * "/". Ctrl+K is left alone on Windows and Linux, where Edge, Chrome and
+ * Firefox use it to search from the address bar.
+ */
 export function searchShortcut(nav?: Pick<Navigator, "platform" | "userAgent">): string {
-  return isApple(nav) ? "⌘K" : "Ctrl K";
+  return isApple(nav) ? "⌘K" : "/";
 }
