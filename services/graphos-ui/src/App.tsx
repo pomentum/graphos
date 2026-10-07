@@ -1,6 +1,6 @@
 import { Center, Loader, MantineProvider } from "@mantine/core";
-import { Notifications } from "@mantine/notifications";
-import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
+import { Notifications, notifications } from "@mantine/notifications";
+import { MutationCache, QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { ApiError } from "./api/http";
@@ -29,6 +29,22 @@ const SCREENS: Record<string, ComponentType> = {
 /** Client errors (4xx) are answers, not outages: they are not retried. */
 function createQueryClient(): QueryClient {
   return new QueryClient({
+    // A write that fails always says so, whichever screen started it.
+    mutationCache: new MutationCache({
+      onSuccess: (_data, _variables, _context, mutation) => {
+        if (mutation.meta?.success) notifications.show({ message: String(mutation.meta.success), autoClose: 2000 });
+      },
+      onError: (error, _variables, _context, mutation) =>
+        !mutation.meta?.silent &&
+        notifications.show({
+          color: "red",
+          title:
+            error instanceof ApiError && error.isConflict
+              ? "Changed by someone else"
+              : String(mutation.meta?.errorTitle ?? "Not saved"),
+          message: error.message,
+        }),
+    }),
     defaultOptions: {
       queries: {
         refetchOnWindowFocus: false,

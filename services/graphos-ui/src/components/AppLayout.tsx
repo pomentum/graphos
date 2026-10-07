@@ -7,6 +7,7 @@ import { useWorkspace } from "../graph/WorkspaceProvider";
 import { useTenantSession } from "../session/SessionProvider";
 import { visibleViews } from "../views/registry";
 import classes from "./AppLayout.module.css";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { NodeSearch, type PickMode } from "./NodeSearch";
 import { Sidebar } from "./Sidebar";
 import { AccountMenu, ActivityBell, TenantSwitcher } from "./ToolbarMenus";
@@ -55,7 +56,9 @@ export function AppLayout() {
         </aside>
       ) : null}
       <main className={classes.main}>
-        <Outlet />
+        <ErrorBoundary resetKey={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </main>
     </div>
   );

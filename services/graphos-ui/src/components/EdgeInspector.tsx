@@ -35,8 +35,13 @@ export function EdgeInspector({ model, edge, onSelectNode, onDeleted }: EdgeInsp
     );
   };
 
+  /** Deletes in graphos, then from the canvas; a failure is shown by the query client. */
   const deleteEdge = async () => {
-    await remove.mutateAsync({ ...ref, etag: editor.record?.etag });
+    try {
+      await remove.mutateAsync({ ...ref, etag: editor.record?.etag });
+    } catch {
+      return;
+    }
     model.removeEdge(edge);
     onDeleted();
   };

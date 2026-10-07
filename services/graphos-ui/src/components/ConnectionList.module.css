@@ -24,14 +24,14 @@
 .link {
   flex: 1;
   min-width: 0;
-  padding: 6px 10px;
+  padding: 6px 10px 6px 4px;
 }
 
-.remove {
-  opacity: 0;
+.edge {
+  flex: none;
+  padding: 6px 0 6px 10px;
 }
 
-.row:hover .remove,
-.remove:focus-visible {
-  opacity: 1;
+.edge:hover {
+  text-decoration: underline;
 }

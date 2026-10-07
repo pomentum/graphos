@@ -99,6 +99,8 @@ export function ExploreView() {
           onNewNode={() => setCreating("node")}
           onConnect={() => setCreating("edge")}
           onClear={() => {
+            select(null);
+            selectEdge(null);
             model.clear();
             workspace.setOverview({ status: "dismissed" });
           }}
@@ -112,6 +114,7 @@ export function ExploreView() {
             model={model}
             selected={selected}
             onSelect={select}
+            onSelectEdge={selectEdge}
             onExpand={(key) => void expand(key)}
           />
         </aside>

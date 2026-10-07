@@ -111,6 +111,7 @@ export function useSaveEdge() {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
   return useMutation({
+    meta: { success: "Saved" },
     mutationFn: (args: { edge: EdgeKey; patch: Properties; etag: string }) =>
       api.patchEdge(args.edge, args.patch, args.etag),
     onSuccess: (result, args) => client.setQueryData(keys.edge(tenant, args.edge), result.data),
@@ -139,13 +140,17 @@ export function useExpand() {
   return useMutation({
     mutationFn: (args: { id: string; relTypes?: string[]; limit: number }) =>
       api.neighbors(args.id, { relTypes: args.relTypes, limit: args.limit }),
+    meta: { errorTitle: "Couldn't load the neighbours" },
   });
 }
 
 /** Shortest paths between two nodes. */
 export function usePaths() {
   const { api } = useTenantSession();
-  return useMutation({ mutationFn: (request: PathsRequest) => api.paths(request) });
+  return useMutation({
+    mutationFn: (request: PathsRequest) => api.paths(request),
+    meta: { silent: true }, // the Path view shows the error itself
+  });
 }
 
 /** Saves edited properties with `If-Match`; a `412` means someone else saved first. */
@@ -153,6 +158,7 @@ export function useSaveNode() {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
   return useMutation({
+    meta: { success: "Saved" },
     mutationFn: (args: { id: string; label: string; patch: Properties; etag: string }) =>
       api.patchNode(args.id, args.patch, { label: args.label, etag: args.etag }),
     onSuccess: (result, args) => client.setQueryData(keys.node(tenant, args.label, args.id), result.data),
@@ -164,6 +170,7 @@ export function useDeleteNode() {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
   return useMutation({
+    meta: { success: "Node deleted" },
     mutationFn: (args: { id: string; label: string; etag?: string }) =>
       api.deleteNode(args.id, { label: args.label, etag: args.etag }),
     onSuccess: (_, args) => {
@@ -178,6 +185,7 @@ export function useCreateNode() {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
   return useMutation({
+    meta: { success: "Node created" },
     mutationFn: (node: NodeUpsert) => api.upsertNode(node),
     onSuccess: () => void client.invalidateQueries({ queryKey: keys.stats(tenant) }),
   });
@@ -188,6 +196,7 @@ export function useCreateEdge() {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
   return useMutation({
+    meta: { success: "Relationship created" },
     mutationFn: (edge: EdgeUpsert) => api.upsertEdge(edge),
     onSuccess: () => void client.invalidateQueries({ queryKey: keys.stats(tenant) }),
   });
@@ -198,6 +207,7 @@ export function useDeleteEdge() {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
   return useMutation({
+    meta: { success: "Relationship deleted" },
     mutationFn: (edge: EdgeKey & { etag?: string }) => api.deleteEdge(edge, edge.etag),
     onSuccess: () => void client.invalidateQueries({ queryKey: keys.stats(tenant) }),
   });

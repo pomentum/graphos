@@ -91,13 +91,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [model, selected, select],
   );
 
+  // Checked while rendering: after Clear or a delete, no view may read a
+  // node or edge that is gone (the effect above only tidies the state).
+  const liveSelected = selected && model.graph.hasNode(selected) ? selected : null;
+  const liveSelectedEdge = selectedEdge && model.graph.hasEdge(selectedEdge) ? selectedEdge : null;
+
   const value = useMemo(
     () => ({
       model,
       version,
-      selected,
+      selected: liveSelected,
       select,
-      selectedEdge,
+      selectedEdge: liveSelectedEdge,
       selectEdge,
       colorBy,
       setColorBy,
@@ -105,7 +110,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       overview,
       setOverview,
     }),
-    [model, version, selected, select, selectedEdge, selectEdge, colorBy, open, overview],
+    [model, version, liveSelected, select, liveSelectedEdge, selectEdge, colorBy, open, overview],
   );
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

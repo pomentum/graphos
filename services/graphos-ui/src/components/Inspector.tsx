@@ -1,5 +1,5 @@
 import { Badge, Group, Stack, Text, UnstyledButton } from "@mantine/core";
-import { useDeleteEdge, useDeleteNode, useProperties } from "../data/queries";
+import { useDeleteNode, useProperties } from "../data/queries";
 import { useNodeEditor } from "../data/useNodeEditor";
 import { displayName, type GraphModel } from "../graph/GraphModel";
 import { useTenantSession } from "../session/SessionProvider";
@@ -12,6 +12,8 @@ export interface InspectorProps {
   model: GraphModel;
   selected: string;
   onSelect: (key: string | null) => void;
+  /** Selects one of the node's edges. */
+  onSelectEdge: (key: string) => void;
   /** Adds the node's neighbours to the canvas. */
   onExpand: (key: string) => void;
 }
@@ -21,25 +23,23 @@ export interface InspectorProps {
  * canvas, and delete. Editing rules (versions, conflicts) live in
  * `useNodeEditor`; this component only presents them.
  */
-export function Inspector({ model, selected, onSelect, onExpand }: InspectorProps) {
+export function Inspector({ model, selected, onSelect, onSelectEdge, onExpand }: InspectorProps) {
   const { canWrite } = useTenantSession();
   const attributes = model.graph.getNodeAttributes(selected);
   const ref = { id: attributes.id, label: attributes.vertexLabel };
   const editor = useNodeEditor(ref);
   const properties = useProperties(ref.label);
   const removeNode = useDeleteNode();
-  const removeEdge = useDeleteEdge();
 
+  /** Deletes in graphos, then from the canvas; a failure is shown by the query client. */
   const deleteNode = async () => {
-    await removeNode.mutateAsync({ ...ref, etag: editor.record?.etag });
+    try {
+      await removeNode.mutateAsync({ ...ref, etag: editor.record?.etag });
+    } catch {
+      return;
+    }
     model.removeNode(selected);
     onSelect(null);
-  };
-
-  /** Removes one edge in graphos, then from the canvas. */
-  const deleteEdge = async (edge: string) => {
-    await removeEdge.mutateAsync(model.edgeRef(edge));
-    model.removeEdge(edge);
   };
 
   return (
@@ -86,13 +86,7 @@ export function Inspector({ model, selected, onSelect, onExpand }: InspectorProp
             </Text>
           </UnstyledButton>
         </Group>
-        <ConnectionList
-          model={model}
-          nodeKey={selected}
-          canRemove={canWrite}
-          onSelect={onSelect}
-          onRemove={(edge) => void deleteEdge(edge)}
-        />
+        <ConnectionList model={model} nodeKey={selected} onSelect={onSelect} onSelectEdge={onSelectEdge} />
       </div>
     </Stack>
   );
