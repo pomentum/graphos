@@ -507,7 +507,7 @@ async def upsert_nodes(
 
 
 @router.get(
-    "/nodes/{external_id}",
+    "/nodes/{external_id:path}",
     response_model=NodeGetResponse,
     summary="Fetch one node by external id",
     description=(
@@ -548,7 +548,7 @@ async def get_node_by_external_id(  # noqa: PLR0913 — FastAPI route parameters
 
 
 @router.patch(
-    "/nodes/{external_id}",
+    "/nodes/{external_id:path}",
     response_model=NodeGetResponse,
     summary="Patch one node's properties (JSON Merge Patch)",
     description=(
@@ -612,7 +612,7 @@ async def patch_node(  # noqa: PLR0913 — FastAPI route parameters
 
 
 @router.post(
-    "/nodes/{external_id}/properties",
+    "/nodes/{external_id:path}/properties",
     response_model=NodePropertiesUpsertResponse,
     summary="Merge a property bag onto the node identified by external id",
     description=(
@@ -2396,7 +2396,7 @@ async def sample_subgraph(
 
 
 @router.delete(
-    "/nodes/{node_id}",
+    "/nodes/{node_id:path}",
     response_model=DeleteNodeResponse,
     summary="Delete a node and its edges by its consumer-assigned id",
     description=(

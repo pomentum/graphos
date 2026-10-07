@@ -56,6 +56,10 @@ each existing tenant once, in the background, to record its property names (abou
 - **`nodes:scan` filters on booleans match.** A `where` value of `true` or `false` (with `=`,
   `!=`, `in`, `not in`) was compared as Python's `True` / `False` and matched no node; values are
   now compared in the JSON text form Postgres reads from the property.
+- **Node ids containing `/` are addressable.** `GET`, `PATCH` and `DELETE /nodes/{id}` and
+  `POST /nodes/{id}/properties` answered 404 for an id such as a file path (`src/a/B.java`), even
+  URL-encoded, because the path is decoded before routing. These routes now take the rest of the
+  path as the id.
 
 ## 0.2.1 — 2026-10-06
 
