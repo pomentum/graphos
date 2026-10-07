@@ -20,6 +20,7 @@ of the same tenant → 409 at the API layer (see api/louvain.py).
 from __future__ import annotations
 
 import array
+import asyncio
 import bisect
 import logging
 import time as _t
@@ -29,7 +30,7 @@ from typing import Any
 
 import asyncpg
 
-from graphos import louvain_compute, writes
+from graphos import community_map, louvain_compute, writes
 from graphos.contracts.graph import _validate_prop_key
 from graphos.db import allow_long_statements
 
@@ -349,8 +350,11 @@ async def _writeback_assignments(
     tenant: str,
     assignments: Mapping[int, int],
     chunk_size: int = 500,  # noqa: ARG001 — kept for caller compat
-) -> int:
+) -> tuple[int, dict[int, int]]:
     """Write `community_id` back onto each vertex.
+
+    Returns how many nodes were assigned and the map from Louvain's raw
+    community ids to the stable ids written (for the community map).
 
     Bulk COPY-staged UPDATE (:func:`graphos.writes.set_node_communities`),
     the same shape as the node upsert.  Rather than issue
@@ -492,7 +496,28 @@ async def _writeback_assignments(
             (gid, str(final_of_raw[raw])) for gid, raw in assignments.items()
         ),
     )
-    return len(assignments)
+    return len(assignments), final_of_raw
+
+
+async def _store_community_map(  # noqa: PLR0913 — the recompute's pieces
+    pool: asyncpg.Pool,
+    tenant: str,
+    edges: louvain_compute.EdgeArrays,
+    assignments: Mapping[int, int],
+    final_of_raw: Mapping[int, int],
+    *,
+    modularity: float,
+) -> None:
+    """Summarises the communities from the edges just clustered and stores
+    the map. Best-effort: the communities are written already, and a map
+    that failed is only missing until the next recompute."""
+    try:
+        data = await asyncio.to_thread(
+            community_map.summarize, edges, assignments, final_of_raw,
+        )
+        await writes.store_community_map(pool, tenant, data, modularity=modularity)
+    except (asyncpg.PostgresError, OSError, ValueError, KeyError) as exc:
+        log.warning("community map not stored", extra={"tenant": tenant, "error": str(exc)})
 
 
 async def recompute_communities(
@@ -535,7 +560,12 @@ async def recompute_communities(
 
     written = 0
     if write and assignments:
-        written = await _writeback_assignments(pool, tenant=tenant, assignments=assignments)
+        written, final_of_raw = await _writeback_assignments(
+            pool, tenant=tenant, assignments=assignments,
+        )
+        await _store_community_map(
+            pool, tenant, edges, assignments, final_of_raw, modularity=result.modularity,
+        )
     t3 = _t.perf_counter()
 
     log.info(

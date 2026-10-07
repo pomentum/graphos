@@ -59,6 +59,7 @@ from graphos.cypher import CypherError
 from graphos.db import allow_long_statements
 
 if TYPE_CHECKING:
+    from graphos.community_map import CommunityMapData
     from graphos.resolver import CompiledEdgeType
 
 log = logging.getLogger(__name__)
@@ -774,3 +775,52 @@ async def set_edge_end_communities(
                 await conn.execute("DROP TABLE IF EXISTS _stg_edge_communities;")
 
     return total
+
+
+async def store_community_map(
+    pool: asyncpg.Pool, tenant: str, data: CommunityMapData, *, modularity: float,
+) -> None:
+    """Replaces the tenant's stored community map (see :mod:`graphos.community_map`)
+    with `data`, in one transaction."""
+    async with pool.acquire() as conn, conn.transaction():
+        names = {
+            r["id"]: r["name"]
+            for r in await conn.fetch(
+                "SELECT l.id, l.name FROM ag_catalog.ag_label l "
+                "JOIN ag_catalog.ag_graph g ON g.graphid = l.graph WHERE g.name = $1",
+                tenant,
+            )
+        }
+        await conn.execute("DELETE FROM graphos_meta.community_map WHERE tenant = $1", tenant)
+        await conn.execute("DELETE FROM graphos_meta.community_links WHERE tenant = $1", tenant)
+        await conn.copy_records_to_table(
+            "community_map", schema_name="graphos_meta",
+            columns=[
+                "tenant", "community_id", "size", "labels", "hub_gid", "hub_degree",
+                "internal_edges",
+            ],
+            records=[
+                (
+                    tenant, cid, s.size,
+                    json.dumps({names.get(lid, str(lid)): n for lid, n in s.labels.most_common()}),
+                    s.hub_gid, s.hub_degree, s.internal_edges,
+                )
+                for cid, s in data.communities.items()
+            ],
+        )
+        await conn.copy_records_to_table(
+            "community_links", schema_name="graphos_meta",
+            columns=["tenant", "src", "dst", "type", "count"],
+            records=[(tenant, cs, cd, rel, n) for (cs, cd, rel), n in data.links.items()],
+        )
+        await conn.execute(
+            """
+            INSERT INTO graphos_meta.community_map_runs
+              (tenant, computed_at, communities, modularity)
+            VALUES ($1, now(), $2, $3)
+            ON CONFLICT (tenant) DO UPDATE
+              SET computed_at = now(), communities = EXCLUDED.communities,
+                  modularity = EXCLUDED.modularity
+            """,
+            tenant, len(data.communities), modularity,
+        )

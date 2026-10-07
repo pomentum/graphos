@@ -2,6 +2,7 @@
 
   GET /v1/{tenant}/graph/map               labels, and edge counts between them
   GET /v1/{tenant}/graph/map/hubs?label=   a label's best-connected nodes
+  GET /v1/{tenant}/graph/communities/map   the communities and the edges between them
 
 A client draws one bubble per label and one line per (label, type, label)
 link, then opens the hubs of a label as a starting point. Both read AGE's
@@ -19,6 +20,7 @@ inside a very large table can be missed. ``exact=true`` reads everything.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from dataclasses import dataclass
 from typing import Annotated
@@ -28,7 +30,18 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from graphos.api.graph import _check_tenant, _safe_decode_props
 from graphos.auth import ReadPrincipal
-from graphos.contracts.graph_map import GraphMapResponse, HubNode, HubsResponse, MapLabel, MapLink
+from graphos.contracts.graph_map import (
+    CommunityHub,
+    CommunityLink,
+    CommunityMapResponse,
+    CommunityNode,
+    GraphMapResponse,
+    HubNode,
+    HubsResponse,
+    MapLabel,
+    MapLink,
+    MapLinkType,
+)
 
 router = APIRouter(tags=["graph"], prefix="/{tenant}/graph")
 
@@ -249,4 +262,110 @@ async def graph_hubs(
     return HubsResponse(
         tenant=tenant, label=label, nodes=nodes,
         elapsed_ms=int((time.perf_counter() - started) * 1000),
+    )
+
+
+DEFAULT_COMMUNITIES = 150
+MAX_COMMUNITIES = 1000
+LABELS_PER_COMMUNITY = 5
+
+
+@router.get(
+    "/communities/map",
+    response_model=CommunityMapResponse,
+    summary="The communities and the edges between them",
+    description=(
+        "The communities of the last Louvain recompute, largest first: each "
+        "with its size, its members per label, its best-connected member "
+        "and its internal edge count, plus the edges between them per "
+        "relationship type. Stored by the recompute from the edges it "
+        "clustered, so it is exact and cheap, and as current as the last "
+        "recompute (`computed_at`). `available` is false until a recompute "
+        "has run since this was added."
+    ),
+)
+async def community_map(
+    tenant: str,
+    request: Request,
+    principal: ReadPrincipal,
+    limit: Annotated[int, Query(ge=1, le=MAX_COMMUNITIES)] = DEFAULT_COMMUNITIES,
+) -> CommunityMapResponse:
+    _check_tenant(tenant, principal)
+    async with request.app.state.pool.acquire() as conn:
+        run = await conn.fetchrow(
+            "SELECT computed_at, communities, modularity "
+            "FROM graphos_meta.community_map_runs WHERE tenant = $1",
+            tenant,
+        )
+        if run is None:
+            return CommunityMapResponse(tenant=tenant, available=False)
+        rows = await conn.fetch(
+            """
+            SELECT community_id, size, labels::text AS labels, hub_gid, hub_degree, internal_edges
+            FROM graphos_meta.community_map WHERE tenant = $1
+            ORDER BY size DESC, community_id
+            LIMIT $2
+            """,
+            tenant, limit,
+        )
+        ids = [r["community_id"] for r in rows]
+        link_rows = await conn.fetch(
+            """
+            SELECT src, dst, type, count FROM graphos_meta.community_links
+            WHERE tenant = $1 AND src = ANY($2::int[]) AND dst = ANY($2::int[])
+            ORDER BY count DESC
+            """,
+            tenant, ids,
+        )
+        hub_gids = [str(r["hub_gid"]) for r in rows if r["hub_gid"] is not None]
+        hubs = {
+            int(r["gid"]): r
+            for r in await conn.fetch(
+                f"""
+                SELECT v.id::text AS gid, c.relname AS label, v.properties::text AS props
+                FROM "{tenant}"."_ag_label_vertex" v
+                JOIN pg_class c ON c.oid = v.tableoid
+                WHERE v.id = ANY($1::text[]::ag_catalog.graphid[])
+                """,
+                hub_gids,
+            )
+        } if hub_gids else {}
+
+    communities = []
+    for r in rows:
+        labels = json.loads(r["labels"])
+        hub_row = hubs.get(r["hub_gid"]) if r["hub_gid"] is not None else None
+        hub = None
+        if hub_row is not None:
+            properties = _safe_decode_props(hub_row["props"])
+            hub = CommunityHub(
+                id=str(properties.get("id", hub_row["gid"])),
+                label=hub_row["label"],
+                properties=properties,
+                degree=r["hub_degree"],
+            )
+        communities.append(CommunityNode(
+            community_id=r["community_id"],
+            size=r["size"],
+            labels=dict(list(labels.items())[:LABELS_PER_COMMUNITY]),
+            hub=hub,
+            internal_edges=r["internal_edges"],
+        ))
+
+    pairs: dict[tuple[int, int], CommunityLink] = {}
+    for r in link_rows:
+        key = (r["src"], r["dst"])
+        link = pairs.get(key)
+        if link is None:
+            link = pairs[key] = CommunityLink(src=r["src"], dst=r["dst"], count=0, types=[])
+        link.count += r["count"]
+        link.types.append(MapLinkType(type=r["type"], count=r["count"]))
+    return CommunityMapResponse(
+        tenant=tenant,
+        available=True,
+        computed_at=run["computed_at"],
+        modularity=run["modularity"],
+        n_communities=run["communities"],
+        communities=communities,
+        links=sorted(pairs.values(), key=lambda link: -link.count),
     )

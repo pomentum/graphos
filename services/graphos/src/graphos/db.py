@@ -163,6 +163,35 @@ CREATE TABLE IF NOT EXISTS graphos_meta.node_properties_complete (
     since   timestamptz NOT NULL DEFAULT now()
 );
 
+-- The community map (``graphos.community_map``): written with each Louvain
+-- recompute from the edges it clustered, read by GET .../communities/map.
+CREATE TABLE IF NOT EXISTS graphos_meta.community_map (
+    tenant          text NOT NULL,
+    community_id    integer NOT NULL,
+    size            integer NOT NULL,
+    labels          jsonb NOT NULL,
+    hub_gid         bigint,
+    hub_degree      integer NOT NULL DEFAULT 0,
+    internal_edges  bigint NOT NULL DEFAULT 0,
+    PRIMARY KEY (tenant, community_id)
+);
+
+CREATE TABLE IF NOT EXISTS graphos_meta.community_links (
+    tenant  text NOT NULL,
+    src     integer NOT NULL,
+    dst     integer NOT NULL,
+    type    text NOT NULL,
+    count   bigint NOT NULL,
+    PRIMARY KEY (tenant, src, dst, type)
+);
+
+CREATE TABLE IF NOT EXISTS graphos_meta.community_map_runs (
+    tenant       text PRIMARY KEY,
+    computed_at  timestamptz NOT NULL,
+    communities  integer NOT NULL,
+    modularity   double precision
+);
+
 -- Background jobs (``graphos.jobs``): long operations a caller asked to
 -- run asynchronously.  ``tenant`` is NULL for instance-wide jobs (vacuum).
 -- ``heartbeat_at`` is refreshed by the process running the job; a running

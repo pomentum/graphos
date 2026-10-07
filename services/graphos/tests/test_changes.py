@@ -53,6 +53,9 @@ def test_every_write_function_records_a_change() -> None:
         # end_community_id is an internal column, not part of any node or edge
         # a consumer reads; set_node_communities records the recompute.
         "set_edge_end_communities",
+        # A summary derived from the same recompute (graphos_meta, not graph
+        # data); the recompute is recorded once, by set_node_communities.
+        "store_community_map",
     }
     tree = ast.parse(WRITES.read_text(encoding="utf-8"))
     recorders = {"_delete_nodes_recorded"}

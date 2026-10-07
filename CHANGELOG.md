@@ -14,6 +14,11 @@ each existing tenant once, in the background, to record its property names (abou
 
 ### Added
 
+- **Community map.** `GET …/graph/communities/map` returns the communities of the last Louvain
+  recompute, largest first, each with its size, members per label, best-connected member and
+  internal edge count, and the edges between communities per relationship type. The recompute
+  stores it from the edges it already clustered, so reading it is exact and instant; it is
+  `available: false` until a recompute has run.
 - **Graph map.** `GET …/graph/map` returns every vertex label with its node count and every
   (source label, edge type, target label) with its edge count: a large tenant at a glance.
   `GET …/graph/map/hubs?label=` returns a label's best-connected nodes, a place to start

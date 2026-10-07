@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -11,6 +12,11 @@ class MapLabel(BaseModel):
     """One vertex label and how many nodes it holds (its own rows, not its children's)."""
 
     label: str
+    count: int
+
+
+class MapLinkType(BaseModel):
+    type: str
     count: int
 
 
@@ -51,3 +57,41 @@ class HubsResponse(BaseModel):
     label: str
     nodes: list[HubNode]
     elapsed_ms: int
+
+
+class CommunityHub(BaseModel):
+    """A community's best-connected member, to name the community after."""
+
+    id: str
+    label: str
+    properties: dict[str, Any]
+    degree: int
+
+
+class CommunityNode(BaseModel):
+    community_id: int
+    size: int
+    labels: dict[str, int] = Field(..., description="Members per label, most first (up to 5).")
+    hub: CommunityHub | None = None
+    internal_edges: int
+
+
+class CommunityLink(BaseModel):
+    """Edges from members of one community to members of another."""
+
+    src: int
+    dst: int
+    count: int
+    types: list[MapLinkType]
+
+
+class CommunityMapResponse(BaseModel):
+    """The communities of the last Louvain recompute and the edges between them."""
+
+    tenant: str
+    available: bool = Field(..., description="False until a recompute has stored a map.")
+    computed_at: datetime | None = None
+    modularity: float | None = None
+    n_communities: int = 0
+    communities: list[CommunityNode] = Field(default_factory=list)
+    links: list[CommunityLink] = Field(default_factory=list)
