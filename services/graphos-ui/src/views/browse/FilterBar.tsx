@@ -1,5 +1,6 @@
 import { Button, Group, Select, TextInput } from "@mantine/core";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { FILTER_OPS, needsValue, type BrowseFilter, type FilterOp } from "./browseState";
 
 export interface FilterBarProps {
@@ -16,6 +17,7 @@ export interface FilterBarProps {
  * key. Remount it (key) to start again from a new applied filter.
  */
 export function FilterBar({ properties, filter, onApply }: FilterBarProps) {
+  const { t } = useTranslation();
   const [property, setProperty] = useState<string | null>(filter?.property ?? null);
   const [op, setOp] = useState<FilterOp>(filter?.op ?? "=");
   const [value, setValue] = useState(filter?.value ?? "");
@@ -29,8 +31,8 @@ export function FilterBar({ properties, filter, onApply }: FilterBarProps) {
       <Select
         size="xs"
         w={160}
-        placeholder="Filter on…"
-        aria-label="Filter property"
+        placeholder={t("views.browse.filter.propertyPlaceholder")}
+        aria-label={t("views.browse.filter.property")}
         data={properties}
         value={property}
         onChange={setProperty}
@@ -41,8 +43,8 @@ export function FilterBar({ properties, filter, onApply }: FilterBarProps) {
       <Select
         size="xs"
         w={110}
-        aria-label="Condition"
-        data={FILTER_OPS}
+        aria-label={t("views.browse.filter.condition")}
+        data={FILTER_OPS.map((option) => ({ value: option.value, label: t(option.label) }))}
         value={op}
         onChange={(next) => setOp((next as FilterOp | null) ?? "=")}
         allowDeselect={false}
@@ -52,8 +54,8 @@ export function FilterBar({ properties, filter, onApply }: FilterBarProps) {
         <TextInput
           size="xs"
           w={160}
-          placeholder="value"
-          aria-label="Filter value"
+          placeholder={t("views.browse.filter.valuePlaceholder")}
+          aria-label={t("views.browse.filter.value")}
           value={value}
           disabled={!property}
           onChange={(event) => setValue(event.currentTarget.value)}
@@ -63,11 +65,11 @@ export function FilterBar({ properties, filter, onApply }: FilterBarProps) {
         />
       ) : null}
       <Button size="xs" variant="default" disabled={!property} onClick={apply}>
-        Apply
+        {t("common.actions.apply")}
       </Button>
       {filter ? (
         <Button size="xs" variant="subtle" color="gray" onClick={() => onApply(null)}>
-          Clear
+          {t("common.actions.clear")}
         </Button>
       ) : null}
     </Group>

@@ -1,6 +1,7 @@
 import { Avatar, Badge, Button, Group, Select, Text, UnstyledButton } from "@mantine/core";
 import { IconChevronRight } from "@tabler/icons-react";
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import type { ChangeItem } from "../../api/types";
 import { useActivity } from "../../data/ActivityProvider";
@@ -16,6 +17,8 @@ import classes from "./ActivityView.module.css";
  * Explore (those rows show a chevron); the others are plain rows.
  */
 export function ActivityView() {
+  const { t } = useTranslation();
+  const unknown = t("common.unknownConsumer");
   const { changes, status, markSeen } = useActivity();
   const { api } = useTenantSession();
   const workspace = useWorkspace();
@@ -27,11 +30,9 @@ export function ActivityView() {
   const newest = changes[0]?.cursor;
   useEffect(markSeen, [markSeen, newest]);
 
-  const people = useMemo(() => unique(changes.map((c) => c.consumer ?? "unknown")), [changes]);
+  const people = useMemo(() => unique(changes.map((c) => c.consumer ?? unknown)), [changes, unknown]);
   const labels = useMemo(() => unique(changes.map((c) => c.label ?? "")).filter(Boolean), [changes]);
-  const shown = changes.filter(
-    (c) => (!person || (c.consumer ?? "unknown") === person) && (!label || c.label === label),
-  );
+  const shown = changes.filter((c) => (!person || (c.consumer ?? unknown) === person) && (!label || c.label === label));
 
   /** Opens the node, then fills in its properties (the change carries only its id). */
   const open = (change: ChangeItem) => {
@@ -55,34 +56,32 @@ export function ActivityView() {
         <Group gap="xs">
           <Select
             size="xs"
-            placeholder="Everyone"
+            placeholder={t("views.activity.everyone")}
             data={people}
             value={person}
             onChange={setPerson}
             clearable
             w={160}
-            aria-label="Filter by person"
+            aria-label={t("views.activity.byPerson")}
           />
           <Select
             size="xs"
-            placeholder="All labels"
+            placeholder={t("views.activity.allLabels")}
             data={labels}
             value={label}
             onChange={setLabel}
             clearable
             w={160}
-            aria-label="Filter by label"
+            aria-label={t("views.activity.byLabel")}
           />
         </Group>
       </Group>
 
       {shown.length === 0 ? (
         <div className={classes.empty}>
-          <Text fw={600}>{filtered ? "No changes match these filters" : "Nothing yet"}</Text>
+          <Text fw={600}>{filtered ? t("views.activity.noMatch") : t("views.activity.empty")}</Text>
           <Text size="sm" c="dimmed">
-            {filtered
-              ? `${changes.length} changes are hidden by the filters.`
-              : "Changes made from now on appear here as they happen."}
+            {filtered ? t("views.activity.hidden", { count: changes.length }) : t("views.activity.emptyHint")}
           </Text>
           {filtered ? (
             <Button
@@ -94,7 +93,7 @@ export function ActivityView() {
                 setLabel(null);
               }}
             >
-              Clear filters
+              {t("views.activity.clearFilters")}
             </Button>
           ) : null}
         </div>
@@ -109,7 +108,7 @@ export function ActivityView() {
                 className={classes.row}
                 data-openable={openable || undefined}
                 onClick={openable ? () => open(change) : undefined}
-                title={openable ? "Open in Explore" : undefined}
+                title={openable ? t("common.actions.openInExplore") : undefined}
               >
                 <Avatar size={28} radius="xl" color="gray">
                   {(change.consumer ?? "?").slice(0, 2).toUpperCase()}
@@ -117,7 +116,7 @@ export function ActivityView() {
                 <div className={classes.text}>
                   <Text size="sm" truncate title={describeChange(change)}>
                     <Text span fw={600}>
-                      {change.consumer ?? "unknown"}
+                      {change.consumer ?? unknown}
                     </Text>{" "}
                     {describeChange(change).replace(/^./, (c) => c.toLowerCase())}
                   </Text>

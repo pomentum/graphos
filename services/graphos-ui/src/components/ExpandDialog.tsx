@@ -1,5 +1,6 @@
 import { Button, Checkbox, Group, Modal, Stack, Text } from "@mantine/core";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { EdgeTypeCount } from "../lib/expand";
 import { formatCount } from "../lib/time";
 
@@ -18,14 +19,22 @@ export interface ExpandDialogProps {
  * per edge type with its count, so a hub never floods the canvas.
  */
 export function ExpandDialog({ opened, nodeName, counts, truncated, onCancel, onConfirm }: ExpandDialogProps) {
+  const { t } = useTranslation();
   const [chosen, setChosen] = useState<string[]>([]);
   useEffect(() => setChosen([]), [counts]);
   const total = counts.filter((c) => chosen.includes(c.type)).reduce((sum, c) => sum + c.in + c.out, 0);
 
   return (
-    <Modal opened={opened} onClose={onCancel} title={`${nodeName} has many neighbours`} centered radius="lg" size="sm">
+    <Modal
+      opened={opened}
+      onClose={onCancel}
+      title={t("components.expandDialog.title", { name: nodeName })}
+      centered
+      radius="lg"
+      size="sm"
+    >
       <Text size="sm" c="dimmed" mb="md">
-        Choose which relationships to follow{truncated ? ". Counts cover the first neighbours only." : "."}
+        {truncated ? t("components.expandDialog.chooseTruncated") : t("components.expandDialog.choose")}
       </Text>
       <Checkbox.Group value={chosen} onChange={setChosen}>
         <Stack gap="xs">
@@ -48,10 +57,12 @@ export function ExpandDialog({ opened, nodeName, counts, truncated, onCancel, on
       </Checkbox.Group>
       <Group justify="flex-end" mt="lg" gap="xs">
         <Button variant="default" size="xs" onClick={onCancel}>
-          Cancel
+          {t("common.actions.cancel")}
         </Button>
         <Button size="xs" disabled={chosen.length === 0} onClick={() => onConfirm(chosen)}>
-          {chosen.length ? `Add ${formatCount(total)}${truncated ? "+" : ""}` : "Add"}
+          {chosen.length
+            ? t("components.expandDialog.addCount", { formatted: `${formatCount(total)}${truncated ? "+" : ""}` })
+            : t("common.actions.add")}
         </Button>
       </Group>
     </Modal>

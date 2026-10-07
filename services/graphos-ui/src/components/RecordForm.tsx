@@ -1,5 +1,6 @@
 import { Alert, Button, Group, Skeleton, Stack, Text } from "@mantine/core";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type { Versioned, VersionedEditor } from "../data/useVersionedEditor";
 import { PropertyEditor } from "./PropertyEditor";
 
@@ -26,6 +27,7 @@ export function RecordForm<T extends Versioned>({
   onSaved,
   actions,
 }: RecordFormProps<T>) {
+  const { t } = useTranslation();
   const save = async () => {
     const saved = await editor.save();
     if (saved) onSaved?.(saved);
@@ -34,14 +36,21 @@ export function RecordForm<T extends Versioned>({
   return (
     <Stack gap="md">
       {editor.stale ? (
-        <Alert color="orange" variant="light" radius="md" title={`${editor.changedBy ?? "Someone"} changed this`}>
-          <Text size="xs">Your edits are kept. Saving applies only the fields you changed.</Text>
+        <Alert
+          color="orange"
+          variant="light"
+          radius="md"
+          title={t("components.recordForm.changedBy", {
+            who: editor.changedBy ?? t("components.recordForm.someone"),
+          })}
+        >
+          <Text size="xs">{t("components.recordForm.editsKept")}</Text>
           <Group gap="xs" mt="xs">
             <Button size="compact-xs" variant="default" onClick={editor.discard}>
-              Discard mine
+              {t("components.recordForm.discardMine")}
             </Button>
             <Button size="compact-xs" loading={editor.saving} onClick={() => void save()}>
-              Save mine
+              {t("components.recordForm.saveMine")}
             </Button>
           </Group>
         </Alert>
@@ -64,10 +73,10 @@ export function RecordForm<T extends Versioned>({
           {editor.dirty && !editor.stale ? (
             <Group gap="xs">
               <Button size="xs" variant="default" onClick={editor.discard}>
-                Revert
+                {t("common.actions.revert")}
               </Button>
               <Button size="xs" loading={editor.saving} onClick={() => void save()}>
-                Save
+                {t("common.actions.save")}
               </Button>
             </Group>
           ) : null}

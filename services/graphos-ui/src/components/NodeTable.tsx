@@ -1,4 +1,5 @@
 import { Table, Text } from "@mantine/core";
+import { useTranslation } from "react-i18next";
 import type { Properties } from "../api/types";
 import { formatValue } from "../lib/properties";
 import classes from "./NodeTable.module.css";
@@ -25,6 +26,7 @@ export interface NodeTableProps {
 
 /** Nodes as rows: the id, then one column per property; long values are cut, with the full value on hover. */
 export function NodeTable({ rows, columns, onOpen, stale }: NodeTableProps) {
+  const { t } = useTranslation();
   return (
     <Table
       stickyHeader
@@ -48,7 +50,7 @@ export function NodeTable({ rows, columns, onOpen, stale }: NodeTableProps) {
             key={`${row.label}:${row.id}`}
             className={classes.row}
             tabIndex={0}
-            aria-label={`Open ${row.id}`}
+            aria-label={t("components.nodeTable.openRow", { id: row.id })}
             onClick={() => onOpen(row)}
             onKeyDown={(event) => {
               if (event.key === "Enter") onOpen(row);

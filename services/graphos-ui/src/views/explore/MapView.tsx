@@ -1,5 +1,6 @@
 import { Button, CloseButton, Group, Loader, Text } from "@mantine/core";
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { GraphCanvas } from "../../components/GraphCanvas";
 import { useGraphMap } from "../../data/queries";
 import { buildMapModel, mapCategories, mapEdgeDisplay, mapNodeDisplay } from "../../graph/graphMap";
@@ -21,6 +22,7 @@ const NO_FOCUS = { nodes: new Set<string>(), edges: new Set<string>() };
  * from its best-connected nodes") to put its hubs on the graph canvas.
  */
 export function MapView({ onMode }: { onMode: (mode: ExploreMode) => void }) {
+  const { t } = useTranslation();
   const [exact, setExact] = useState(false);
   const map = useGraphMap(exact);
   const palette = usePalette();
@@ -48,7 +50,7 @@ export function MapView({ onMode }: { onMode: (mode: ExploreMode) => void }) {
 
   return (
     <div className={classes.root} data-inspector={selected ? "open" : "closed"}>
-      <section className={classes.canvas} aria-label="Map of labels">
+      <section className={classes.canvas} aria-label={t("views.explore.map.region")}>
         {model ? (
           <GraphCanvas
             model={model}
@@ -68,7 +70,7 @@ export function MapView({ onMode }: { onMode: (mode: ExploreMode) => void }) {
               <>
                 <Loader size="sm" />
                 <Text size="sm" c="dimmed">
-                  Counting labels and the edges between them…
+                  {t("views.explore.map.counting")}
                 </Text>
               </>
             )}
@@ -81,14 +83,15 @@ export function MapView({ onMode }: { onMode: (mode: ExploreMode) => void }) {
         {totals ? (
           <Group gap={8} className={classes.note} wrap="nowrap">
             <Text size="xs" c="dimmed">
-              {formatCount(totals.labels)} labels · {formatCount(totals.nodes)} nodes ·{" "}
-              {map.data?.estimated ? "≈ " : ""}
-              {formatCount(totals.edges)} edges
-              {map.data?.estimated ? " (large tables sampled)" : ""}
+              {t(map.data?.estimated ? "views.explore.map.totalsEstimated" : "views.explore.map.totals", {
+                labels: t("common.counts.labels", { count: totals.labels, formatted: formatCount(totals.labels) }),
+                nodes: t("common.counts.nodes", { count: totals.nodes, formatted: formatCount(totals.nodes) }),
+                edges: t("common.counts.edges", { count: totals.edges, formatted: formatCount(totals.edges) }),
+              })}
             </Text>
             {map.data?.estimated ? (
               <Button size="compact-xs" variant="subtle" loading={map.isFetching} onClick={() => setExact(true)}>
-                Count exactly
+                {t("views.explore.map.countExactly")}
               </Button>
             ) : null}
           </Group>
@@ -96,8 +99,12 @@ export function MapView({ onMode }: { onMode: (mode: ExploreMode) => void }) {
       </section>
 
       {selected && map.data ? (
-        <aside className={classes.inspector} aria-label="Label">
-          <CloseButton className={classes.close} aria-label="Close" onClick={() => setSelected(null)} />
+        <aside className={classes.inspector} aria-label={t("views.explore.map.panel")}>
+          <CloseButton
+            className={classes.close}
+            aria-label={t("common.actions.close")}
+            onClick={() => setSelected(null)}
+          />
           <MapPanel
             map={map.data}
             label={selected}

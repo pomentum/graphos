@@ -1,5 +1,6 @@
 import { Button, Stack, Text } from "@mantine/core";
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { t } from "../i18n";
 
 interface State {
   error: Error | null;
@@ -29,12 +30,12 @@ export class ErrorBoundary extends Component<{ children: ReactNode; resetKey: st
     if (!this.state.error) return this.props.children;
     return (
       <Stack align="center" justify="center" h="100%" gap="xs" p="xl">
-        <Text fw={600}>This view stopped working</Text>
+        <Text fw={600}>{t("errors.viewFailed")}</Text>
         <Text size="sm" c="dimmed" ta="center" maw={420}>
           {this.state.error.message}
         </Text>
         <Button size="xs" variant="default" mt="sm" onClick={() => this.setState({ error: null })}>
-          Try again
+          {t("common.actions.tryAgain")}
         </Button>
       </Stack>
     );

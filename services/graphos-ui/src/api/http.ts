@@ -1,3 +1,5 @@
+import { t } from "../i18n";
+
 /** Query string values; arrays repeat the key, `undefined` and `null` are left out. */
 export type Query = Record<string, string | number | boolean | string[] | undefined | null>;
 
@@ -39,7 +41,7 @@ export function describeError(status: number, body: unknown): string {
   if (Array.isArray(detail)) {
     return detail.map((d) => (typeof d === "object" && d && "msg" in d ? String(d.msg) : String(d))).join("; ");
   }
-  return `Request failed (${status})`;
+  return t("errors.requestFailed", { status });
 }
 
 /**

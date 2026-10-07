@@ -1,5 +1,6 @@
 import { Group, Text, UnstyledButton } from "@mantine/core";
 import { IconArrowLeft, IconArrowRight } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { displayName, type GraphModel } from "../graph/GraphModel";
 import classes from "./ConnectionList.module.css";
 
@@ -20,12 +21,13 @@ export interface ConnectionListProps {
  * where it asks first.
  */
 export function ConnectionList({ model, nodeKey, onSelect, onSelectEdge, max = 12 }: ConnectionListProps) {
+  const { t } = useTranslation();
   const all = model.graph.edges(nodeKey).filter((edge) => !model.graph.getEdgeAttribute(edge, "more"));
   const edges = all.slice(0, max);
   if (edges.length === 0) {
     return (
       <Text size="xs" c="dimmed">
-        None yet. Expand the node (or double-click it) to add its neighbours.
+        {t("components.connectionList.empty")}
       </Text>
     );
   }
@@ -38,9 +40,19 @@ export function ConnectionList({ model, nodeKey, onSelect, onSelectEdge, max = 1
         const Arrow = outgoing ? IconArrowRight : IconArrowLeft;
         return (
           <div key={edge} className={classes.row}>
-            <UnstyledButton className={classes.edge} onClick={() => onSelectEdge(edge)} title="Show this relationship">
+            <UnstyledButton
+              className={classes.edge}
+              onClick={() => onSelectEdge(edge)}
+              title={t("components.connectionList.showEdge")}
+            >
               <Group gap={6} wrap="nowrap">
-                <Arrow size={12} className="gx-muted" aria-label={outgoing ? "outgoing" : "incoming"} />
+                <Arrow
+                  size={12}
+                  className="gx-muted"
+                  aria-label={
+                    outgoing ? t("components.connectionList.outgoing") : t("components.connectionList.incoming")
+                  }
+                />
                 <Text size="xs" c="dimmed">
                   {model.graph.getEdgeAttribute(edge, "edgeType")}
                 </Text>
@@ -56,7 +68,7 @@ export function ConnectionList({ model, nodeKey, onSelect, onSelectEdge, max = 1
       })}
       {all.length > edges.length ? (
         <Text size="xs" c="dimmed" className={classes.row}>
-          and {all.length - edges.length} more on the canvas
+          {t("components.connectionList.more", { count: all.length - edges.length })}
         </Text>
       ) : null}
     </div>

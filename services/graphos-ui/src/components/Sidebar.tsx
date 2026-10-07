@@ -1,7 +1,8 @@
 import { Text } from "@mantine/core";
 import { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { NavLink, useLocation } from "react-router-dom";
-import { menuGroups, type ViewDefinition } from "../views/registry";
+import { GROUP_TITLES, menuGroups, type ViewDefinition } from "../views/registry";
 import classes from "./Sidebar.module.css";
 
 /**
@@ -11,6 +12,7 @@ import classes from "./Sidebar.module.css";
  * between views does not lose a search.
  */
 export function Sidebar({ views }: { views: ViewDefinition[] }) {
+  const { t } = useTranslation();
   const location = useLocation();
   const lastSearch = useRef(new Map<string, string>());
   useEffect(() => {
@@ -18,11 +20,11 @@ export function Sidebar({ views }: { views: ViewDefinition[] }) {
   }, [location.pathname, location.search]);
 
   return (
-    <nav className={classes.root} aria-label="Views">
+    <nav className={classes.root} aria-label={t("shell.sidebar.views")}>
       {menuGroups(views).map(([group, items]) => (
         <div key={group} className={classes.section}>
           <Text size="xs" c="dimmed" className={classes.heading}>
-            {group}
+            {t(GROUP_TITLES[group])}
           </Text>
           {items.map((view) => (
             <NavLink
@@ -31,7 +33,7 @@ export function Sidebar({ views }: { views: ViewDefinition[] }) {
               className={({ isActive }) => (isActive ? `${classes.item} ${classes.active}` : classes.item)}
             >
               <view.icon size={16} stroke={1.7} className={classes.icon} />
-              <span>{view.title}</span>
+              <span>{t(view.title)}</span>
             </NavLink>
           ))}
         </div>

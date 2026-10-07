@@ -1,5 +1,6 @@
 import { Badge, Button, Group, Stack, Text, Tooltip } from "@mantine/core";
 import { IconArrowsMaximize, IconArrowsMinimize, IconEyeOff } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { useDeleteNode, useProperties } from "../data/queries";
 import { useNodeEditor } from "../data/useNodeEditor";
 import { displayName, type GraphModel } from "../graph/GraphModel";
@@ -28,6 +29,7 @@ export interface InspectorProps {
  * component only presents them.
  */
 export function Inspector({ model, selected, onSelect, onSelectEdge, onExpand, onHide }: InspectorProps) {
+  const { t } = useTranslation();
   const { canWrite } = useTenantSession();
   const attributes = model.graph.getNodeAttributes(selected);
   const ref = { id: attributes.id, label: attributes.vertexLabel };
@@ -58,41 +60,41 @@ export function Inspector({ model, selected, onSelect, onSelectEdge, onExpand, o
           </Badge>
           {editor.record ? (
             <Text size="xs" c="dimmed">
-              Revision {editor.record.rev}
+              {t("common.revision", { rev: editor.record.rev })}
             </Text>
           ) : null}
         </Group>
         <Group gap={6} mt="sm">
-          <Tooltip label="Add its neighbours, a page at a time (E)" withArrow>
+          <Tooltip label={t("components.inspector.expandTooltip")} withArrow>
             <Button
               size="compact-xs"
               variant="default"
               leftSection={<IconArrowsMaximize size={13} />}
               onClick={() => onExpand(selected)}
             >
-              Expand
+              {t("components.inspector.expand")}
             </Button>
           </Tooltip>
           {model.canCollapse(selected) ? (
-            <Tooltip label="Take back the neighbours it added (C)" withArrow>
+            <Tooltip label={t("components.inspector.collapseTooltip")} withArrow>
               <Button
                 size="compact-xs"
                 variant="default"
                 leftSection={<IconArrowsMinimize size={13} />}
                 onClick={() => model.collapse(selected)}
               >
-                Collapse
+                {t("components.inspector.collapse")}
               </Button>
             </Tooltip>
           ) : null}
-          <Tooltip label="Take it off the canvas; Back brings it back (H)" withArrow>
+          <Tooltip label={t("components.inspector.hideTooltip")} withArrow>
             <Button
               size="compact-xs"
               variant="default"
               leftSection={<IconEyeOff size={13} />}
               onClick={() => onHide(selected)}
             >
-              Hide
+              {t("components.inspector.hide")}
             </Button>
           </Tooltip>
         </Group>
@@ -105,8 +107,8 @@ export function Inspector({ model, selected, onSelect, onSelectEdge, onExpand, o
         onSaved={(saved) => model.updateNode(selected, saved.properties)}
         actions={
           <ConfirmDelete
-            question="Delete this node and all its relationships?"
-            confirmLabel="Delete node"
+            question={t("components.inspector.deleteQuestion")}
+            confirmLabel={t("components.inspector.deleteConfirm")}
             busy={removeNode.isPending}
             onConfirm={() => void deleteNode()}
           />
@@ -115,7 +117,7 @@ export function Inspector({ model, selected, onSelect, onSelectEdge, onExpand, o
 
       <div>
         <Text size="xs" c="dimmed" mb={6}>
-          Relationships on the canvas
+          {t("components.inspector.relationships")}
         </Text>
         <ConnectionList model={model} nodeKey={selected} onSelect={onSelect} onSelectEdge={onSelectEdge} />
       </div>

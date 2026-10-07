@@ -2,6 +2,7 @@ import { Combobox, Group, Kbd, Loader, ScrollArea, Select, Stack, Text, TextInpu
 import { useDebouncedValue, useHotkeys, type HotkeyItem } from "@mantine/hooks";
 import { IconSearch } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { SearchHit } from "../api/types";
 import { usePropertyNames, useSchema, useSearch } from "../data/queries";
 import { pickSearchIndex } from "../data/searchIndex";
@@ -24,6 +25,7 @@ const BY_ID = "__by_id__";
 export interface NodeSearchProps {
   /** Called with the chosen hit; `add` when Shift was held (Shift Return / Shift click). */
   onPick: (hit: SearchHit, mode: PickMode) => void;
+  /** "Search" by default. */
   placeholder?: string;
   /** Focus with `/` (or ⌘K on Apple devices). Only one search on screen should claim it. */
   hotkey?: boolean;
@@ -58,7 +60,7 @@ function hitId(hit: SearchHit): string {
  */
 export function NodeSearch({
   onPick,
-  placeholder = "Search",
+  placeholder: placeholderText,
   hotkey,
   allowAdd,
   keepSelection,
@@ -67,6 +69,8 @@ export function NodeSearch({
   initialText = "",
   onEdit,
 }: NodeSearchProps) {
+  const { t } = useTranslation();
+  const placeholder = placeholderText ?? t("components.nodeSearch.placeholder");
   const { api } = useTenantSession();
   const [query, setQuery] = useState(initialText);
   const [debounced] = useDebouncedValue(query, 150);
@@ -154,7 +158,7 @@ export function NodeSearch({
   };
 
   const scopes = [
-    ...(index ? [{ value: ANY, label: "Any (index)" }] : []),
+    ...(index ? [{ value: ANY, label: t("components.nodeSearch.anyIndex") }] : []),
     ...(properties.data ?? ["name"]).map((name) => ({ value: name, label: name })),
   ];
 
@@ -166,13 +170,13 @@ export function NodeSearch({
           variant="filled"
           leftSection={
             <Text size="xs" c="dimmed">
-              in
+              {t("components.nodeSearch.in")}
             </Text>
           }
           onFocus={(event) => event.currentTarget.select()}
           radius="md"
-          aria-label="Search in"
-          title="Search in"
+          aria-label={t("components.nodeSearch.searchIn")}
+          title={t("components.nodeSearch.searchIn")}
           data={scopes}
           value={searchIn}
           onChange={(next) => setScope(next ?? null)}
@@ -229,15 +233,21 @@ export function NodeSearch({
         <Combobox.Dropdown hidden={!debounced.trim()}>
           <Combobox.Options>
             <ScrollArea.Autosize mah="min(420px, calc(100vh - 160px))" type="auto">
-              {hits.length === 0 && !fresh ? <Combobox.Empty>Searching…</Combobox.Empty> : null}
+              {hits.length === 0 && !fresh ? (
+                <Combobox.Empty>{t("components.nodeSearch.searching")}</Combobox.Empty>
+              ) : null}
               {hits.length === 0 && fresh ? (
                 idMissing === query.trim() ? (
-                  <Combobox.Empty>No node has this name or id</Combobox.Empty>
+                  <Combobox.Empty>{t("components.nodeSearch.noNode")}</Combobox.Empty>
                 ) : (
                   <Combobox.Option value={BY_ID}>
-                    <Text size="sm">No matches in {searchIn === ANY ? "the index" : searchIn}</Text>
+                    <Text size="sm">
+                      {t("components.nodeSearch.noMatchesIn", {
+                        where: searchIn === ANY ? t("components.nodeSearch.theIndex") : searchIn,
+                      })}
+                    </Text>
                     <Text size="xs" c="dimmed">
-                      Return opens “{middleEllipsis(query.trim(), ID_CHARS)}” as a node id
+                      {t("components.nodeSearch.openById", { id: middleEllipsis(query.trim(), ID_CHARS) })}
                     </Text>
                   </Combobox.Option>
                 )
@@ -277,7 +287,7 @@ export function NodeSearch({
           {allowAdd && hits.length > 0 ? (
             <Combobox.Footer>
               <Text size="xs" c="dimmed">
-                Return opens · Shift Return adds to the canvas
+                {t("components.nodeSearch.footer")}
               </Text>
             </Combobox.Footer>
           ) : null}

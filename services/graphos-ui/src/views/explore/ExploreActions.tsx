@@ -9,15 +9,12 @@ import {
   IconTrashX,
 } from "@tabler/icons-react";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type { ColorBy } from "../../graph/canvasStyle";
 import { isApple } from "../../lib/platform";
 import classes from "./ExploreView.module.css";
 
-const COLOR_MODES: { value: ColorBy; label: string }[] = [
-  { value: "none", label: "No colours" },
-  { value: "label", label: "By label" },
-  { value: "group", label: "By group" },
-];
+const COLOR_MODES: ColorBy[] = ["none", "label", "group"];
 
 export interface ExploreActionsProps {
   /** Shown first, e.g. the Map / Graph switch. */
@@ -41,12 +38,20 @@ export interface ExploreActionsProps {
 
 /** The buttons over the canvas: Back, Focus, new node, connect, colours, clear. */
 export function ExploreActions(props: ExploreActionsProps) {
+  const { t } = useTranslation();
   const { canWrite, hasSelection, isEmpty, busy, colorBy, lastStep, focusOnly } = props;
   const undoKey = isApple() ? "⌘Z" : "Ctrl+Z";
   return (
     <Group gap={6} className={classes.actions}>
       {props.leading}
-      <Tooltip label={lastStep ? `Undo “${lastStep}” (${undoKey})` : "Nothing to undo"} withArrow>
+      <Tooltip
+        label={
+          lastStep
+            ? t("views.explore.actions.backTooltip", { step: lastStep, key: undoKey })
+            : t("views.explore.actions.nothingToUndo")
+        }
+        withArrow
+      >
         <Button
           size="compact-xs"
           variant="default"
@@ -54,11 +59,11 @@ export function ExploreActions(props: ExploreActionsProps) {
           disabled={!lastStep}
           onClick={props.onBack}
         >
-          Back
+          {t("views.explore.actions.back")}
         </Button>
       </Tooltip>
       {hasSelection ? (
-        <Tooltip label="Show only the selection and its neighbours (F)" withArrow>
+        <Tooltip label={t("views.explore.actions.focusTooltip")} withArrow>
           <Button
             size="compact-xs"
             variant={focusOnly ? "filled" : "default"}
@@ -66,7 +71,7 @@ export function ExploreActions(props: ExploreActionsProps) {
             onClick={props.onFocus}
             aria-pressed={focusOnly}
           >
-            Focus
+            {t("views.explore.actions.focus")}
           </Button>
         </Tooltip>
       ) : null}
@@ -77,29 +82,29 @@ export function ExploreActions(props: ExploreActionsProps) {
           leftSection={<IconCirclePlus size={14} />}
           onClick={props.onNewNode}
         >
-          Node
+          {t("views.explore.actions.newNode")}
         </Button>
       ) : null}
       {canWrite && hasSelection ? (
         <Button size="compact-xs" variant="default" leftSection={<IconLink size={14} />} onClick={props.onConnect}>
-          Connect
+          {t("views.explore.actions.connect")}
         </Button>
       ) : null}
       {!isEmpty ? (
         <Menu position="bottom-start" width={160}>
           <Menu.Target>
             <Button size="compact-xs" variant="default" leftSection={<IconPalette size={14} />}>
-              Colours
+              {t("views.explore.actions.colours")}
             </Button>
           </Menu.Target>
           <Menu.Dropdown>
             {COLOR_MODES.map((mode) => (
               <Menu.Item
-                key={mode.value}
-                onClick={() => props.onColorBy(mode.value)}
-                rightSection={colorBy === mode.value ? <IconCheck size={14} /> : null}
+                key={mode}
+                onClick={() => props.onColorBy(mode)}
+                rightSection={colorBy === mode ? <IconCheck size={14} /> : null}
               >
-                {mode.label}
+                {t(`views.explore.colours.${mode}`)}
               </Menu.Item>
             ))}
           </Menu.Dropdown>
@@ -113,7 +118,7 @@ export function ExploreActions(props: ExploreActionsProps) {
           leftSection={<IconTrashX size={14} />}
           onClick={props.onClear}
         >
-          Clear
+          {t("views.explore.actions.clear")}
         </Button>
       ) : null}
       {busy ? <Loader size={14} /> : null}

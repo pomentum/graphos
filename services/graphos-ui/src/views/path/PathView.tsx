@@ -11,6 +11,7 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import type { Direction, GraphPath, SearchHit } from "../../api/types";
 import { GraphCanvas } from "../../components/GraphCanvas";
@@ -36,6 +37,7 @@ function endpoint(hit: SearchHit): Endpoint {
  * back (or sharing the link) shows the same search, run again.
  */
 export function PathView() {
+  const { t } = useTranslation();
   const palette = usePalette();
   const schema = useSchema();
   const paths = usePaths();
@@ -103,11 +105,11 @@ export function PathView() {
 
   return (
     <div className={classes.root}>
-      <aside className={classes.form} aria-label="Path options">
+      <aside className={classes.form} aria-label={t("views.path.options")}>
         <Stack gap="md">
-          <Input.Wrapper label="From">
+          <Input.Wrapper label={t("views.path.from")}>
             <NodeSearch
-              placeholder="Start node"
+              placeholder={t("views.path.startNode")}
               keepSelection
               scoped
               width="100%"
@@ -116,9 +118,9 @@ export function PathView() {
               onPick={(hit) => update({ from: endpoint(hit) })}
             />
           </Input.Wrapper>
-          <Input.Wrapper label="To">
+          <Input.Wrapper label={t("views.path.to")}>
             <NodeSearch
-              placeholder="End node"
+              placeholder={t("views.path.endNode")}
               keepSelection
               scoped
               width="100%"
@@ -127,20 +129,20 @@ export function PathView() {
               onPick={(hit) => update({ to: endpoint(hit) })}
             />
           </Input.Wrapper>
-          <Input.Wrapper label="Direction">
+          <Input.Wrapper label={t("views.path.direction")}>
             <SegmentedControl
               fullWidth
               size="xs"
               value={direction}
               onChange={(value) => update({ direction: value as Direction })}
               data={[
-                { value: "both", label: "Either" },
-                { value: "out", label: "Forward" },
-                { value: "in", label: "Backward" },
+                { value: "both", label: t("views.path.directions.both") },
+                { value: "out", label: t("views.path.directions.out") },
+                { value: "in", label: t("views.path.directions.in") },
               ]}
             />
           </Input.Wrapper>
-          <Input.Wrapper label={`Up to ${maxHops} hops`}>
+          <Input.Wrapper label={t("views.path.upToHops", { count: maxHops })}>
             <Slider
               min={1}
               max={MAX_HOPS}
@@ -152,8 +154,8 @@ export function PathView() {
             />
           </Input.Wrapper>
           <MultiSelect
-            label="Relationships"
-            placeholder={relTypes.length ? undefined : "All"}
+            label={t("views.path.relationships")}
+            placeholder={relTypes.length ? undefined : t("views.path.allRelationships")}
             data={schema.data?.edge_labels ?? []}
             value={relTypes}
             onChange={(next) => update({ relTypes: next })}
@@ -162,7 +164,7 @@ export function PathView() {
             clearable
           />
           <Button disabled={!from || !to} loading={paths.isPending} onClick={() => void find()}>
-            Find paths
+            {t("views.path.findPaths")}
           </Button>
           {paths.error ? (
             <Alert color="red" variant="light" radius="md">
@@ -178,7 +180,7 @@ export function PathView() {
                 onDoubleClick={() => openInExplore(path)}
               >
                 <Text size="xs" c="dimmed">
-                  Path {index + 1} · {path.edges.length} {path.edges.length === 1 ? "hop" : "hops"}
+                  {t("views.path.pathTitle", { index: index + 1, count: path.edges.length })}
                 </Text>
                 <Text size="sm" lineClamp={2}>
                   {path.nodes.map((n) => displayName(n.properties ?? {}, n.id)).join(" → ")}
@@ -187,7 +189,7 @@ export function PathView() {
               {chosen === index ? (
                 <Group justify="flex-end" mt={4}>
                   <Button size="compact-xs" variant="default" onClick={() => openInExplore(path)}>
-                    Open in Explore
+                    {t("common.actions.openInExplore")}
                   </Button>
                 </Group>
               ) : null}
@@ -195,7 +197,7 @@ export function PathView() {
           ))}
         </Stack>
       </aside>
-      <section className={classes.canvas} aria-label="Paths">
+      <section className={classes.canvas} aria-label={t("views.path.canvas")}>
         <GraphCanvas model={model} emphasis={emphasis} palette={palette} onSelect={() => undefined} />
       </section>
     </div>

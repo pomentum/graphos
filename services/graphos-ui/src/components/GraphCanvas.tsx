@@ -1,6 +1,7 @@
 import { ActionIcon, Group } from "@mantine/core";
 import { IconFocusCentered, IconMinus, IconPlus } from "@tabler/icons-react";
 import { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import Sigma from "sigma";
 import type { NodeHoverDrawingFunction } from "sigma/rendering";
 import type { MouseCoords } from "sigma/types";
@@ -41,6 +42,7 @@ export function GraphCanvas({
   frame,
   style = GRAPH_STYLE,
 }: GraphCanvasProps) {
+  const { t } = useTranslation();
   const container = useRef<HTMLDivElement>(null);
   const sigma = useRef<Sigma<NodeAttributes, EdgeAttributes> | null>(null);
   // Sigma's callbacks read these refs, so they always see the latest props.
@@ -121,18 +123,28 @@ export function GraphCanvas({
     <div className={classes.root} style={{ background: palette.canvas }}>
       <div ref={container} className={classes.stage} data-testid="graph-canvas" />
       <Group gap={2} className={classes.zoom}>
-        <ActionIcon variant="subtle" color="gray" aria-label="Zoom out" onClick={() => camera()?.animatedUnzoom(1.5)}>
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          aria-label={t("components.graphCanvas.zoomOut")}
+          onClick={() => camera()?.animatedUnzoom(1.5)}
+        >
           <IconMinus size={15} />
         </ActionIcon>
         <ActionIcon
           variant="subtle"
           color="gray"
-          aria-label="Show everything"
+          aria-label={t("components.graphCanvas.showAll")}
           onClick={() => camera()?.animatedReset()}
         >
           <IconFocusCentered size={15} />
         </ActionIcon>
-        <ActionIcon variant="subtle" color="gray" aria-label="Zoom in" onClick={() => camera()?.animatedZoom(1.5)}>
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          aria-label={t("components.graphCanvas.zoomIn")}
+          onClick={() => camera()?.animatedZoom(1.5)}
+        >
           <IconPlus size={15} />
         </ActionIcon>
       </Group>

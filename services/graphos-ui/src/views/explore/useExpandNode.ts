@@ -3,6 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import type { Neighbor, NeighborsResponse } from "../../api/types";
 import type { ExpandDialogProps } from "../../components/ExpandDialog";
 import { useExpand } from "../../data/queries";
+import { t } from "../../i18n";
 import { countByEdgeType, EXPAND_FETCH_LIMIT } from "../../lib/expand";
 import { displayName, nodeKey, type GraphModel } from "../../graph/GraphModel";
 
@@ -52,13 +53,13 @@ export function useExpandNode(
   const begin = (center: string, neighbors: Neighbor[]) => {
     const shown = neighbors.filter((n) => model.graph.hasNode(nodeKey({ id: n.neighbor_id, label: n.neighbor_label })));
     if (neighbors.length === 0) {
-      notifications.show({ message: "No neighbours", color: "gray" });
+      notifications.show({ message: t("notices.noNeighbours"), color: "gray" });
       return;
     }
     // Edges to neighbours already on the canvas are drawn at once; new ones page.
     if (shown.length > 0) model.addNeighbors(center, shown);
     if (shown.length === neighbors.length) {
-      notifications.show({ message: "Its neighbours are all on the canvas already", color: "gray" });
+      notifications.show({ message: t("notices.neighboursAllShown"), color: "gray" });
       onExpanded(center, []);
       return;
     }

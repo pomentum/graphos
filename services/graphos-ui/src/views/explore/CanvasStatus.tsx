@@ -1,4 +1,5 @@
 import { Button, Loader, Text } from "@mantine/core";
+import { useTranslation } from "react-i18next";
 import type { Overview } from "../../graph/WorkspaceProvider";
 import { searchShortcut } from "../../lib/platform";
 import { formatCount } from "../../lib/time";
@@ -18,12 +19,13 @@ export function CanvasStatus({
   isEmpty: boolean;
   onLoad: () => void;
 }) {
+  const { t } = useTranslation();
   if (overview.status === "loading") {
     return (
       <div className={classes.empty}>
         <Loader size="sm" />
         <Text size="sm" c="dimmed">
-          Loading the graph…
+          {t("views.explore.status.loading")}
         </Text>
       </div>
     );
@@ -31,12 +33,16 @@ export function CanvasStatus({
   if (isEmpty) {
     return (
       <div className={classes.empty}>
-        <Text fw={600}>{overview.status === "failed" ? "Couldn't load the graph" : "The canvas is empty"}</Text>
+        <Text fw={600}>
+          {overview.status === "failed" ? t("views.explore.status.failed") : t("views.explore.status.empty")}
+        </Text>
         <Text size="sm" c="dimmed">
-          Find a node with search ({searchShortcut()}), then double-click it to see its neighbours.
+          {t("views.explore.status.emptyHint", { shortcut: searchShortcut() })}
         </Text>
         <Button size="xs" variant="default" mt="sm" className={classes.emptyAction} onClick={onLoad}>
-          {overview.total && overview.total > WHOLE_GRAPH_LIMIT ? "Open the map" : "Show the whole graph"}
+          {overview.total && overview.total > WHOLE_GRAPH_LIMIT
+            ? t("views.explore.status.openMap")
+            : t("views.explore.status.showWhole")}
         </Button>
       </div>
     );
@@ -44,7 +50,11 @@ export function CanvasStatus({
   if (overview.status === "shown" && overview.total && overview.shown && overview.total > overview.shown) {
     return (
       <Text size="xs" className={classes.note}>
-        A sample of {formatCount(overview.shown)} of {formatCount(overview.total)} nodes. Search to focus on one.
+        {t("views.explore.status.sample", {
+          count: overview.total,
+          shown: formatCount(overview.shown),
+          total: formatCount(overview.total),
+        })}
       </Text>
     );
   }

@@ -1,5 +1,6 @@
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import type { GraphMap } from "../api/types";
+import { t } from "../i18n";
 import { formatCount } from "../lib/time";
 import { rankColors } from "../theme/categories";
 import type { Palette } from "../theme/tokens";
@@ -98,7 +99,7 @@ export function linksOf(map: GraphMap, label: string): LabelLinks {
  */
 export function mapNodeDisplay(key: string, node: NodeAttributes, emphasis: Emphasis, palette: Palette): NodeDisplay {
   const count = Number(node.properties.count ?? 0);
-  const label = `${node.vertexLabel} · ${formatCount(count)}`;
+  const label = t("views.explore.map.bubbleLabel", { label: node.vertexLabel, formatted: formatCount(count) });
   const colour = emphasis.categories?.colors.get(node.vertexLabel) ?? palette.nodeIdle;
   const focused = emphasis.focus.nodes.size > 0;
   if (key === emphasis.selected) {

@@ -15,6 +15,7 @@ import { ConnectView } from "./views/connect/ConnectView";
 import { ExploreView } from "./views/explore/ExploreView";
 import { OverviewView } from "./views/overview/OverviewView";
 import { PathView } from "./views/path/PathView";
+import { t } from "./i18n";
 import { VIEWS } from "./views/registry";
 
 /** The component behind each view of the registry. */
@@ -32,7 +33,8 @@ function createQueryClient(): QueryClient {
     // A write that fails always says so, whichever screen started it.
     mutationCache: new MutationCache({
       onSuccess: (_data, _variables, _context, mutation) => {
-        if (mutation.meta?.success) notifications.show({ message: String(mutation.meta.success), autoClose: 2000 });
+        // `meta.success` and `meta.errorTitle` are i18n keys (see data/queries).
+        if (mutation.meta?.success) notifications.show({ message: t(mutation.meta.success), autoClose: 2000 });
       },
       onError: (error, _variables, _context, mutation) =>
         !mutation.meta?.silent &&
@@ -40,8 +42,8 @@ function createQueryClient(): QueryClient {
           color: "red",
           title:
             error instanceof ApiError && error.isConflict
-              ? "Changed by someone else"
-              : String(mutation.meta?.errorTitle ?? "Not saved"),
+              ? t("errors.conflict")
+              : t(mutation.meta?.errorTitle ?? "errors.notSaved"),
           message: error.message,
         }),
     }),

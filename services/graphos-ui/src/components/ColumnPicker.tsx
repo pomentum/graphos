@@ -1,5 +1,6 @@
 import { Button, Checkbox, Popover, ScrollArea, Stack } from "@mantine/core";
 import { IconColumns3 } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 
 export interface ColumnPickerProps {
   /** Every column that can be shown, in the order offered. */
@@ -11,6 +12,7 @@ export interface ColumnPickerProps {
 
 /** A Columns button with a checklist; checked columns keep the order of `options`. */
 export function ColumnPicker({ options, value, onChange }: ColumnPickerProps) {
+  const { t } = useTranslation();
   const shown = new Set(value);
   const toggle = (column: string, on: boolean) => {
     const next = new Set(shown);
@@ -23,7 +25,7 @@ export function ColumnPicker({ options, value, onChange }: ColumnPickerProps) {
     <Popover position="bottom-end" shadow="md" width={220}>
       <Popover.Target>
         <Button size="xs" variant="default" leftSection={<IconColumns3 size={14} />}>
-          Columns · {value.length}
+          {t("components.columnPicker.button", { shown: value.length })}
         </Button>
       </Popover.Target>
       <Popover.Dropdown p="xs">

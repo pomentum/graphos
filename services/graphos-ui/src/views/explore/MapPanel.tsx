@@ -1,5 +1,6 @@
 import { Badge, Button, Group, Stack, Text, UnstyledButton } from "@mantine/core";
 import { IconTable, IconTargetArrow } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import type { GraphMap } from "../../api/types";
 import { linksOf } from "../../graph/graphMap";
@@ -24,6 +25,7 @@ export interface MapPanelProps {
  * the canvas, or its nodes in Browse.
  */
 export function MapPanel({ map, label, opening, onOpen, onSelectLabel }: MapPanelProps) {
+  const { t } = useTranslation();
   const count = map.labels.find((l) => l.label === label)?.count ?? 0;
   const { outgoing, incoming } = linksOf(map, label);
   const approx = map.estimated ? "≈ " : "";
@@ -36,12 +38,12 @@ export function MapPanel({ map, label, opening, onOpen, onSelectLabel }: MapPane
         </Text>
         <Group gap={6} mt={4}>
           <Badge variant="light" size="sm" radius="sm" tt="none">
-            {formatCount(count)} nodes
+            {t("common.counts.nodes", { count, formatted: formatCount(count) })}
           </Badge>
         </Group>
         <Stack gap={6} mt="sm">
           <Button size="xs" leftSection={<IconTargetArrow size={14} />} loading={opening} onClick={() => onOpen(label)}>
-            Start from its best-connected nodes
+            {t("views.explore.map.startFromHubs")}
           </Button>
           <Button
             size="xs"
@@ -50,13 +52,25 @@ export function MapPanel({ map, label, opening, onOpen, onSelectLabel }: MapPane
             component={Link}
             to={`/browse?label=${encodeURIComponent(label)}`}
           >
-            Browse its nodes
+            {t("views.explore.map.browseNodes")}
           </Button>
         </Stack>
       </div>
 
-      <LinkList title="Relationships to" rows={outgoing} approx={approx} arrow="→" onSelectLabel={onSelectLabel} />
-      <LinkList title="Relationships from" rows={incoming} approx={approx} arrow="←" onSelectLabel={onSelectLabel} />
+      <LinkList
+        title={t("views.explore.map.relationshipsTo")}
+        rows={outgoing}
+        approx={approx}
+        arrow="→"
+        onSelectLabel={onSelectLabel}
+      />
+      <LinkList
+        title={t("views.explore.map.relationshipsFrom")}
+        rows={incoming}
+        approx={approx}
+        arrow="←"
+        onSelectLabel={onSelectLabel}
+      />
     </Stack>
   );
 }
@@ -74,6 +88,7 @@ function LinkList({
   arrow: string;
   onSelectLabel: (label: string) => void;
 }) {
+  const { t } = useTranslation();
   if (rows.length === 0) return null;
   return (
     <div>
@@ -101,7 +116,7 @@ function LinkList({
         ))}
         {rows.length > SHOWN_LINKS ? (
           <Text size="xs" c="dimmed" className={classes.row}>
-            and {rows.length - SHOWN_LINKS} more
+            {t("views.explore.map.more", { count: rows.length - SHOWN_LINKS })}
           </Text>
         ) : null}
       </div>

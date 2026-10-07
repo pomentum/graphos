@@ -1,3 +1,4 @@
+import type { ParseKeys } from "i18next";
 import type { ScanFilter } from "../../api/types";
 import { valueLike, type PropertyProfile } from "../../lib/properties";
 
@@ -16,11 +17,12 @@ export interface BrowseState {
   filter: BrowseFilter | null;
 }
 
-export const FILTER_OPS: { value: FilterOp; label: string }[] = [
-  { value: "=", label: "is" },
-  { value: "!=", label: "is not" },
-  { value: "exists", label: "is set" },
-  { value: "not exists", label: "is not set" },
+/** The operators offered, in order; `label` is an i18n key, translated where it is shown. */
+export const FILTER_OPS: { value: FilterOp; label: ParseKeys }[] = [
+  { value: "=", label: "views.browse.ops.is" },
+  { value: "!=", label: "views.browse.ops.isNot" },
+  { value: "exists", label: "views.browse.ops.isSet" },
+  { value: "not exists", label: "views.browse.ops.isNotSet" },
 ];
 
 /** Short, URL-friendly names for the operators. */

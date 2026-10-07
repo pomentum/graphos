@@ -1,5 +1,6 @@
 import { Button, Group, Select, Skeleton, Text } from "@mantine/core";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ColumnPicker } from "../../components/ColumnPicker";
 import { NodeTable, type NodeRow } from "../../components/NodeTable";
@@ -20,6 +21,7 @@ const PAGE_SIZE = 50;
  * live in the address, so a view can be bookmarked or sent to someone.
  */
 export function BrowseView() {
+  const { t } = useTranslation();
   const schema = useSchema();
   const stats = useStats();
   const [params, setParams] = useSearchParams();
@@ -49,9 +51,14 @@ export function BrowseView() {
         <Select
           size="xs"
           w={200}
-          aria-label="Label"
-          placeholder="Label"
-          data={labels.map((l) => ({ value: l, label: counts.has(l) ? `${l} · ${formatCount(counts.get(l)!)}` : l }))}
+          aria-label={t("views.browse.label")}
+          placeholder={t("views.browse.label")}
+          data={labels.map((l) => ({
+            value: l,
+            label: counts.has(l)
+              ? t("views.browse.labelOption", { label: l, formatted: formatCount(counts.get(l)!) })
+              : l,
+          }))}
           value={label}
           onChange={(next) => show({ label: next, filter: null })}
           searchable
@@ -75,7 +82,7 @@ export function BrowseView() {
           <Skeleton h={240} radius="lg" />
         ) : (
           <Text c="dimmed" size="sm" className={classes.empty}>
-            No labels yet.
+            {t("views.browse.noLabels")}
           </Text>
         )
       ) : (
@@ -111,6 +118,7 @@ function LabelPages({
   columns: string[] | null;
   onColumns: (columns: string[]) => void;
 }) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { open } = useWorkspace();
   const profile = usePropertyProfile(label);
@@ -146,10 +154,16 @@ function LabelPages({
       <Group justify="space-between" gap="sm">
         <Text size="xs" c="dimmed">
           {!ready || page.isLoading
-            ? "Loading…"
+            ? t("common.state.loading")
             : rows.length === 0
-              ? "No nodes match."
-              : `Rows ${formatCount(from)}–${formatCount(from + rows.length - 1)}${total !== undefined ? ` of ${formatCount(total)}` : ""}`}
+              ? t("views.browse.noNodes")
+              : total !== undefined
+                ? t("views.browse.rowsOf", {
+                    from: formatCount(from),
+                    to: formatCount(from + rows.length - 1),
+                    total: formatCount(total),
+                  })
+                : t("views.browse.rows", { from: formatCount(from), to: formatCount(from + rows.length - 1) })}
         </Text>
         <ColumnPicker options={names} value={columns} onChange={onColumns} />
       </Group>
@@ -169,7 +183,7 @@ function LabelPages({
 
       <Group justify="flex-end" gap="xs">
         <Button size="xs" variant="default" disabled={pager.page === 0} onClick={() => setPager(previousPage(pager))}>
-          Previous
+          {t("common.actions.previous")}
         </Button>
         <Button
           size="xs"
@@ -177,7 +191,7 @@ function LabelPages({
           disabled={nextCursor === null || page.isPlaceholderData}
           onClick={() => nextCursor && setPager(nextPage(pager, nextCursor))}
         >
-          Next
+          {t("common.actions.next")}
         </Button>
       </Group>
     </>

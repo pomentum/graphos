@@ -2,6 +2,7 @@ import Graph from "graphology";
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import type { EdgeKey } from "../api/graphosApi";
 import type { GraphExport, GraphPath, Neighbor, Properties } from "../api/types";
+import { t } from "../i18n";
 
 /** What the canvas stores on each node. */
 export interface NodeAttributes {
@@ -120,7 +121,9 @@ export class GraphModel {
 
   /** Adds a node (or refreshes its properties) and returns its key. */
   addNode(ref: NodeRef, properties: Properties, near?: string): string {
-    return this.track(`Open ${displayName(properties, ref.id)}`, () => this.putNode(ref, properties, near));
+    return this.track(t("views.explore.history.open", { name: displayName(properties, ref.id) }), () =>
+      this.putNode(ref, properties, near),
+    );
   }
 
   /**
@@ -171,7 +174,7 @@ export class GraphModel {
     const name = this.graph.hasNode(centerKey)
       ? displayName(this.graph.getNodeAttribute(centerKey, "properties"), this.graph.getNodeAttribute(centerKey, "id"))
       : centerKey;
-    return this.track(`Expand ${name}`, () => {
+    return this.track(t("views.explore.history.expand", { name }), () => {
       const fresh = neighbors.filter(
         (n) => !this.graph.hasNode(nodeKey({ id: n.neighbor_id, label: n.neighbor_label })),
       );
@@ -221,7 +224,7 @@ export class GraphModel {
 
   /** Adds every node and edge of the paths; returns the keys on them. */
   addPaths(paths: GraphPath[]): { nodes: Set<string>; edges: Set<string> } {
-    return this.track("Add paths", () => {
+    return this.track(t("views.explore.history.addPaths"), () => {
       const nodes = new Set<string>();
       const edges = new Set<string>();
       for (const path of paths) {
@@ -246,7 +249,9 @@ export class GraphModel {
 
   /** Adds one edge between two nodes already on the canvas. */
   addEdge(type: string, srcKey: string, dstKey: string, properties: Properties = {}): string {
-    return this.track(`Connect ${type}`, () => this.putEdge(type, srcKey, dstKey, properties));
+    return this.track(t("views.explore.history.connect", { type }), () =>
+      this.putEdge(type, srcKey, dstKey, properties),
+    );
   }
 
   /** Replaces a node's properties after it was edited. */
@@ -260,7 +265,7 @@ export class GraphModel {
   removeNode(key: string): void {
     if (!this.graph.hasNode(key)) return;
     const attributes = this.graph.getNodeAttributes(key);
-    this.track(`Hide ${displayName(attributes.properties, attributes.id)}`, () => {
+    this.track(t("views.explore.history.hide", { name: displayName(attributes.properties, attributes.id) }), () => {
       this.dropNode(key);
       this.dropNode(moreKey(key));
     });
@@ -269,7 +274,9 @@ export class GraphModel {
   /** Takes an edge off the canvas; Back puts it back. */
   removeEdge(key: string): void {
     if (!this.graph.hasEdge(key)) return;
-    this.track(`Hide ${this.graph.getEdgeAttribute(key, "edgeType")}`, () => this.dropEdge(key));
+    this.track(t("views.explore.history.hide", { name: this.graph.getEdgeAttribute(key, "edgeType") }), () =>
+      this.dropEdge(key),
+    );
   }
 
   /**
@@ -297,7 +304,7 @@ export class GraphModel {
     const doomed = this.collapsible(key);
     if (doomed.length === 0) return;
     const attributes = this.graph.getNodeAttributes(key);
-    this.track(`Collapse ${displayName(attributes.properties, attributes.id)}`, () => {
+    this.track(t("views.explore.history.collapse", { name: displayName(attributes.properties, attributes.id) }), () => {
       for (const child of doomed) this.dropNode(child);
       this.expandedFrom.delete(key);
     });
@@ -468,14 +475,17 @@ export class GraphModel {
     if (this.graph.hasNode(key)) {
       if (this.graph.getNodeAttribute(key, "more") === more) return;
       this.current?.updatedNodes.push([key, { ...this.graph.getNodeAttributes(key) }]);
-      this.graph.mergeNodeAttributes(key, { more, properties: { name: `+${more} more` } });
+      this.graph.mergeNodeAttributes(key, {
+        more,
+        properties: { name: t("views.explore.morePlaceholder", { count: more }) },
+      });
       return;
     }
     const position = spot ?? this.fan(centerKey, 1)[0]!;
     this.graph.addNode(key, {
       id: "",
       vertexLabel: "",
-      properties: { name: `+${more} more` },
+      properties: { name: t("views.explore.morePlaceholder", { count: more }) },
       size: BASE_SIZE,
       more,
       ...position,

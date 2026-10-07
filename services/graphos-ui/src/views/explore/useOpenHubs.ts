@@ -1,6 +1,7 @@
 import { notifications } from "@mantine/notifications";
 import { useState } from "react";
 import { useWorkspace } from "../../graph/WorkspaceProvider";
+import { t } from "../../i18n";
 import { useTenantSession } from "../../session/SessionProvider";
 
 /** Hubs put on the canvas when a label is opened from the map. */
@@ -21,12 +22,12 @@ export function useOpenHubs(): { openHubs: (label: string) => Promise<void>; ope
     try {
       const hubs = await api.hubs(label, HUBS_PER_LABEL);
       if (hubs.nodes.length === 0) {
-        notifications.show({ message: `No ${label} node has any edges`, color: "gray" });
+        notifications.show({ message: t("notices.noHubs", { label }), color: "gray" });
         return;
       }
       const induced = await api.inducedEdges(hubs.nodes.map((n) => n.id));
       const keys = model.addGroup(
-        `Open ${label}`,
+        t("views.explore.history.open", { name: label }),
         hubs.nodes.map((n) => ({ ref: { id: n.id, label }, properties: n.properties })),
         induced.edges.map((e) => ({
           type: e.type,
@@ -41,7 +42,7 @@ export function useOpenHubs(): { openHubs: (label: string) => Promise<void>; ope
     } catch (error) {
       notifications.show({
         color: "red",
-        title: `Couldn't open ${label}`,
+        title: t("errors.openLabelFailed", { label }),
         message: error instanceof Error ? error.message : String(error),
       });
     } finally {

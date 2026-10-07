@@ -1,5 +1,6 @@
 import { Badge, Group, Stack, Text, UnstyledButton } from "@mantine/core";
 import { IconArrowRight } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { useDeleteEdge } from "../data/queries";
 import { useEdgeEditor } from "../data/useNodeEditor";
 import { displayName, type GraphModel } from "../graph/GraphModel";
@@ -18,6 +19,7 @@ export interface EdgeInspectorProps {
 
 /** The selected edge: its two ends, its properties edited in place, and delete. */
 export function EdgeInspector({ model, edge, onSelectNode, onDeleted }: EdgeInspectorProps) {
+  const { t } = useTranslation();
   const { canWrite } = useTenantSession();
   const ref = model.edgeRef(edge);
   const [srcKey, dstKey] = model.graph.extremities(edge);
@@ -51,7 +53,7 @@ export function EdgeInspector({ model, edge, onSelectNode, onDeleted }: EdgeInsp
       <div>
         <Group gap={6} wrap="nowrap">
           {end(srcKey!)}
-          <IconArrowRight size={14} className="gx-muted" aria-label="to" />
+          <IconArrowRight size={14} className="gx-muted" aria-label={t("components.edgeInspector.to")} />
           {end(dstKey!)}
         </Group>
         <Group gap={6} mt={4}>
@@ -60,7 +62,7 @@ export function EdgeInspector({ model, edge, onSelectNode, onDeleted }: EdgeInsp
           </Badge>
           {editor.record ? (
             <Text size="xs" c="dimmed">
-              Revision {editor.record.rev}
+              {t("common.revision", { rev: editor.record.rev })}
             </Text>
           ) : null}
         </Group>
@@ -71,8 +73,8 @@ export function EdgeInspector({ model, edge, onSelectNode, onDeleted }: EdgeInsp
         onSaved={(saved) => model.updateEdge(edge, saved.properties)}
         actions={
           <ConfirmDelete
-            question="Delete this relationship?"
-            confirmLabel="Delete relationship"
+            question={t("components.edgeInspector.deleteQuestion")}
+            confirmLabel={t("components.edgeInspector.deleteConfirm")}
             busy={remove.isPending}
             onConfirm={() => void deleteEdge()}
           />

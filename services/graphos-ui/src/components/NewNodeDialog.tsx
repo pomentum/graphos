@@ -1,5 +1,6 @@
 import { Alert, Button, Group, Modal, Select, Stack, Text, TextInput } from "@mantine/core";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { NodeUpsert } from "../api/types";
 import type { NodeRef } from "../graph/GraphModel";
 
@@ -32,6 +33,7 @@ export function NewNodeDialog({
   onCancel,
   onCreate,
 }: NewNodeDialogProps) {
+  const { t } = useTranslation();
   const [chosen, setLabel] = useState<string | null>(null);
   // The first label until one is chosen (the labels may arrive after the dialog).
   const label = chosen ?? labels[0] ?? null;
@@ -45,10 +47,17 @@ export function NewNodeDialog({
   };
 
   return (
-    <Modal opened={opened} onClose={onCancel} title="New node" centered radius="lg" size="sm">
+    <Modal
+      opened={opened}
+      onClose={onCancel}
+      title={t("components.newNodeDialog.title")}
+      centered
+      radius="lg"
+      size="sm"
+    >
       <Stack gap="sm">
         <Select
-          label="Label"
+          label={t("components.newNodeDialog.label")}
           data={labels}
           value={label}
           onChange={(next) => {
@@ -60,8 +69,8 @@ export function NewNodeDialog({
           selectFirstOptionOnChange
         />
         <TextInput
-          label="ID"
-          description="Unique within the label"
+          label={t("components.newNodeDialog.id")}
+          description={t("components.newNodeDialog.idDescription")}
           value={id}
           onChange={(e) => {
             setId(e.currentTarget.value);
@@ -71,26 +80,31 @@ export function NewNodeDialog({
           data-autofocus
         />
         <TextInput
-          label="Name"
+          label={t("components.newNodeDialog.name")}
           value={name}
           onChange={(e) => setName(e.currentTarget.value)}
           error={error}
           onKeyDown={(e) => e.key === "Enter" && submit()}
         />
         {existing ? (
-          <Alert color="orange" variant="light" radius="md" title={`This ${existing.label} exists already`}>
-            <Text size="xs">Creating it would overwrite its properties.</Text>
+          <Alert
+            color="orange"
+            variant="light"
+            radius="md"
+            title={t("components.newNodeDialog.existsTitle", { label: existing.label })}
+          >
+            <Text size="xs">{t("components.newNodeDialog.existsBody")}</Text>
             <Button size="compact-xs" variant="default" mt="xs" onClick={() => onOpenExisting?.(existing)}>
-              Open it
+              {t("components.newNodeDialog.openExisting")}
             </Button>
           </Alert>
         ) : null}
         <Group justify="flex-end" gap="xs" mt="xs">
           <Button variant="default" size="xs" onClick={onCancel}>
-            Cancel
+            {t("common.actions.cancel")}
           </Button>
           <Button size="xs" disabled={!valid || Boolean(existing)} loading={saving} onClick={submit}>
-            Create
+            {t("common.actions.create")}
           </Button>
         </Group>
       </Stack>

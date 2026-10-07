@@ -1,8 +1,19 @@
+import type { ParseKeys } from "i18next";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { EdgeKey, SearchParams } from "../api/graphosApi";
 import type { EdgeUpsert, NodesScanRequest, NodeUpsert, PathsRequest, Properties } from "../api/types";
 import { profileProperties } from "../lib/properties";
 import { useTenantSession } from "../session/SessionProvider";
+
+/**
+ * What a mutation says when it ends: `success` and `errorTitle` are i18n keys
+ * (translated by the MutationCache in App), `silent` leaves errors to the caller.
+ */
+declare module "@tanstack/react-query" {
+  interface Register {
+    mutationMeta: { success?: ParseKeys; errorTitle?: ParseKeys; silent?: boolean };
+  }
+}
 
 /** Cache keys, scoped by tenant so switching tenants never shows another's data. */
 export const keys = {
@@ -118,7 +129,7 @@ export function useSaveEdge() {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
   return useMutation({
-    meta: { success: "Saved" },
+    meta: { success: "notices.saved" },
     mutationFn: (args: { edge: EdgeKey; patch: Properties; etag: string }) =>
       api.patchEdge(args.edge, args.patch, args.etag),
     onSuccess: (result, args) => client.setQueryData(keys.edge(tenant, args.edge), result.data),
@@ -147,7 +158,7 @@ export function useExpand() {
   return useMutation({
     mutationFn: (args: { id: string; relTypes?: string[]; limit: number }) =>
       api.neighbors(args.id, { relTypes: args.relTypes, limit: args.limit }),
-    meta: { errorTitle: "Couldn't load the neighbours" },
+    meta: { errorTitle: "errors.neighboursNotLoaded" },
   });
 }
 
@@ -165,7 +176,7 @@ export function useSaveNode() {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
   return useMutation({
-    meta: { success: "Saved" },
+    meta: { success: "notices.saved" },
     mutationFn: (args: { id: string; label: string; patch: Properties; etag: string }) =>
       api.patchNode(args.id, args.patch, { label: args.label, etag: args.etag }),
     onSuccess: (result, args) => client.setQueryData(keys.node(tenant, args.label, args.id), result.data),
@@ -177,7 +188,7 @@ export function useDeleteNode() {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
   return useMutation({
-    meta: { success: "Node deleted" },
+    meta: { success: "notices.nodeDeleted" },
     mutationFn: (args: { id: string; label: string; etag?: string }) =>
       api.deleteNode(args.id, { label: args.label, etag: args.etag }),
     onSuccess: (_, args) => {
@@ -192,7 +203,7 @@ export function useCreateNode() {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
   return useMutation({
-    meta: { success: "Node created" },
+    meta: { success: "notices.nodeCreated" },
     mutationFn: (node: NodeUpsert) => api.upsertNode(node),
     onSuccess: () => void client.invalidateQueries({ queryKey: keys.stats(tenant) }),
   });
@@ -203,7 +214,7 @@ export function useCreateEdge() {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
   return useMutation({
-    meta: { success: "Relationship created" },
+    meta: { success: "notices.relationshipCreated" },
     mutationFn: (edge: EdgeUpsert) => api.upsertEdge(edge),
     onSuccess: () => void client.invalidateQueries({ queryKey: keys.stats(tenant) }),
   });
@@ -214,7 +225,7 @@ export function useDeleteEdge() {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
   return useMutation({
-    meta: { success: "Relationship deleted" },
+    meta: { success: "notices.relationshipDeleted" },
     mutationFn: (edge: EdgeKey & { etag?: string }) => api.deleteEdge(edge, edge.etag),
     onSuccess: () => void client.invalidateQueries({ queryKey: keys.stats(tenant) }),
   });

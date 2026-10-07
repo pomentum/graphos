@@ -15,6 +15,7 @@ import {
 } from "@mantine/core";
 import { useState } from "react";
 import { IconBell, IconCheck, IconChevronDown, IconLogout, IconMoon, IconSun, IconSunMoon } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useActivity } from "../data/ActivityProvider";
 import { describeChange, streamStatusText } from "../lib/changes";
@@ -30,6 +31,7 @@ const TENANT_SEARCH_FROM = 8;
  * hundreds of tenants stays usable; arrows and Enter pick one.
  */
 export function TenantSwitcher() {
+  const { t } = useTranslation();
   const { session, selectTenant } = useSessionContext();
   const [query, setQuery] = useState("");
   const combobox = useCombobox({
@@ -42,7 +44,7 @@ export function TenantSwitcher() {
   if (!session?.tenant) return null;
   const tenants = session.me.tenants;
   const needle = query.trim().toLowerCase();
-  const shown = needle ? tenants.filter((t) => t.toLowerCase().includes(needle)) : tenants;
+  const shown = needle ? tenants.filter((tenant) => tenant.toLowerCase().includes(needle)) : tenants;
 
   return (
     <Combobox
@@ -56,7 +58,7 @@ export function TenantSwitcher() {
     >
       <Combobox.Target withAriaAttributes={false}>
         <UnstyledButton
-          aria-label="Switch tenant"
+          aria-label={t("shell.tenants.switch")}
           disabled={tenants.length < 2}
           onClick={() => combobox.toggleDropdown()}
         >
@@ -74,8 +76,8 @@ export function TenantSwitcher() {
               setQuery(event.currentTarget.value);
               combobox.updateSelectedOptionIndex();
             }}
-            placeholder={`Find among ${tenants.length} tenants`}
-            aria-label="Find a tenant"
+            placeholder={t("shell.tenants.findAmong", { count: tenants.length })}
+            aria-label={t("shell.tenants.find")}
           />
         ) : null}
         <Combobox.Options>
@@ -90,7 +92,7 @@ export function TenantSwitcher() {
                 </Group>
               </Combobox.Option>
             ))}
-            {shown.length === 0 ? <Combobox.Empty>No tenant matches</Combobox.Empty> : null}
+            {shown.length === 0 ? <Combobox.Empty>{t("shell.tenants.noMatch")}</Combobox.Empty> : null}
           </ScrollArea.Autosize>
         </Combobox.Options>
       </Combobox.Dropdown>
@@ -100,12 +102,17 @@ export function TenantSwitcher() {
 
 /** The bell: a dot when others changed something, and the latest changes on click. */
 export function ActivityBell() {
+  const { t } = useTranslation();
   const { changes, unseen, markSeen, status } = useActivity();
   return (
     <Popover position="bottom-end" width={300} onOpen={markSeen} radius="lg">
       <Popover.Target>
         <Indicator disabled={unseen === 0} size={7} offset={4} color="accent">
-          <ActionIcon variant="subtle" color="gray" aria-label={`Activity${unseen ? `, ${unseen} new` : ""}`}>
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            aria-label={unseen ? t("shell.activityBell.labelUnseen", { unseen }) : t("shell.activityBell.label")}
+          >
             <IconBell size={17} stroke={1.7} />
           </ActionIcon>
         </Indicator>
@@ -121,18 +128,21 @@ export function ActivityBell() {
                 {describeChange(change)}
               </Text>
               <Text size="xs" c="dimmed">
-                {change.consumer ?? "unknown"} · {relativeTime(change.at)}
+                {t("shell.activityBell.byWhen", {
+                  who: change.consumer ?? t("common.unknownConsumer"),
+                  when: relativeTime(change.at),
+                })}
               </Text>
             </div>
           ))}
           {changes.length === 0 ? (
             <Text size="sm" c="dimmed">
-              No changes since you opened graphos.
+              {t("shell.activityBell.empty")}
             </Text>
           ) : null}
         </Stack>
         <Text component={Link} to="/activity" size="xs" c="var(--gx-accent-text)" mt="sm" display="block">
-          Show all activity
+          {t("shell.activityBell.showAll")}
         </Text>
       </Popover.Dropdown>
     </Popover>
@@ -141,13 +151,14 @@ export function ActivityBell() {
 
 /** Who is signed in, the colour scheme, and sign out. */
 export function AccountMenu() {
+  const { t } = useTranslation();
   const { me, canWrite } = useTenantSession();
   const { signOut } = useSessionContext();
   const { colorScheme, setColorScheme } = useMantineColorScheme();
   const schemes = [
-    { value: "auto", label: "System", icon: IconSunMoon },
-    { value: "light", label: "Light", icon: IconSun },
-    { value: "dark", label: "Dark", icon: IconMoon },
+    { value: "auto", label: t("shell.account.schemes.system"), icon: IconSunMoon },
+    { value: "light", label: t("shell.account.schemes.light"), icon: IconSun },
+    { value: "dark", label: t("shell.account.schemes.dark"), icon: IconMoon },
   ] as const;
   return (
     <Menu position="bottom-end" width={210}>
@@ -157,7 +168,7 @@ export function AccountMenu() {
           size={26}
           radius="xl"
           color="gray"
-          aria-label="Account"
+          aria-label={t("shell.account.label")}
           style={{ cursor: "pointer", border: 0 }}
         >
           {me.consumer.slice(0, 2).toUpperCase()}
@@ -165,7 +176,10 @@ export function AccountMenu() {
       </Menu.Target>
       <Menu.Dropdown>
         <Menu.Label>
-          {me.consumer} · {canWrite ? "can edit" : "read only"}
+          {t("shell.account.whoAndAccess", {
+            consumer: me.consumer,
+            access: canWrite ? t("shell.account.canEdit") : t("shell.account.readOnly"),
+          })}
         </Menu.Label>
         <Menu.Divider />
         {schemes.map(({ value, label, icon: Icon }) => (
@@ -180,7 +194,7 @@ export function AccountMenu() {
         ))}
         <Menu.Divider />
         <Menu.Item leftSection={<IconLogout size={14} />} onClick={signOut}>
-          Sign out
+          {t("shell.account.signOut")}
         </Menu.Item>
       </Menu.Dropdown>
     </Menu>

@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { displayName, type GraphModel } from "./GraphModel";
 
 /** A readable name for a community, in place of its number. */
@@ -42,7 +43,9 @@ export function nameGroups(model: GraphModel, groups: Iterable<string>): Map<str
     const total = counts.reduce((sum, [, n]) => sum + n, 0);
     const [top, second] = counts;
     const detail =
-      top && top[1] / total >= 0.5 ? `mostly ${top[0]}` : [top?.[0], second?.[0]].filter(Boolean).join(", ");
+      top && top[1] / total >= 0.5
+        ? t("views.explore.groups.mostly", { label: top[0] })
+        : [top?.[0], second?.[0]].filter(Boolean).join(", ");
     names.set(id, { title: hub.name, detail });
   }
   return names;

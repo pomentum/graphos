@@ -2,6 +2,7 @@ import { ActionIcon, Group, Text } from "@mantine/core";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import { useEffect } from "react";
 import { IconLayoutSidebar } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { SearchHit } from "../api/types";
 import { useWorkspace } from "../graph/WorkspaceProvider";
@@ -21,6 +22,7 @@ import { AccountMenu, ActivityBell, TenantSwitcher } from "./ToolbarMenus";
 const NARROW = "(max-width: 900px)";
 
 export function AppLayout() {
+  const { t } = useTranslation();
   const session = useTenantSession();
   const workspace = useWorkspace();
   const navigate = useNavigate();
@@ -48,13 +50,18 @@ export function AppLayout() {
     <div className={classes.root} data-sidebar={sidebarOpen ? "open" : "closed"} data-narrow={narrow || undefined}>
       <header className={classes.toolbar}>
         <Group gap="sm" className={classes.toolbarStart} wrap="nowrap">
-          <ActionIcon variant="subtle" color="gray" aria-label="Show or hide the sidebar" onClick={sidebar.toggle}>
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            aria-label={t("shell.toolbar.toggleSidebar")}
+            onClick={sidebar.toggle}
+          >
             <IconLayoutSidebar size={17} stroke={1.7} />
           </ActionIcon>
           <TenantSwitcher />
         </Group>
         <Text fw={600} size="sm" className={classes.title}>
-          {current?.title ?? ""}
+          {current ? t(current.title) : ""}
         </Text>
         <Group gap="sm" justify="flex-end" wrap="nowrap" className={classes.toolbarEnd}>
           <ActivityBell />

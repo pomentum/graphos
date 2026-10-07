@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ApiError } from "../api/http";
 import type { Properties } from "../api/types";
+import { t } from "../i18n";
 import { isEmptyPatch, mergePatch } from "../lib/properties";
 
 /** Anything graphos versions: properties plus the `ETag` of this revision. */
@@ -75,7 +76,7 @@ export function useVersionedEditor<T extends Versioned>(source: VersionedSource<
       return saved;
     } catch (e) {
       if (e instanceof ApiError && e.isConflict) await source.refetch();
-      else setError(e instanceof Error ? e.message : "Couldn't save");
+      else setError(e instanceof Error ? e.message : t("errors.couldNotSave"));
       return null;
     }
   };

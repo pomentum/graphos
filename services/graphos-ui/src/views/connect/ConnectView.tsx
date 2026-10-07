@@ -1,6 +1,7 @@
 import { Button, Paper, PasswordInput, ScrollArea, Stack, Text, TextInput, Title, UnstyledButton } from "@mantine/core";
 import { IconChevronRight, IconSearch } from "@tabler/icons-react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ApiError } from "../../api/http";
 import { useSessionContext } from "../../session/SessionProvider";
 import classes from "./ConnectView.module.css";
@@ -15,6 +16,7 @@ const TENANT_SEARCH_FROM = 8;
  * unreachable), offers to try again rather than asking for it anew.
  */
 export function ConnectView() {
+  const { t } = useTranslation();
   const { session, signIn, selectTenant, signOut, restoreFailed, retryRestore } = useSessionContext();
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -30,9 +32,7 @@ export function ConnectView() {
     } catch (e) {
       // Kept until the next answer, so the button does not move under the pointer.
       setError(
-        e instanceof ApiError && e.status === 401
-          ? "graphos doesn't recognise this token."
-          : "Couldn't reach graphos. Try again.",
+        e instanceof ApiError && e.status === 401 ? t("errors.tokenNotRecognised") : t("errors.unreachableTryAgain"),
       );
     } finally {
       setBusy(false);
@@ -41,7 +41,7 @@ export function ConnectView() {
 
   const tenants = session?.me.tenants ?? [];
   const needle = query.trim().toLowerCase();
-  const shown = needle ? tenants.filter((t) => t.toLowerCase().includes(needle)) : tenants;
+  const shown = needle ? tenants.filter((tenant) => tenant.toLowerCase().includes(needle)) : tenants;
 
   return (
     <div className={classes.root}>
@@ -52,21 +52,21 @@ export function ConnectView() {
             <>
               <div>
                 <Title order={1} size="h3">
-                  Choose a tenant
+                  {t("shell.signIn.chooseTenant")}
                 </Title>
                 <Text size="sm" c="dimmed">
-                  Signed in as {session.me.consumer}
+                  {t("shell.signIn.signedInAs", { consumer: session.me.consumer })}
                 </Text>
               </div>
               {tenants.length === 0 ? (
-                <Text size="sm">This token has no tenants. Ask an administrator to add one.</Text>
+                <Text size="sm">{t("shell.signIn.noTenants")}</Text>
               ) : (
                 <Stack gap="xs">
                   {tenants.length > TENANT_SEARCH_FROM ? (
                     <TextInput
                       size="xs"
-                      placeholder={`Find among ${tenants.length} tenants`}
-                      aria-label="Find a tenant"
+                      placeholder={t("shell.tenants.findAmong", { count: tenants.length })}
+                      aria-label={t("shell.tenants.find")}
                       leftSection={<IconSearch size={14} />}
                       value={query}
                       autoFocus
@@ -85,43 +85,43 @@ export function ConnectView() {
                     ))}
                     {shown.length === 0 ? (
                       <Text size="sm" c="dimmed" className={classes.tenant}>
-                        No tenant matches
+                        {t("shell.tenants.noMatch")}
                       </Text>
                     ) : null}
                   </ScrollArea.Autosize>
                 </Stack>
               )}
               <Button variant="subtle" color="gray" size="xs" onClick={signOut}>
-                Use another token
+                {t("shell.signIn.useAnotherToken")}
               </Button>
             </>
           ) : restoreFailed ? (
             <>
               <div>
                 <Title order={1} size="h3">
-                  Couldn&apos;t reach graphos
+                  {t("errors.unreachable")}
                 </Title>
                 <Text size="sm" c="dimmed">
-                  Your token is kept for this tab. Check the connection, then try again.
+                  {t("shell.signIn.tokenKept")}
                 </Text>
               </div>
-              <Button onClick={retryRestore}>Try again</Button>
+              <Button onClick={retryRestore}>{t("common.actions.tryAgain")}</Button>
               <Button variant="subtle" color="gray" size="xs" onClick={signOut}>
-                Use another token
+                {t("shell.signIn.useAnotherToken")}
               </Button>
             </>
           ) : (
             <>
               <div>
                 <Title order={1} size="h3">
-                  Sign in to graphos
+                  {t("shell.signIn.title")}
                 </Title>
                 <Text size="sm" c="dimmed">
-                  Use the token your administrator gave you. It stays in this tab only.
+                  {t("shell.signIn.hint")}
                 </Text>
               </div>
               <PasswordInput
-                label="Token"
+                label={t("shell.signIn.token")}
                 value={token}
                 error={error}
                 autoFocus
@@ -129,7 +129,7 @@ export function ConnectView() {
                 onKeyDown={(e) => e.key === "Enter" && void submit()}
               />
               <Button loading={busy} disabled={!token.trim()} onClick={() => void submit()}>
-                Continue
+                {t("shell.signIn.continue")}
               </Button>
             </>
           )}

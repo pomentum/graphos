@@ -1,6 +1,7 @@
 import { CloseButton } from "@mantine/core";
 import { useHotkeys } from "@mantine/hooks";
 import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ApiError } from "../../api/http";
 import type { NodeUpsert, SearchHit } from "../../api/types";
 import { CanvasLegend } from "../../components/CanvasLegend";
@@ -43,6 +44,7 @@ const HUB_LABELS = 12;
  * Keys: Escape deselects, F focus, E expand, C collapse, H hide, Ctrl/⌘+Z back.
  */
 export function ExploreView() {
+  const { t } = useTranslation();
   const { canWrite, api } = useTenantSession();
   const workspace = useWorkspace();
   const { model, version, selected, select, selectedEdge, selectEdge, colorBy, open, overview, frameOn, mode } =
@@ -161,7 +163,7 @@ export function ExploreView() {
   const inspectorOpen = Boolean(selected || selectedEdge);
   return (
     <div className={classes.root} data-inspector={inspectorOpen ? "open" : "closed"}>
-      <section className={classes.canvas} aria-label="Graph">
+      <section className={classes.canvas} aria-label={t("views.explore.graphRegion")}>
         <GraphCanvas
           model={model}
           emphasis={emphasis}
@@ -199,8 +201,8 @@ export function ExploreView() {
       </section>
 
       {selected && selectedNode?.more === undefined ? (
-        <aside className={classes.inspector} aria-label="Inspector">
-          <CloseButton className={classes.close} aria-label="Close the inspector (Escape)" onClick={deselect} />
+        <aside className={classes.inspector} aria-label={t("views.explore.inspector")}>
+          <CloseButton className={classes.close} aria-label={t("views.explore.closeInspector")} onClick={deselect} />
           <Inspector
             key={selected}
             model={model}
@@ -212,8 +214,8 @@ export function ExploreView() {
           />
         </aside>
       ) : selectedEdge ? (
-        <aside className={classes.inspector} aria-label="Inspector">
-          <CloseButton className={classes.close} aria-label="Close the inspector (Escape)" onClick={deselect} />
+        <aside className={classes.inspector} aria-label={t("views.explore.inspector")}>
+          <CloseButton className={classes.close} aria-label={t("views.explore.closeInspector")} onClick={deselect} />
           <EdgeInspector
             key={selectedEdge}
             model={model}
@@ -245,13 +247,13 @@ export function ExploreView() {
           key={`edge-${dialogKey}`}
           opened={creating === "edge"}
           fromName={displayName(selectedNode.properties, selectedNode.id)}
-          edgeTypes={(schema.data?.edge_labels ?? []).filter((t) => !schema.data?.rule_edge_labels.includes(t))}
+          edgeTypes={(schema.data?.edge_labels ?? []).filter((type) => !schema.data?.rule_edge_labels.includes(type))}
           saving={createEdge.isPending}
           error={
             createEdge.error
               ? createEdge.error.message
               : createEdge.data?.edges_upserted === 0
-                ? "The other node no longer exists."
+                ? t("errors.otherNodeGone")
                 : null
           }
           onCancel={() => setCreating(null)}

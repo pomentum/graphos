@@ -1,6 +1,7 @@
 import { ActionIcon, Autocomplete, Group, NumberInput, Switch, Text, TextInput, UnstyledButton } from "@mantine/core";
 import { IconPlus, IconX } from "@tabler/icons-react";
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Properties } from "../api/types";
 import { formatValue, propertyKind, sortedEntries, SYSTEM_PROPERTIES, typedValue } from "../lib/properties";
 import classes from "./PropertyEditor.module.css";
@@ -20,6 +21,7 @@ export interface PropertyEditorProps {
  * edited in place. Knows nothing about saving; it only changes the draft.
  */
 export function PropertyEditor({ draft, editable, onChange, suggestions = [] }: PropertyEditorProps) {
+  const { t } = useTranslation();
   const set = (key: string, value: unknown) => onChange({ ...draft, [key]: value });
   const remove = (key: string) => {
     const next = { ...draft };
@@ -53,7 +55,7 @@ export function PropertyEditor({ draft, editable, onChange, suggestions = [] }: 
                 variant="subtle"
                 color="gray"
                 size="xs"
-                aria-label={`Remove ${key}`}
+                aria-label={t("components.propertyEditor.remove", { name: key })}
                 className={classes.remove}
                 onClick={() => remove(key)}
               >
@@ -72,7 +74,8 @@ export function PropertyEditor({ draft, editable, onChange, suggestions = [] }: 
 
 /** One editable value; the input matches the value's type. */
 function ValueInput({ name, value, onChange }: { name: string; value: unknown; onChange: (value: unknown) => void }) {
-  const label = `Value of ${name}`;
+  const { t } = useTranslation();
+  const label = t("components.propertyEditor.valueOf", { name });
   switch (propertyKind(value)) {
     case "number":
       return <NumberField label={label} value={value as number} onChange={onChange} />;
@@ -104,6 +107,7 @@ function ValueInput({ name, value, onChange }: { name: string; value: unknown; o
  * never becomes 0 or, saved as `NaN`, a deleted property.
  */
 function NumberField({ label, value, onChange }: { label: string; value: number; onChange: (value: unknown) => void }) {
+  const { t } = useTranslation();
   const [text, setText] = useState<string | number>(value);
   const valid = typeof text === "number" || (text !== "" && Number.isFinite(Number(text)));
   return (
@@ -114,7 +118,7 @@ function NumberField({ label, value, onChange }: { label: string; value: number;
       value={text}
       hideControls
       error={!valid}
-      title={valid ? undefined : "Not a number yet; the saved value is unchanged"}
+      title={valid ? undefined : t("components.propertyEditor.notANumber")}
       onChange={(next) => {
         setText(next);
         if (typeof next === "number" && Number.isFinite(next)) onChange(next);
@@ -138,6 +142,7 @@ function NewProperty({
   suggestions: string[];
   onAdd: (key: string, value: unknown) => void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
@@ -159,7 +164,7 @@ function NewProperty({
       <UnstyledButton className={classes.add} onClick={() => setOpen(true)}>
         <Group gap={6}>
           <IconPlus size={13} />
-          <Text size="xs">Add property</Text>
+          <Text size="xs">{t("components.propertyEditor.addProperty")}</Text>
         </Group>
       </UnstyledButton>
     );
@@ -169,8 +174,8 @@ function NewProperty({
       <Autocomplete
         variant="unstyled"
         size="xs"
-        placeholder="name"
-        aria-label="New property name"
+        placeholder={t("components.propertyEditor.namePlaceholder")}
+        aria-label={t("components.propertyEditor.newName")}
         data={suggestions.filter((name) => !(name in existing))}
         value={key}
         error={taken}
@@ -185,8 +190,8 @@ function NewProperty({
       <TextInput
         variant="unstyled"
         size="sm"
-        placeholder="value"
-        aria-label="New property value"
+        placeholder={t("components.propertyEditor.valuePlaceholder")}
+        aria-label={t("components.propertyEditor.newValue")}
         ref={valueInput}
         value={value}
         onChange={(e) => setValue(e.currentTarget.value)}
@@ -195,7 +200,7 @@ function NewProperty({
           if (e.key === "Escape") cancel();
         }}
       />
-      <ActionIcon variant="subtle" size="xs" aria-label="Add property" onClick={add}>
+      <ActionIcon variant="subtle" size="xs" aria-label={t("components.propertyEditor.addProperty")} onClick={add}>
         <IconPlus size={12} />
       </ActionIcon>
     </div>

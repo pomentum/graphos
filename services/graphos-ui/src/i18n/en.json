@@ -1,0 +1,395 @@
+{
+  "common": {
+    "actions": {
+      "cancel": "Cancel",
+      "save": "Save",
+      "revert": "Revert",
+      "delete": "Delete",
+      "close": "Close",
+      "clear": "Clear",
+      "apply": "Apply",
+      "tryAgain": "Try again",
+      "previous": "Previous",
+      "next": "Next",
+      "open": "Open",
+      "create": "Create",
+      "add": "Add",
+      "openInExplore": "Open in Explore"
+    },
+    "state": {
+      "loading": "Loading…",
+      "noMatches": "No matches"
+    },
+    "revision": "Revision {{rev}}",
+    "unknownConsumer": "unknown",
+    "counts": {
+      "labels_one": "{{formatted}} label",
+      "labels_other": "{{formatted}} labels",
+      "nodes_one": "{{formatted}} node",
+      "nodes_other": "{{formatted}} nodes",
+      "edges_one": "{{formatted}} edge",
+      "edges_other": "{{formatted}} edges"
+    },
+    "time": {
+      "justNow": "just now"
+    },
+    "stream": {
+      "live": "Live",
+      "connecting": "Connecting…",
+      "retrying": "Reconnecting…"
+    },
+    "changes": {
+      "verbs": {
+        "upsert": "Wrote",
+        "merge": "Updated",
+        "patch": "Edited",
+        "delete": "Deleted",
+        "resolve": "Derived",
+        "communities": "Regrouped"
+      },
+      "anyNodes": "nodes",
+      "anyEdges": "edges",
+      "one": "{{verb}} {{what}} {{id}}",
+      "nodes_one": "{{verb}} {{formatted}} {{what}} node",
+      "nodes_other": "{{verb}} {{formatted}} {{what}} nodes",
+      "edges_one": "{{verb}} {{formatted}} {{what}} edge",
+      "edges_other": "{{verb}} {{formatted}} {{what}} edges"
+    }
+  },
+  "shell": {
+    "signIn": {
+      "title": "Sign in to graphos",
+      "hint": "Use the token your administrator gave you. It stays in this tab only.",
+      "token": "Token",
+      "continue": "Continue",
+      "chooseTenant": "Choose a tenant",
+      "signedInAs": "Signed in as {{consumer}}",
+      "noTenants": "This token has no tenants. Ask an administrator to add one.",
+      "useAnotherToken": "Use another token",
+      "tokenKept": "Your token is kept for this tab. Check the connection, then try again."
+    },
+    "toolbar": {
+      "toggleSidebar": "Show or hide the sidebar"
+    },
+    "sidebar": {
+      "views": "Views"
+    },
+    "tenants": {
+      "switch": "Switch tenant",
+      "find": "Find a tenant",
+      "findAmong_one": "Find among {{count}} tenant",
+      "findAmong_other": "Find among {{count}} tenants",
+      "noMatch": "No tenant matches"
+    },
+    "activityBell": {
+      "label": "Activity",
+      "labelUnseen": "Activity, {{unseen}} new",
+      "byWhen": "{{who}} · {{when}}",
+      "empty": "No changes since you opened graphos.",
+      "showAll": "Show all activity"
+    },
+    "account": {
+      "label": "Account",
+      "whoAndAccess": "{{consumer}} · {{access}}",
+      "canEdit": "can edit",
+      "readOnly": "read only",
+      "schemes": {
+        "system": "System",
+        "light": "Light",
+        "dark": "Dark"
+      },
+      "signOut": "Sign out"
+    }
+  },
+  "views": {
+    "registry": {
+      "groups": {
+        "graph": "Graph",
+        "insights": "Insights",
+        "data": "Data",
+        "admin": "Admin"
+      },
+      "titles": {
+        "explore": "Explore",
+        "path": "Path",
+        "overview": "Overview",
+        "activity": "Activity",
+        "browse": "Browse"
+      }
+    },
+    "explore": {
+      "graphRegion": "Graph",
+      "inspector": "Inspector",
+      "closeInspector": "Close the inspector (Escape)",
+      "mode": {
+        "label": "Map or graph",
+        "map": "Map",
+        "graph": "Graph"
+      },
+      "actions": {
+        "back": "Back",
+        "backTooltip": "Undo “{{step}}” ({{key}})",
+        "nothingToUndo": "Nothing to undo",
+        "focus": "Focus",
+        "focusTooltip": "Show only the selection and its neighbours (F)",
+        "newNode": "Node",
+        "connect": "Connect",
+        "colours": "Colours",
+        "clear": "Clear"
+      },
+      "colours": {
+        "none": "No colours",
+        "label": "By label",
+        "group": "By group"
+      },
+      "status": {
+        "loading": "Loading the graph…",
+        "failed": "Couldn't load the graph",
+        "empty": "The canvas is empty",
+        "emptyHint": "Find a node with search ({{shortcut}}), then double-click it to see its neighbours.",
+        "openMap": "Open the map",
+        "showWhole": "Show the whole graph",
+        "sample_one": "A sample of {{shown}} of {{total}} node. Search to focus on one.",
+        "sample_other": "A sample of {{shown}} of {{total}} nodes. Search to focus on one."
+      },
+      "history": {
+        "open": "Open {{name}}",
+        "expand": "Expand {{name}}",
+        "addPaths": "Add paths",
+        "connect": "Connect {{type}}",
+        "hide": "Hide {{name}}",
+        "collapse": "Collapse {{name}}"
+      },
+      "morePlaceholder_one": "+{{count}} more",
+      "morePlaceholder_other": "+{{count}} more",
+      "groups": {
+        "mostly": "mostly {{label}}"
+      },
+      "map": {
+        "bubbleLabel": "{{label}} · {{formatted}}",
+        "region": "Map of labels",
+        "panel": "Label",
+        "counting": "Counting labels and the edges between them…",
+        "totals": "{{labels}} · {{nodes}} · {{edges}}",
+        "totalsEstimated": "{{labels}} · {{nodes}} · ≈ {{edges}} (large tables sampled)",
+        "countExactly": "Count exactly",
+        "startFromHubs": "Start from its best-connected nodes",
+        "browseNodes": "Browse its nodes",
+        "relationshipsTo": "Relationships to",
+        "relationshipsFrom": "Relationships from",
+        "more_one": "and {{count}} more",
+        "more_other": "and {{count}} more"
+      }
+    },
+    "path": {
+      "options": "Path options",
+      "canvas": "Paths",
+      "from": "From",
+      "startNode": "Start node",
+      "to": "To",
+      "endNode": "End node",
+      "direction": "Direction",
+      "directions": {
+        "both": "Either",
+        "out": "Forward",
+        "in": "Backward"
+      },
+      "upToHops_one": "Up to {{count}} hop",
+      "upToHops_other": "Up to {{count}} hops",
+      "relationships": "Relationships",
+      "allRelationships": "All",
+      "findPaths": "Find paths",
+      "pathTitle_one": "Path {{index}} · {{count}} hop",
+      "pathTitle_other": "Path {{index}} · {{count}} hops",
+      "summary": {
+        "truncated": "The search reached a very connected part of the graph and stopped. Choose relationships or a direction to narrow it.",
+        "noPath_one": "No path within {{count}} hop.",
+        "noPath_other": "No path within {{count}} hops.",
+        "found": "{{paths}} of {{hops}}",
+        "paths_one": "{{count}} shortest path",
+        "paths_other": "{{count}} shortest paths",
+        "hops_one": "{{count}} hop",
+        "hops_other": "{{count}} hops"
+      }
+    },
+    "overview": {
+      "stats": {
+        "nodes": "Nodes",
+        "edges": "Edges",
+        "storage": "Storage"
+      },
+      "labels": "Labels",
+      "noNodes": "No nodes yet",
+      "relationships": "Relationships",
+      "noEdges": "No edges yet",
+      "values": "Values",
+      "labelPrefix": "{{label}} ·",
+      "pickLabel": "Pick a label above, then a property",
+      "property": "Property",
+      "distinct": "{{values}} across {{nodes}}",
+      "distinctValues_one": "{{formatted}} distinct value",
+      "distinctValues_other": "{{formatted}} distinct values"
+    },
+    "activity": {
+      "everyone": "Everyone",
+      "byPerson": "Filter by person",
+      "allLabels": "All labels",
+      "byLabel": "Filter by label",
+      "noMatch": "No changes match these filters",
+      "empty": "Nothing yet",
+      "hidden_one": "{{count}} change is hidden by the filters.",
+      "hidden_other": "{{count}} changes are hidden by the filters.",
+      "emptyHint": "Changes made from now on appear here as they happen.",
+      "clearFilters": "Clear filters"
+    },
+    "browse": {
+      "label": "Label",
+      "labelOption": "{{label}} · {{formatted}}",
+      "noLabels": "No labels yet.",
+      "noNodes": "No nodes match.",
+      "rows": "Rows {{from}}–{{to}}",
+      "rowsOf": "Rows {{from}}–{{to}} of {{total}}",
+      "filter": {
+        "propertyPlaceholder": "Filter on…",
+        "property": "Filter property",
+        "condition": "Condition",
+        "valuePlaceholder": "value",
+        "value": "Filter value"
+      },
+      "ops": {
+        "is": "is",
+        "isNot": "is not",
+        "isSet": "is set",
+        "isNotSet": "is not set"
+      }
+    }
+  },
+  "components": {
+    "inspector": {
+      "expand": "Expand",
+      "expandTooltip": "Add its neighbours, a page at a time (E)",
+      "collapse": "Collapse",
+      "collapseTooltip": "Take back the neighbours it added (C)",
+      "hide": "Hide",
+      "hideTooltip": "Take it off the canvas; Back brings it back (H)",
+      "deleteQuestion": "Delete this node and all its relationships?",
+      "deleteConfirm": "Delete node",
+      "relationships": "Relationships on the canvas"
+    },
+    "edgeInspector": {
+      "to": "to",
+      "deleteQuestion": "Delete this relationship?",
+      "deleteConfirm": "Delete relationship"
+    },
+    "recordForm": {
+      "changedBy": "{{who}} changed this",
+      "someone": "Someone",
+      "editsKept": "Your edits are kept. Saving applies only the fields you changed.",
+      "discardMine": "Discard mine",
+      "saveMine": "Save mine"
+    },
+    "connectionList": {
+      "empty": "None yet. Expand the node (or double-click it) to add its neighbours.",
+      "showEdge": "Show this relationship",
+      "outgoing": "outgoing",
+      "incoming": "incoming",
+      "more_one": "and {{count}} more on the canvas",
+      "more_other": "and {{count}} more on the canvas"
+    },
+    "canvasLegend": {
+      "groupsHint": "Communities found by clustering the graph (Louvain)",
+      "groupsHeading": "Groups: communities by clustering",
+      "groupTitle": "{{title}}, group {{category}} ({{detail}})",
+      "group": "Group {{category}}",
+      "moreGroups_one": "{{count}} more group in grey",
+      "moreGroups_other": "{{count}} more groups in grey",
+      "moreLabels_one": "{{count}} more label in grey",
+      "moreLabels_other": "{{count}} more labels in grey",
+      "notGrouped": "{{formatted}} not grouped"
+    },
+    "propertyEditor": {
+      "remove": "Remove {{name}}",
+      "valueOf": "Value of {{name}}",
+      "notANumber": "Not a number yet; the saved value is unchanged",
+      "addProperty": "Add property",
+      "namePlaceholder": "name",
+      "newName": "New property name",
+      "valuePlaceholder": "value",
+      "newValue": "New property value"
+    },
+    "expandDialog": {
+      "title": "{{name}} has many neighbours",
+      "choose": "Choose which relationships to follow.",
+      "chooseTruncated": "Choose which relationships to follow. Counts cover the first neighbours only.",
+      "addCount": "Add {{formatted}}"
+    },
+    "newNodeDialog": {
+      "title": "New node",
+      "label": "Label",
+      "id": "ID",
+      "idDescription": "Unique within the label",
+      "name": "Name",
+      "existsTitle": "This {{label}} exists already",
+      "existsBody": "Creating it would overwrite its properties.",
+      "openExisting": "Open it"
+    },
+    "newEdgeDialog": {
+      "title": "Connect {{name}}",
+      "relationship": "Relationship",
+      "to": "To",
+      "findNode": "Find a node",
+      "connect": "Connect"
+    },
+    "columnPicker": {
+      "button": "Columns · {{shown}}"
+    },
+    "nodeTable": {
+      "openRow": "Open {{id}}"
+    },
+    "countBars": {
+      "empty": "Nothing yet",
+      "emptyName": "(empty)"
+    },
+    "nodeSearch": {
+      "placeholder": "Search",
+      "anyIndex": "Any (index)",
+      "in": "in",
+      "searchIn": "Search in",
+      "searching": "Searching…",
+      "noNode": "No node has this name or id",
+      "noMatchesIn": "No matches in {{where}}",
+      "theIndex": "the index",
+      "openById": "Return opens “{{id}}” as a node id",
+      "footer": "Return opens · Shift Return adds to the canvas"
+    },
+    "graphCanvas": {
+      "zoomOut": "Zoom out",
+      "showAll": "Show everything",
+      "zoomIn": "Zoom in"
+    }
+  },
+  "notices": {
+    "saved": "Saved",
+    "nodeCreated": "Node created",
+    "nodeDeleted": "Node deleted",
+    "relationshipCreated": "Relationship created",
+    "relationshipDeleted": "Relationship deleted",
+    "noNeighbours": "No neighbours",
+    "neighboursAllShown": "Its neighbours are all on the canvas already",
+    "noHubs": "No {{label}} node has any edges"
+  },
+  "errors": {
+    "notSaved": "Not saved",
+    "couldNotSave": "Couldn't save",
+    "conflict": "Changed by someone else",
+    "requestFailed": "Request failed ({{status}})",
+    "unreachable": "Couldn't reach graphos",
+    "unreachableTryAgain": "Couldn't reach graphos. Try again.",
+    "tokenNotRecognised": "graphos doesn't recognise this token.",
+    "viewFailed": "This view stopped working",
+    "neighboursNotLoaded": "Couldn't load the neighbours",
+    "otherNodeGone": "The other node no longer exists.",
+    "openLabelFailed": "Couldn't open {{label}}",
+    "countsNotLoaded": "Couldn't load the tenant's counts"
+  }
+}
