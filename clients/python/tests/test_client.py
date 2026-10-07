@@ -672,3 +672,50 @@ async def test_me_and_schema() -> None:
     schema = await cli.schema()
     assert schema.vertex_labels == ["Person"] and "names" in schema.search_indexes
     await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_graph_map_hubs_community_map_and_property_search() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        path = request.url.path
+        if path == "/v1/demo/graph/map":
+            return httpx.Response(200, json={
+                "tenant": "demo", "estimated": True, "elapsed_ms": 9,
+                "labels": [{"label": "Function", "count": 10}],
+                "links": [{"src_label": "Function", "type": "CALLS", "dst_label": "Function",
+                           "count": 40, "estimated": True}],
+            })
+        if path == "/v1/demo/graph/map/hubs":
+            return httpx.Response(200, json={
+                "tenant": "demo", "label": "Function", "elapsed_ms": 3,
+                "nodes": [{"id": "f0", "label": "Function", "properties": {"name": "f0"},
+                           "degree": 5}],
+            })
+        if path == "/v1/demo/graph/communities/map":
+            return httpx.Response(200, json={
+                "tenant": "demo", "available": True, "computed_at": "2026-10-07T10:00:00Z",
+                "modularity": 0.5, "n_communities": 1,
+                "communities": [{"community_id": 4, "size": 6, "labels": {"Function": 6},
+                                 "hub": {"id": "f0", "label": "Function", "properties": {},
+                                         "degree": 5},
+                                 "internal_edges": 15}],
+                "links": [],
+            })
+        assert path == "/v1/demo/graph/search"
+        return httpx.Response(200, json={"tenant": "demo", "query": "src", "limit": 20,
+                                         "truncated": False, "elapsed_ms": 1, "nodes": []})
+
+    cli = GraphosClient(base_url="http://x", token="tok", tenant="demo")
+    cli._http = httpx.AsyncClient(base_url="http://x", transport=_mock_transport(handler))
+    graph_map = await cli.graph_map(exact=True)
+    assert graph_map.links[0].count == 40 and "exact=true" in seen[-1]
+    hubs = await cli.map_hubs("Function", limit=5)
+    assert hubs.nodes[0].degree == 5 and "label=Function" in seen[-1] and "limit=5" in seen[-1]
+    groups = await cli.community_map(limit=10)
+    assert groups.available and groups.communities[0].hub is not None
+    await cli.search("src", property="path")
+    assert "property=path" in seen[-1]
+    await cli.close()

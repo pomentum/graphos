@@ -69,6 +69,86 @@ class TenantSchemaInfo(BaseModel):
 # ── Reads ───────────────────────────────────────────────────────────────────
 
 
+class MapLabel(BaseModel):
+    label: str
+    count: int
+
+
+class MapLinkType(BaseModel):
+    type: str
+    count: int
+
+
+class MapLink(BaseModel):
+    src_label: str
+    type: str
+    dst_label: str
+    count: int
+    estimated: bool = False
+
+
+class GraphMap(BaseModel):
+    """``GET …/graph/map``: labels with node counts, edge counts between labels."""
+
+    tenant: str
+    labels: list[MapLabel] = Field(default_factory=list)
+    links: list[MapLink] = Field(default_factory=list)
+    estimated: bool = False
+    elapsed_ms: int = 0
+
+
+class HubNode(BaseModel):
+    id: str
+    label: str
+    properties: dict[str, Any] = Field(default_factory=dict)
+    degree: int
+    estimated: bool = False
+
+
+class HubsResponse(BaseModel):
+    """``GET …/graph/map/hubs``: a label's best-connected nodes."""
+
+    tenant: str
+    label: str
+    nodes: list[HubNode] = Field(default_factory=list)
+    elapsed_ms: int = 0
+
+
+class CommunityHub(BaseModel):
+    id: str
+    label: str
+    properties: dict[str, Any] = Field(default_factory=dict)
+    degree: int
+
+
+class CommunityNode(BaseModel):
+    community_id: int
+    size: int
+    labels: dict[str, int] = Field(default_factory=dict)
+    hub: CommunityHub | None = None
+    internal_edges: int = 0
+
+
+class CommunityLink(BaseModel):
+    src: int
+    dst: int
+    count: int
+    types: list[MapLinkType] = Field(default_factory=list)
+
+
+class CommunityMap(BaseModel):
+    """``GET …/graph/communities/map``: the last recompute's communities and
+    the edges between them."""
+
+    tenant: str
+    available: bool
+    computed_at: datetime | None = None
+    modularity: float | None = None
+    n_communities: int = 0
+    communities: list[CommunityNode] = Field(default_factory=list)
+    links: list[CommunityLink] = Field(default_factory=list)
+
+
 class NodeHit(BaseModel):
     id: int
     label: str

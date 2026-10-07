@@ -22,6 +22,7 @@ from graphos_client._models import (
     ChangesPage,
     CommunitiesResponse,
     CommunityIdsResponse,
+    CommunityMap,
     CommunitySummary,
     DeleteByPropertyResponse,
     DeleteEdgeResponse,
@@ -32,8 +33,10 @@ from graphos_client._models import (
     EdgesUpsertResponse,
     EdgeUpsert,
     ExpandResponse,
+    GraphMap,
     GraphologyExport,
     HistogramResponse,
+    HubsResponse,
     InducedEdgesResponse,
     Job,
     Me,
@@ -572,13 +575,17 @@ class GraphosClient:
         index: str | None = None,
         fuzzy: bool = False,
         min_score: float = 0.0,
+        property: str | None = None,  # noqa: A002 — the query parameter's name
     ) -> SearchResponse:
         """Search nodes.  With ``index``: ranked by a search index of the tenant,
         each hit with a ``score`` and the property it ``matched``; without:
-        unranked case-insensitive substring match on ``name``."""
+        unranked case-insensitive substring match on ``property`` (``name`` by
+        default; other properties are read row by row)."""
         params: dict[str, Any] = {"q": q, "limit": limit}
         if label is not None:
             params["label"] = label
+        if property is not None:
+            params["property"] = property
         if index is not None:
             params["index"] = index
             params["fuzzy"] = "true" if fuzzy else "false"
@@ -869,6 +876,29 @@ class GraphosClient:
             json_body={"ids": list(ids)},
         )
         return CommunityIdsResponse.model_validate(resp.json())
+
+    async def graph_map(self, *, exact: bool = False) -> GraphMap:
+        """``GET …/graph/map``: every label with its node count and the edge
+        counts between labels; large edge tables are sampled unless ``exact``."""
+        params = {"exact": "true"} if exact else None
+        resp = await self._request("GET", f"/v1/{self._tenant}/graph/map", params=params)
+        return GraphMap.model_validate(resp.json())
+
+    async def map_hubs(self, label: str, *, limit: int = 40) -> HubsResponse:
+        """``GET …/graph/map/hubs``: the label's best-connected nodes, most first."""
+        resp = await self._request(
+            "GET", f"/v1/{self._tenant}/graph/map/hubs", params={"label": label, "limit": limit},
+        )
+        return HubsResponse.model_validate(resp.json())
+
+    async def community_map(self, *, limit: int = 150) -> CommunityMap:
+        """``GET …/graph/communities/map``: the last recompute's communities,
+        largest first, and the edges between them (``available`` is false until
+        a recompute has run)."""
+        resp = await self._request(
+            "GET", f"/v1/{self._tenant}/graph/communities/map", params={"limit": limit},
+        )
+        return CommunityMap.model_validate(resp.json())
 
     async def tenant_stats(self) -> TenantStatsResponse:
         resp = await self._request("GET", f"/v1/{self._tenant}/graph/stats")
