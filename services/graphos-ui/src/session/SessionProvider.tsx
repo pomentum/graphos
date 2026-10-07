@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { fetchMe, GraphosApi } from "../api/graphosApi";
-import { HttpClient } from "../api/http";
+import { ApiError, HttpClient } from "../api/http";
 import type { Me } from "../api/types";
 import { SessionStore } from "./sessionStore";
 
@@ -23,6 +23,9 @@ interface SessionContextValue {
   session: Session | null;
   /** True while a token kept from earlier in the tab is being checked. */
   restoring: boolean;
+  /** The kept token could not be checked (graphos unreachable): it is kept for `retryRestore`. */
+  restoreFailed: boolean;
+  retryRestore: () => void;
   /** Checks the token with graphos and keeps it for the tab. */
   signIn: (token: string) => Promise<void>;
   selectTenant: (tenant: string) => void;
@@ -47,6 +50,7 @@ export function SessionProvider({
   const [store] = useState(() => storeProp ?? new SessionStore());
   const [state, setState] = useState(initial);
   const [restoring, setRestoring] = useState(() => !initial && store.load() !== null);
+  const [restoreFailed, setRestoreFailed] = useState(false);
 
   const signIn = useCallback(
     async (token: string) => {
@@ -59,7 +63,9 @@ export function SessionProvider({
     [store],
   );
 
-  // After a reload: sign in again with the token kept for this tab.
+  // After a reload: sign in again with the token kept for this tab. Only a
+  // refused token is forgotten; when graphos cannot be reached it is kept,
+  // so a network blip does not sign the user out.
   useEffect(() => {
     if (!restoring) return;
     const kept = store.load();
@@ -68,9 +74,15 @@ export function SessionProvider({
       return;
     }
     signIn(kept.token)
-      .catch(() => store.clear())
+      .then(() => setRestoreFailed(false))
+      .catch((error: unknown) => {
+        if (error instanceof ApiError && error.status === 401) store.clear();
+        else setRestoreFailed(true);
+      })
       .finally(() => setRestoring(false));
   }, [restoring, signIn, store]);
+
+  const retryRestore = useCallback(() => setRestoring(true), []);
 
   const selectTenant = useCallback(
     (tenant: string) => {
@@ -86,6 +98,7 @@ export function SessionProvider({
   const signOut = useCallback(() => {
     store.clear();
     setState(null);
+    setRestoreFailed(false);
   }, [store]);
 
   const session = useMemo<Session | null>(() => {
@@ -100,8 +113,8 @@ export function SessionProvider({
   }, [state]);
 
   const value = useMemo(
-    () => ({ session, restoring, signIn, selectTenant, signOut }),
-    [session, restoring, signIn, selectTenant, signOut],
+    () => ({ session, restoring, restoreFailed, retryRestore, signIn, selectTenant, signOut }),
+    [session, restoring, restoreFailed, retryRestore, signIn, selectTenant, signOut],
   );
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
