@@ -200,6 +200,11 @@ export class GraphosApi {
     ).data;
   }
 
+  /** The tenant's recent background jobs, newest first. */
+  async jobs(limit = 20): Promise<Job[]> {
+    return (await this.http.get<{ jobs: Job[] }>("/v1/jobs", { tenant: this.tenant, limit })).jobs;
+  }
+
   /** One background job's status. */
   job(id: string): Promise<Job> {
     return this.http.get(`/v1/jobs/${enc(id)}`);

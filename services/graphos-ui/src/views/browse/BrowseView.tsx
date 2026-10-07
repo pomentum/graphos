@@ -1,4 +1,6 @@
 import { Button, Group, Select, Skeleton, Text } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
+import { IconMap } from "@tabler/icons-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -10,6 +12,7 @@ import { currentCursor, FIRST_PAGE, nextPage, previousPage } from "../../lib/pag
 import { formatCount } from "../../lib/time";
 import { browseParams, defaultColumns, readBrowseState, scanFilter, type BrowseFilter } from "./browseState";
 import classes from "./BrowseView.module.css";
+import { MAX_OPEN_NODES, useOpenNodes } from "../explore/useOpenNodes";
 import { FilterBar } from "./FilterBar";
 
 /** Rows per page. */
@@ -45,6 +48,15 @@ export function BrowseView() {
   const show = (next: { label: string | null; filter: BrowseFilter | null }) =>
     setParams(browseParams(next), { replace: true });
 
+  // The label on the map, selected: its counts and relationships at a glance.
+  const navigate = useNavigate();
+  const { setMapLabel, setMode } = useWorkspace();
+  const showOnMap = () => {
+    setMapLabel(label);
+    setMode("map");
+    void navigate("/explore");
+  };
+
   return (
     <div className={classes.root}>
       <Group gap="sm" wrap="wrap">
@@ -71,6 +83,11 @@ export function BrowseView() {
           filter={state.filter}
           onApply={(filter) => show({ label, filter })}
         />
+        {label ? (
+          <Button size="xs" variant="default" leftSection={<IconMap size={14} />} onClick={showOnMap}>
+            {t("views.browse.selection.showOnMap")}
+          </Button>
+        ) : null}
       </Group>
 
       {label === null ? (
@@ -121,8 +138,12 @@ function LabelPages({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { open } = useWorkspace();
+  const openNodes = useOpenNodes();
   const profile = usePropertyProfile(label);
   const [pager, setPager] = useState(FIRST_PAGE);
+  // Rows picked across pages, by id, for opening together.
+  const [picked, setPicked] = useState<Map<string, NodeRow>>(() => new Map());
+  const [opening, setOpening] = useState(false);
 
   // A filter's value is typed from the profile, so wait for it.
   const ready = !filter || profile.data !== undefined;
@@ -149,6 +170,34 @@ function LabelPages({
     void navigate("/explore");
   };
 
+  const toggle = (row: NodeRow, on: boolean) =>
+    setPicked((current) => {
+      const next = new Map(current);
+      if (on && next.size < MAX_OPEN_NODES) next.set(row.id, row);
+      else next.delete(row.id);
+      return next;
+    });
+  const toggleAll = (on: boolean) => {
+    for (const row of rows) toggle(row, on);
+  };
+
+  /** The picked rows and the relationships among them, on the graph canvas. */
+  const openPicked = async () => {
+    setOpening(true);
+    try {
+      await openNodes(t("views.browse.selection.history", { count: picked.size, label }), label, [...picked.values()]);
+      void navigate("/explore");
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        title: t("views.browse.selection.openFailed"),
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setOpening(false);
+    }
+  };
+
   return (
     <>
       <Group justify="space-between" gap="sm">
@@ -165,14 +214,37 @@ function LabelPages({
                   })
                 : t("views.browse.rows", { from: formatCount(from), to: formatCount(from + rows.length - 1) })}
         </Text>
-        <ColumnPicker options={names} value={columns} onChange={onColumns} />
+        <Group gap="xs">
+          {picked.size > 0 ? (
+            <>
+              <Text size="xs" c="dimmed">
+                {t("views.browse.selection.picked", { count: picked.size })}
+              </Text>
+              <Button size="xs" loading={opening} onClick={() => void openPicked()}>
+                {t("views.browse.selection.open")}
+              </Button>
+              <Button size="xs" variant="subtle" color="gray" onClick={() => setPicked(new Map())}>
+                {t("views.browse.selection.clear")}
+              </Button>
+            </>
+          ) : null}
+          <ColumnPicker options={names} value={columns} onChange={onColumns} />
+        </Group>
       </Group>
 
       <div className={classes.table}>
         {!ready || page.isLoading ? (
           <Skeleton h={240} />
         ) : (
-          <NodeTable rows={rows} columns={columns} onOpen={openRow} stale={page.isPlaceholderData} />
+          <NodeTable
+            rows={rows}
+            columns={columns}
+            onOpen={openRow}
+            stale={page.isPlaceholderData}
+            selected={new Set(picked.keys())}
+            onToggle={toggle}
+            onToggleAll={toggleAll}
+          />
         )}
       </div>
       {page.error ? (

@@ -56,6 +56,7 @@ export function buildMapModel(map: GraphMap): GraphModel {
     properties.count += link.count;
     properties.types.push({ type: link.type, count: link.count });
   }
+  keepStrongestLinks(model);
   if (graph.order > 2) {
     forceAtlas2.assign(graph, {
       iterations: 500,
@@ -64,6 +65,45 @@ export function buildMapModel(map: GraphMap): GraphModel {
     });
   }
   return model;
+}
+
+/** Bubbles labelled while nothing is selected: the largest ones. */
+export const MAP_LABELS = 20;
+/** A selection's neighbours are labelled while there are at most this many. */
+const MAP_FOCUS_LABELS = 24;
+
+/** The keys of the `count` largest bubbles, to label. */
+export function largestBubbles(model: GraphModel, count = MAP_LABELS): Set<string> {
+  const sized = model.graph.mapNodes((key, node) => [key, Number(node.properties.count ?? 0)] as const);
+  return new Set(
+    [...sized]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, count)
+      .map(([key]) => key),
+  );
+}
+
+/** Lines kept per bubble on the map and the groups: its strongest links. */
+export const LINKS_PER_BUBBLE = 4;
+
+/**
+ * Keeps each bubble's `perBubble` strongest lines (by edge count) and drops
+ * the rest, so the drawing shows structure instead of a hairball: a line
+ * stays if it is among the strongest of either of its ends. The panels still
+ * list every link; only the drawing is thinned.
+ */
+export function keepStrongestLinks(model: GraphModel, perBubble = LINKS_PER_BUBBLE): void {
+  const graph = model.graph;
+  const keep = new Set<string>();
+  graph.forEachNode((key) => {
+    graph
+      .edges(key)
+      .map((edge) => [edge, Number(graph.getEdgeAttribute(edge, "properties").count ?? 0)] as const)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, perBubble)
+      .forEach(([edge]) => keep.add(edge));
+  });
+  for (const edge of graph.edges()) if (!keep.has(edge)) graph.dropEdge(edge);
 }
 
 /** Bubble size by node count: logarithmic, so a label of a few nodes stays visible beside one of millions. */
@@ -101,19 +141,27 @@ export function mapNodeDisplay(key: string, node: NodeAttributes, emphasis: Emph
   const count = Number(node.properties.count ?? 0);
   const name = typeof node.properties.name === "string" ? node.properties.name : node.vertexLabel;
   const label = t("views.explore.map.bubbleLabel", { label: name, formatted: formatCount(count) });
+  // The whole name (a group's hub may be a long path) on hover; a short one on the canvas.
+  const full = typeof node.properties.fullName === "string" ? node.properties.fullName : name;
+  const fullLabel = t("views.explore.map.bubbleLabel", { label: full, formatted: formatCount(count) });
   // Colours are keyed by the bubble's key: the label on the map, the group in Groups.
   const colour = emphasis.categories?.colors.get(key) ?? palette.nodeIdle;
   const focused = emphasis.focus.nodes.size > 0;
   if (key === emphasis.selected) {
-    return { color: palette.accent, size: node.size + 2, label, fullLabel: label, forceLabel: true, zIndex: 3 };
+    return { color: palette.accent, size: node.size + 2, label, fullLabel, forceLabel: true, zIndex: 3 };
   }
   const faded = focused && !emphasis.focus.nodes.has(key);
+  // Labelled: the largest bubbles (emphasis.hubs) while nothing is selected, else
+  // the selection's neighbours while they are few; any other bubble on hover.
+  const labelled = focused
+    ? !faded && emphasis.focus.nodes.size <= MAP_FOCUS_LABELS
+    : (emphasis.hubs?.has(key) ?? true);
   return {
     color: faded ? mix(colour, palette.canvas, 0.75) : colour,
     size: node.size,
     label,
-    fullLabel: label,
-    forceLabel: !faded,
+    fullLabel,
+    forceLabel: labelled,
     zIndex: faded ? 0 : 1,
   };
 }

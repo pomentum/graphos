@@ -1,9 +1,10 @@
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import type { CommunityMap } from "../api/types";
 import { t } from "../i18n";
+import { middleEllipsis } from "../lib/text";
 import { rankColors } from "../theme/categories";
 import type { Categories } from "./canvasStyle";
-import { bubbleSize, type MapLinkCount } from "./graphMap";
+import { bubbleSize, keepStrongestLinks, type MapLinkCount } from "./graphMap";
 import { displayName, GraphModel } from "./GraphModel";
 
 export type Community = CommunityMap["communities"][number];
@@ -21,6 +22,23 @@ export function groupTitle(community: Community): string {
     : t("views.explore.groups.fallbackName", { id: community.community_id });
 }
 
+/**
+ * A name short enough for the canvas: the meaningful end of an id-like name.
+ * Paths keep their last segment (`a/b/Invoice.java::__file__` → `Invoice.java`),
+ * `group:artifact` keeps the part after the colon, dotted names keep their last two parts, and
+ * anything still long is cut in the middle. The full name stays on hover.
+ */
+export function shortName(name: string, max = 28): string {
+  let text = name.replace(/::[^/]*$/, "");
+  const segments = text.split(/[/\\]/).filter(Boolean);
+  text = segments.at(-1) ?? text;
+  // `group:artifact`, `kind:name`: the part after the last colon (not in a URL).
+  if (text.includes(":") && !text.includes("://")) text = text.slice(text.lastIndexOf(":") + 1) || text;
+  const dotted = text.split(".");
+  if (dotted.length > 3 && !/\s/.test(text)) text = dotted.slice(-2).join(".");
+  return middleEllipsis(text, max);
+}
+
 /** What a group is made of: "mostly Class" when one label is a majority, else its two commonest labels. */
 export function groupMakeup(community: Community): string {
   const entries = Object.entries(community.labels);
@@ -36,16 +54,16 @@ export function groupMakeup(community: Community): string {
  * thicker with more. Laid out with ForceAtlas2, stronger links pulling
  * harder, bubbles kept apart by their size.
  */
-export function buildCommunityModel(map: CommunityMap): GraphModel {
+export function buildCommunityModel(map: CommunityMap, shown = map.communities.length): GraphModel {
   const model = new GraphModel();
   const graph = model.graph;
-  map.communities.forEach((community, i) => {
+  map.communities.slice(0, shown).forEach((community, i) => {
     const angle = i * 2.399963;
     const r = Math.sqrt(i + 1);
     graph.addNode(groupKey(community.community_id), {
       id: String(community.community_id),
       vertexLabel: groupMakeup(community),
-      properties: { name: groupTitle(community), count: community.size },
+      properties: { name: shortName(groupTitle(community)), fullName: groupTitle(community), count: community.size },
       size: bubbleSize(community.size),
       x: r * Math.cos(angle),
       y: r * Math.sin(angle),
@@ -59,11 +77,12 @@ export function buildCommunityModel(map: CommunityMap): GraphModel {
       properties: { count: link.count, types: link.types as MapLinkCount[] },
     });
   }
+  keepStrongestLinks(model);
   if (graph.order > 2) {
     forceAtlas2.assign(graph, {
       iterations: 500,
       getEdgeWeight: (_edge, attributes) => Math.log10(Number(attributes.properties.count) + 1),
-      settings: { ...forceAtlas2.inferSettings(graph), adjustSizes: true, scalingRatio: 60, gravity: 0.4 },
+      settings: { ...forceAtlas2.inferSettings(graph), adjustSizes: true, scalingRatio: 120, gravity: 0.3 },
     });
   }
   return model;

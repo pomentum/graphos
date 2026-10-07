@@ -1,7 +1,15 @@
 import type { ParseKeys } from "i18next";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { EdgeKey, SearchParams } from "../api/graphosApi";
-import type { EdgeUpsert, NodesScanRequest, NodeUpsert, PathsRequest, Properties, SchemaAddition } from "../api/types";
+import type {
+  EdgeUpsert,
+  Job,
+  NodesScanRequest,
+  NodeUpsert,
+  PathsRequest,
+  Properties,
+  SchemaAddition,
+} from "../api/types";
 import { profileProperties } from "../lib/properties";
 import { useTenantSession } from "../session/SessionProvider";
 
@@ -29,6 +37,7 @@ export const keys = {
   catalogue: (tenant: string) => ["catalogue", tenant] as const,
   map: (tenant: string, exact: boolean) => ["map", tenant, exact] as const,
   groups: (tenant: string) => ["groups", tenant] as const,
+  groupsJob: (tenant: string) => ["groupsJob", tenant] as const,
 };
 
 /** Labels, hierarchy and search indexes; changes rarely, so cached for minutes. */
@@ -53,6 +62,27 @@ export function useCommunityMap() {
 export function useCatalogue() {
   const { api, tenant } = useTenantSession();
   return useQuery({ queryKey: keys.catalogue(tenant), queryFn: () => api.catalogue(), staleTime: 5 * 60_000 });
+}
+
+/** A job that has not ended yet. */
+export function isActiveJob(job: Job | null | undefined): boolean {
+  return job?.status === "queued" || job?.status === "running";
+}
+
+/** How often a running job is checked. */
+const JOB_POLL_MS = 3_000;
+
+/**
+ * The tenant's latest groups recompute, from graphos's job list, checked
+ * every few seconds while it runs and not at all otherwise.
+ */
+export function useGroupsJob() {
+  const { api, tenant } = useTenantSession();
+  return useQuery({
+    queryKey: keys.groupsJob(tenant),
+    queryFn: async () => (await api.jobs()).find((job) => job.kind === "recompute_communities") ?? null,
+    refetchInterval: (query) => (isActiveJob(query.state.data) ? JOB_POLL_MS : false),
+  });
 }
 
 /** Every property name nodes of the tenant carry, sorted; for "search in" pickers. */

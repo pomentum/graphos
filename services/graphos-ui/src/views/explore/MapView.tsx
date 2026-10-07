@@ -3,8 +3,8 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { GraphCanvas } from "../../components/GraphCanvas";
 import { useGraphMap } from "../../data/queries";
-import { buildMapModel, mapCategories, mapEdgeDisplay, mapNodeDisplay } from "../../graph/graphMap";
-import type { ExploreMode } from "../../graph/WorkspaceProvider";
+import { buildMapModel, largestBubbles, mapCategories, mapEdgeDisplay, mapNodeDisplay } from "../../graph/graphMap";
+import { useWorkspace, type ExploreMode } from "../../graph/WorkspaceProvider";
 import { formatCount } from "../../lib/time";
 import { usePalette } from "../../theme/usePalette";
 import classes from "./ExploreView.module.css";
@@ -26,19 +26,22 @@ export function MapView({ onMode }: { onMode: (mode: ExploreMode) => void }) {
   const [exact, setExact] = useState(false);
   const map = useGraphMap(exact);
   const palette = usePalette();
-  const [selected, setSelected] = useState<string | null>(null);
+  // Kept in the workspace: going to Browse and back keeps the label selected.
+  const { mapLabel: selected, setMapLabel: setSelected } = useWorkspace();
   const { openHubs, opening } = useOpenHubs();
 
   const model = useMemo(() => (map.data ? buildMapModel(map.data) : null), [map.data]);
   const categories = useMemo(() => (map.data ? mapCategories(map.data) : undefined), [map.data]);
+  const largest = useMemo(() => (model ? largestBubbles(model) : undefined), [model]);
   const emphasis = useMemo(
     () => ({
       selected,
       categories,
       focus: selected && model?.graph.hasNode(selected) ? model.neighborhood(selected) : NO_FOCUS,
       recent: new Set<string>(),
+      hubs: largest,
     }),
-    [selected, categories, model],
+    [selected, categories, model, largest],
   );
   const totals = map.data
     ? {

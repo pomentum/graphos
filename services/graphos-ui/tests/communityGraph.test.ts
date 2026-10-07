@@ -6,6 +6,7 @@ import {
   groupLinks,
   groupMakeup,
   groupTitle,
+  shortName,
 } from "../src/graph/communityGraph";
 import { CATEGORY_COLORS } from "../src/theme/categories";
 
@@ -43,7 +44,11 @@ describe("groups view", () => {
     const model = buildCommunityModel(map);
     expect(model.graph.order).toBe(2);
     expect(model.graph.size).toBe(2); // the link to group 77 (not shown) is left out
-    expect(model.graph.getNodeAttribute(groupKey(4), "properties")).toEqual({ name: "pay", count: 100 });
+    expect(model.graph.getNodeAttribute(groupKey(4), "properties")).toEqual({
+      name: "pay",
+      fullName: "pay",
+      count: 100,
+    });
     expect(communityCategories(map).colors.get(groupKey(4))).toBe(CATEGORY_COLORS[0]);
   });
 
@@ -53,5 +58,41 @@ describe("groups view", () => {
       [77, 5],
     ]);
     expect(groupLinks(map, 4).incoming.map((l) => [l.id, l.count])).toEqual([[9, 3]]);
+  });
+});
+
+describe("short group names", () => {
+  it("keeps the meaningful end of id-like names", () => {
+    expect(shortName("repo/src/main/java/com/example/Invoice.java::__file__")).toBe("Invoice.java");
+    expect(shortName("parent:com.example.billing.invoice.core")).toBe("invoice.core");
+    expect(shortName("billing-api")).toBe("billing-api");
+    expect(shortName("a/b/" + "x".repeat(60))).toHaveLength(28);
+  });
+});
+
+describe("thinning the lines", () => {
+  it("keeps each bubble's strongest links only", () => {
+    const groups: CommunityMap = {
+      ...map,
+      communities: Array.from({ length: 7 }, (_, i) => ({
+        community_id: i,
+        size: 10,
+        labels: { Doc: 10 },
+        hub: null,
+        internal_edges: 0,
+      })),
+      // Group 0 links to every other group, with counts 1..6.
+      links: Array.from({ length: 6 }, (_, i) => ({
+        src: 0,
+        dst: i + 1,
+        count: i + 1,
+        types: [{ type: "X", count: i + 1 }],
+      })),
+    };
+    const model = buildCommunityModel(groups);
+    // Every edge is the only (so strongest) link of its other end: all are kept.
+    expect(model.graph.size).toBe(6);
+    expect(shortName("party-management:party-mgt")).toBe("party-mgt");
+    expect(shortName("http://example.org/a")).toBe("a");
   });
 });

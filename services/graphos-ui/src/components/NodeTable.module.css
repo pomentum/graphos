@@ -32,3 +32,8 @@
 .table[data-stale="true"] tbody {
   opacity: 0.55;
 }
+
+.table th.check,
+.table td.check {
+  width: 40px;
+}

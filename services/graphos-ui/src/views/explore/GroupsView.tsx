@@ -1,11 +1,11 @@
-import { Button, CloseButton, Group, Loader, Stack, Text } from "@mantine/core";
+import { Button, CloseButton, Group, Loader, Select, Stack, Text } from "@mantine/core";
 import { IconRefresh } from "@tabler/icons-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { GraphCanvas } from "../../components/GraphCanvas";
 import { useCommunityMap } from "../../data/queries";
 import { buildCommunityModel, communityCategories, groupKey, type Community } from "../../graph/communityGraph";
-import { mapEdgeDisplay, mapNodeDisplay } from "../../graph/graphMap";
+import { largestBubbles, mapEdgeDisplay, mapNodeDisplay } from "../../graph/graphMap";
 import { useWorkspace, type ExploreMode } from "../../graph/WorkspaceProvider";
 import { relativeTime } from "../../lib/time";
 import { useTenantSession } from "../../session/SessionProvider";
@@ -16,6 +16,9 @@ import { ModeSwitch } from "./ModeSwitch";
 import { useRecomputeGroups } from "./useRecomputeGroups";
 
 const GROUP_STYLE = { node: mapNodeDisplay, edge: mapEdgeDisplay };
+/** How many of the largest groups are drawn; more crowd the canvas without saying more. */
+const SHOWN_CHOICES = [25, 50, 100, 150];
+const DEFAULT_SHOWN = 50;
 const NO_FOCUS = { nodes: new Set<string>(), edges: new Set<string>() };
 
 /**
@@ -32,11 +35,14 @@ export function GroupsView({ onMode }: { onMode: (mode: ExploreMode) => void }) 
   const workspace = useWorkspace();
   const map = useCommunityMap();
   const palette = usePalette();
-  const [selected, setSelected] = useState<string | null>(null);
+  // Kept in the workspace: leaving the view keeps the group selected.
+  const { selectedGroup: selected, setSelectedGroup: setSelected } = workspace;
   const { recompute, running } = useRecomputeGroups();
 
   const data = map.data?.available ? map.data : null;
-  const model = useMemo(() => (data ? buildCommunityModel(data) : null), [data]);
+  const [shown, setShown] = useState(DEFAULT_SHOWN);
+  const model = useMemo(() => (data ? buildCommunityModel(data, shown) : null), [data, shown]);
+  const largest = useMemo(() => (model ? largestBubbles(model) : undefined), [model]);
   const categories = useMemo(() => (data ? communityCategories(data) : undefined), [data]);
   const emphasis = useMemo(
     () => ({
@@ -44,8 +50,9 @@ export function GroupsView({ onMode }: { onMode: (mode: ExploreMode) => void }) 
       categories,
       focus: selected && model?.graph.hasNode(selected) ? model.neighborhood(selected) : NO_FOCUS,
       recent: new Set<string>(),
+      hubs: largest,
     }),
-    [selected, categories, model],
+    [selected, categories, model, largest],
   );
   const byKey = useMemo(() => new Map((data?.communities ?? []).map((c) => [groupKey(c.community_id), c])), [data]);
   const community = selected ? byKey.get(selected) : undefined;
@@ -118,6 +125,20 @@ export function GroupsView({ onMode }: { onMode: (mode: ExploreMode) => void }) 
         )}
         <Group gap={6} className={classes.actions}>
           <ModeSwitch mode="groups" onChange={onMode} />
+          {data ? (
+            <Select
+              size="xs"
+              w={150}
+              aria-label={t("views.explore.groups.shownLabel")}
+              data={SHOWN_CHOICES.filter((n) => n <= Math.max(data.communities.length, SHOWN_CHOICES[0]!)).map((n) => ({
+                value: String(n),
+                label: t("views.explore.groups.shownOption", { count: n }),
+              }))}
+              value={String(shown)}
+              onChange={(value) => value && setShown(Number(value))}
+              allowDeselect={false}
+            />
+          ) : null}
           {data ? computeButton : null}
         </Group>
         {data ? (
@@ -125,7 +146,7 @@ export function GroupsView({ onMode }: { onMode: (mode: ExploreMode) => void }) 
             {running
               ? t("views.explore.groups.computing")
               : t("views.explore.groups.totals", {
-                  shown: data.communities.length,
+                  shown: Math.min(shown, data.communities.length),
                   total: data.n_communities,
                   when: data.computed_at ? relativeTime(data.computed_at) : "",
                 })}

@@ -51,6 +51,12 @@ interface WorkspaceValue {
   frameOn: (keys: string[]) => void;
   mode: ExploreMode;
   setMode: (mode: ExploreMode) => void;
+  /** The label selected on the map, kept while the user goes elsewhere. */
+  mapLabel: string | null;
+  setMapLabel: (label: string | null) => void;
+  /** The group selected under Groups (its bubble key), kept likewise. */
+  selectedGroup: string | null;
+  setSelectedGroup: (key: string | null) => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceValue | null>(null);
@@ -69,6 +75,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [colorBy, setColorBy] = useState<ColorBy>("none");
   const [frame, setFrame] = useState<{ keys: string[]; token: number }>();
   const [mode, setMode] = useState<ExploreMode>("graph");
+  const [mapLabel, setMapLabel] = useState<string | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const frameOn = useCallback(
     (keys: string[]) => setFrame((current) => ({ keys, token: (current?.token ?? 0) + 1 })),
     [],
@@ -92,6 +100,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setSelectedEdge(null);
     setOverview({ status: "idle" });
     setMode("graph");
+    setMapLabel(null);
+    setSelectedGroup(null);
   }, [model, tenant]);
 
   // A selected node that was deleted is no longer selected.
@@ -135,8 +145,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       frameOn,
       mode,
       setMode,
+      mapLabel,
+      setMapLabel,
+      selectedGroup,
+      setSelectedGroup,
     }),
-    [model, version, liveSelected, select, liveSelectedEdge, selectEdge, colorBy, open, overview, frame, frameOn, mode],
+    [
+      model,
+      version,
+      liveSelected,
+      select,
+      liveSelectedEdge,
+      selectEdge,
+      colorBy,
+      open,
+      overview,
+      frame,
+      frameOn,
+      mode,
+      mapLabel,
+      selectedGroup,
+    ],
   );
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

@@ -192,7 +192,11 @@
         "linksFrom": "Relationships from",
         "more_one": "and {{count}} more",
         "more_other": "and {{count}} more",
-        "hint": "Click a group to see what it is made of; double-click to open its best-connected member."
+        "hint": "Click a group to see what it is made of; double-click to open its best-connected member.",
+        "computeDone": "Groups computed",
+        "shownLabel": "How many groups to show",
+        "shownOption_one": "Largest {{count}}",
+        "shownOption_other": "Largest {{count}}"
       },
       "map": {
         "bubbleLabel": "{{label}} · {{formatted}}",
@@ -290,6 +294,16 @@
         "isNot": "is not",
         "isSet": "is set",
         "isNotSet": "is not set"
+      },
+      "selection": {
+        "picked_one": "{{count}} picked",
+        "picked_other": "{{count}} picked",
+        "open": "Open in Explore",
+        "clear": "Clear",
+        "history_one": "Open {{count}} {{label}} node",
+        "history_other": "Open {{count}} {{label}} nodes",
+        "openFailed": "Couldn't open the nodes",
+        "showOnMap": "Show on map"
       }
     },
     "schema": {
@@ -429,7 +443,9 @@
       "button": "Columns · {{shown}}"
     },
     "nodeTable": {
-      "openRow": "Open {{id}}"
+      "openRow": "Open {{id}}",
+      "selectRow": "Pick {{id}}",
+      "selectPage": "Pick every row on this page"
     },
     "countBars": {
       "empty": "Nothing yet",

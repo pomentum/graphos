@@ -229,6 +229,8 @@ export interface Job {
   kind: string;
   status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
   error: { message: string } | null;
+  created_at: string;
+  finished_at: string | null;
 }
 
 /** What an admin may add to a tenant's schema: re-registration merges it with what exists. */

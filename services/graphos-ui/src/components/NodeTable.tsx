@@ -1,4 +1,4 @@
-import { Table, Text } from "@mantine/core";
+import { Checkbox, Table, Text } from "@mantine/core";
 import { useTranslation } from "react-i18next";
 import type { Properties } from "../api/types";
 import { formatValue } from "../lib/properties";
@@ -22,22 +22,39 @@ export interface NodeTableProps {
   onOpen: (row: NodeRow) => void;
   /** Dims the rows while the next page loads. */
   stale?: boolean;
+  /** With these, a first column of checkboxes picks rows (by id). */
+  selected?: Set<string>;
+  onToggle?: (row: NodeRow, on: boolean) => void;
+  onToggleAll?: (on: boolean) => void;
 }
 
 /** Nodes as rows: the id, then one column per property; long values are cut, with the full value on hover. */
-export function NodeTable({ rows, columns, onOpen, stale }: NodeTableProps) {
+export function NodeTable({ rows, columns, onOpen, stale, selected, onToggle, onToggleAll }: NodeTableProps) {
   const { t } = useTranslation();
+  const selectable = Boolean(selected && onToggle);
+  const picked = rows.filter((row) => selected?.has(row.id)).length;
   return (
     <Table
       stickyHeader
       highlightOnHover
       className={classes.table}
       // Every column keeps a readable width; past the view, the table scrolls sideways.
-      style={{ minWidth: ID_WIDTH + columns.length * MIN_COLUMN_WIDTH }}
+      style={{ minWidth: ID_WIDTH + columns.length * MIN_COLUMN_WIDTH + (selectable ? 40 : 0) }}
       data-stale={stale ? "true" : undefined}
     >
       <Table.Thead>
         <Table.Tr>
+          {selectable ? (
+            <Table.Th className={classes.check}>
+              <Checkbox
+                size="xs"
+                aria-label={t("components.nodeTable.selectPage")}
+                checked={rows.length > 0 && picked === rows.length}
+                indeterminate={picked > 0 && picked < rows.length}
+                onChange={(event) => onToggleAll?.(event.currentTarget.checked)}
+              />
+            </Table.Th>
+          ) : null}
           <Table.Th className={classes.id}>id</Table.Th>
           {columns.map((column) => (
             <Table.Th key={column}>{column}</Table.Th>
@@ -56,6 +73,16 @@ export function NodeTable({ rows, columns, onOpen, stale }: NodeTableProps) {
               if (event.key === "Enter") onOpen(row);
             }}
           >
+            {selectable ? (
+              <Table.Td className={classes.check} onClick={(event) => event.stopPropagation()}>
+                <Checkbox
+                  size="xs"
+                  aria-label={t("components.nodeTable.selectRow", { id: row.id })}
+                  checked={selected?.has(row.id) ?? false}
+                  onChange={(event) => onToggle?.(row, event.currentTarget.checked)}
+                />
+              </Table.Td>
+            ) : null}
             <Table.Td>
               <Text size="xs" ff="monospace" truncate title={row.id}>
                 {row.id}

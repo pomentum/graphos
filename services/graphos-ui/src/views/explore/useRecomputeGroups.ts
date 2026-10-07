@@ -1,42 +1,52 @@
 import { notifications } from "@mantine/notifications";
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { keys } from "../../data/queries";
+import { useEffect, useRef } from "react";
+import { isActiveJob, keys, useGroupsJob } from "../../data/queries";
 import { t } from "../../i18n";
 import { useTenantSession } from "../../session/SessionProvider";
 
-/** How often a running recompute is checked. */
-const POLL_MS = 3_000;
-
 /**
- * Recomputes the groups (admin) as a background job and waits for it,
- * then reloads the group map. Recomputing a large graph takes minutes; the
- * page stays usable meanwhile.
+ * Recomputing the groups (admin): starts the background job, and follows
+ * whichever recompute of this tenant is running, whoever started it and
+ * from wherever. The job is read from graphos, not kept in the page, so
+ * leaving the view, reloading, or a recompute started elsewhere are all
+ * seen; when it ends the group map is read again.
  */
 export function useRecomputeGroups(): { recompute: () => Promise<void>; running: boolean } {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
-  const [running, setRunning] = useState(false);
+  const job = useGroupsJob();
+  const running = isActiveJob(job.data);
+
+  // A recompute that was running and has now ended.
+  const wasRunning = useRef(running);
+  useEffect(() => {
+    if (wasRunning.current && !running && job.data) {
+      if (job.data.status === "succeeded") {
+        void client.invalidateQueries({ queryKey: keys.groups(tenant) });
+        notifications.show({ message: t("views.explore.groups.computeDone") });
+      } else {
+        notifications.show({
+          color: "red",
+          title: t("views.explore.groups.computeFailed"),
+          message: job.data.error?.message ?? job.data.status,
+        });
+      }
+    }
+    wasRunning.current = running;
+  }, [running, job.data, client, tenant]);
 
   const recompute = async () => {
-    setRunning(true);
     try {
-      let job = await api.recomputeGroups();
-      while (job.status === "queued" || job.status === "running") {
-        await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-        job = await api.job(job.id);
-      }
-      if (job.status !== "succeeded") throw new Error(job.error?.message ?? job.status);
-      await client.invalidateQueries({ queryKey: keys.groups(tenant) });
+      await api.recomputeGroups();
     } catch (error) {
       notifications.show({
         color: "red",
         title: t("views.explore.groups.computeFailed"),
         message: error instanceof Error ? error.message : String(error),
       });
-    } finally {
-      setRunning(false);
     }
+    await client.invalidateQueries({ queryKey: keys.groupsJob(tenant) });
   };
   return { recompute, running };
 }
