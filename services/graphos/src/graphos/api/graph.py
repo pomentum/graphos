@@ -2889,6 +2889,15 @@ def _build_cursor_predicate(
     return "(" + " OR ".join(branches) + ")", params, idx
 
 
+def _jsonb_text(value: Any) -> str:
+    """A value as ``jsonb ->>`` prints it: text as-is, anything else as JSON.
+
+    ``str()`` is not that form: it renders ``True`` where Postgres prints
+    ``true``, so a boolean filter would never match.
+    """
+    return value if isinstance(value, str) else _json.dumps(value)
+
+
 def _compile_scan_where(
     clauses: list[NodesScanWhere],
     *,
@@ -2946,11 +2955,9 @@ def _compile_scan_where(
                 f"((((v.properties)::text)::jsonb) ->> '{prop}') "
                 f"{sql_op} ${idx}::text"
             )
-            # ``->>`` returns text — compare to the value's canonical
-            # text form.  Strings pass through unchanged; ints / floats
-            # / bools render the same way ``->>`` would emit them so
-            # equality holds.
-            params.append(str(c.value))
+            # ``->>`` returns text — compare to the value's text form
+            # as ``->>`` emits it (``true``, ``42``, ``1.5``).
+            params.append(_jsonb_text(c.value))
             idx += 1
         elif c.op in ("in", "not in"):
             if not isinstance(c.value, list) or not c.value:
@@ -2972,16 +2979,16 @@ def _compile_scan_where(
             # (~1.5 s on a large inheritance hierarchy, empirically).
             #
             # ``->>`` returns text uniformly: strings as-is, numbers /
-            # booleans as their canonical text form.  The wire param
-            # is a plain ``text[]`` (each value stringified), which
-            # PG can ``ANY()`` against the indexed text expression
-            # without an extra coercion.
+            # booleans as JSON text.  The wire param is a plain
+            # ``text[]`` in that same form, which PG can ``ANY()``
+            # against the indexed text expression without an extra
+            # coercion.
             sql_op = "<> ALL" if c.op == "not in" else "= ANY"
             fragments.append(
                 f"((((v.properties)::text)::jsonb) ->> '{prop}') "
                 f"{sql_op} (${idx}::text[])"
             )
-            params.append([str(x) for x in c.value])
+            params.append([_jsonb_text(x) for x in c.value])
             idx += 1
         else:  # pragma: no cover — Literal type prevents this
             raise HTTPException(

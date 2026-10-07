@@ -53,6 +53,9 @@ each existing tenant once, in the background, to record its property names (abou
   `edges:resolve` and every registration. `GET …/graph/catalogue` was cached from registration,
   often before any data, and showed nothing until `?refresh=true`; it is now current after every
   commit. Graphs that predate the record are read once, in the background at startup.
+- **`nodes:scan` filters on booleans match.** A `where` value of `true` or `false` (with `=`,
+  `!=`, `in`, `not in`) was compared as Python's `True` / `False` and matched no node; values are
+  now compared in the JSON text form Postgres reads from the property.
 
 ## 0.2.1 — 2026-10-06
 
