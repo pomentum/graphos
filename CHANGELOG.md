@@ -5,6 +5,13 @@ are released together under one version.
 
 ## Unreleased
 
+### Upgrading
+
+Two tables are added to `graphos_meta` at startup. On the first start, graphos reads every node of
+each existing tenant once, in the background, to record its property names (about as long as one
+`GET …/graph/catalogue?refresh=true` used to take); the API serves meanwhile, and an
+`edges:resolve` that arrives first waits for its tenant's pass.
+
 ### Added
 
 - **Web UI** (`services/graphos-ui`, image `graphos-ui`). Explore (ranked search, a graph canvas,
@@ -16,6 +23,7 @@ are released together under one version.
   forwards `/api/` to graphos on the same origin; users sign in with their own token (kept for
   the browser tab only), so read-only tokens get a read-only UI and edits are attributed to them.
   Light and dark themes. Opt in with `docker compose ... --profile ui`.
+- **`GET …/graph/catalogue?property=…`** narrows the catalogue to the given properties.
 - **`GET /v1/me`**: the calling token's consumer, admin flag, access and registered tenants.
 - **`GET /v1/{tenant}/schema`**: a tenant's labels, label hierarchy, search indexes and
   rule-derived edge labels, for any token on the tenant (the full spec stays admin-only). The
@@ -34,6 +42,15 @@ are released together under one version.
   Each (label, property) gets its GIN indexes (two for `identifier`), built concurrently. Search without `index` is unchanged.
   The client gains `search(index=, fuzzy=, min_score=)`, `register_tenant(search_indexes=)` and
   `SearchHit`.
+
+### Fixed
+
+- **The resolver catalogue is current and cheap.** Which vertex labels carry which properties is
+  now recorded as nodes are written (`graphos_meta.node_properties`, same transaction), instead of
+  being found by reading every row of the tenant: 80 s on a tenant of 572k vertices, run on every
+  `edges:resolve` and every registration. `GET …/graph/catalogue` was cached from registration,
+  often before any data, and showed nothing until `?refresh=true`; it is now current after every
+  commit. Graphs that predate the record are read once, in the background at startup.
 
 ## 0.2.1 — 2026-10-06
 

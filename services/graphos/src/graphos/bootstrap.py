@@ -30,7 +30,7 @@ from dataclasses import asdict, dataclass, field
 
 import asyncpg
 
-from graphos import search
+from graphos import node_properties, search
 from graphos.db import DDL_TIMEOUT_S, allow_long_statements
 from graphos.lookup import REV
 
@@ -343,12 +343,18 @@ async def bootstrap_tenant(
             spec.name,
         )
         try:
-            # 1. Graph itself
+            # 1. Graph itself.  A graph created here holds no nodes yet, so
+            # its record of property names is complete from the start.
+            existed = await conn.fetchval(
+                "SELECT 1 FROM ag_catalog.ag_graph WHERE name = $1;", spec.name,
+            )
             await _safe(
                 conn,
                 f"SELECT create_graph('{spec.name}');",
                 swallow=_SWALLOW_DUPLICATE_OBJECT,
             )
+            if not existed:
+                await node_properties.mark_new(conn, spec.name)
 
             # 1b. The revision column (graphos.writes bumps it on every
             # write).  Added to AGE's two parent tables: Postgres adds it to

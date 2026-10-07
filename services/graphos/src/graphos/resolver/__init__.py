@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from graphos.resolver.catalogue import (
     PropertyLabelCatalogue,
+    catalogue_for_properties,
     get_catalogue,
     refresh_catalogue,
 )
@@ -23,6 +24,7 @@ from graphos.resolver.compiler import (
     CompileError,
     compile_resolve_rule,
     compile_resolve_rules_for_edge_type,
+    rule_property_names,
 )
 from graphos.resolver.indexer import (
     IndexerError,
@@ -35,9 +37,11 @@ __all__ = [
     "CompileError",
     "IndexerError",
     "PropertyLabelCatalogue",
+    "catalogue_for_properties",
     "compile_resolve_rule",
     "compile_resolve_rules_for_edge_type",
     "ensure_resolve_rule_indexes",
     "get_catalogue",
     "refresh_catalogue",
+    "rule_property_names",
 ]

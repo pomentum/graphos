@@ -327,8 +327,8 @@ the edges server-side. No data leaves the database.
 Several entries in `edge_labels` may share a `name`; each rule is kept and run.
 
 **Candidate labels** come from a per-tenant catalogue of which vertex labels
-carry each property (`GET …/graph/catalogue`, refreshed on registration and on
-every resolve). A rule that references a property no node carries yet still
+carry each property (`GET …/graph/catalogue`), recorded as nodes are written,
+so it is current after every commit. A rule that references a property no node carries yet still
 registers; it writes nothing and reports a `warning`.
 
 **Indexes are derived automatically** at registration on the labels that

@@ -31,7 +31,7 @@ import asyncpg
 
 from graphos.bootstrap import TenantSpec
 from graphos.resolver._normalize import canon_text_sql
-from graphos.resolver.catalogue import get_catalogue
+from graphos.resolver.catalogue import catalogue_for_properties
 
 log = logging.getLogger(__name__)
 
@@ -507,7 +507,12 @@ async def ensure_resolve_rule_indexes(
         )
         return list(cached[1])
 
-    catalogue = await get_catalogue(pool, tenant, refresh=True)
+    # The labels carrying each property the rules index, read now.
+    wanted: set[str] = set()
+    for _, rule in spec.resolve_rules:
+        arr = _array_property_for_rule(rule)
+        wanted.update(([arr] if arr else []) + _scalar_properties_for_rule(rule))
+    catalogue = await catalogue_for_properties(pool, tenant, wanted)
 
     # Build the set of indexes to ensure.  Dedupe by name across rules
     # so two rules that need the same ``(label, prop, kind)`` only emit

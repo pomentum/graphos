@@ -10,8 +10,8 @@ import pytest
 
 from graphos.bootstrap import TenantSpec
 from graphos.resolver.catalogue import (
+    forget_catalogue_for_test,
     install_catalogue_for_test,
-    invalidate_catalogue,
 )
 from graphos.resolver.indexer import (
     _LAST_RUN,
@@ -58,15 +58,15 @@ class _StubPool:
 
 
 def _patch_catalogue_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make ``get_catalogue`` return the test-seeded catalogue without
-    hitting the DB."""
+    """Make the indexer's catalogue lookup return the test-seeded
+    catalogue without hitting the DB."""
     from graphos.resolver import catalogue as cat_mod
     from graphos.resolver import indexer as idx_mod
 
-    async def _fake_get(pool, tenant, *, refresh=False):  # noqa: ANN001
-        return cat_mod._CACHE[tenant]
+    async def _fake_lookup(pool, tenant, properties):  # noqa: ANN001
+        return cat_mod._TEST_CATALOGUES[tenant]
 
-    monkeypatch.setattr(idx_mod, "get_catalogue", _fake_get)
+    monkeypatch.setattr(idx_mod, "catalogue_for_properties", _fake_lookup)
 
 
 # ── Fixtures ────────────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ def tenant_name() -> str:
     _LAST_RUN.pop(name, None)
     yield name
     _LAST_RUN.pop(name, None)
-    invalidate_catalogue(name)
+    forget_catalogue_for_test(name)
 
 
 @pytest.fixture

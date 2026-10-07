@@ -32,7 +32,6 @@ from collections.abc import Callable
 import asyncpg
 
 from graphos import bootstrap
-from graphos.resolver.catalogue import invalidate_catalogue
 
 log = logging.getLogger(__name__)
 
@@ -164,7 +163,6 @@ class RegistrySync:
             "FROM graphos_meta.tenants WHERE name = $1;",
             name,
         )
-        invalidate_catalogue(name)
         if row is None:
             if bootstrap.forget(name):
                 log.info("tenant unregistered by another replica", extra={"tenant": name})
@@ -191,12 +189,10 @@ class RegistrySync:
                 bootstrap.registered_tenants()
             ):
                 bootstrap.remember(bootstrap.spec_from_json(row["spec"]))
-                invalidate_catalogue(name)
                 self._versions[name] = row["version"]
                 changed += 1
         for name in set(bootstrap.registered_tenants()) - present:
             bootstrap.forget(name)
-            invalidate_catalogue(name)
             self._versions.pop(name, None)
             changed += 1
         if changed:

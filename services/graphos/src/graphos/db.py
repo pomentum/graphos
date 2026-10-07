@@ -146,6 +146,23 @@ CREATE INDEX IF NOT EXISTS cache_expires_at
     ON graphos_meta.cache (expires_at)
     WHERE expires_at IS NOT NULL;
 
+-- Property names each vertex label's nodes carry (``graphos.node_properties``),
+-- added in the same transaction as the nodes; read by the resolver's catalogue.
+-- Only grows: a name stays after its last carrier is gone.
+CREATE TABLE IF NOT EXISTS graphos_meta.node_properties (
+    tenant    text NOT NULL,
+    label     text NOT NULL,
+    property  text NOT NULL,
+    PRIMARY KEY (tenant, label, property)
+);
+
+-- Tenants whose node_properties rows cover every node: graphs created after
+-- the table existed at once, older ones after one backfill.
+CREATE TABLE IF NOT EXISTS graphos_meta.node_properties_complete (
+    tenant  text PRIMARY KEY,
+    since   timestamptz NOT NULL DEFAULT now()
+);
+
 -- Background jobs (``graphos.jobs``): long operations a caller asked to
 -- run asynchronously.  ``tenant`` is NULL for instance-wide jobs (vacuum).
 -- ``heartbeat_at`` is refreshed by the process running the job; a running

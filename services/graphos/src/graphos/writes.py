@@ -54,7 +54,7 @@ from typing import TYPE_CHECKING, Any
 
 import asyncpg
 
-from graphos import changes, lookup
+from graphos import changes, lookup, node_properties
 from graphos.cypher import CypherError
 from graphos.db import allow_long_statements
 
@@ -127,6 +127,7 @@ async def upsert_nodes(
         return 0
 
     records = [(str(row["id"]), json.dumps(row.get("props", {}))) for row in rows]
+    names = {"id"}.union(*(row.get("props") or {} for row in rows))
 
     with _db_errors(
         "bulk node COPY upsert failed",
@@ -148,7 +149,9 @@ async def upsert_nodes(
             # overriding any ``id`` the caller put in props.  ``ON CONFLICT DO
             # UPDATE`` refuses to touch a row twice in one statement, so the
             # batch is collapsed to the last staging row per id first.
+            # The property names written are recorded by the same statement.
             status = await conn.execute(
+                f"{node_properties.NOTE_CTE}"
                 f'INSERT INTO "{tenant}"."{label}" (properties) '
                 f"SELECT (jsonb_set(props, '{{id}}', to_jsonb(ext_id)))::text::agtype "
                 f"FROM ("
@@ -158,7 +161,8 @@ async def upsert_nodes(
                 f") deduped "
                 f"ON CONFLICT ((properties->'\"id\"')) "
                 f'DO UPDATE SET properties = "{label}".properties || EXCLUDED.properties, '
-                f'{lookup.REV} = "{label}".{lookup.REV} + 1;'
+                f'{lookup.REV} = "{label}".{lookup.REV} + 1;',
+                tenant, label, sorted(names),
             )
             written = _rows_written(status, default=len(rows))
             await changes.record(
@@ -304,6 +308,7 @@ async def merge_node_properties(
                 json.dumps(external_id),
                 json.dumps(dict(properties)),
             )
+            await node_properties.note(conn, tenant, node.label, properties)
             await changes.record(
                 conn, tenant=tenant, op="merge", kind="node", label=node.label,
                 ids=[external_id], rev=int(row["rev"]), count=1,
@@ -368,6 +373,9 @@ async def patch_node(  # noqa: PLR0913 — identity, patch and precondition
                 f"RETURNING {lookup.REV};",
                 json.dumps(external_id),
                 json.dumps(properties),
+            )
+            await node_properties.note(
+                conn, tenant, node.label, (k for k, v in patch.items() if v is not None),
             )
             await changes.record(
                 conn, tenant=tenant, op="patch", kind="node", label=node.label,
@@ -679,13 +687,21 @@ async def set_node_communities(
                 "_stg_assignments", records=assignments, columns=("gid", "community_id"),
             )
             await allow_long_statements(conn, 600.0)
+            # The labels written to are recorded as carrying community_id.
             await conn.execute(
+                f"WITH updated AS ("
                 f'UPDATE "{tenant}"."_ag_label_vertex" t '
                 f"SET properties = t.properties || "
                 f"('{{\"community_id\": ' || s.community_id || '}}')::agtype, "
                 f"{lookup.REV} = t.{lookup.REV} + 1 "
                 f"FROM _stg_assignments s "
-                f"WHERE t.id = (s.gid::text)::graphid;",
+                f"WHERE t.id = (s.gid::text)::graphid "
+                f"RETURNING t.tableoid) "
+                f"INSERT INTO graphos_meta.node_properties (tenant, label, property) "
+                f"SELECT DISTINCT $1, c.relname, 'community_id' "
+                f"FROM updated JOIN pg_class c ON c.oid = updated.tableoid "
+                f"ON CONFLICT DO NOTHING;",
+                tenant,
                 timeout=600.0,
             )
             # One summary: every node in ``assignments`` got a community_id.

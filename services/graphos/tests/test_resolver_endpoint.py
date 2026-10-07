@@ -17,8 +17,8 @@ from graphos.app import create_app
 from graphos.bootstrap import TenantSpec, remember
 from graphos.config import Settings
 from graphos.resolver.catalogue import (
+    forget_catalogue_for_test,
     install_catalogue_for_test,
-    invalidate_catalogue,
 )
 
 
@@ -52,13 +52,13 @@ def registered_tenant() -> str:
     ))
     # Catalogue empty — no DB; the endpoint must short-circuit to
     # zero-emit with a warning rather than 500.
-    invalidate_catalogue(name)
+    forget_catalogue_for_test(name)
     install_catalogue_for_test(name, {})
     yield name
     # Cleanup: drop the registration so other tests don't see it.
     from graphos.bootstrap import _REGISTERED
     _REGISTERED.pop(name, None)
-    invalidate_catalogue(name)
+    forget_catalogue_for_test(name)
 
 
 def test_resolve_unknown_tenant_404() -> None:
@@ -100,27 +100,25 @@ def test_resolve_empty_catalogue_zero_emit_with_warning(
     the endpoint returns ``edges_written=0`` with a warning rather than
     failing the call (per design doc §"Open questions" #3)."""
     client = _client()
-    # The endpoint refreshes the catalogue on entry by hitting the DB —
-    # which is unavailable here.  We patch refresh_catalogue to return
+    # The endpoint looks the catalogue up on entry by hitting the DB —
+    # which is unavailable here.  We patch catalogue_for_properties to return
     # the seeded empty catalogue instead of hitting the DB.
-    from graphos.resolver import catalogue as cat_mod
-    original = cat_mod.refresh_catalogue
-
-    async def _fake_refresh(pool, tenant):  # noqa: ANN001 — test stub
-        return cat_mod._CACHE[tenant]
-
-    cat_mod.refresh_catalogue = _fake_refresh
-    # Also patch the name imported by graph.py
     from graphos.api import graph as graph_mod
-    graph_mod.refresh_catalogue = _fake_refresh
+    from graphos.resolver import catalogue as cat_mod
+    original = graph_mod.catalogue_for_properties
+
+    async def _fake_refresh(pool, tenant, properties):  # noqa: ANN001 — test stub
+        return cat_mod._TEST_CATALOGUES[tenant]
+
+    from graphos.api import graph as graph_mod
+    graph_mod.catalogue_for_properties = _fake_refresh
     try:
         resp = client.post(
             f"/v1/{registered_tenant}/graph/edges:resolve",
             json={},  # resolve all registered types — just REFERENCES
         )
     finally:
-        cat_mod.refresh_catalogue = original
-        graph_mod.refresh_catalogue = original
+        graph_mod.catalogue_for_properties = original
 
     assert resp.status_code == HTTPStatus.OK, resp.text
     body = resp.json()
@@ -139,23 +137,22 @@ def test_resolve_empty_request_resolves_all_registered(
 ) -> None:
     """Omitting ``edge_types`` resolves every registered rule (here, just REFERENCES)."""
     client = _client()
-    from graphos.resolver import catalogue as cat_mod
-    original = cat_mod.refresh_catalogue
-
-    async def _fake_refresh(pool, tenant):  # noqa: ANN001
-        return cat_mod._CACHE[tenant]
-
-    cat_mod.refresh_catalogue = _fake_refresh
     from graphos.api import graph as graph_mod
-    graph_mod.refresh_catalogue = _fake_refresh
+    from graphos.resolver import catalogue as cat_mod
+    original = graph_mod.catalogue_for_properties
+
+    async def _fake_refresh(pool, tenant, properties):  # noqa: ANN001
+        return cat_mod._TEST_CATALOGUES[tenant]
+
+    from graphos.api import graph as graph_mod
+    graph_mod.catalogue_for_properties = _fake_refresh
     try:
         resp = client.post(
             f"/v1/{registered_tenant}/graph/edges:resolve",
             json={},
         )
     finally:
-        cat_mod.refresh_catalogue = original
-        graph_mod.refresh_catalogue = original
+        graph_mod.catalogue_for_properties = original
     assert resp.status_code == HTTPStatus.OK
     body = resp.json()
     types = [r["edge_type"] for r in body["results"]]
@@ -216,12 +213,12 @@ def registered_multi_rule_tenant() -> str:
             }),
         ),
     ))
-    invalidate_catalogue(name)
+    forget_catalogue_for_test(name)
     install_catalogue_for_test(name, {})
     yield name
     from graphos.bootstrap import _REGISTERED
     _REGISTERED.pop(name, None)
-    invalidate_catalogue(name)
+    forget_catalogue_for_test(name)
 
 
 def test_resolve_multi_rule_per_edge_type_returns_single_result(
@@ -231,23 +228,22 @@ def test_resolve_multi_rule_per_edge_type_returns_single_result(
     entry (per-edge-type counts), not two — the response shape stays
     one row per edge_type even with multiple rules behind it."""
     client = _client()
-    from graphos.resolver import catalogue as cat_mod
-    original = cat_mod.refresh_catalogue
-
-    async def _fake_refresh(pool, tenant):  # noqa: ANN001
-        return cat_mod._CACHE[tenant]
-
-    cat_mod.refresh_catalogue = _fake_refresh
     from graphos.api import graph as graph_mod
-    graph_mod.refresh_catalogue = _fake_refresh
+    from graphos.resolver import catalogue as cat_mod
+    original = graph_mod.catalogue_for_properties
+
+    async def _fake_refresh(pool, tenant, properties):  # noqa: ANN001
+        return cat_mod._TEST_CATALOGUES[tenant]
+
+    from graphos.api import graph as graph_mod
+    graph_mod.catalogue_for_properties = _fake_refresh
     try:
         resp = client.post(
             f"/v1/{registered_multi_rule_tenant}/graph/edges:resolve",
             json={},
         )
     finally:
-        cat_mod.refresh_catalogue = original
-        graph_mod.refresh_catalogue = original
+        graph_mod.catalogue_for_properties = original
     assert resp.status_code == HTTPStatus.OK, resp.text
     body = resp.json()
     # Both rules are for RELATES_TO — the result list has exactly one
@@ -267,7 +263,7 @@ async def _e2e_indexer_with_live_db(db_pool) -> None:  # noqa: ANN001
         remember,
         unregister_tenant,
     )
-    from graphos.resolver.catalogue import invalidate_catalogue
+    from graphos.resolver.catalogue import forget_catalogue_for_test
     from graphos.resolver.indexer import ensure_resolve_rule_indexes
 
     name = "tenant_indexer_e2e"
@@ -310,7 +306,7 @@ async def _e2e_indexer_with_live_db(db_pool) -> None:  # noqa: ANN001
         assert "idx_Document_name_btree" in names
         assert "idx_Document_team_btree" in names
     finally:
-        invalidate_catalogue(name)
+        forget_catalogue_for_test(name)
         await unregister_tenant(db_pool, name)
 
 

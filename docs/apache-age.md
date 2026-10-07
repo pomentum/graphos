@@ -129,6 +129,15 @@ Plan shape for `MATCH (n:Person {id: …})`:
             Index Cond: (properties @> '{"id": "..."}'::agtype)
 ```
 
+**Do not answer "which rows have key K" through this GIN index.** The
+key-exists operator `properties ? '"K"'::agtype` can use `gin_agtype_ops`
+(its `text` overload cannot), but on AGE 1.6 the index scan misses rows:
+on a real tenant it returned 0 rows of a label where a sequential scan
+with the same predicate returned 30, for keys holding arrays among
+others. graphos does not use it. The resolver's catalogue of which labels
+carry which properties is recorded at write time instead
+(`graphos_meta.node_properties`).
+
 ---
 
 ## 5. Why every write is COPY-staged SQL

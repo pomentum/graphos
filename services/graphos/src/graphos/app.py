@@ -12,6 +12,8 @@ their own context via ``POST /v1/tenants`` (see bootstrap.py).
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import signal
 from collections.abc import AsyncIterator
@@ -23,7 +25,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from graphos import __version__
+from graphos import __version__, node_properties
 from graphos.api import (
     bulk,
     cache,
@@ -151,6 +153,13 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception:  # noqa: BLE001
             log.exception("tenant bootstrap failed at startup", extra={"tenant": spec.name})
 
+    # 3b. Tenants whose graph predates graphos_meta.node_properties: record
+    #     their property names once, in the background (reads every node).
+    property_backfill = asyncio.create_task(
+        node_properties.backfill_incomplete(pool, list(registered_tenants())),
+        name="graphos-node-properties-backfill",
+    )
+
     # 4. Background jobs.
     runner = JobRunner(
         pool, JOB_KINDS,
@@ -189,6 +198,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        property_backfill.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await property_backfill
         await registry_sync.stop()
         await feed.stop()
         await listener.stop()

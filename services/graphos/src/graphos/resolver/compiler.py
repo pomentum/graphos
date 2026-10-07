@@ -371,6 +371,24 @@ def _normalise(edge_type: str, rule: dict[str, object]) -> _NormalisedRule:
     )
 
 
+def rule_property_names(edge_type: str, rule: dict[str, object]) -> set[str]:
+    """Every node property a rule reads at the top level of a row: the
+    source array, the ``dst_value_from`` properties, the ``require_*``
+    properties and the ``require_dst_property`` keys.  The catalogue is
+    looked up for exactly these.
+
+    Raises ``CompileError`` for a rule outside the DSL.
+    """
+    norm = _normalise(edge_type, rule)
+    return {
+        norm.src_array_prop,
+        *norm.dst_expr.property_names,
+        *norm.require_different,
+        *norm.require_same,
+        *(prop for prop, _ in norm.require_dst_property),
+    }
+
+
 def _infer_labels(
     norm: _NormalisedRule,
     catalogue: PropertyLabelCatalogue,

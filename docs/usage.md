@@ -368,7 +368,7 @@ other reads return every match.
 | `/graph/sample_subgraph` | POST | `label` (required), `filter_property`/`filter_value`, `rel_types`, `per_rel` (50 / 500), `include_properties`, `edge_properties` | stratified `nodes`, `edges` |
 | `/graph/scoped_subgraph` | POST | see below | `nodes[{id (external id), label, properties}]`, `edges`, `truncated` |
 | `/graph/export` | GET | `node_ids`, `rel_types`, `limit_nodes` (5000 / 50000) | graphology JSON |
-| `/graph/catalogue` | GET | `refresh` | `by_property`: property → labels |
+| `/graph/catalogue` | GET | `property` (repeatable), `refresh` | `by_property`: property → labels |
 
 - **search** without `index` matches the `name` property with a case-insensitive `ILIKE '%q%'`,
   served by the trigram index `<Label>_name_trgm`, unranked. `q` is matched literally: `%` and `_`
@@ -670,8 +670,10 @@ curl -s -X POST "$G/v1/acme/graph/edges:resolve" \
 
 `edges:resolve` needs tenant scope; an edge type without a rule returns 400. Inserts use
 `ON CONFLICT (start_id, end_id) DO NOTHING`, so re-runs only add missing edges. Candidate labels and
-supporting indexes come from the property catalogue (`GET /graph/catalogue`), which reflects the data
-present at the time, so re-register after loading data to get the indexes. Python:
+supporting indexes come from the property catalogue (`GET /graph/catalogue`). graphos records which
+labels carry which properties as nodes are written, so the catalogue is current after every commit;
+indexes are derived at registration, so re-register after loading data to get them. A property no
+node carries any more may still be listed until `?refresh=true`, which re-reads every node. Python:
 `g.resolve_edges(edge_types=[...])`; register rules over HTTP (`register_tenant` is typed for plain
 edge-label strings).
 

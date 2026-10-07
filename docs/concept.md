@@ -164,8 +164,22 @@ modes the process then reloads the stored spec (`bootstrap.py::load_spec`)
 and serves that, so a partial re-registration never hides labels or rules
 registered earlier; the response's `vertex_labels` / `edge_labels` are the
 merged sets.
-Registration then refreshes the resolver catalogue and creates resolver
-indexes (best-effort; failures are logged, not returned).
+Registration then creates resolver indexes (best-effort; failures are
+logged, not returned) on the labels the resolver catalogue lists.
+
+**Resolver catalogue.** Which vertex labels carry which property names is
+recorded as nodes are written: every node write (upsert, bulk, snapshot,
+merge, patch, community write-back) adds its property names to
+`graphos_meta.node_properties` in the same transaction, the upsert in the
+same statement. A name already recorded costs one unique-index lookup.
+The catalogue is therefore current after every commit and costs one small
+indexed query, where it used to read every row of the tenant (80 s for
+572k vertices, measured). The record only grows: a name stays after the
+last node carrying it is patched or deleted, which the resolver tolerates;
+`GET …/graph/catalogue?refresh=true` re-reads every node and drops such
+names. A graph created by graphos starts complete; a graph that predates
+the record is read once, in the background at startup, or when a lookup
+first needs it.
 
 On startup graphos reloads every stored spec and re-runs `bootstrap_tenant`
 for each, so consumers need not re-register after a restart. A tenant whose
@@ -352,7 +366,7 @@ Paths under `/v1/{tenant}/graph/...` are abbreviated to `…/graph/...`.
 | `POST …/graph/nodes:scan` | Paginated node enumeration with filters/projection | tenant |
 | `POST …/graph/edges:scan` | Paginated edge enumeration with filters/projection | tenant |
 | `GET …/graph/export?node_ids=&rel_types=&limit_nodes=` | graphology JSON (§6); `limit_nodes` default 5000, ≤50000 | tenant |
-| `GET …/graph/catalogue?refresh=` | Resolver property → labels map | tenant |
+| `GET …/graph/catalogue?property=&refresh=` | Resolver property → labels map, recorded at write time; `property` narrows it, `refresh=true` re-reads every node | tenant |
 | **Aggregates & communities** | | |
 | `POST …/graph/nodes/aggregate` `{label, group_by, values?, limit}` | Group one label by a property | tenant |
 | `POST …/graph/edges/aggregate` | Group edges by endpoint properties and type | tenant |
@@ -562,15 +576,16 @@ through to auth.
 #### 2.5.7 Failure model and process state
 
 `graphos-db` holds all durable state. `graphos-api` also keeps process-local
-state for speed: the tenant registry, the resolver catalogue, the cache LRU,
-rate-limit buckets and the resolver-index memo. Several replicas can run
-against one database; `graphos.sync` keeps the first three in step:
+state for speed: the tenant registry, the cache LRU, rate-limit buckets and
+the resolver-index memo. Several replicas can run against one database;
+`graphos.sync` keeps the first two in step (the resolver catalogue is read
+from the database on every use, so it needs no syncing):
 
-- **Tenant registry and resolver catalogue.** Every write to
+- **Tenant registry.** Every write to
   `graphos_meta.tenants` (register, re-register, unregister) sends
   `NOTIFY graphos_tenants, '<tenant>'` in the same transaction. Each replica
-  `LISTEN`s on one connection, shared with the change feed, reloads that
-  tenant's spec and drops its catalogue, normally within milliseconds. A
+  `LISTEN`s on one connection, shared with the change feed, and reloads that
+  tenant's spec, normally within milliseconds. A
   replica also reconciles the whole registry every `GRAPHOS_REGISTRY_SYNC_S`
   (30 s) and whenever its listener (re)connects, comparing the md5 of each
   stored spec, and a request for a tenant it does not know looks it up in

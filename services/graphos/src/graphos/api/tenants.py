@@ -19,7 +19,6 @@ is idempotent and cheap. See ``bootstrap.py`` module docstring for context.
 
 from __future__ import annotations
 
-import contextlib
 import logging
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -41,7 +40,6 @@ from graphos.contracts.tenants import (
     TenantInfo,
     TenantSpecBody,
 )
-from graphos.resolver.catalogue import refresh_catalogue
 from graphos.resolver.indexer import ensure_resolve_rule_indexes
 
 log = logging.getLogger(__name__)
@@ -171,13 +169,6 @@ async def register(
     # registration added; build what the merged spec now needs.
     if spec.search_indexes:
         await ensure_search_indexes(pool, spec)
-
-    # Warm the per-tenant property→labels catalogue so the first
-    # ``edges:resolve`` call doesn't pay the discovery cost.  Best-effort:
-    # if AGE / the tenant schema isn't fully wired (no node rows yet) the
-    # catalogue stays empty and the resolver refreshes on demand.
-    with contextlib.suppress(Exception):  # non-fatal warm-up
-        await refresh_catalogue(pool, spec.name)
 
     # Auto-derive functional indexes for every ``resolve_rule`` block:
     # graphos owns the SQL — consumers declare intent only.  Idempotent

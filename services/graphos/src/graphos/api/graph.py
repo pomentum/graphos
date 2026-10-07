@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json as _json
 import logging
 import time
@@ -120,9 +121,10 @@ from graphos.contracts.tenants import (
 from graphos.cypher import CypherError, parse_agtype
 from graphos.resolver import (
     CompileError,
+    catalogue_for_properties,
     compile_resolve_rules_for_edge_type,
     get_catalogue,
-    refresh_catalogue,
+    rule_property_names,
 )
 
 _aggregate_log = logging.getLogger("graphos.aggregate")
@@ -1512,8 +1514,12 @@ async def scoped_subgraph(
         "one vertex row, the list of leaf labels carrying it "
         "(inheritance parents pruned).  Use this to verify that the "
         "property names in a registered ``resolve_rule`` actually "
-        "resolve to label tables before firing ``/edges:resolve``.  "
-        "Pass ``refresh=true`` to rebuild from live DB state."
+        "resolve to label tables before firing ``/edges:resolve``.\n\n"
+        "The map is kept as nodes are written, so it is current after "
+        "every commit.  ``property`` (repeatable) narrows it to those "
+        "properties, as ``edges:resolve`` does.  A property no node carries "
+        "any more may still be listed; ``refresh=true`` re-reads every node "
+        "to drop such names (slow on a large tenant)."
     ),
 )
 async def catalogue(
@@ -1522,12 +1528,19 @@ async def catalogue(
     principal: ReadPrincipal,
     refresh: Annotated[
         bool,
-        Query(description="Force a rebuild from live DB state."),
+        Query(description="Re-read every node first, dropping properties no node carries."),
     ] = False,
+    property: Annotated[  # noqa: A002 — the query parameter's name
+        list[str] | None,
+        Query(description="Only these properties."),
+    ] = None,
 ) -> CatalogueResponse:
     _check_tenant(tenant, principal)
-    cat = await get_catalogue(
-        request.app.state.pool, tenant, refresh=refresh,
+    pool = request.app.state.pool
+    cat = (
+        await catalogue_for_properties(pool, tenant, property)
+        if property
+        else await get_catalogue(pool, tenant, refresh=refresh)
     )
     return CatalogueResponse(
         tenant=tenant,
@@ -3606,18 +3619,32 @@ def _resolve_plan(
     return rules_by_type, requested
 
 
+def _rule_properties(
+    rules_by_type: dict[str, list[dict[str, Any]]], edge_types: list[str],
+) -> set[str]:
+    """Properties read by the rules of ``edge_types``.  A rule outside the
+    DSL contributes none; compiling it reports the error."""
+    out: set[str] = set()
+    for edge_type in edge_types:
+        for rule in rules_by_type[edge_type]:
+            with contextlib.suppress(CompileError):
+                out |= rule_property_names(edge_type, rule)
+    return out
+
+
 async def run_resolve(
     pool: asyncpg.Pool, tenant: str, body: ResolveEdgesRequest,
 ) -> ResolveEdgesResponse:
     """The resolution itself, for the endpoint and for background jobs."""
     rules_by_type, requested = _resolve_plan(tenant, body)
 
-    # Catalogue drives the FROM-list label inference.  Refresh on every
-    # request so the resolver picks up new vertex labels / freshly
-    # populated property keys without restart.  Refresh cost is one
-    # cheap SQL per registered vertex label — measured under 50 ms even
-    # on a large tenant, well within the synchronous-call budget.
-    catalogue = await refresh_catalogue(pool, tenant)
+    # Catalogue drives the FROM-list label inference.  Looked up for the
+    # rules' own properties only, from the database now (one GIN probe per
+    # label and property), so labels and properties written a moment ago
+    # count.
+    catalogue = await catalogue_for_properties(
+        pool, tenant, _rule_properties(rules_by_type, requested),
+    )
 
     total_started = time.perf_counter()
 

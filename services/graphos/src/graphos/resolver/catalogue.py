@@ -2,28 +2,33 @@
 
 The resolver compiler needs to know, for each property name referenced
 in a ``resolve_rule``, which vertex labels carry that property on at
-least one row — that's the FROM-list it joins over.  The catalogue is a
-small in-process map kept per tenant, refreshed on tenant registration
-and on demand from the resolve endpoint when a cached entry is missing
-or stale.
+least one row — that's the FROM-list it joins over.
 
-The catalogue is a soft cache, never authoritative.  An empty entry for
-a property name means "no node carries this property *yet*" and the
-resolver will still attempt the compile — at worst, the rule fires on
-the parent ``_ag_label_vertex`` table and writes zero edges, which is
-the design-doc-specified behaviour for a rule that references a not-yet-
-present property.
+It is read from ``graphos_meta.node_properties`` (:mod:`graphos.node_properties`),
+which the write path keeps in the same transaction as the nodes: one
+indexed query, current the moment a write commits, with no cache to go
+stale.  :func:`catalogue_for_properties` answers for the properties a set
+of rules reads (the resolver, the index builder); :func:`refresh_catalogue`
+for every property (the ``GET …/graph/catalogue`` diagnostic).
+
+The catalogue is a coarse filter, never authoritative.  A property that a
+label's nodes no longer carry may still be listed for it (the record only
+grows), and the resolver then finds no matching rows.  An empty entry for
+a property name means "no node carries this property *yet*": the rule
+compiles to nothing and writes zero edges, the design-doc-specified
+behaviour for a rule that references a not-yet-present property.
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 import asyncpg
+
+from graphos import node_properties
 
 log = logging.getLogger(__name__)
 
@@ -45,13 +50,6 @@ class PropertyLabelCatalogue:
 
     def labels_for(self, prop_name: str) -> frozenset[str]:
         return self.by_property.get(prop_name, frozenset())
-
-
-# In-process cache.  Refresh is cheap (one SQL per tenant) so we don't
-# bother with a TTL — invalidate on registration + on-demand by the
-# resolve endpoint.
-_CACHE: dict[str, PropertyLabelCatalogue] = {}
-_CACHE_LOCK = asyncio.Lock()
 
 
 async def _discover_vertex_labels(
@@ -143,135 +141,103 @@ async def _discover_label_parents(
     return out
 
 
-async def _properties_present_on(
-    conn: asyncpg.Connection,
-    tenant: str,
-    label: str,
-) -> frozenset[str]:
-    """Return the set of top-level JSONB keys that appear on at least
-    one row in ``"<tenant>"."<label>"``.  Cheap aggregate — uses the
-    same per-label GIN(properties) index installed at bootstrap; on
-    empty tables it short-circuits.
+def _prune_parents(
+    raw: dict[str, set[str]], ancestors: dict[str, frozenset[str]],
+) -> dict[str, frozenset[str]]:
+    """Leaf labels only: drop a parent label when one of its descendants
+    carries the same property.
+
+    Postgres expands ``SELECT FROM parent`` to scan every descendant, so
+    a compiler joining over the parent would scan the rows the child ×
+    child INSERTs already cover, multiplied by the descendant count on
+    both sides.  Leaf-only candidates give the planner a tight
+    cardinality estimate and let the composite indexes do their job.
     """
-    # AGE stores ``properties`` as ``agtype``; cast to ``jsonb`` for
-    # ``jsonb_object_keys``.  ``LIMIT`` after the DISTINCT keeps the
-    # cost bounded even on a giant table — we just need any node with
-    # the key.
-    row = await conn.fetchrow(
-        f'''
-        SELECT COALESCE(
-          jsonb_agg(DISTINCT k),
-          '[]'::jsonb
-        ) AS keys
-        FROM "{tenant}"."{label}",
-             LATERAL jsonb_object_keys(
-               (properties::text)::jsonb
-             ) AS k;
-        '''
-    )
-    if row is None or row["keys"] is None:
-        return frozenset()
-    keys = json.loads(row["keys"]) if isinstance(row["keys"], str) else list(row["keys"])
-    return frozenset(str(k) for k in keys)
+    out: dict[str, frozenset[str]] = {}
+    for prop, label_set in raw.items():
+        pruned = set(label_set)
+        for cand in label_set:
+            descendants = {child for child, anc in ancestors.items() if cand in anc}
+            if descendants & label_set:
+                pruned.discard(cand)
+        out[prop] = frozenset(pruned) if pruned else frozenset(label_set)
+    return out
 
 
-async def refresh_catalogue(
-    pool: asyncpg.Pool,
-    tenant: str,
+async def _catalogue(
+    pool: asyncpg.Pool, tenant: str, names: set[str] | None,
 ) -> PropertyLabelCatalogue:
-    """Rebuild the catalogue for one tenant from live DB state.
+    """The catalogue for ``names`` (every recorded name when None).
 
-    Best-effort: errors from a single label are logged and skipped so a
-    partially-bootstrapped tenant doesn't poison the catalogue for the
-    rest.  Returns the freshly-built entry.
+    Labels that no longer exist are left out, and inheritance parents are
+    pruned.  Best-effort: a database error yields an empty catalogue.
     """
     cat = PropertyLabelCatalogue(tenant=tenant)
     try:
+        await node_properties.ensure_complete(pool, tenant)
         async with pool.acquire() as conn:
-            labels = await _discover_vertex_labels(conn, tenant)
+            labels = set(await _discover_vertex_labels(conn, tenant))
             ancestors = await _discover_label_parents(conn, tenant)
-            raw: dict[str, set[str]] = {}
-            for label in labels:
-                try:
-                    keys = await _properties_present_on(conn, tenant, label)
-                except asyncpg.exceptions.PostgresError as exc:
-                    log.debug(
-                        "catalogue: skipping label",
-                        extra={
-                            "tenant": tenant, "label": label, "error": str(exc),
-                        },
-                    )
-                    continue
-                for prop in keys:
-                    if not _IDENT.fullmatch(prop):
-                        # The catalogue is consumed by the compiler,
-                        # which only emits identifier-safe paths.
-                        # Skip oddly-named keys so they can't sneak
-                        # through.
-                        continue
-                    raw.setdefault(prop, set()).add(label)
-            # Prune inheritance parents.  When a property appears on
-            # both a parent label and any of its descendants, drop the
-            # parent from the candidate set: postgres expands
-            # ``SELECT FROM parent`` to scan every descendant anyway,
-            # so the compiler joining over the parent would scan the
-            # same rows the child × child INSERTs already cover —
-            # multiplied by the descendant count on both sides.  Leaf-
-            # only candidates give the planner a tight cardinality
-            # estimate and let the composite indexes do their job.
-            for prop, label_set in raw.items():
-                pruned: set[str] = set(label_set)
-                for cand in list(label_set):
-                    cand_descendants = {
-                        child
-                        for child, anc in ancestors.items()
-                        if cand in anc
-                    }
-                    if cand_descendants & label_set:
-                        pruned.discard(cand)
-                cat.by_property[prop] = (
-                    frozenset(pruned) if pruned else frozenset(label_set)
-                )
+            recorded = await node_properties.labels_by_property(conn, tenant, names)
+        raw = {
+            prop: found & labels
+            for prop, found in recorded.items()
+            # The compiler only emits identifier-safe property paths.
+            if _IDENT.fullmatch(prop) and found & labels
+        }
+        cat.by_property = _prune_parents(raw, ancestors)
     except asyncpg.exceptions.PostgresError as exc:
         log.warning(
-            "catalogue refresh failed (using empty)",
-            extra={"tenant": tenant, "error": str(exc)},
+            "catalogue lookup failed (using empty)", extra={"tenant": tenant, "error": str(exc)},
         )
-    async with _CACHE_LOCK:
-        _CACHE[tenant] = cat
     return cat
 
 
-async def get_catalogue(
-    pool: asyncpg.Pool,
-    tenant: str,
-    *,
-    refresh: bool = False,
+async def catalogue_for_properties(
+    pool: asyncpg.Pool, tenant: str, properties: Iterable[str],
 ) -> PropertyLabelCatalogue:
-    """Return the cached catalogue for one tenant, refreshing on miss
-    or when ``refresh=True``.
+    """The labels carrying each of ``properties``, as of the last commit.
+
+    Names that are not plain identifiers are ignored, as the compiler
+    would reject them.
     """
-    if not refresh:
-        async with _CACHE_LOCK:
-            cached = _CACHE.get(tenant)
-        if cached is not None:
-            return cached
-    return await refresh_catalogue(pool, tenant)
+    wanted = {p for p in properties if _IDENT.fullmatch(p)}
+    if not wanted:
+        return PropertyLabelCatalogue(tenant=tenant)
+    return await _catalogue(pool, tenant, wanted)
 
 
-def invalidate_catalogue(tenant: str) -> None:
-    """Drop one tenant's cached catalogue.  Used by tests; also safe
-    to call from any code path that mutates the registered schema.
+async def refresh_catalogue(
+    pool: asyncpg.Pool, tenant: str, *, rebuild: bool = False,
+) -> PropertyLabelCatalogue:
+    """Every recorded property of the tenant, with its labels.
+
+    ``rebuild`` first re-reads every node (:func:`graphos.node_properties.backfill`),
+    dropping names no node carries any more; otherwise the record is read as is.
     """
-    _CACHE.pop(tenant, None)
+    if rebuild:
+        await node_properties.backfill(pool, tenant, rebuild=True)
+    return await _catalogue(pool, tenant, None)
 
 
-def install_catalogue_for_test(
-    tenant: str,
-    by_property: dict[str, set[str]],
-) -> None:
-    """Test-only seed: install a fixed catalogue without hitting the DB."""
-    _CACHE[tenant] = PropertyLabelCatalogue(
+async def get_catalogue(
+    pool: asyncpg.Pool, tenant: str, *, refresh: bool = False,
+) -> PropertyLabelCatalogue:
+    """Every property of the tenant; ``refresh`` rebuilds the record first."""
+    return await refresh_catalogue(pool, tenant, rebuild=refresh)
+
+
+# Catalogues tests install in place of a database lookup.
+_TEST_CATALOGUES: dict[str, PropertyLabelCatalogue] = {}
+
+
+def install_catalogue_for_test(tenant: str, by_property: dict[str, set[str]]) -> None:
+    """Test-only: a fixed catalogue, returned by stubbed lookups."""
+    _TEST_CATALOGUES[tenant] = PropertyLabelCatalogue(
         tenant=tenant,
         by_property={k: frozenset(v) for k, v in by_property.items()},
     )
+
+
+def forget_catalogue_for_test(tenant: str) -> None:
+    _TEST_CATALOGUES.pop(tenant, None)
