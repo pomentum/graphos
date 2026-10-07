@@ -10,6 +10,7 @@ import {
 } from "react";
 import type { Properties } from "../api/types";
 import { useTenantSession } from "../session/SessionProvider";
+import type { ColorBy } from "./canvasStyle";
 import { GraphModel, nodeKey, type NodeRef } from "./GraphModel";
 
 /** Whether the canvas holds the tenant as a whole (in full or as a sample). */
@@ -26,8 +27,13 @@ interface WorkspaceValue {
   model: GraphModel;
   /** Changes whenever the model does, so components re-render. */
   version: number;
+  /** The selected node; selecting an edge clears it, and the other way round. */
   selected: string | null;
   select: (key: string | null) => void;
+  selectedEdge: string | null;
+  selectEdge: (key: string | null) => void;
+  colorBy: ColorBy;
+  setColorBy: (colorBy: ColorBy) => void;
   /** Puts a node on the canvas (if it isn't there) and selects it. */
   open: (ref: NodeRef, properties: Properties) => string;
   overview: Overview;
@@ -46,6 +52,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [model] = useState(() => new GraphModel());
   const [selected, setSelected] = useState<string | null>(null);
   const [overview, setOverview] = useState<Overview>({ status: "idle" });
+  const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
+  const [colorBy, setColorBy] = useState<ColorBy>("none");
+  const select = useCallback((key: string | null) => {
+    setSelected(key);
+    if (key) setSelectedEdge(null);
+  }, []);
+  const selectEdge = useCallback((key: string | null) => {
+    setSelectedEdge(key);
+    if (key) setSelected(null);
+  }, []);
   const version = useSyncExternalStore(
     useCallback((onChange: () => void) => model.subscribe(onChange), [model]),
     () => model.revision,
@@ -54,28 +70,42 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     model.clear();
     setSelected(null);
+    setSelectedEdge(null);
     setOverview({ status: "idle" });
   }, [model, tenant]);
 
   // A selected node that was deleted is no longer selected.
   useEffect(() => {
     if (selected && !model.graph.hasNode(selected)) setSelected(null);
-  }, [model, selected, version]);
+    if (selectedEdge && !model.graph.hasEdge(selectedEdge)) setSelectedEdge(null);
+  }, [model, selected, selectedEdge, version]);
 
   const open = useCallback(
     (ref: NodeRef, properties: Properties) => {
       const key = model.graph.hasNode(nodeKey(ref))
         ? nodeKey(ref)
         : model.addNode(ref, properties, selected ?? undefined);
-      setSelected(key);
+      select(key);
       return key;
     },
-    [model, selected],
+    [model, selected, select],
   );
 
   const value = useMemo(
-    () => ({ model, version, selected, select: setSelected, open, overview, setOverview }),
-    [model, version, selected, open, overview],
+    () => ({
+      model,
+      version,
+      selected,
+      select,
+      selectedEdge,
+      selectEdge,
+      colorBy,
+      setColorBy,
+      open,
+      overview,
+      setOverview,
+    }),
+    [model, version, selected, select, selectedEdge, selectEdge, colorBy, open, overview],
   );
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

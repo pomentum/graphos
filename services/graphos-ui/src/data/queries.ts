@@ -8,6 +8,8 @@ export const keys = {
   schema: (tenant: string) => ["schema", tenant] as const,
   search: (tenant: string, params: SearchParams) => ["search", tenant, params] as const,
   node: (tenant: string, label: string, id: string) => ["node", tenant, label, id] as const,
+  edge: (tenant: string, edge: EdgeKey) =>
+    ["edge", tenant, edge.type, edge.srcLabel, edge.srcId, edge.dstLabel, edge.dstId] as const,
   stats: (tenant: string) => ["stats", tenant] as const,
   properties: (tenant: string, label: string) => ["properties", tenant, label] as const,
   histogram: (tenant: string, label: string, property: string) => ["histogram", tenant, label, property] as const,
@@ -53,6 +55,27 @@ export function useProperties(label: string | null) {
     enabled: label !== null,
     staleTime: 60_000,
     select: (page) => [...new Set(page.items.flatMap((node) => Object.keys(node.properties)))].sort(),
+  });
+}
+
+/** One edge with its current revision and `ETag`. */
+export function useEdge(edge: EdgeKey | null) {
+  const { api, tenant } = useTenantSession();
+  return useQuery({
+    queryKey: edge ? keys.edge(tenant, edge) : ["edge", tenant, "none"],
+    queryFn: () => api.edge(edge!),
+    enabled: edge !== null,
+  });
+}
+
+/** Saves edited edge properties with `If-Match`. */
+export function useSaveEdge() {
+  const { api, tenant } = useTenantSession();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { edge: EdgeKey; patch: Properties; etag: string }) =>
+      api.patchEdge(args.edge, args.patch, args.etag),
+    onSuccess: (result, args) => client.setQueryData(keys.edge(tenant, args.edge), result.data),
   });
 }
 
@@ -137,7 +160,7 @@ export function useDeleteEdge() {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (edge: EdgeKey) => api.deleteEdge(edge),
+    mutationFn: (edge: EdgeKey & { etag?: string }) => api.deleteEdge(edge, edge.etag),
     onSuccess: () => void client.invalidateQueries({ queryKey: keys.stats(tenant) }),
   });
 }

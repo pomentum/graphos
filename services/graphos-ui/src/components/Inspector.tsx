@@ -1,12 +1,12 @@
-import { Alert, Badge, Button, Group, Popover, Skeleton, Stack, Text, UnstyledButton } from "@mantine/core";
-import { IconTrash } from "@tabler/icons-react";
+import { Badge, Group, Stack, Text, UnstyledButton } from "@mantine/core";
 import { useDeleteEdge, useDeleteNode, useProperties } from "../data/queries";
 import { useNodeEditor } from "../data/useNodeEditor";
 import { displayName, type GraphModel } from "../graph/GraphModel";
 import { useTenantSession } from "../session/SessionProvider";
+import { ConfirmDelete } from "./ConfirmDelete";
 import { ConnectionList } from "./ConnectionList";
 import classes from "./Inspector.module.css";
-import { PropertyEditor } from "./PropertyEditor";
+import { RecordForm } from "./RecordForm";
 
 export interface InspectorProps {
   model: GraphModel;
@@ -30,28 +30,15 @@ export function Inspector({ model, selected, onSelect, onExpand }: InspectorProp
   const removeNode = useDeleteNode();
   const removeEdge = useDeleteEdge();
 
-  const save = async () => {
-    const saved = await editor.save();
-    if (saved) model.updateNode(selected, saved.properties);
-  };
-
   const deleteNode = async () => {
-    await removeNode.mutateAsync({ ...ref, etag: editor.node?.etag });
+    await removeNode.mutateAsync({ ...ref, etag: editor.record?.etag });
     model.removeNode(selected);
     onSelect(null);
   };
 
   /** Removes one edge in graphos, then from the canvas. */
   const deleteEdge = async (edge: string) => {
-    const [src, dst] = model.graph.extremities(edge).map((key) => model.graph.getNodeAttributes(key));
-    if (!src || !dst) return;
-    await removeEdge.mutateAsync({
-      type: model.graph.getEdgeAttribute(edge, "edgeType"),
-      srcId: src.id,
-      srcLabel: src.vertexLabel,
-      dstId: dst.id,
-      dstLabel: dst.vertexLabel,
-    });
+    await removeEdge.mutateAsync(model.edgeRef(edge));
     model.removeEdge(edge);
   };
 
@@ -59,79 +46,34 @@ export function Inspector({ model, selected, onSelect, onExpand }: InspectorProp
     <Stack gap="md" className={classes.root}>
       <div>
         <Text fw={600} size="md" truncate>
-          {displayName(editor.node?.properties ?? attributes.properties, ref.id)}
+          {displayName(editor.record?.properties ?? attributes.properties, ref.id)}
         </Text>
         <Group gap={6} mt={4}>
           <Badge variant="light" size="sm" radius="sm" tt="none">
             {ref.label}
           </Badge>
-          {editor.node ? (
+          {editor.record ? (
             <Text size="xs" c="dimmed">
-              Revision {editor.node.rev}
+              Revision {editor.record.rev}
             </Text>
           ) : null}
         </Group>
       </div>
 
-      {editor.stale ? (
-        <Alert color="orange" variant="light" radius="md" title={`${editor.changedBy ?? "Someone"} changed this node`}>
-          <Text size="xs">Your edits are kept. Saving applies only the fields you changed.</Text>
-          <Group gap="xs" mt="xs">
-            <Button size="compact-xs" variant="default" onClick={editor.discard}>
-              Discard mine
-            </Button>
-            <Button size="compact-xs" loading={editor.saving} onClick={() => void save()}>
-              Save mine
-            </Button>
-          </Group>
-        </Alert>
-      ) : null}
-
-      {editor.isLoading ? (
-        <Skeleton h={120} radius="lg" />
-      ) : (
-        <PropertyEditor
-          draft={editor.values}
-          editable={canWrite}
-          onChange={editor.change}
-          suggestions={properties.data}
-        />
-      )}
-      {editor.error ? (
-        <Text size="xs" c="red">
-          {editor.error}
-        </Text>
-      ) : null}
-
-      {canWrite ? (
-        <Group justify="space-between">
-          <Popover position="bottom-start" withArrow>
-            <Popover.Target>
-              <Button size="xs" variant="subtle" color="red" leftSection={<IconTrash size={14} />}>
-                Delete
-              </Button>
-            </Popover.Target>
-            <Popover.Dropdown>
-              <Text size="xs" mb="xs">
-                Delete this node and every edge touching it?
-              </Text>
-              <Button size="compact-xs" color="red" loading={removeNode.isPending} onClick={() => void deleteNode()}>
-                Delete node
-              </Button>
-            </Popover.Dropdown>
-          </Popover>
-          {editor.dirty && !editor.stale ? (
-            <Group gap="xs">
-              <Button size="xs" variant="default" onClick={editor.discard}>
-                Revert
-              </Button>
-              <Button size="xs" loading={editor.saving} onClick={() => void save()}>
-                Save
-              </Button>
-            </Group>
-          ) : null}
-        </Group>
-      ) : null}
+      <RecordForm
+        editor={editor}
+        editable={canWrite}
+        suggestions={properties.data}
+        onSaved={(saved) => model.updateNode(selected, saved.properties)}
+        actions={
+          <ConfirmDelete
+            question="Delete this node and every edge touching it?"
+            confirmLabel="Delete node"
+            busy={removeNode.isPending}
+            onConfirm={() => void deleteNode()}
+          />
+        }
+      />
 
       <div>
         <Group justify="space-between" mb={6}>

@@ -1,5 +1,6 @@
 import Graph from "graphology";
 import forceAtlas2 from "graphology-layout-forceatlas2";
+import type { EdgeKey } from "../api/graphosApi";
 import type { GraphExport, GraphPath, Neighbor, Properties } from "../api/types";
 
 /** What the canvas stores on each node. */
@@ -186,6 +187,25 @@ export class GraphModel {
   /** Empties the canvas. */
   clear(): void {
     this.graph.clear();
+    this.notify();
+  }
+
+  /** graphos's identity of a canvas edge: its type and both end nodes. */
+  edgeRef(key: string): EdgeKey {
+    const [src, dst] = this.graph.extremities(key).map((end) => this.graph.getNodeAttributes(end));
+    return {
+      type: this.graph.getEdgeAttribute(key, "edgeType"),
+      srcId: src!.id,
+      srcLabel: src!.vertexLabel,
+      dstId: dst!.id,
+      dstLabel: dst!.vertexLabel,
+    };
+  }
+
+  /** Replaces an edge's properties after it was edited. */
+  updateEdge(key: string, properties: Properties): void {
+    if (!this.graph.hasEdge(key)) return;
+    this.graph.setEdgeAttribute(key, "properties", properties);
     this.notify();
   }
 

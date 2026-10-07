@@ -94,3 +94,25 @@ describe("GraphModel.load", () => {
     expect(new Set(positions).size).toBe(3);
   });
 });
+
+describe("GraphModel edges", () => {
+  it("addresses an edge by its type and both ends, and replaces its properties", () => {
+    const model = new GraphModel();
+    const a = model.addNode({ id: "a", label: "Function" }, { name: "a" });
+    model.addNeighbors(a, [neighbor("b", "in")]);
+    const key = edgeKey("CALLS", nodeKey({ id: "b", label: "Function" }), a);
+    expect(model.edgeRef(key)).toEqual({
+      type: "CALLS",
+      srcId: "b",
+      srcLabel: "Function",
+      dstId: "a",
+      dstLabel: "Function",
+    });
+    const before = model.revision;
+    model.updateEdge(key, { weight: 2 });
+    expect(model.graph.getEdgeAttribute(key, "properties")).toEqual({ weight: 2 });
+    expect(model.revision).toBe(before + 1);
+    model.updateEdge("gone", { weight: 3 });
+    expect(model.revision).toBe(before + 1);
+  });
+});

@@ -71,6 +71,18 @@ export interface NodeRecord {
   etag: string;
 }
 
+/** One edge with its revision; `etag` goes back as `If-Match` on a write. */
+export interface EdgeRecord {
+  type: string;
+  src_id: string;
+  src_label: string;
+  dst_id: string;
+  dst_label: string;
+  properties: Properties;
+  rev: number;
+  etag: string;
+}
+
 export interface Neighbor {
   neighbor_id: string;
   neighbor_label: string;

@@ -1,6 +1,7 @@
 import type { HttpClient, Tagged } from "./http";
 import type {
   DeleteNodeResponse,
+  EdgeRecord,
   EdgeUpsert,
   GraphExport,
   EdgesUpsertResponse,
@@ -35,6 +36,10 @@ export interface EdgeKey {
 }
 
 const enc = encodeURIComponent;
+
+function edgeQuery(edge: EdgeKey) {
+  return { src: edge.srcId, dst: edge.dstId, src_label: edge.srcLabel, dst_label: edge.dstLabel };
+}
 
 /** The calling token, independent of any tenant. */
 export function fetchMe(http: HttpClient): Promise<Me> {
@@ -110,10 +115,26 @@ export class GraphosApi {
     return this.http.post(`${this.graph}/edges`, { edges: [edge] });
   }
 
+  /** One edge by its type and end nodes, with the `ETag` to send back on a write. */
+  edge(edge: EdgeKey): Promise<EdgeRecord> {
+    return this.http.get(`${this.graph}/edges/${enc(edge.type)}`, edgeQuery(edge));
+  }
+
+  /** Applies a JSON Merge Patch to one edge, with `If-Match` like `patchNode`. */
+  patchEdge(edge: EdgeKey, patch: Properties, etag?: string): Promise<Tagged<EdgeRecord>> {
+    return this.http.request("PATCH", `${this.graph}/edges/${enc(edge.type)}`, {
+      body: patch,
+      contentType: "application/merge-patch+json",
+      query: edgeQuery(edge),
+      headers: etag ? { "If-Match": etag } : undefined,
+    });
+  }
+
   /** Deletes one edge identified by its type and end nodes. */
-  deleteEdge(edge: EdgeKey): Promise<unknown> {
+  deleteEdge(edge: EdgeKey, etag?: string): Promise<unknown> {
     return this.http.request("DELETE", `${this.graph}/edges/${enc(edge.type)}`, {
-      query: { src: edge.srcId, dst: edge.dstId, src_label: edge.srcLabel, dst_label: edge.dstLabel },
+      query: edgeQuery(edge),
+      headers: etag ? { "If-Match": etag } : undefined,
     });
   }
 

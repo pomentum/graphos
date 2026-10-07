@@ -16,6 +16,8 @@ export interface GraphCanvasProps {
   onSelect: (key: string | null) => void;
   /** Double-click on a node; e.g. to add its neighbours. */
   onExpand?: (key: string) => void;
+  /** Click on an edge; edges are clickable only when this is set. */
+  onSelectEdge?: (key: string) => void;
 }
 
 /**
@@ -23,12 +25,13 @@ export interface GraphCanvasProps {
  * dragged; the camera has zoom controls. Colours and labels come from
  * `canvasStyle`, so this component only connects sigma to React.
  */
-export function GraphCanvas({ model, emphasis, palette, onSelect, onExpand }: GraphCanvasProps) {
+export function GraphCanvas({ model, emphasis, palette, onSelect, onExpand, onSelectEdge }: GraphCanvasProps) {
   const container = useRef<HTMLDivElement>(null);
   const sigma = useRef<Sigma<NodeAttributes, EdgeAttributes> | null>(null);
   // Sigma's callbacks read these refs, so they always see the latest props.
-  const latest = useRef({ emphasis, palette, onSelect, onExpand });
-  latest.current = { emphasis, palette, onSelect, onExpand };
+  const latest = useRef({ emphasis, palette, onSelect, onExpand, onSelectEdge });
+  latest.current = { emphasis, palette, onSelect, onExpand, onSelectEdge };
+  const edgesClickable = Boolean(onSelectEdge);
 
   useEffect(() => {
     if (!container.current) return;
@@ -41,6 +44,7 @@ export function GraphCanvas({ model, emphasis, palette, onSelect, onExpand }: Gr
       labelWeight: "500",
       stagePadding: 80,
       allowInvalidContainer: true,
+      enableEdgeEvents: edgesClickable,
       nodeReducer: (key, node) => ({
         ...node,
         ...nodeDisplay(key, node, latest.current.emphasis, latest.current.palette),
@@ -56,6 +60,15 @@ export function GraphCanvas({ model, emphasis, palette, onSelect, onExpand }: Gr
 
     renderer.on("clickNode", ({ node }) => latest.current.onSelect(node));
     renderer.on("clickStage", () => latest.current.onSelect(null));
+    renderer.on("clickEdge", ({ edge }) => latest.current.onSelectEdge?.(edge));
+    // A pointer over clickable things, as for links.
+    const pointer = (on: boolean) => () => {
+      if (container.current) container.current.style.cursor = on ? "pointer" : "";
+    };
+    renderer.on("enterNode", pointer(true));
+    renderer.on("leaveNode", pointer(false));
+    renderer.on("enterEdge", pointer(true));
+    renderer.on("leaveEdge", pointer(false));
     renderer.on("doubleClickNode", (event) => {
       event.preventSigmaDefault();
       latest.current.onExpand?.(event.node);
@@ -66,7 +79,7 @@ export function GraphCanvas({ model, emphasis, palette, onSelect, onExpand }: Gr
       renderer.kill();
       sigma.current = null;
     };
-  }, [model]);
+  }, [model, edgesClickable]);
 
   // New colours or emphasis: redraw without rebuilding the renderer.
   useEffect(() => {

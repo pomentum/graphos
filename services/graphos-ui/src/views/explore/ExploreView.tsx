@@ -1,32 +1,35 @@
-import { Button, Group, Loader, Text } from "@mantine/core";
-import { IconCirclePlus, IconLink, IconTrashX } from "@tabler/icons-react";
 import { useMemo, useState } from "react";
 import { ApiError } from "../../api/http";
 import type { SearchHit } from "../../api/types";
+import { CanvasLegend } from "../../components/CanvasLegend";
+import { EdgeInspector } from "../../components/EdgeInspector";
 import { ExpandDialog } from "../../components/ExpandDialog";
 import { GraphCanvas } from "../../components/GraphCanvas";
 import { Inspector } from "../../components/Inspector";
 import { NewEdgeDialog } from "../../components/NewEdgeDialog";
 import { NewNodeDialog } from "../../components/NewNodeDialog";
 import { useCreateEdge, useCreateNode, useSchema } from "../../data/queries";
+import { categorize } from "../../graph/canvasStyle";
 import { displayName } from "../../graph/GraphModel";
 import { useWorkspace } from "../../graph/WorkspaceProvider";
 import { useTenantSession } from "../../session/SessionProvider";
 import { usePalette } from "../../theme/usePalette";
+import { CanvasStatus } from "./CanvasStatus";
+import { ExploreActions } from "./ExploreActions";
 import classes from "./ExploreView.module.css";
-import { formatCount } from "../../lib/time";
-import { searchShortcut } from "../../lib/platform";
 import { useExpandNode } from "./useExpandNode";
-import { useWholeGraph } from "./useWholeGraph";
 import { useRecentlyChanged } from "./useRecentlyChanged";
+import { useWholeGraph } from "./useWholeGraph";
 
 /**
- * Explore: the canvas of nodes found by search and expanded by
- * double-click, with the inspector for the selected node.
+ * Explore: the canvas (the whole graph on arrival, or nodes found by search
+ * and expanded by double-click), with the inspector for the selected node or
+ * edge.
  */
 export function ExploreView() {
   const { canWrite } = useTenantSession();
-  const { model, version, selected, select, open, overview, setOverview } = useWorkspace();
+  const workspace = useWorkspace();
+  const { model, version, selected, select, selectedEdge, selectEdge, colorBy, open, overview } = workspace;
   const { load } = useWholeGraph();
   const palette = usePalette();
   const schema = useSchema();
@@ -36,14 +39,21 @@ export function ExploreView() {
   const createNode = useCreateNode();
   const createEdge = useCreateEdge();
 
+  // `version` changes with the model, so categories and neighbourhoods are recomputed.
+  const categories = useMemo(() => categorize(model, colorBy), [model, colorBy, version]);
   const emphasis = useMemo(
     () => ({
       selected,
-      focus: selected ? model.neighborhood(selected) : { nodes: new Set<string>(), edges: new Set<string>() },
+      selectedEdge,
+      categories,
+      focus: selected
+        ? model.neighborhood(selected)
+        : selectedEdge
+          ? { nodes: new Set(model.graph.extremities(selectedEdge)), edges: new Set<string>() }
+          : { nodes: new Set<string>(), edges: new Set<string>() },
       recent,
     }),
-    // `version` changes with the model, so the neighbourhood is recomputed.
-    [model, selected, recent, version],
+    [model, selected, selectedEdge, categories, recent, version],
   );
 
   const selectedNode = selected ? model.graph.getNodeAttributes(selected) : null;
@@ -65,78 +75,34 @@ export function ExploreView() {
     setCreating(null);
   };
 
+  const inspectorOpen = Boolean(selected || selectedEdge);
   return (
-    <div className={classes.root} data-inspector={selected ? "open" : "closed"}>
+    <div className={classes.root} data-inspector={inspectorOpen ? "open" : "closed"}>
       <section className={classes.canvas} aria-label="Graph">
         <GraphCanvas
           model={model}
           emphasis={emphasis}
           palette={palette}
           onSelect={select}
+          onSelectEdge={selectEdge}
           onExpand={(key) => void expand(key)}
         />
-        {overview.status === "loading" ? (
-          <div className={classes.empty}>
-            <Loader size="sm" />
-            <Text size="sm" c="dimmed">
-              Loading the graph…
-            </Text>
-          </div>
-        ) : model.isEmpty ? (
-          <div className={classes.empty}>
-            <Text fw={600}>{overview.status === "failed" ? "Couldn't load the graph" : "The canvas is empty"}</Text>
-            <Text size="sm" c="dimmed">
-              Find a node with search ({searchShortcut()}), then double-click it to see its neighbours.
-            </Text>
-            <Button size="xs" variant="default" mt="sm" className={classes.emptyAction} onClick={() => void load()}>
-              Show the whole graph
-            </Button>
-          </div>
-        ) : null}
-        {overview.status === "shown" && overview.total && overview.shown && overview.total > overview.shown ? (
-          <Text size="xs" className={classes.note}>
-            A sample of {formatCount(overview.shown)} of {formatCount(overview.total)} nodes. Search to focus on one.
-          </Text>
-        ) : null}
-        <Group gap={6} className={classes.actions}>
-          {canWrite ? (
-            <>
-              <Button
-                size="compact-xs"
-                variant="default"
-                leftSection={<IconCirclePlus size={14} />}
-                onClick={() => setCreating("node")}
-              >
-                Node
-              </Button>
-              {selected ? (
-                <Button
-                  size="compact-xs"
-                  variant="default"
-                  leftSection={<IconLink size={14} />}
-                  onClick={() => setCreating("edge")}
-                >
-                  Connect
-                </Button>
-              ) : null}
-            </>
-          ) : null}
-          {!model.isEmpty ? (
-            <Button
-              size="compact-xs"
-              variant="subtle"
-              color="gray"
-              leftSection={<IconTrashX size={14} />}
-              onClick={() => {
-                model.clear();
-                setOverview({ status: "dismissed" });
-              }}
-            >
-              Clear
-            </Button>
-          ) : null}
-          {isExpanding ? <Loader size={14} /> : null}
-        </Group>
+        <CanvasStatus overview={overview} isEmpty={model.isEmpty} onLoad={() => void load()} />
+        <CanvasLegend categories={categories} />
+        <ExploreActions
+          canWrite={canWrite}
+          hasSelection={Boolean(selected)}
+          isEmpty={model.isEmpty}
+          busy={isExpanding}
+          colorBy={colorBy}
+          onColorBy={workspace.setColorBy}
+          onNewNode={() => setCreating("node")}
+          onConnect={() => setCreating("edge")}
+          onClear={() => {
+            model.clear();
+            workspace.setOverview({ status: "dismissed" });
+          }}
+        />
       </section>
 
       {selected ? (
@@ -147,6 +113,16 @@ export function ExploreView() {
             selected={selected}
             onSelect={select}
             onExpand={(key) => void expand(key)}
+          />
+        </aside>
+      ) : selectedEdge ? (
+        <aside className={classes.inspector} aria-label="Inspector">
+          <EdgeInspector
+            key={selectedEdge}
+            model={model}
+            edge={selectedEdge}
+            onSelectNode={select}
+            onDeleted={() => selectEdge(null)}
           />
         </aside>
       ) : null}
