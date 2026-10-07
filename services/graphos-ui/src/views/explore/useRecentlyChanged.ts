@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useActivity } from "../../data/ActivityProvider";
+import { useChangeSubscription } from "../../data/ActivityProvider";
 import { nodeKey, type GraphModel } from "../../graph/GraphModel";
 import { useTenantSession } from "../../session/SessionProvider";
 
@@ -11,7 +11,7 @@ const MARK_MS = 8_000;
  * canvas can mark them. The user's own changes are not marked.
  */
 export function useRecentlyChanged(model: GraphModel): Set<string> {
-  const { subscribe } = useActivity();
+  const subscribe = useChangeSubscription();
   const { me } = useTenantSession();
   const [recent, setRecent] = useState<Set<string>>(() => new Set());
 

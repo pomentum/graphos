@@ -20,6 +20,8 @@ interface ActivityValue {
 }
 
 const ActivityContext = createContext<ActivityValue | null>(null);
+/** Only `subscribe`: it never changes, so its users do not re-render on every change. */
+const SubscribeContext = createContext<ActivityValue["subscribe"] | null>(null);
 
 /**
  * Follows the tenant's change feed once for the whole app: keeps recent
@@ -37,11 +39,15 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setChanges([]);
     setUnseen(0);
+    // One pass over the cache per change, however many nodes it names.
     const refreshCached = (change: ChangeItem) => {
-      if (change.kind !== "node" || !change.label) return;
-      for (const id of change.ids ?? []) {
-        void client.invalidateQueries({ queryKey: keys.node(tenant, change.label, id) });
-      }
+      if (change.kind !== "node" || !change.label || !change.ids?.length) return;
+      const ids = new Set(change.ids);
+      const [kind, , label] = keys.node(tenant, change.label, "");
+      void client.invalidateQueries({
+        predicate: ({ queryKey }) =>
+          queryKey[0] === kind && queryKey[1] === tenant && queryKey[2] === label && ids.has(String(queryKey[3])),
+      });
     };
     const stream = new ChangeStream(api, {
       onStatus: setStatus,
@@ -68,7 +74,21 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
     () => ({ changes, status, unseen, markSeen, subscribe }),
     [changes, status, unseen, markSeen, subscribe],
   );
-  return <ActivityContext.Provider value={value}>{children}</ActivityContext.Provider>;
+  return (
+    <SubscribeContext.Provider value={subscribe}>
+      <ActivityContext.Provider value={value}>{children}</ActivityContext.Provider>
+    </SubscribeContext.Provider>
+  );
+}
+
+/**
+ * Subscribes to changes as they arrive, without re-rendering for each one
+ * (unlike `useActivity`, whose list changes with every change).
+ */
+export function useChangeSubscription(): ActivityValue["subscribe"] {
+  const subscribe = useContext(SubscribeContext);
+  if (!subscribe) throw new Error("useChangeSubscription must be used inside ActivityProvider");
+  return subscribe;
 }
 
 /** The live activity of the selected tenant; throws outside `ActivityProvider`. */

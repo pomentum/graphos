@@ -17,7 +17,7 @@ import { useState } from "react";
 import { IconBell, IconCheck, IconChevronDown, IconLogout, IconMoon, IconSun, IconSunMoon } from "@tabler/icons-react";
 import { Link } from "react-router-dom";
 import { useActivity } from "../data/ActivityProvider";
-import { describeChange } from "../lib/changes";
+import { describeChange, streamStatusText } from "../lib/changes";
 import { relativeTime } from "../lib/time";
 import { useSessionContext, useTenantSession } from "../session/SessionProvider";
 
@@ -112,7 +112,7 @@ export function ActivityBell() {
       </Popover.Target>
       <Popover.Dropdown>
         <Text size="xs" c="dimmed" mb={6}>
-          {status === "live" ? "Live" : "Reconnecting…"}
+          {streamStatusText(status)}
         </Text>
         <Stack gap={8}>
           {changes.slice(0, 5).map((change) => (

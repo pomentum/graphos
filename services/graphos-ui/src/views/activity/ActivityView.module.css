@@ -24,7 +24,7 @@
   border-top: 0;
 }
 
-.row:hover {
+.row[data-openable]:hover {
   background: var(--gx-accent-soft);
 }
 

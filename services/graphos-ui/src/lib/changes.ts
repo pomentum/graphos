@@ -1,4 +1,17 @@
+import type { StreamStatus } from "../api/changeStream";
 import type { ChangeItem } from "../api/types";
+
+/** The feed's state in words, the same wherever it is shown. */
+export function streamStatusText(status: StreamStatus): string {
+  return status === "live" ? "Live" : status === "retrying" ? "Reconnecting…" : "Connecting…";
+}
+
+/** The node a change can open on the canvas: a change to one node that still exists. */
+export function openableNode(change: ChangeItem): { id: string; label: string } | null {
+  const id = change.ids?.[0];
+  if (change.kind !== "node" || change.op === "delete" || !id || !change.label || change.count !== 1) return null;
+  return { id, label: change.label };
+}
 
 const VERBS: Record<ChangeItem["op"], string> = {
   upsert: "wrote",

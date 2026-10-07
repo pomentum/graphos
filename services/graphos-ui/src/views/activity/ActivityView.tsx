@@ -1,25 +1,31 @@
-import { Avatar, Badge, Group, Select, Text, UnstyledButton } from "@mantine/core";
+import { Avatar, Badge, Button, Group, Select, Text, UnstyledButton } from "@mantine/core";
+import { IconChevronRight } from "@tabler/icons-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ChangeItem } from "../../api/types";
 import { useActivity } from "../../data/ActivityProvider";
 import { useWorkspace } from "../../graph/WorkspaceProvider";
-import { describeChange } from "../../lib/changes";
+import { useTenantSession } from "../../session/SessionProvider";
+import { describeChange, openableNode, streamStatusText } from "../../lib/changes";
 import { relativeTime } from "../../lib/time";
 import classes from "./ActivityView.module.css";
 
 /**
  * Activity: every change to the tenant since this page was opened, live,
- * with who made it. A change to one node opens it in Explore.
+ * with who made it. A change to one node that still exists opens it in
+ * Explore (those rows show a chevron); the others are plain rows.
  */
 export function ActivityView() {
   const { changes, status, markSeen } = useActivity();
+  const { api } = useTenantSession();
   const workspace = useWorkspace();
   const navigate = useNavigate();
   const [person, setPerson] = useState<string | null>(null);
   const [label, setLabel] = useState<string | null>(null);
 
-  useEffect(markSeen, [markSeen, changes.length]);
+  // Everything shown here is seen, including changes that arrive while watching.
+  const newest = changes[0]?.cursor;
+  useEffect(markSeen, [markSeen, newest]);
 
   const people = useMemo(() => unique(changes.map((c) => c.consumer ?? "unknown")), [changes]);
   const labels = useMemo(() => unique(changes.map((c) => c.label ?? "")).filter(Boolean), [changes]);
@@ -27,18 +33,24 @@ export function ActivityView() {
     (c) => (!person || (c.consumer ?? "unknown") === person) && (!label || c.label === label),
   );
 
+  /** Opens the node, then fills in its properties (the change carries only its id). */
   const open = (change: ChangeItem) => {
-    const id = change.ids?.[0];
-    if (change.kind !== "node" || change.op === "delete" || !id || !change.label) return;
-    workspace.open({ id, label: change.label }, { id });
-    navigate("/explore");
+    const ref = openableNode(change);
+    if (!ref) return;
+    const key = workspace.open(ref, { id: ref.id });
+    void api
+      .node(ref.id, ref.label)
+      .then((record) => workspace.model.updateNode(key, record.properties))
+      .catch(() => undefined);
+    void navigate("/explore");
   };
+  const filtered = Boolean(person || label);
 
   return (
     <div className={classes.root}>
       <Group justify="space-between" mb="md">
         <Badge variant="dot" color={status === "live" ? "accent" : "gray"} size="lg" radius="sm" tt="none">
-          {status === "live" ? "Live" : status === "retrying" ? "Reconnecting" : "Connecting"}
+          {streamStatusText(status)}
         </Badge>
         <Group gap="xs">
           <Select
@@ -66,31 +78,57 @@ export function ActivityView() {
 
       {shown.length === 0 ? (
         <div className={classes.empty}>
-          <Text fw={600}>Nothing yet</Text>
+          <Text fw={600}>{filtered ? "No changes match these filters" : "Nothing yet"}</Text>
           <Text size="sm" c="dimmed">
-            Changes made from now on appear here as they happen.
+            {filtered
+              ? `${changes.length} changes are hidden by the filters.`
+              : "Changes made from now on appear here as they happen."}
           </Text>
+          {filtered ? (
+            <Button
+              size="xs"
+              variant="default"
+              mt="sm"
+              onClick={() => {
+                setPerson(null);
+                setLabel(null);
+              }}
+            >
+              Clear filters
+            </Button>
+          ) : null}
         </div>
       ) : (
         <div className={classes.group}>
-          {shown.map((change) => (
-            <UnstyledButton key={change.cursor} className={classes.row} onClick={() => open(change)}>
-              <Avatar size={28} radius="xl" color="gray">
-                {(change.consumer ?? "?").slice(0, 2).toUpperCase()}
-              </Avatar>
-              <div className={classes.text}>
-                <Text size="sm" truncate>
-                  <Text span fw={600}>
-                    {change.consumer ?? "unknown"}
-                  </Text>{" "}
-                  {describeChange(change).replace(/^./, (c) => c.toLowerCase())}
-                </Text>
-                <Text size="xs" c="dimmed">
-                  {relativeTime(change.at)}
-                </Text>
-              </div>
-            </UnstyledButton>
-          ))}
+          {shown.map((change) => {
+            const openable = openableNode(change) !== null;
+            const Row = openable ? UnstyledButton : "div";
+            return (
+              <Row
+                key={change.cursor}
+                className={classes.row}
+                data-openable={openable || undefined}
+                onClick={openable ? () => open(change) : undefined}
+                title={openable ? "Open in Explore" : undefined}
+              >
+                <Avatar size={28} radius="xl" color="gray">
+                  {(change.consumer ?? "?").slice(0, 2).toUpperCase()}
+                </Avatar>
+                <div className={classes.text}>
+                  <Text size="sm" truncate>
+                    <Text span fw={600}>
+                      {change.consumer ?? "unknown"}
+                    </Text>{" "}
+                    {describeChange(change).replace(/^./, (c) => c.toLowerCase())}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {relativeTime(change.at)}
+                  </Text>
+                </div>
+                {openable ? <IconChevronRight size={14} className="gx-muted" /> : null}
+              </Row>
+            );
+          })}
         </div>
       )}
     </div>
