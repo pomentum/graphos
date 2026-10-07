@@ -1,11 +1,15 @@
 # Changelog
 
-Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`) and client (`graphos-client`)
-are released together under one version.
+Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
+`ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
+under one version.
 
-## Unreleased
+## 0.3.0 — 2026-10-07
 
-### Upgrading
+graphos 0.3.0 adds the web UI, ranked search through search indexes, a map of a tenant's labels and of its
+communities, and a property catalogue kept current as nodes are written.
+
+### Upgrading from 0.2.1
 
 Five tables are added to `graphos_meta` at startup: the property record (`node_properties`,
 `node_properties_complete`) and the community map (`community_map`, `community_links`,

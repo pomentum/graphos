@@ -77,10 +77,11 @@ file in its npm distribution.
 | @tabler/icons-react | MIT |
 | sigma | MIT |
 | graphology, graphology-layout, graphology-layout-forceatlas2 | MIT |
+| i18next, react-i18next | MIT |
 | @fontsource/inter (Inter typeface) | SIL Open Font License 1.1 |
 | @fontsource/ibm-plex-mono (IBM Plex Mono typeface) | SIL Open Font License 1.1 |
 
-These are the direct dependencies. They bundle 56 packages in all, each under a permissive
+These are the direct dependencies. They bundle 60 packages in all, each under a permissive
 licence: MIT for most, BSD-3-Clause (react-transition-group), 0BSD (tslib) and MIT OR CC0-1.0
 (type-fest). The fonts are redistributed unmodified under the OFL, which permits bundling them
 with software. The image is built on `nginxinc/nginx-unprivileged` (nginx: BSD-2-Clause, on

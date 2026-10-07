@@ -106,7 +106,7 @@ Community detection uses [python-igraph](https://python.igraph.org/), which is G
 
 The [`graphos-image`](.github/workflows/image.yml) workflow builds and smoke-tests both variants (`linux/amd64`) on every pull request and push, and publishes the default (permissive-only) variant for `linux/amd64` and `linux/arm64` to `ghcr.io/<owner>/graphos-api` from `main` and version tags. The `louvain` variant is built and smoke-tested but not published.
 
-**Releasing.** What changed in each version is in [CHANGELOG.md](CHANGELOG.md). Push a version tag such as `0.2.1` to publish the image (`ghcr.io/<owner>/graphos-api:0.2.1` and `:0.2`); keep the versions in `services/graphos/pyproject.toml` and `clients/python/pyproject.toml` equal to the tag. [`graphos-client`](clients/python/) is not published to PyPI automatically: the [`graphos-client-release`](.github/workflows/client-release.yml) workflow is run by hand from a version tag.
+**Releasing.** What changed in each version is in [CHANGELOG.md](CHANGELOG.md). Push a version tag such as `0.3.0` to publish the images (`ghcr.io/<owner>/graphos-api:0.3.0` and `:0.3`, and the same for `graphos-ui`); keep the versions in `services/graphos/pyproject.toml`, `clients/python/pyproject.toml` and `services/graphos-ui/package.json` equal to the tag. [`graphos-client`](clients/python/) is not published to PyPI automatically: the [`graphos-client-release`](.github/workflows/client-release.yml) workflow is run by hand from a version tag.
 
 ## Python client
 
