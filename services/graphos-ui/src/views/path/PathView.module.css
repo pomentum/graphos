@@ -1,0 +1,30 @@
+.root {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  height: 100%;
+}
+
+.form {
+  overflow-y: auto;
+  padding: 16px;
+  background: var(--gx-panel);
+  border-right: 0.5px solid var(--gx-separator);
+}
+
+.canvas {
+  position: relative;
+  min-width: 0;
+}
+
+.path {
+  display: block;
+  padding: 8px 10px;
+  border-radius: var(--mantine-radius-md);
+  background: var(--gx-group);
+  border: 0.5px solid var(--gx-separator);
+}
+
+.path[data-active="true"] {
+  border-color: var(--gx-accent);
+  background: var(--gx-accent-soft);
+}

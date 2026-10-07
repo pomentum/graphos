@@ -131,6 +131,27 @@ services:
     mem_limit: 2g
     mem_reservation: 256m
 
+  # The web UI: static files and a same-origin proxy to graphos-api, no state of
+  # its own. Opt in with `--profile ui`. Users sign in with their own graphos token.
+  graphos-ui:
+    profiles: ["ui"]
+    image: graphos-ui:${GRAPHOS_UI_TAG:-dev}
+    build:
+      context: ./services/graphos-ui
+    container_name: graphos-ui
+    restart: unless-stopped
+    depends_on:
+      graphos-api:
+        condition: service_healthy
+    environment:
+      GRAPHOS_API_UPSTREAM: http://graphos-api:8080
+    ports:
+      # Bind to localhost only, like the API; put TLS in front for other users.
+      - "127.0.0.1:${GRAPHOS_UI_PORT:-8081}:8080"
+    networks:
+      - graphos-net
+    mem_limit: 64m
+
 volumes:
   graphos_data:
     name: graphos_data

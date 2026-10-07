@@ -1,13 +1,15 @@
-# graphos-api container image.
+# graphos-api and graphos-ui container images.
 #
-# build    every PR and push: builds both variants (no push) and smoke-tests them.
-#          Read-only token, so it is safe on pull requests from forks.
-# publish  main and version tags X.Y.Z only (push or manual run): publishes the default variant to
-#          GitHub Container Registry as ghcr.io/<owner>/graphos-api. Only this job
-#          gets `packages: write`.
+# build     every PR and push: builds both API variants (no push) and smoke-tests them.
+# build-ui  every PR and push: builds the UI image (no push) and smoke-tests it.
+#           Read-only token, so both are safe on pull requests from forks.
+# publish   main and version tags X.Y.Z only (push or manual run): publishes the default API
+#           variant and the UI to GitHub Container Registry as ghcr.io/<owner>/graphos-api and
+#           ghcr.io/<owner>/graphos-ui. Only this job gets `packages: write`.
 #
-# A version tag (e.g. 0.1.0) releases the image. It must equal the version in both
-# services/graphos/pyproject.toml and clients/python/pyproject.toml. The client is
+# A version tag (e.g. 0.1.0) releases the images. It must equal the version in
+# services/graphos/pyproject.toml, clients/python/pyproject.toml and
+# services/graphos-ui/package.json. The client is
 # published to PyPI separately, by hand (see client-release.yml).
 #
 # Variants:
@@ -67,8 +69,32 @@ jobs:
           "
           docker run --rm --entrypoint ls graphos-api:ci /usr/share/licenses/graphos
 
+  build-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build (ui, amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: services/graphos-ui
+          load: true
+          tags: graphos-ui:ci
+          cache-from: type=gha,scope=ui
+          cache-to: type=gha,mode=max,scope=ui
+
+      - name: Smoke test
+        run: |
+          docker run -d --name ui -p 8081:8080 graphos-ui:ci
+          for i in $(seq 1 20); do curl -fs http://127.0.0.1:8081/healthz && break; sleep 1; done
+          curl -fs http://127.0.0.1:8081/ | grep -q '<div id="root">'
+          curl -fsI http://127.0.0.1:8081/ | grep -qi 'content-security-policy'
+          docker exec ui ls /usr/share/licenses/graphos-ui
+
   publish:
-    needs: build
+    needs: [build, build-ui]
     # Only main and version tags publish: not pull requests, not manual runs on other branches.
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
     runs-on: ubuntu-latest
@@ -78,7 +104,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Tag matches the service and client versions
+      - name: Tag matches the service, UI and client versions
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           for f in services/graphos/pyproject.toml clients/python/pyproject.toml; do
@@ -88,6 +114,11 @@ jobs:
               exit 1
             fi
           done
+          ui="$(python3 -c "import json;print(json.load(open('services/graphos-ui/package.json'))['version'])")"
+          if [ "${ui}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match version ${ui} in services/graphos-ui/package.json"
+            exit 1
+          fi
 
       - uses: docker/setup-qemu-action@v3
 
@@ -123,3 +154,28 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=default
+
+      - name: UI image tags and labels
+        id: meta-ui
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/graphos-ui
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+          labels: |
+            org.opencontainers.image.title=graphos-ui
+            org.opencontainers.image.description=Web UI for graphos
+            org.opencontainers.image.licenses=Apache-2.0
+
+      - name: Build and push UI (amd64 + arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: services/graphos-ui
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta-ui.outputs.tags }}
+          labels: ${{ steps.meta-ui.outputs.labels }}
+          cache-from: type=gha,scope=ui

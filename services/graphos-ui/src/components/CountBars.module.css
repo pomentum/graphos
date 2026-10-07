@@ -1,0 +1,45 @@
+.group {
+  background: var(--gx-group);
+  border: 0.5px solid var(--gx-separator);
+  border-radius: var(--mantine-radius-lg);
+  overflow: hidden;
+}
+
+.row {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border-top: 0.5px solid var(--gx-separator);
+}
+
+.row:first-child {
+  border-top: 0;
+}
+
+button.row:hover,
+.row[data-active="true"] {
+  background: var(--gx-accent-soft);
+}
+
+.line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.count {
+  flex: none;
+}
+
+.track {
+  height: 3px;
+  margin-top: 5px;
+  border-radius: 2px;
+  background: var(--gx-control);
+}
+
+.bar {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--gx-accent);
+}

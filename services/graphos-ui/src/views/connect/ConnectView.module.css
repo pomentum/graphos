@@ -1,0 +1,44 @@
+.root {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 16px;
+  background: var(--gx-window);
+}
+
+.card {
+  width: min(380px, 100%);
+  background: var(--gx-panel);
+  border: 0.5px solid var(--gx-separator);
+}
+
+.mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--gx-accent);
+}
+
+.list {
+  background: var(--gx-group);
+  border: 0.5px solid var(--gx-separator);
+  border-radius: var(--mantine-radius-lg);
+  overflow: hidden;
+}
+
+.tenant {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 10px 12px;
+  border-top: 0.5px solid var(--gx-separator);
+}
+
+.tenant:first-child {
+  border-top: 0;
+}
+
+.tenant:hover {
+  background: var(--gx-accent-soft);
+}

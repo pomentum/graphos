@@ -408,6 +408,12 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
     or `available: false` when it is missing.
   - `POST /v1/db/vacuum`: named tables or the whole database; `analyze`
     defaults on, `full` off.
+- **Web UI** (`services/graphos-ui`, optional): search, a graph canvas with
+  expand, inspect and edit (saved with `If-Match`), shortest paths, counts per
+  label and live activity. An nginx image with no backend of its own; users
+  sign in with their own token, so permissions and attribution are graphos's.
+  It reads labels and search indexes from `GET /v1/{tenant}/schema`, which any
+  token on the tenant may call, and `GET /v1/me` lists a token's tenants.
 - **Background jobs:** community recompute, `edges:resolve` and vacuum accept
   `Prefer: respond-async` and answer 202 with a job (`Location: /v1/jobs/{id}`).
   `GET /v1/jobs/{id}` returns its status and, when done, the synchronous

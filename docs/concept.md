@@ -335,6 +335,8 @@ Paths under `/v1/{tenant}/graph/...` are abbreviated to `…/graph/...`.
 | `POST /v1/tenants[?force_shrink=true]` | Register / re-apply a spec (§2.2) | admin |
 | `GET /v1/tenants` | List registered tenants | admin |
 | `GET /v1/tenants/{name}` | One tenant's spec summary | admin |
+| `GET /v1/me` | The calling token: consumer, `admin`, `access`, and the registered tenants it may use | any token |
+| `GET /v1/{tenant}/schema` | Labels, label hierarchy, search indexes and rule-derived edge labels (no DDL, rules or `meta`) | tenant |
 | `DELETE /v1/tenants/{name}` | Unregister (see below) | admin |
 | **Reads** | | |
 | `GET …/graph/search?q=&label=&limit=` | Case-insensitive literal substring (`ILIKE`, with `%` / `_` in `q` escaped) on `name`, served by the trigram index; limit ≤200. Hit `id` = AGE graphid (integer); external id in `properties.id` | tenant |

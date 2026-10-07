@@ -1,0 +1,22 @@
+/* Page-wide rules; component styles live next to their components. */
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--gx-window);
+  color: var(--gx-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+.gx-mono {
+  font-family: var(--mantine-font-family-monospace);
+}
+
+.gx-muted {
+  color: var(--gx-muted);
+}

@@ -17,6 +17,7 @@ Your services send JSON over HTTP. graphos owns the database, writes the SQL aga
 - **Schema-agnostic.** No built-in labels or property names. Every endpoint takes label / property / edge names as parameters.
 - **Fast, idempotent writes:** small batches, NDJSON streaming bulk and single-file snapshot import all go through COPY-staged SQL upserts (`INSERT … ON CONFLICT`); in our measurements this was 37–156× faster than per-row Cypher `MERGE` (see [AGE notes](docs/apache-age.md)).
 - **Ranked search:** declare named search indexes over chosen labels and properties; `identifier` finds `getUserById` from `get user by id` or `getUsrById`, `text` is stemmed full-text search. Plain Postgres indexes, updated with the write.
+- **Web UI (optional):** search, explore and edit the graph on a canvas, find paths, see counts and follow changes live; each user signs in with their own token. `docker compose ... --profile ui up -d`.
 - **Composable reads:** search, neighbors, multi-hop expand, shortest paths, induced subgraph, paginated node scan, stratified sampling, graphology export (sigma.js / Gephi).
 - **Edit in place, safely:** read, patch (JSON Merge Patch) or delete one node or edge; each carries a revision and an `ETag`, and `If-Match` turns a concurrent edit into a `412` instead of a lost update.
 - **Graph analytics:** label histograms, top-K by degree, node/edge aggregates, and (optional extra) Louvain communities with IDs that stay stable across runs; the same graph gives the same communities, computed in a separate process so the API keeps serving.

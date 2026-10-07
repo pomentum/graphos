@@ -7,6 +7,20 @@ are released together under one version.
 
 ### Added
 
+- **Web UI** (`services/graphos-ui`, image `graphos-ui`). Explore (ranked search, a graph canvas,
+  expand with a choice of relationship types when a node has many neighbours, inspect and edit
+  properties, add and delete nodes and edges), Path (shortest paths between two nodes), Overview
+  (counts and sizes per label, value counts of a property) and Activity (the change feed, live).
+  Edits are saved with `If-Match` and only for the fields changed; a node saved by someone else
+  meanwhile is flagged with who saved it instead of being overwritten. nginx serves the app and
+  forwards `/api/` to graphos on the same origin; users sign in with their own token (kept for
+  the browser tab only), so read-only tokens get a read-only UI and edits are attributed to them.
+  Light and dark themes. Opt in with `docker compose ... --profile ui`.
+- **`GET /v1/me`**: the calling token's consumer, admin flag, access and registered tenants.
+- **`GET /v1/{tenant}/schema`**: a tenant's labels, label hierarchy, search indexes and
+  rule-derived edge labels, for any token on the tenant (the full spec stays admin-only). The
+  client gains `me()` and `schema()`.
+
 - **Ranked search through named search indexes.** A tenant declares `search_indexes` at
   registration: a name, the vertex labels (or `["*"]`, every label now and later), up to 8 string
   properties, and an analyzer. `GET …/graph/search?index=<name>` returns hits ordered by a `score`

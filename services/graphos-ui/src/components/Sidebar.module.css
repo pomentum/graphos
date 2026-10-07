@@ -1,0 +1,41 @@
+.root {
+  padding: 4px 0 12px;
+}
+
+.section {
+  padding-top: 10px;
+}
+
+.heading {
+  padding: 4px 16px;
+}
+
+.item {
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 1px 8px;
+  padding: 5px 9px;
+  border-radius: var(--mantine-radius-sm);
+  font-size: var(--mantine-font-size-sm);
+  color: var(--gx-text);
+}
+
+.item:hover {
+  background: var(--gx-control);
+}
+
+.icon {
+  color: var(--gx-accent-text);
+}
+
+.active,
+.active:hover {
+  background: var(--gx-accent);
+  color: #fff;
+}
+
+.active .icon {
+  color: #fff;
+}

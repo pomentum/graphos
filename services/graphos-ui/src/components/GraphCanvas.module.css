@@ -1,0 +1,21 @@
+.root {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+.stage {
+  position: absolute;
+  inset: 0;
+}
+
+.zoom {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 3px;
+  border-radius: var(--mantine-radius-md);
+  background: color-mix(in srgb, var(--gx-window) 85%, transparent);
+  border: 0.5px solid var(--gx-separator);
+}

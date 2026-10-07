@@ -61,3 +61,27 @@ graphos runs normally and `POST /v1/{tenant}/recompute-communities` answers `501
 container image published by this repository's workflow does not contain it. If you distribute
 an install or image that includes python-igraph, that distribution must comply with the GPL for
 the igraph component.
+
+## UI dependencies
+
+Bundled into the web UI built from `services/graphos-ui` (`package.json`, versions pinned in
+`package-lock.json`) and served by the `graphos-ui` image. Each package carries its own licence
+file in its npm distribution.
+
+| Package | Licence |
+|---|---|
+| react, react-dom | MIT |
+| react-router-dom | MIT |
+| @mantine/core, @mantine/hooks, @mantine/notifications | MIT |
+| @tanstack/react-query | MIT |
+| @tabler/icons-react | MIT |
+| sigma | MIT |
+| graphology, graphology-layout, graphology-layout-forceatlas2 | MIT |
+| @fontsource/inter (Inter typeface) | SIL Open Font License 1.1 |
+| @fontsource/ibm-plex-mono (IBM Plex Mono typeface) | SIL Open Font License 1.1 |
+
+These are the direct dependencies. They bundle 56 packages in all, each under a permissive
+licence: MIT for most, BSD-3-Clause (react-transition-group), 0BSD (tslib) and MIT OR CC0-1.0
+(type-fest). The fonts are redistributed unmodified under the OFL, which permits bundling them
+with software. The image is built on `nginxinc/nginx-unprivileged` (nginx: BSD-2-Clause, on
+Alpine Linux, whose packages carry their own licences).

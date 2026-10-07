@@ -132,6 +132,10 @@ a write.
 
 These endpoints need no token: `/healthz`, `/readyz`, `/metrics`, `/v1/info`, `/` and `/docs`.
 
+`GET /v1/me` tells any token what it is: `{"consumer", "admin", "access", "tenants"}`, where
+`tenants` lists the registered tenants it may use (all of them for an admin token). A client that
+starts with only a token, such as the web UI, uses it to offer the right tenants.
+
 **Token rotation.** Edit the tokens file, then run `docker kill --signal=HUP graphos-api`. graphos
 swaps in the new token map atomically. SIGHUP is not available on Windows hosts. The file must be
 a JSON object. If it is missing, unreadable or not a JSON object at startup, graphos refuses to
@@ -207,6 +211,10 @@ The expression matches the one `nodes:scan` filters on, so a `where` clause on `
 | `GET /v1/tenants` | `{"tenants": [TenantInfo…]}` |
 | `GET /v1/tenants/{name}` | one `TenantInfo` (404 if unknown) |
 | `DELETE /v1/tenants/{name}` | **Forgets the registration only.** It deletes the `graphos_meta.tenants` row and the in-memory entry. The AGE graph and its data are kept, and re-POSTing the spec brings the tenant back. Returns `{"tenant", "status": "unregistered"}` (404 if unknown). |
+
+Any token on a tenant, read-only included, can read its shape with `GET /v1/{tenant}/schema`:
+`{"name", "vertex_labels", "edge_labels", "label_hierarchy", "search_indexes", "rule_edge_labels"}`.
+It leaves out what only admins see (declared DDL, rule bodies, `meta`).
 
 While a tenant is unregistered, data-plane calls to it return 404. To remove the data itself, delete
 it before you unregister: use `DELETE /v1/{tenant}/graph/nodes?property_key=…&property_value=…`, or
@@ -766,6 +774,22 @@ async with GraphosClient(base_url=G, token=TOKEN, tenant="acme") as g:
 
 The endpoints without auth report tenant counts, never names; admins list tenants with
 `GET /v1/tenants`.
+
+### Web UI
+
+`services/graphos-ui` is a web UI for exploring, editing and following a tenant: ranked search,
+a graph canvas with expand on double-click, shortest paths, counts per label, and live activity.
+It is an nginx image with no backend of its own: it serves the app and forwards `/api/` to
+graphos on the same origin, so graphos needs no CORS setup. Each user signs in with their own
+token, so read-only tokens get a read-only UI and edits are attributed to the person who made
+them. Start it with the rest of the stack:
+
+```bash
+docker compose -f docker-compose.graphos.yml --profile ui up -d    # http://127.0.0.1:8081
+```
+
+or run `ghcr.io/pomentum/graphos-ui` with `GRAPHOS_API_UPSTREAM` pointing at graphos. See
+[services/graphos-ui/README.md](../services/graphos-ui/README.md).
 
 ### Several replicas
 

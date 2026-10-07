@@ -1,0 +1,39 @@
+.root {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  height: 100%;
+}
+
+.root[data-inspector="open"] {
+  grid-template-columns: minmax(0, 1fr) 300px;
+}
+
+.canvas {
+  position: relative;
+  min-width: 0;
+}
+
+.inspector {
+  overflow-y: auto;
+  background: var(--gx-panel);
+  border-left: 0.5px solid var(--gx-separator);
+}
+
+.actions {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+}
+
+.empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  text-align: center;
+  padding: 0 24px;
+  pointer-events: none;
+}

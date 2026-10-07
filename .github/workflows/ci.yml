@@ -38,6 +38,32 @@ jobs:
       - name: Client tests
         run: pytest clients/python/tests
 
+  # ── Web UI: format, types, tests, production build ──────────────────────
+  ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/graphos-ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: services/graphos-ui/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Format and types
+        run: npm run lint
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
   # ── Repo consistency: licence copies + generated diagrams ───────────────
   consistency:
     runs-on: ubuntu-latest
@@ -46,7 +72,7 @@ jobs:
 
       - name: Licence files in each package match the repository root
         run: |
-          for d in services/graphos clients/python; do
+          for d in services/graphos services/graphos-ui clients/python; do
             for f in LICENSE NOTICE THIRD_PARTY_NOTICES.md; do
               cmp "$f" "$d/$f" || { echo "::error::$d/$f differs from ./$f"; exit 1; }
             done
