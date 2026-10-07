@@ -1,7 +1,7 @@
 import type { ParseKeys } from "i18next";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { EdgeKey, SearchParams } from "../api/graphosApi";
-import type { EdgeUpsert, NodesScanRequest, NodeUpsert, PathsRequest, Properties } from "../api/types";
+import type { EdgeUpsert, NodesScanRequest, NodeUpsert, PathsRequest, Properties, SchemaAddition } from "../api/types";
 import { profileProperties } from "../lib/properties";
 import { useTenantSession } from "../session/SessionProvider";
 
@@ -47,6 +47,12 @@ export function useGraphMap(exact = false) {
 export function useCommunityMap() {
   const { api, tenant } = useTenantSession();
   return useQuery({ queryKey: keys.groups(tenant), queryFn: () => api.communityMap(), staleTime: 5 * 60_000 });
+}
+
+/** The property catalogue: each property name and the labels whose nodes carry it. */
+export function useCatalogue() {
+  const { api, tenant } = useTenantSession();
+  return useQuery({ queryKey: keys.catalogue(tenant), queryFn: () => api.catalogue(), staleTime: 5 * 60_000 });
 }
 
 /** Every property name nodes of the tenant carry, sorted; for "search in" pickers. */
@@ -213,6 +219,25 @@ export function useCreateNode() {
     meta: { success: "notices.nodeCreated" },
     mutationFn: (node: NodeUpsert) => api.upsertNode(node),
     onSuccess: () => void client.invalidateQueries({ queryKey: keys.stats(tenant) }),
+  });
+}
+
+/**
+ * Adds labels, relationship types, parents or search indexes (admin). The
+ * schema, the map and the property catalogue are read again afterwards.
+ */
+export function useAddToSchema() {
+  const { api, tenant } = useTenantSession();
+  const client = useQueryClient();
+  return useMutation({
+    meta: { success: "notices.schemaUpdated", errorTitle: "errors.schemaNotUpdated" },
+    mutationFn: (addition: SchemaAddition) => api.addToSchema(addition),
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: keys.schema(tenant) }),
+        client.invalidateQueries({ queryKey: ["map", tenant] }),
+        client.invalidateQueries({ queryKey: keys.catalogue(tenant) }),
+      ]),
   });
 }
 

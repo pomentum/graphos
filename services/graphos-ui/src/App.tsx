@@ -11,6 +11,7 @@ import { SessionProvider, useSessionContext } from "./session/SessionProvider";
 import { resolveCssVariables, theme } from "./theme/mantineTheme";
 import { ActivityView } from "./views/activity/ActivityView";
 import { BrowseView } from "./views/browse/BrowseView";
+import { SchemaView } from "./views/schema/SchemaView";
 import { ConnectView } from "./views/connect/ConnectView";
 import { ExploreView } from "./views/explore/ExploreView";
 import { OverviewView } from "./views/overview/OverviewView";
@@ -25,6 +26,7 @@ const SCREENS: Record<string, ComponentType> = {
   overview: OverviewView,
   activity: ActivityView,
   browse: BrowseView,
+  schema: SchemaView,
 };
 
 /** Client errors (4xx) are answers, not outages: they are not retried. */

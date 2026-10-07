@@ -1,4 +1,12 @@
-import { IconActivity, IconChartBar, IconRoute, IconTable, IconTopologyStar3, type Icon } from "@tabler/icons-react";
+import {
+  IconActivity,
+  IconChartBar,
+  IconRoute,
+  IconSchema,
+  IconTable,
+  IconTopologyStar3,
+  type Icon,
+} from "@tabler/icons-react";
 import type { ParseKeys } from "i18next";
 import type { Session } from "../session/SessionProvider";
 
@@ -56,6 +64,14 @@ export const VIEWS: ViewDefinition[] = [
     path: "/browse",
     title: "views.registry.titles.browse",
     icon: IconTable,
+    group: "Data",
+    requires: "read",
+  },
+  {
+    id: "schema",
+    path: "/schema",
+    title: "views.registry.titles.schema",
+    icon: IconSchema,
     group: "Data",
     requires: "read",
   },

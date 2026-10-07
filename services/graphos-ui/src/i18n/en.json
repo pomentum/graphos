@@ -114,7 +114,8 @@
         "path": "Path",
         "overview": "Overview",
         "activity": "Activity",
-        "browse": "Browse"
+        "browse": "Browse",
+        "schema": "Schema"
       }
     },
     "explore": {
@@ -290,6 +291,62 @@
         "isSet": "is set",
         "isNotSet": "is not set"
       }
+    },
+    "schema": {
+      "heading": "Schema of {{tenant}}",
+      "readOnly": "Read only. Administrators can add labels, relationship types and search indexes.",
+      "neverRemoves": "Nothing is removed here: graphos keeps every label and relationship type, and the data in them.",
+      "add": "Add",
+      "addLabel": "Label",
+      "addRelationship": "Relationship type",
+      "addIndex": "Search index",
+      "sections": {
+        "labels": "Labels",
+        "relationships": "Relationship types",
+        "indexes": "Search indexes"
+      },
+      "labels": {
+        "inherits": "inherits {{parent}}",
+        "properties_one": "{{count}} property",
+        "properties_other": "{{count}} properties",
+        "noProperties": "No properties yet",
+        "browse": "Browse"
+      },
+      "relationships": {
+        "derived": "derived",
+        "derivedTooltip": "Created by a resolve rule from matching properties, not written directly",
+        "none": "None yet",
+        "pairsMore_one": "and {{count}} more pair",
+        "pairsMore_other": "and {{count}} more pairs"
+      },
+      "indexes": {
+        "allLabels": "every label",
+        "none": "No search indexes. Without one, search matches one property by substring.",
+        "covers": "{{properties}} on {{labels}}"
+      },
+      "dialog": {
+        "labelTitle": "New label",
+        "relationshipTitle": "New relationship type",
+        "indexTitle": "New search index",
+        "name": "Name",
+        "labelNameHint": "Starts with a capital letter, e.g. Invoice",
+        "relationshipNameHint": "Starts with a capital letter, e.g. CALLS or DependsOn",
+        "indexNameHint": "Lower case, e.g. by_name",
+        "parent": "Inherits from",
+        "parentHint": "Optional: its nodes then also count as the parent label’s",
+        "analyzer": "Analyzer",
+        "analyzerIdentifier": "Identifier: names, ids, paths",
+        "analyzerText": "Text: prose, full-text",
+        "language": "Language",
+        "properties": "Properties",
+        "propertiesHint": "Up to {{max}} text properties",
+        "labels": "Labels",
+        "labelsHint": "None chosen: every label, now and later",
+        "invalidName": "Not a valid name",
+        "exists": "Already in the schema",
+        "buildNote": "Building the index reads every node it covers; on a large graph this takes a while.",
+        "add": "Add"
+      }
     }
   },
   "components": {
@@ -404,7 +461,8 @@
     "relationshipDeleted": "Relationship deleted",
     "noNeighbours": "No neighbours",
     "neighboursAllShown": "Its neighbours are all on the canvas already",
-    "noHubs": "No {{label}} node has any edges"
+    "noHubs": "No {{label}} node has any edges",
+    "schemaUpdated": "Added to the schema"
   },
   "errors": {
     "notSaved": "Not saved",
@@ -418,6 +476,7 @@
     "neighboursNotLoaded": "Couldn't load the neighbours",
     "otherNodeGone": "The other node no longer exists.",
     "openLabelFailed": "Couldn't open {{label}}",
-    "countsNotLoaded": "Couldn't load the tenant's counts"
+    "countsNotLoaded": "Couldn't load the tenant's counts",
+    "schemaNotUpdated": "Not added to the schema"
   }
 }
