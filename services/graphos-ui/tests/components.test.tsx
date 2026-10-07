@@ -1,5 +1,6 @@
 import { fireEvent, screen } from "@testing-library/react";
 import { ExpandDialog } from "../src/components/ExpandDialog";
+import { NewNodeDialog } from "../src/components/NewNodeDialog";
 import { PropertyEditor } from "../src/components/PropertyEditor";
 import { renderWithTheme } from "./render";
 
@@ -72,5 +73,28 @@ describe("ExpandDialog", () => {
     fireEvent.click(screen.getByLabelText(/CALLS/));
     fireEvent.click(screen.getByRole("button", { name: "Add 42" }));
     expect(onConfirm).toHaveBeenCalledWith(["CALLS"]);
+  });
+});
+
+describe("NewNodeDialog", () => {
+  it("offers an existing node instead of overwriting it", () => {
+    const onOpenExisting = vi.fn();
+    const onCreate = vi.fn();
+    renderWithTheme(
+      <NewNodeDialog
+        opened
+        labels={["Person"]}
+        saving={false}
+        error={null}
+        existing={{ id: "ada", label: "Person" }}
+        onOpenExisting={onOpenExisting}
+        onCancel={() => undefined}
+        onCreate={onCreate}
+      />,
+    );
+    expect(screen.getByText("This Person exists already")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Open it" }));
+    expect(onOpenExisting).toHaveBeenCalledWith({ id: "ada", label: "Person" });
   });
 });

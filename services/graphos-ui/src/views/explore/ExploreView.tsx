@@ -1,7 +1,7 @@
 import { useHotkeys } from "@mantine/hooks";
 import { useCallback, useMemo, useState } from "react";
 import { ApiError } from "../../api/http";
-import type { SearchHit } from "../../api/types";
+import type { NodeUpsert, SearchHit } from "../../api/types";
 import { CanvasLegend } from "../../components/CanvasLegend";
 import { EdgeInspector } from "../../components/EdgeInspector";
 import { ExpandDialog } from "../../components/ExpandDialog";
@@ -11,7 +11,7 @@ import { NewEdgeDialog } from "../../components/NewEdgeDialog";
 import { NewNodeDialog } from "../../components/NewNodeDialog";
 import { useCreateEdge, useCreateNode, useSchema } from "../../data/queries";
 import { categorize } from "../../graph/canvasStyle";
-import { displayName, moreKey } from "../../graph/GraphModel";
+import { displayName, moreKey, type NodeRef } from "../../graph/GraphModel";
 import { useWorkspace } from "../../graph/WorkspaceProvider";
 import { useTenantSession } from "../../session/SessionProvider";
 import { usePalette } from "../../theme/usePalette";
@@ -42,7 +42,7 @@ const HUB_LABELS = 12;
  * Keys: Escape deselects, F focus, E expand, C collapse, H hide, Ctrl/⌘+Z back.
  */
 export function ExploreView() {
-  const { canWrite } = useTenantSession();
+  const { canWrite, api } = useTenantSession();
   const workspace = useWorkspace();
   const { model, version, selected, select, selectedEdge, selectEdge, colorBy, open, overview, frameOn, mode } =
     workspace;
@@ -64,6 +64,9 @@ export function ExploreView() {
   );
   const { expand, dialog, isExpanding } = useExpandNode(model, onExpanded);
   const [creating, setCreating] = useState<"node" | "edge" | null>(null);
+  // A new key per opening: each dialog starts empty, without the last one's values or error.
+  const [dialogKey, setDialogKey] = useState(0);
+  const [existing, setExisting] = useState<NodeRef | null>(null);
   const createNode = useCreateNode();
   const createEdge = useCreateEdge();
 
@@ -89,6 +92,26 @@ export function ExploreView() {
   );
 
   const selectedNode = selected ? model.graph.getNodeAttributes(selected) : null;
+
+  const startCreating = (kind: "node" | "edge") => {
+    createNode.reset();
+    createEdge.reset();
+    setExisting(null);
+    setDialogKey((k) => k + 1);
+    setCreating(kind);
+  };
+
+  /** Creates the node unless one with that id exists: creating would overwrite it, so offer it instead. */
+  const createNewNode = async (node: NodeUpsert) => {
+    const found = await api.node(node.id, node.label).catch(() => null);
+    if (found) {
+      setExisting({ id: node.id, label: node.label });
+      return;
+    }
+    if (!(await createNode.mutateAsync(node).catch(() => null))) return;
+    open({ id: node.id, label: node.label }, { ...node.properties, id: node.id });
+    setCreating(null);
+  };
 
   const deselect = () => {
     select(null);
@@ -164,8 +187,8 @@ export function ExploreView() {
           onBack={() => model.undo()}
           onFocus={() => setFocusOnly((on) => !on)}
           onColorBy={workspace.setColorBy}
-          onNewNode={() => setCreating("node")}
-          onConnect={() => setCreating("edge")}
+          onNewNode={() => startCreating("node")}
+          onConnect={() => startCreating("edge")}
           onClear={() => {
             deselect();
             model.clear();
@@ -200,19 +223,23 @@ export function ExploreView() {
 
       <ExpandDialog {...dialog} />
       <NewNodeDialog
+        key={`node-${dialogKey}`}
         opened={creating === "node"}
         labels={schema.data?.vertex_labels ?? []}
         saving={createNode.isPending}
         error={createNode.error instanceof ApiError ? createNode.error.message : null}
-        onCancel={() => setCreating(null)}
-        onCreate={async (node) => {
-          if (!(await createNode.mutateAsync(node).catch(() => null))) return;
-          open({ id: node.id, label: node.label }, { ...node.properties, id: node.id });
+        existing={existing}
+        onEdit={() => setExisting(null)}
+        onOpenExisting={(ref) => {
+          void api.node(ref.id, ref.label).then((record) => open(ref, record.properties));
           setCreating(null);
         }}
+        onCancel={() => setCreating(null)}
+        onCreate={(node) => void createNewNode(node)}
       />
       {selectedNode ? (
         <NewEdgeDialog
+          key={`edge-${dialogKey}`}
           opened={creating === "edge"}
           fromName={displayName(selectedNode.properties, selectedNode.id)}
           edgeTypes={(schema.data?.edge_labels ?? []).filter((t) => !schema.data?.rule_edge_labels.includes(t))}

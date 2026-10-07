@@ -16,7 +16,9 @@ export interface NewEdgeDialogProps {
 
 /** Asks for an edge's type and the node it points to (picked by search). */
 export function NewEdgeDialog({ opened, fromName, edgeTypes, saving, error, onCancel, onCreate }: NewEdgeDialogProps) {
-  const [type, setType] = useState<string | null>(edgeTypes[0] ?? null);
+  const [chosen, setType] = useState<string | null>(null);
+  // The first type until one is chosen (the types may arrive after the dialog).
+  const type = chosen ?? edgeTypes[0] ?? null;
   const [to, setTo] = useState<SearchHit | null>(null);
 
   return (
