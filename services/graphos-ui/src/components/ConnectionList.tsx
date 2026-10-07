@@ -20,12 +20,12 @@ export interface ConnectionListProps {
  * where it asks first.
  */
 export function ConnectionList({ model, nodeKey, onSelect, onSelectEdge, max = 12 }: ConnectionListProps) {
-  const all = model.graph.edges(nodeKey);
+  const all = model.graph.edges(nodeKey).filter((edge) => !model.graph.getEdgeAttribute(edge, "more"));
   const edges = all.slice(0, max);
   if (edges.length === 0) {
     return (
       <Text size="xs" c="dimmed">
-        None on the canvas yet. Double-click the node to add its neighbours.
+        None yet. Expand the node (or double-click it) to add its neighbours.
       </Text>
     );
   }

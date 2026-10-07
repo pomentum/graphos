@@ -23,6 +23,8 @@
   position: absolute;
   top: 12px;
   left: 12px;
+  /* Wraps inside the canvas rather than running under the inspector. */
+  max-width: calc(100% - 24px);
 }
 
 .empty {
@@ -44,7 +46,7 @@
 
 .note {
   position: absolute;
-  top: 12px;
+  bottom: 14px;
   left: 50%;
   transform: translateX(-50%);
   padding: 4px 10px;

@@ -38,6 +38,10 @@ interface WorkspaceValue {
   open: (ref: NodeRef, properties: Properties) => string;
   overview: Overview;
   setOverview: (overview: Overview) => void;
+  /** Where the camera should go next: these nodes, whenever `token` changes. */
+  frame: { keys: string[]; token: number } | undefined;
+  /** Moves the camera to show these nodes. */
+  frameOn: (keys: string[]) => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceValue | null>(null);
@@ -54,6 +58,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [overview, setOverview] = useState<Overview>({ status: "idle" });
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const [colorBy, setColorBy] = useState<ColorBy>("none");
+  const [frame, setFrame] = useState<{ keys: string[]; token: number }>();
+  const frameOn = useCallback(
+    (keys: string[]) => setFrame((current) => ({ keys, token: (current?.token ?? 0) + 1 })),
+    [],
+  );
   const select = useCallback((key: string | null) => {
     setSelected(key);
     if (key) setSelectedEdge(null);
@@ -86,9 +95,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         ? nodeKey(ref)
         : model.addNode(ref, properties, selected ?? undefined);
       select(key);
+      frameOn([key, ...model.graph.neighbors(key)]);
       return key;
     },
-    [model, selected, select],
+    [model, selected, select, frameOn],
   );
 
   // Checked while rendering: after Clear or a delete, no view may read a
@@ -109,8 +119,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       open,
       overview,
       setOverview,
+      frame,
+      frameOn,
     }),
-    [model, version, liveSelected, select, liveSelectedEdge, selectEdge, colorBy, open, overview],
+    [model, version, liveSelected, select, liveSelectedEdge, selectEdge, colorBy, open, overview, frame, frameOn],
   );
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

@@ -12,6 +12,8 @@ export interface NodeAttributes {
   x: number;
   y: number;
   size: number;
+  /** Set on a "+N more" placeholder: how many neighbours are not shown yet. Not a graphos node. */
+  more?: number;
 }
 
 /** What the canvas stores on each edge. */
@@ -19,12 +21,25 @@ export interface EdgeAttributes {
   /** The graphos edge type (`type` itself is sigma's edge style). */
   edgeType: string;
   properties: Properties;
+  /** Set on the edge to a "+N more" placeholder. */
+  more?: boolean;
 }
 
 /** A node as graphos names it: its own id within a label. */
 export interface NodeRef {
   id: string;
   label: string;
+}
+
+/** One change to the canvas that Back can undo. */
+interface Step {
+  title: string;
+  addedNodes: string[];
+  addedEdges: string[];
+  removedNodes: [string, NodeAttributes][];
+  removedEdges: [string, string, string, EdgeAttributes][];
+  /** Nodes changed in place (a "+N more" count), with their attributes before. */
+  updatedNodes: [string, NodeAttributes][];
 }
 
 /** The node's key on the canvas; the same node always gets the same key. */
@@ -37,6 +52,11 @@ export function edgeKey(type: string, srcKey: string, dstKey: string): string {
   return `${type}|${srcKey}|${dstKey}`;
 }
 
+/** The key of the "+N more" placeholder of a node's neighbours. */
+export function moreKey(centerKey: string): string {
+  return `more:${centerKey}`;
+}
+
 /** The text shown for a node: its `name`, else its id. */
 export function displayName(properties: Properties, id: string): string {
   const name = properties.name;
@@ -44,16 +64,39 @@ export function displayName(properties: Properties, id: string): string {
 }
 
 const BASE_SIZE = 5;
+/** New neighbours per ring around the expanded node before the next, wider ring starts. */
+const RING_CAPACITY = 12;
+/** Steps Back can undo. */
+const HISTORY_LIMIT = 50;
+
+/** Which ring and which slot in it the `index`-th node of a fan takes; rings grow by 6 slots. */
+function ringSlot(index: number): [number, number] {
+  let ring = 0;
+  let rest = index;
+  while (rest >= RING_CAPACITY + ring * 6) {
+    rest -= RING_CAPACITY + ring * 6;
+    ring += 1;
+  }
+  return [ring, rest];
+}
 
 /**
  * The part of the tenant graph on the canvas. Adds what searches, expands
  * and paths return, placing new nodes next to the node they came from, and
- * notifies listeners after each change. Knows nothing about React or sigma.
+ * notifies listeners after each change. Every change is recorded so Back
+ * can undo it, and the neighbours each expand added are remembered so it
+ * can be collapsed again. Knows nothing about React or sigma.
  */
 export class GraphModel {
   readonly graph = new Graph<NodeAttributes, EdgeAttributes>({ type: "directed", multi: false });
   private readonly listeners = new Set<() => void>();
   private changes = 0;
+  private readonly steps: Step[] = [];
+  private current: Step | null = null;
+  /** For each expanded node, the nodes its expansions added. */
+  private readonly expandedFrom = new Map<string, Set<string>>();
+  /** For each node new nodes were placed around: the fan's direction and the next free slot. */
+  private readonly fans = new Map<string, { facing: number; span: number; next: number; step: number }>();
 
   /** Grows with every change; a cheap snapshot for React's external-store hook. */
   get revision(): number {
@@ -70,19 +113,23 @@ export class GraphModel {
     return this.graph.order === 0;
   }
 
+  /** What Back would undo, or null when there is nothing to undo. */
+  get lastStep(): string | null {
+    return this.steps.at(-1)?.title ?? null;
+  }
+
   /** Adds a node (or refreshes its properties) and returns its key. */
   addNode(ref: NodeRef, properties: Properties, near?: string): string {
-    const key = this.putNode(ref, properties, near);
-    this.notify();
-    return key;
+    return this.track(`Open ${displayName(properties, ref.id)}`, () => this.putNode(ref, properties, near));
   }
 
   /**
    * Replaces the canvas with an exported graph, nodes spread on a disc for
    * the layout to start from. Returns how many nodes and edges were drawn.
+   * Starts a new history.
    */
   load(exported: GraphExport): { nodes: number; edges: number } {
-    this.graph.clear();
+    this.reset();
     const keyOf = new Map<string, string>();
     const radius = Math.sqrt(exported.nodes.length) * 2 + 1;
     exported.nodes.forEach((node, i) => {
@@ -113,56 +160,67 @@ export class GraphModel {
     return { nodes: this.graph.order, edges: this.graph.size };
   }
 
-  /** Adds the neighbours of `centerKey` and the edges to them, in a ring around it. */
-  addNeighbors(centerKey: string, neighbors: Neighbor[]): string[] {
-    const added: string[] = [];
-    neighbors.forEach((n, i) => {
-      const key = this.putNode(
-        { id: n.neighbor_id, label: n.neighbor_label },
-        n.neighbor_properties,
-        centerKey,
-        i,
-        neighbors.length,
+  /**
+   * Adds neighbours of `centerKey` and the edges to them. New nodes fan out
+   * on the side of the node away from what it already connects to, in rings,
+   * so the rest of the canvas does not move. With `more` > 0 a "+N more"
+   * placeholder stands for the neighbours not added yet. Returns the nodes
+   * that were not on the canvas before.
+   */
+  addNeighbors(centerKey: string, neighbors: Neighbor[], more = 0): string[] {
+    const name = this.graph.hasNode(centerKey)
+      ? displayName(this.graph.getNodeAttribute(centerKey, "properties"), this.graph.getNodeAttribute(centerKey, "id"))
+      : centerKey;
+    return this.track(`Expand ${name}`, () => {
+      const fresh = neighbors.filter(
+        (n) => !this.graph.hasNode(nodeKey({ id: n.neighbor_id, label: n.neighbor_label })),
       );
-      const [src, dst] = n.direction === "out" ? [centerKey, key] : [key, centerKey];
-      this.putEdge(n.edge_type, src, dst, n.edge_properties);
-      added.push(key);
+      const spots = this.fan(centerKey, fresh.length + (more > 0 ? 1 : 0));
+      const added: string[] = [];
+      for (const n of neighbors) {
+        const ref = { id: n.neighbor_id, label: n.neighbor_label };
+        const isNew = !this.graph.hasNode(nodeKey(ref));
+        const key = this.putNode(ref, n.neighbor_properties, undefined, isNew ? spots[added.length] : undefined);
+        const [src, dst] = n.direction === "out" ? [centerKey, key] : [key, centerKey];
+        this.putEdge(n.edge_type, src, dst, n.edge_properties);
+        if (isNew) added.push(key);
+      }
+      const children = this.expandedFrom.get(centerKey) ?? new Set<string>();
+      for (const key of added) children.add(key);
+      this.expandedFrom.set(centerKey, children);
+      this.setMore(centerKey, more, spots[added.length]);
+      return added;
     });
-    this.resize();
-    this.notify();
-    return added;
   }
 
   /** Adds every node and edge of the paths; returns the keys on them. */
   addPaths(paths: GraphPath[]): { nodes: Set<string>; edges: Set<string> } {
-    const nodes = new Set<string>();
-    const edges = new Set<string>();
-    for (const path of paths) {
-      let previous: string | undefined;
-      const byId = new Map<string, string>();
-      for (const node of path.nodes) {
-        const key = this.putNode(node, node.properties ?? {}, previous);
-        byId.set(node.id, key);
-        nodes.add(key);
-        previous = key;
+    return this.track("Add paths", () => {
+      const nodes = new Set<string>();
+      const edges = new Set<string>();
+      for (const path of paths) {
+        let previous: string | undefined;
+        const byId = new Map<string, string>();
+        for (const node of path.nodes) {
+          const key = this.putNode(node, node.properties ?? {}, previous);
+          byId.set(node.id, key);
+          nodes.add(key);
+          previous = key;
+        }
+        for (const edge of path.edges) {
+          const src = byId.get(edge.src_id);
+          const dst = byId.get(edge.dst_id);
+          if (src && dst) edges.add(this.putEdge(edge.type, src, dst, {}));
+        }
       }
-      for (const edge of path.edges) {
-        const src = byId.get(edge.src_id);
-        const dst = byId.get(edge.dst_id);
-        if (src && dst) edges.add(this.putEdge(edge.type, src, dst, {}));
-      }
-    }
-    this.relax();
-    this.notify();
-    return { nodes, edges };
+      this.relax();
+      return { nodes, edges };
+    });
   }
 
   /** Adds one edge between two nodes already on the canvas. */
   addEdge(type: string, srcKey: string, dstKey: string, properties: Properties = {}): string {
-    const key = this.putEdge(type, srcKey, dstKey, properties);
-    this.resize();
-    this.notify();
-    return key;
+    return this.track(`Connect ${type}`, () => this.putEdge(type, srcKey, dstKey, properties));
   }
 
   /** Replaces a node's properties after it was edited. */
@@ -172,21 +230,77 @@ export class GraphModel {
     this.notify();
   }
 
+  /** Takes a node off the canvas (it stays in graphos); Back puts it back. */
   removeNode(key: string): void {
-    if (this.graph.hasNode(key)) this.graph.dropNode(key);
-    this.resize();
-    this.notify();
+    if (!this.graph.hasNode(key)) return;
+    const attributes = this.graph.getNodeAttributes(key);
+    this.track(`Hide ${displayName(attributes.properties, attributes.id)}`, () => {
+      this.dropNode(key);
+      this.dropNode(moreKey(key));
+    });
   }
 
+  /** Takes an edge off the canvas; Back puts it back. */
   removeEdge(key: string): void {
+    if (!this.graph.hasEdge(key)) return;
+    this.track(`Hide ${this.graph.getEdgeAttribute(key, "edgeType")}`, () => this.dropEdge(key));
+  }
+
+  /**
+   * Takes a node or edge that was deleted in graphos off the canvas. Not
+   * recorded: Back must not bring back something that no longer exists.
+   */
+  forget(key: string): void {
+    if (this.graph.hasNode(key)) this.graph.dropNode(key);
+    if (this.graph.hasNode(moreKey(key))) this.graph.dropNode(moreKey(key));
     if (this.graph.hasEdge(key)) this.graph.dropEdge(key);
     this.resize();
     this.notify();
   }
 
-  /** Empties the canvas. */
+  /** Whether collapsing the node would take anything off the canvas. */
+  canCollapse(key: string): boolean {
+    return this.collapsible(key).length > 0;
+  }
+
+  /**
+   * Takes back what expanding the node added: the neighbours it brought that
+   * connect to nothing else on the canvas, and its "+N more" placeholder.
+   */
+  collapse(key: string): void {
+    const doomed = this.collapsible(key);
+    if (doomed.length === 0) return;
+    const attributes = this.graph.getNodeAttributes(key);
+    this.track(`Collapse ${displayName(attributes.properties, attributes.id)}`, () => {
+      for (const child of doomed) this.dropNode(child);
+      this.expandedFrom.delete(key);
+    });
+  }
+
+  /** Undoes the last change: removes what it added and restores what it removed. */
+  undo(): void {
+    const step = this.steps.pop();
+    if (!step) return;
+    for (const key of step.addedEdges) if (this.graph.hasEdge(key)) this.graph.dropEdge(key);
+    for (const key of step.addedNodes) if (this.graph.hasNode(key)) this.graph.dropNode(key);
+    for (const [key, attributes] of step.updatedNodes) {
+      if (this.graph.hasNode(key)) this.graph.replaceNodeAttributes(key, attributes);
+    }
+    for (const [key, attributes] of step.removedNodes) {
+      if (!this.graph.hasNode(key)) this.graph.addNode(key, attributes);
+    }
+    for (const [key, src, dst, attributes] of step.removedEdges) {
+      if (!this.graph.hasEdge(key) && this.graph.hasNode(src) && this.graph.hasNode(dst)) {
+        this.graph.addDirectedEdgeWithKey(key, src, dst, attributes);
+      }
+    }
+    this.resize();
+    this.notify();
+  }
+
+  /** Empties the canvas and its history. */
   clear(): void {
-    this.graph.clear();
+    this.reset();
     this.notify();
   }
 
@@ -218,6 +332,19 @@ export class GraphModel {
     };
   }
 
+  /** The `count` best-connected nodes on the canvas (placeholders aside), most connected first. */
+  hubs(count: number): string[] {
+    const ranked: [string, number][] = [];
+    this.graph.forEachNode((key, node) => {
+      if (node.more === undefined) ranked.push([key, this.graph.degree(key)]);
+    });
+    return ranked
+      .filter(([, degree]) => degree > 1)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, count)
+      .map(([key]) => key);
+  }
+
   /** Lets the layout settle a little after many nodes were added. */
   relax(iterations = 60): void {
     if (this.graph.order < 3) return;
@@ -227,7 +354,45 @@ export class GraphModel {
     });
   }
 
-  private putNode(ref: NodeRef, properties: Properties, near?: string, index = 0, total = 1): string {
+  /** Runs `change`, recording what it added and removed as one step of history, then notifies once. */
+  private track<T>(title: string, change: () => T): T {
+    const step: Step = {
+      title,
+      addedNodes: [],
+      addedEdges: [],
+      removedNodes: [],
+      removedEdges: [],
+      updatedNodes: [],
+    };
+    this.current = step;
+    try {
+      return change();
+    } finally {
+      this.current = null;
+      const changed =
+        step.addedNodes.length +
+          step.addedEdges.length +
+          step.removedNodes.length +
+          step.removedEdges.length +
+          step.updatedNodes.length >
+        0;
+      if (changed) {
+        this.steps.push(step);
+        if (this.steps.length > HISTORY_LIMIT) this.steps.shift();
+      }
+      this.resize();
+      this.notify();
+    }
+  }
+
+  private reset(): void {
+    this.graph.clear();
+    this.steps.length = 0;
+    this.expandedFrom.clear();
+    this.fans.clear();
+  }
+
+  private putNode(ref: NodeRef, properties: Properties, near?: string, position?: { x: number; y: number }): string {
     const key = nodeKey(ref);
     if (this.graph.hasNode(key)) {
       this.graph.mergeNodeAttributes(key, {
@@ -235,33 +400,142 @@ export class GraphModel {
       });
       return key;
     }
-    const position = this.positionNear(near, index, total);
-    this.graph.addNode(key, { id: ref.id, vertexLabel: ref.label, properties, size: BASE_SIZE, ...position });
+    const spot = position ?? this.fan(near, 1)[0]!;
+    this.graph.addNode(key, { id: ref.id, vertexLabel: ref.label, properties, size: BASE_SIZE, ...spot });
+    this.current?.addedNodes.push(key);
     return key;
   }
 
-  private putEdge(type: string, src: string, dst: string, properties: Properties): string {
+  private putEdge(type: string, src: string, dst: string, properties: Properties, more = false): string {
     const key = edgeKey(type, src, dst);
-    if (!this.graph.hasEdge(key)) this.graph.addDirectedEdgeWithKey(key, src, dst, { edgeType: type, properties });
+    if (!this.graph.hasEdge(key)) {
+      this.graph.addDirectedEdgeWithKey(key, src, dst, { edgeType: type, properties, ...(more ? { more } : {}) });
+      this.current?.addedEdges.push(key);
+    }
     return key;
   }
 
-  /** A spot on a ring around `near` (or around the centre for a first node). */
-  private positionNear(near: string | undefined, index: number, total: number): { x: number; y: number } {
-    const origin =
-      near && this.graph.hasNode(near)
-        ? { x: this.graph.getNodeAttribute(near, "x"), y: this.graph.getNodeAttribute(near, "y") }
-        : { x: 0, y: 0 };
-    if (!near && this.graph.order === 0) return origin;
-    const angle = (2 * Math.PI * index) / Math.max(total, 1) + Math.random() * 0.3;
-    const radius = 1 + Math.sqrt(total) * 0.35;
-    return { x: origin.x + radius * Math.cos(angle), y: origin.y + radius * Math.sin(angle) };
+  /** Removes a node, recording it and its edges so Back can restore them. */
+  private dropNode(key: string): void {
+    if (!this.graph.hasNode(key)) return;
+    this.graph.forEachEdge(key, (edge, attributes, src, dst) => {
+      this.current?.removedEdges.push([edge, src, dst, { ...attributes }]);
+    });
+    this.current?.removedNodes.push([key, { ...this.graph.getNodeAttributes(key) }]);
+    this.graph.dropNode(key);
   }
 
-  /** Better-connected nodes are drawn a little larger. */
+  private dropEdge(key: string): void {
+    if (!this.graph.hasEdge(key)) return;
+    const [src, dst] = this.graph.extremities(key);
+    this.current?.removedEdges.push([key, src!, dst!, { ...this.graph.getEdgeAttributes(key) }]);
+    this.graph.dropEdge(key);
+  }
+
+  /** Shows, updates or removes the "+N more" placeholder next to `centerKey`. */
+  private setMore(centerKey: string, more: number, spot?: { x: number; y: number }): void {
+    const key = moreKey(centerKey);
+    if (more <= 0) {
+      this.dropNode(key);
+      return;
+    }
+    if (this.graph.hasNode(key)) {
+      if (this.graph.getNodeAttribute(key, "more") === more) return;
+      this.current?.updatedNodes.push([key, { ...this.graph.getNodeAttributes(key) }]);
+      this.graph.mergeNodeAttributes(key, { more, properties: { name: `+${more} more` } });
+      return;
+    }
+    const position = spot ?? this.fan(centerKey, 1)[0]!;
+    this.graph.addNode(key, {
+      id: "",
+      vertexLabel: "",
+      properties: { name: `+${more} more` },
+      size: BASE_SIZE,
+      more,
+      ...position,
+    });
+    this.current?.addedNodes.push(key);
+    this.putEdge("", centerKey, key, {}, true);
+  }
+
+  /** What collapsing `key` removes: its placeholder and the nodes it added that hang only on it. */
+  private collapsible(key: string): string[] {
+    const doomed: string[] = [];
+    if (this.graph.hasNode(moreKey(key))) doomed.push(moreKey(key));
+    for (const child of this.expandedFrom.get(key) ?? []) {
+      if (!this.graph.hasNode(child)) continue;
+      const others = this.graph.neighbors(child).filter((n) => n !== key && n !== moreKey(child));
+      if (others.length === 0) doomed.push(child);
+    }
+    return doomed;
+  }
+
+  /**
+   * Spots for `count` new nodes around `near`: on the side facing away from
+   * the nodes it already connected to when first expanded (all around when
+   * it had none), in rings one typical edge length apart. A node keeps its
+   * fan, so a later page continues in the next free slots, outside the
+   * earlier ones, instead of landing on top of them. Without `near`, around
+   * the centre.
+   */
+  private fan(near: string | undefined, count: number): { x: number; y: number }[] {
+    if (count === 0) return [];
+    const hasCenter = near !== undefined && this.graph.hasNode(near);
+    if (!hasCenter && this.graph.order === 0) return Array.from({ length: count }, () => ({ x: 0, y: 0 }));
+    const origin = hasCenter
+      ? { x: this.graph.getNodeAttribute(near, "x"), y: this.graph.getNodeAttribute(near, "y") }
+      : { x: 0, y: 0 };
+    const fan = (hasCenter && this.fans.get(near)) || this.newFan(hasCenter ? near : undefined, origin);
+    if (hasCenter) this.fans.set(near, fan);
+    const spots: { x: number; y: number }[] = [];
+    for (let i = 0; i < count; i += 1) {
+      const [ring, slot] = ringSlot(fan.next + i);
+      const capacity = RING_CAPACITY + ring * 6;
+      const radius = fan.step * (1 + ring * 0.6);
+      const angle =
+        fan.span >= 2 * Math.PI
+          ? fan.facing + (2 * Math.PI * slot) / capacity + ring * 0.3
+          : fan.facing - fan.span / 2 + (fan.span * (slot + 0.5)) / capacity;
+      spots.push({ x: origin.x + radius * Math.cos(angle), y: origin.y + radius * Math.sin(angle) });
+    }
+    fan.next += count;
+    return spots;
+  }
+
+  /** A fan facing away from what `near` connects to now (all around when nothing). */
+  private newFan(
+    near: string | undefined,
+    origin: { x: number; y: number },
+  ): { facing: number; span: number; next: number; step: number } {
+    const step = this.typicalEdgeLength();
+    const linked = near ? this.graph.neighbors(near).filter((n) => n !== moreKey(near)) : [];
+    if (linked.length > 0) {
+      const cx = linked.reduce((sum, n) => sum + this.graph.getNodeAttribute(n, "x"), 0) / linked.length;
+      const cy = linked.reduce((sum, n) => sum + this.graph.getNodeAttribute(n, "y"), 0) / linked.length;
+      if (Math.hypot(origin.x - cx, origin.y - cy) > step * 0.05) {
+        return { facing: Math.atan2(origin.y - cy, origin.x - cx), span: Math.PI * 1.3, next: 0, step };
+      }
+    }
+    return { facing: Math.random() * 2 * Math.PI, span: 2 * Math.PI, next: 0, step };
+  }
+
+  /** The median length of up to 200 edges on the canvas, so new nodes match its scale. */
+  private typicalEdgeLength(): number {
+    const lengths: number[] = [];
+    this.graph.someEdge((_edge, _attributes, _src, _dst, a, b) => {
+      lengths.push(Math.hypot(a.x - b.x, a.y - b.y));
+      return lengths.length >= 200;
+    });
+    if (lengths.length === 0) return 1.5;
+    lengths.sort((a, b) => a - b);
+    return Math.max(lengths[Math.floor(lengths.length / 2)]!, 0.5);
+  }
+
+  /** Better-connected nodes are drawn a little larger; placeholders stay small. */
   private resize(): void {
-    this.graph.forEachNode((key) => {
-      this.graph.setNodeAttribute(key, "size", BASE_SIZE + Math.min(6, Math.sqrt(this.graph.degree(key))));
+    this.graph.forEachNode((key, node) => {
+      const size = node.more !== undefined ? BASE_SIZE - 1 : BASE_SIZE + Math.min(6, Math.sqrt(this.graph.degree(key)));
+      this.graph.setNodeAttribute(key, "size", size);
     });
   }
 

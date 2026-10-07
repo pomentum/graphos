@@ -2,6 +2,7 @@ import {
   edgeDisplay,
   FOCUS_LABEL_LIMIT,
   categorize,
+  mix,
   nodeCategory,
   nodeDisplay,
   type Categories,
@@ -124,5 +125,52 @@ describe("group names", () => {
     expect(names.get("9")).toEqual({ title: "x", detail: "mostly File" });
     expect(categorize(model, "group").groupNames?.get("4")?.title).toBe("InvoiceService");
     expect(categorize(model, "label").groupNames).toBeUndefined();
+  });
+});
+
+describe("following a large graph", () => {
+  const focused = (extra: Partial<Emphasis> = {}): Emphasis => ({
+    selected: "s",
+    focus: { nodes: new Set(["s", "k"]), edges: new Set(["e1"]) },
+    recent: new Set(),
+    ...extra,
+  });
+
+  it("fades what is outside the focus, or hides it when isolated", () => {
+    const outside = nodeDisplay("o", node, focused(), DARK);
+    expect(outside.color).toBe(mix(DARK.nodeIdle, DARK.canvas, 0.72));
+    expect(outside.hidden).toBeUndefined();
+    expect(nodeDisplay("o", node, focused({ isolate: true }), DARK).hidden).toBe(true);
+    expect(nodeDisplay("k", node, focused({ isolate: true }), DARK).hidden).toBeUndefined();
+    const edge = { edgeType: "X", properties: {} };
+    expect(edgeDisplay("e2", edge, focused({ isolate: true }), DARK).hidden).toBe(true);
+    expect(edgeDisplay("e2", edge, focused(), DARK).color).toBe(mix(DARK.edgeIdle, DARK.canvas, 0.72));
+    expect(nodeDisplay("o", node, emphasis(null), DARK).color).toBe(DARK.nodeIdle); // no focus, no fading
+  });
+
+  it("labels hubs while nothing is selected, and new nodes for a moment", () => {
+    expect(nodeDisplay("h", node, { ...emphasis(null), hubs: new Set(["h"]) }, DARK).forceLabel).toBe(true);
+    expect(nodeDisplay("h", node, focused({ hubs: new Set(["h"]) }), DARK).forceLabel).toBe(false);
+    expect(nodeDisplay("n", node, { ...emphasis(null), fresh: new Set(["n"]) }, DARK).forceLabel).toBe(true);
+    const crowded = focused({
+      focus: { nodes: new Set(Array.from({ length: FOCUS_LABEL_LIMIT + 5 }, (_, i) => `f${i}`)), edges: new Set() },
+      fresh: new Set(["f3"]),
+    });
+    expect(nodeDisplay("f3", node, crowded, DARK).forceLabel).toBe(true);
+    expect(nodeDisplay("f4", node, crowded, DARK).forceLabel).toBe(false);
+  });
+
+  it("draws a +N more placeholder quietly, always labelled", () => {
+    const more: NodeAttributes = { ...node, more: 12, properties: { name: "+12 more" } };
+    expect(nodeDisplay("m", more, emphasis(null), DARK)).toMatchObject({
+      color: DARK.muted,
+      label: "+12 more",
+      forceLabel: true,
+    });
+  });
+
+  it("blends hex colours and leaves others alone", () => {
+    expect(mix("#000000", "#ffffff", 0.5)).toBe("#808080");
+    expect(mix("rgba(0,0,0,1)", "#ffffff", 0.5)).toBe("rgba(0,0,0,1)");
   });
 });

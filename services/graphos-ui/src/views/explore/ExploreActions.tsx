@@ -1,6 +1,15 @@
-import { Button, Group, Loader, Menu } from "@mantine/core";
-import { IconCheck, IconCirclePlus, IconLink, IconPalette, IconTrashX } from "@tabler/icons-react";
+import { Button, Group, Loader, Menu, Tooltip } from "@mantine/core";
+import {
+  IconArrowBackUp,
+  IconCheck,
+  IconCirclePlus,
+  IconFocus2,
+  IconLink,
+  IconPalette,
+  IconTrashX,
+} from "@tabler/icons-react";
 import type { ColorBy } from "../../graph/canvasStyle";
+import { isApple } from "../../lib/platform";
 import classes from "./ExploreView.module.css";
 
 const COLOR_MODES: { value: ColorBy; label: string }[] = [
@@ -15,17 +24,48 @@ export interface ExploreActionsProps {
   isEmpty: boolean;
   busy: boolean;
   colorBy: ColorBy;
+  /** What Back would undo, or null. */
+  lastStep: string | null;
+  /** Only the selection's neighbourhood is shown. */
+  focusOnly: boolean;
   onColorBy: (colorBy: ColorBy) => void;
   onNewNode: () => void;
   onConnect: () => void;
+  onBack: () => void;
+  onFocus: () => void;
   onClear: () => void;
 }
 
-/** The buttons over the canvas: new node, connect, colours, clear. */
+/** The buttons over the canvas: Back, Focus, new node, connect, colours, clear. */
 export function ExploreActions(props: ExploreActionsProps) {
-  const { canWrite, hasSelection, isEmpty, busy, colorBy } = props;
+  const { canWrite, hasSelection, isEmpty, busy, colorBy, lastStep, focusOnly } = props;
+  const undoKey = isApple() ? "⌘Z" : "Ctrl+Z";
   return (
     <Group gap={6} className={classes.actions}>
+      <Tooltip label={lastStep ? `Undo “${lastStep}” (${undoKey})` : "Nothing to undo"} withArrow>
+        <Button
+          size="compact-xs"
+          variant="default"
+          leftSection={<IconArrowBackUp size={14} />}
+          disabled={!lastStep}
+          onClick={props.onBack}
+        >
+          Back
+        </Button>
+      </Tooltip>
+      {hasSelection ? (
+        <Tooltip label="Show only the selection and its neighbours (F)" withArrow>
+          <Button
+            size="compact-xs"
+            variant={focusOnly ? "filled" : "default"}
+            leftSection={<IconFocus2 size={14} />}
+            onClick={props.onFocus}
+            aria-pressed={focusOnly}
+          >
+            Focus
+          </Button>
+        </Tooltip>
+      ) : null}
       {canWrite ? (
         <Button
           size="compact-xs"

@@ -18,6 +18,8 @@ export interface GraphCanvasProps {
   onExpand?: (key: string) => void;
   /** Click on an edge; edges are clickable only when this is set. */
   onSelectEdge?: (key: string) => void;
+  /** Moves the camera to show these nodes whenever `token` changes. */
+  frame?: { keys: string[]; token: number };
 }
 
 /**
@@ -25,7 +27,7 @@ export interface GraphCanvasProps {
  * dragged; the camera has zoom controls. Colours and labels come from
  * `canvasStyle`, so this component only connects sigma to React.
  */
-export function GraphCanvas({ model, emphasis, palette, onSelect, onExpand, onSelectEdge }: GraphCanvasProps) {
+export function GraphCanvas({ model, emphasis, palette, onSelect, onExpand, onSelectEdge, frame }: GraphCanvasProps) {
   const container = useRef<HTMLDivElement>(null);
   const sigma = useRef<Sigma<NodeAttributes, EdgeAttributes> | null>(null);
   // Sigma's callbacks read these refs, so they always see the latest props.
@@ -58,7 +60,11 @@ export function GraphCanvas({ model, emphasis, palette, onSelect, onExpand, onSe
     });
     sigma.current = renderer;
 
-    renderer.on("clickNode", ({ node }) => latest.current.onSelect(node));
+    // A "+N more" placeholder is not a node to inspect: a click opens the next page.
+    renderer.on("clickNode", ({ node }) => {
+      if (model.graph.getNodeAttribute(node, "more") !== undefined) latest.current.onExpand?.(node);
+      else latest.current.onSelect(node);
+    });
     renderer.on("clickStage", () => latest.current.onSelect(null));
     renderer.on("clickEdge", ({ edge }) => latest.current.onSelectEdge?.(edge));
     // A pointer over clickable things, as for links.
@@ -87,6 +93,16 @@ export function GraphCanvas({ model, emphasis, palette, onSelect, onExpand, onSe
     sigma.current?.refresh();
   }, [emphasis, palette]);
 
+  // Frame the given nodes, once they are drawn (the graph's extent may have just changed).
+  useEffect(() => {
+    if (!frame || frame.keys.length === 0) return;
+    const id = requestAnimationFrame(() => {
+      const renderer = sigma.current;
+      if (renderer) frameNodes(renderer, frame.keys);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [frame]);
+
   const camera = () => sigma.current?.getCamera();
   return (
     <div className={classes.root} style={{ background: palette.canvas }}>
@@ -109,6 +125,25 @@ export function GraphCanvas({ model, emphasis, palette, onSelect, onExpand, onSe
       </Group>
     </div>
   );
+}
+
+/**
+ * Animates the camera onto `keys`: centred on them, zoomed so they fill most
+ * of the view, but never closer than a comfortable reading distance.
+ */
+function frameNodes(renderer: Sigma<NodeAttributes, EdgeAttributes>, keys: string[]): void {
+  renderer.refresh();
+  const points = keys.flatMap((key) => {
+    const data = renderer.getNodeDisplayData(key);
+    return data ? [data] : [];
+  });
+  if (points.length === 0) return;
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  // Camera coordinates are those of the framed graph (0..1); ratio 1 shows all of it.
+  const ratio = Math.min(1, Math.max(0.08, Math.max(maxX - minX, maxY - minY) * 1.6));
+  void renderer.getCamera().animate({ x: (minX + maxX) / 2, y: (minY + maxY) / 2, ratio }, { duration: 450 });
 }
 
 /** Lets the user drag nodes; returns a function that removes the handlers. */
@@ -141,7 +176,9 @@ function enableDragging(renderer: Sigma<NodeAttributes, EdgeAttributes>, model: 
 
 /** The hover label: the node's name on a panel-coloured tag, in either theme. */
 function drawHoverLabel(palette: () => Palette): NodeHoverDrawingFunction<NodeAttributes, EdgeAttributes> {
-  return (context, data, settings) => {
+  return (context, display, settings) => {
+    // The reducer adds the uncut name; hover shows all of it.
+    const data = { ...display, label: (display as { fullLabel?: string }).fullLabel ?? display.label };
     if (!data.label) return;
     const size = settings.labelSize;
     context.font = `${settings.labelWeight} ${size}px ${settings.labelFont}`;

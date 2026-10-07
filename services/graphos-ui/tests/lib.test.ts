@@ -1,7 +1,7 @@
 import type { ChangeItem, Neighbor, TenantSchema } from "../src/api/types";
 import { pickSearchIndex } from "../src/data/searchIndex";
 import { describeChange } from "../src/lib/changes";
-import { countByEdgeType, EXPAND_WARN_AT, needsChoice } from "../src/lib/expand";
+import { countByEdgeType } from "../src/lib/expand";
 import { isEmptyPatch, mergePatch, propertyKind, sortedEntries } from "../src/lib/properties";
 import { formatBytes, relativeTime } from "../src/lib/time";
 import { pickTenant } from "../src/session/SessionProvider";
@@ -41,22 +41,6 @@ describe("expand", () => {
       { type: "B", out: 1, in: 1 },
       { type: "A", out: 1, in: 0 },
     ]);
-  });
-
-  it("asks only for many or truncated neighbours", () => {
-    expect(
-      needsChoice(
-        Array.from({ length: EXPAND_WARN_AT }, () => n("A", "out")),
-        false,
-      ),
-    ).toBe(false);
-    expect(
-      needsChoice(
-        Array.from({ length: EXPAND_WARN_AT + 1 }, () => n("A", "out")),
-        false,
-      ),
-    ).toBe(true);
-    expect(needsChoice([], true)).toBe(true);
   });
 });
 

@@ -42,7 +42,7 @@ export function EdgeInspector({ model, edge, onSelectNode, onDeleted }: EdgeInsp
     } catch {
       return;
     }
-    model.removeEdge(edge);
+    model.forget(edge);
     onDeleted();
   };
 
