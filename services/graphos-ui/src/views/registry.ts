@@ -1,4 +1,4 @@
-import { IconActivity, IconChartBar, IconRoute, IconTopologyStar3, type Icon } from "@tabler/icons-react";
+import { IconActivity, IconChartBar, IconRoute, IconTable, IconTopologyStar3, type Icon } from "@tabler/icons-react";
 import type { Session } from "../session/SessionProvider";
 
 export type ViewGroup = "Graph" | "Insights" | "Data" | "Admin";
@@ -20,6 +20,7 @@ export const VIEWS: ViewDefinition[] = [
   { id: "path", path: "/path", title: "Path", icon: IconRoute, group: "Graph", requires: "read" },
   { id: "overview", path: "/overview", title: "Overview", icon: IconChartBar, group: "Insights", requires: "read" },
   { id: "activity", path: "/activity", title: "Activity", icon: IconActivity, group: "Insights", requires: "read" },
+  { id: "browse", path: "/browse", title: "Browse", icon: IconTable, group: "Data", requires: "read" },
 ];
 
 /** The views this session may open; views it can't use are hidden, not greyed out. */

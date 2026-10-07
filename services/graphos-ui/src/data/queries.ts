@@ -1,6 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { EdgeKey, SearchParams } from "../api/graphosApi";
-import type { EdgeUpsert, NodeUpsert, PathsRequest, Properties } from "../api/types";
+import type { EdgeUpsert, NodesScanRequest, NodeUpsert, PathsRequest, Properties } from "../api/types";
+import { profileProperties } from "../lib/properties";
 import { useTenantSession } from "../session/SessionProvider";
 
 /** Cache keys, scoped by tenant so switching tenants never shows another's data. */
@@ -12,6 +13,7 @@ export const keys = {
     ["edge", tenant, edge.type, edge.srcLabel, edge.srcId, edge.dstLabel, edge.dstId] as const,
   stats: (tenant: string) => ["stats", tenant] as const,
   properties: (tenant: string, label: string) => ["properties", tenant, label] as const,
+  scan: (tenant: string, request: NodesScanRequest) => ["scan", tenant, request] as const,
   histogram: (tenant: string, label: string, property: string) => ["histogram", tenant, label, property] as const,
 };
 
@@ -55,6 +57,30 @@ export function useProperties(label: string | null) {
     enabled: label !== null,
     staleTime: 60_000,
     select: (page) => [...new Set(page.items.flatMap((node) => Object.keys(node.properties)))].sort(),
+  });
+}
+
+/** The properties of a label (from the same sample), most common first, with an example value each. */
+export function usePropertyProfile(label: string | null) {
+  const { api, tenant } = useTenantSession();
+  return useQuery({
+    queryKey: keys.properties(tenant, label ?? ""),
+    queryFn: () => api.sampleNodes(label!, PROPERTY_SAMPLE),
+    enabled: label !== null,
+    staleTime: 60_000,
+    select: (page) => profileProperties(page.items),
+  });
+}
+
+/** One page of a node scan; idle without a request, and keeps the last page while the next loads. */
+export function useNodePage(request: NodesScanRequest | null) {
+  const { api, tenant } = useTenantSession();
+  return useQuery({
+    queryKey: request ? keys.scan(tenant, request) : ["scan", tenant, "none"],
+    queryFn: ({ signal }) => api.scanNodes(request!, signal),
+    enabled: request !== null,
+    placeholderData: keepPreviousData,
+    staleTime: 10_000,
   });
 }
 

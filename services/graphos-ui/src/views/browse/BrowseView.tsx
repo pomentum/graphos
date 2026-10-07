@@ -1,0 +1,156 @@
+import { Button, Group, Select, Skeleton, Text } from "@mantine/core";
+import { useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { ColumnPicker } from "../../components/ColumnPicker";
+import { NodeTable, type NodeRow } from "../../components/NodeTable";
+import { useNodePage, usePropertyProfile, useStats } from "../../data/queries";
+import { useWorkspace } from "../../graph/WorkspaceProvider";
+import { currentCursor, FIRST_PAGE, nextPage, previousPage } from "../../lib/pager";
+import { formatCount } from "../../lib/time";
+import { browseParams, defaultColumns, readBrowseState, scanFilter, type BrowseFilter } from "./browseState";
+import classes from "./BrowseView.module.css";
+import { FilterBar } from "./FilterBar";
+
+/** Rows per page. */
+const PAGE_SIZE = 50;
+
+/**
+ * Browse: the nodes of one label as a table, filtered on a property and
+ * paged in id order. A row opens the node in Explore. The label and filter
+ * live in the address, so a view can be bookmarked or sent to someone.
+ */
+export function BrowseView() {
+  const stats = useStats();
+  const [params, setParams] = useSearchParams();
+  const state = readBrowseState(params);
+
+  const labels = (stats.data?.labels ?? []).filter((l) => l.kind === "v").sort((a, b) => b.count - a.count);
+  const label = state.label ?? labels[0]?.label ?? null;
+  const count = labels.find((l) => l.label === label)?.count;
+  const profile = usePropertyProfile(label);
+
+  const show = (next: { label: string | null; filter: BrowseFilter | null }) =>
+    setParams(browseParams(next), { replace: true });
+
+  return (
+    <div className={classes.root}>
+      <Group gap="sm" wrap="wrap">
+        <Select
+          size="xs"
+          w={200}
+          aria-label="Label"
+          placeholder="Label"
+          data={labels.map((l) => ({ value: l.label, label: `${l.label} · ${formatCount(l.count)}` }))}
+          value={label}
+          onChange={(next) => show({ label: next, filter: null })}
+          searchable
+          selectFirstOptionOnChange
+          allowDeselect={false}
+        />
+        <FilterBar
+          key={JSON.stringify([label, state.filter])}
+          properties={(profile.data ?? []).map((p) => p.name)}
+          filter={state.filter}
+          onApply={(filter) => show({ label, filter })}
+        />
+      </Group>
+
+      {label === null ? (
+        stats.isLoading ? (
+          <Skeleton h={240} radius="lg" />
+        ) : (
+          <Text c="dimmed" size="sm" className={classes.empty}>
+            No nodes yet.
+          </Text>
+        )
+      ) : (
+        <LabelPages
+          key={JSON.stringify([label, state.filter])}
+          label={label}
+          filter={state.filter}
+          total={state.filter ? undefined : count}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The pages of one label under one filter, with the column picker and the
+ * pager. Remounted (key) when the label or filter changes, which starts
+ * again from the first page.
+ */
+function LabelPages({ label, filter, total }: { label: string; filter: BrowseFilter | null; total?: number }) {
+  const navigate = useNavigate();
+  const { open } = useWorkspace();
+  const profile = usePropertyProfile(label);
+  const [pager, setPager] = useState(FIRST_PAGE);
+  const [chosen, setChosen] = useState<string[] | null>(null);
+
+  // A filter's value is typed from the profile, so wait for it.
+  const ready = !filter || profile.data !== undefined;
+  const page = useNodePage(
+    ready
+      ? {
+          labels: [label],
+          where: filter ? [scanFilter(filter, profile.data ?? [])] : [],
+          project: ["*"],
+          limit: PAGE_SIZE,
+          cursor: currentCursor(pager),
+        }
+      : null,
+  );
+
+  const names = (profile.data ?? []).map((p) => p.name).filter((name) => name !== "id");
+  const columns = chosen ?? defaultColumns(profile.data ?? []);
+  const rows = page.data?.items ?? [];
+  const from = pager.page * PAGE_SIZE + 1;
+  const nextCursor = page.data?.next_cursor ?? null;
+
+  const openRow = (row: NodeRow) => {
+    open({ id: row.id, label: row.label }, row.properties);
+    void navigate("/explore");
+  };
+
+  return (
+    <>
+      <Group justify="space-between" gap="sm">
+        <Text size="xs" c="dimmed">
+          {page.isLoading
+            ? "Loading…"
+            : rows.length === 0
+              ? "No nodes match."
+              : `Rows ${formatCount(from)}–${formatCount(from + rows.length - 1)}${total !== undefined ? ` of ${formatCount(total)}` : ""}`}
+        </Text>
+        <ColumnPicker options={names} value={columns} onChange={setChosen} />
+      </Group>
+
+      <div className={classes.table}>
+        {page.isLoading ? (
+          <Skeleton h={240} />
+        ) : (
+          <NodeTable rows={rows} columns={columns} onOpen={openRow} stale={page.isPlaceholderData} />
+        )}
+      </div>
+      {page.error ? (
+        <Text size="sm" c="red">
+          {page.error.message}
+        </Text>
+      ) : null}
+
+      <Group justify="flex-end" gap="xs">
+        <Button size="xs" variant="default" disabled={pager.page === 0} onClick={() => setPager(previousPage(pager))}>
+          Previous
+        </Button>
+        <Button
+          size="xs"
+          variant="default"
+          disabled={nextCursor === null || page.isPlaceholderData}
+          onClick={() => nextCursor && setPager(nextPage(pager, nextCursor))}
+        >
+          Next
+        </Button>
+      </Group>
+    </>
+  );
+}

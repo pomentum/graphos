@@ -41,6 +41,24 @@ export interface GraphExport {
 }
 
 /** `POST …/graph/nodes:scan`: one page of nodes in id order. */
+/** One condition of a node scan; conditions are combined with AND. */
+export interface ScanFilter {
+  property: string;
+  op: "=" | "!=" | "exists" | "not exists";
+  /** Omitted for `exists` / `not exists`. */
+  value?: unknown;
+}
+
+/** A page of a label's nodes, in id order. */
+export interface NodesScanRequest {
+  labels: string[];
+  where?: ScanFilter[];
+  /** Properties to return; `["*"]` for all of them. */
+  project?: string[];
+  limit?: number;
+  cursor?: string | null;
+}
+
 export interface NodesScanResponse {
   items: { id: string; label: string; properties: Properties }[];
   next_cursor: string | null;

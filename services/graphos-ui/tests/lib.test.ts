@@ -150,6 +150,6 @@ describe("view registry", () => {
     const admin = { ...VIEWS[0]!, id: "tenants", group: "Admin", requires: "admin" } as ViewDefinition;
     expect(visibleViews({ isAdmin: false }, [...VIEWS, admin]).map((v) => v.id)).not.toContain("tenants");
     expect(visibleViews({ isAdmin: true }, [...VIEWS, admin]).map((v) => v.id)).toContain("tenants");
-    expect(menuGroups(VIEWS).map(([group]) => group)).toEqual(["Graph", "Insights"]);
+    expect(menuGroups(VIEWS).map(([group]) => group)).toEqual(["Graph", "Insights", "Data"]);
   });
 });

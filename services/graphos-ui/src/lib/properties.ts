@@ -52,3 +52,37 @@ export function formatValue(value: unknown): string {
 function sameValue(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
+
+/** How often a property appears in a sample of nodes, with one of its values. */
+export interface PropertyProfile {
+  name: string;
+  /** Nodes of the sample that have it. */
+  count: number;
+  /** A non-null value seen for it, to tell numbers and booleans from text. */
+  example: unknown;
+}
+
+/** The properties of a sample of nodes, most common first (ties by name). */
+export function profileProperties(nodes: { properties: Properties }[]): PropertyProfile[] {
+  const profiles = new Map<string, PropertyProfile>();
+  for (const node of nodes) {
+    for (const [name, value] of Object.entries(node.properties)) {
+      const profile = profiles.get(name) ?? { name, count: 0, example: null };
+      profile.count += 1;
+      if (profile.example === null && value !== null) profile.example = value;
+      profiles.set(name, profile);
+    }
+  }
+  return [...profiles.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
+/**
+ * Typed text as a value of the same type as `example`: a number or boolean
+ * when the property holds those and the text reads as one, else the text.
+ */
+export function valueLike(text: string, example: unknown): unknown {
+  const trimmed = text.trim();
+  if (typeof example === "number" && trimmed !== "" && Number.isFinite(Number(trimmed))) return Number(trimmed);
+  if (typeof example === "boolean" && (trimmed === "true" || trimmed === "false")) return trimmed === "true";
+  return text;
+}

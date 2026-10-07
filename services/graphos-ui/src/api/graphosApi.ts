@@ -9,6 +9,7 @@ import type {
   Me,
   NeighborsResponse,
   NodeRecord,
+  NodesScanRequest,
   NodesScanResponse,
   NodeUpsert,
   PathsRequest,
@@ -67,7 +68,13 @@ export class GraphosApi {
 
   /** The first `limit` nodes of a label with all their properties. */
   sampleNodes(label: string, limit: number): Promise<NodesScanResponse> {
-    return this.http.post(`${this.graph}/nodes:scan`, { labels: [label], project: ["*"], limit });
+    return this.scanNodes({ labels: [label], project: ["*"], limit });
+  }
+
+  /** One page of nodes in id order; send `next_cursor` back for the next page. */
+  async scanNodes(request: NodesScanRequest, signal?: AbortSignal): Promise<NodesScanResponse> {
+    return (await this.http.request<NodesScanResponse>("POST", `${this.graph}/nodes:scan`, { body: request, signal }))
+      .data;
   }
 
   /** Ranked search through a search index, or substring on `name` without one. */

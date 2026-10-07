@@ -1,0 +1,34 @@
+.table {
+  table-layout: fixed;
+  min-width: 100%;
+}
+
+.table th {
+  background: var(--gx-group);
+  font-weight: 600;
+  font-size: var(--mantine-font-size-xs);
+  color: var(--gx-muted);
+}
+
+.table td,
+.table th {
+  max-width: 280px;
+  border-color: var(--gx-separator);
+}
+
+.table th.id {
+  width: 240px;
+}
+
+.row {
+  cursor: pointer;
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--gx-accent);
+  outline-offset: -2px;
+}
+
+.table[data-stale="true"] tbody {
+  opacity: 0.55;
+}
