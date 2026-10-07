@@ -26,6 +26,8 @@ export interface SearchParams {
   label?: string;
   limit?: number;
   fuzzy?: boolean;
+  /** Without `index`: the property to match by substring (default `name`). */
+  property?: string;
 }
 
 export interface EdgeKey {
@@ -77,9 +79,17 @@ export class GraphosApi {
       .data;
   }
 
-  /** Ranked search through a search index, or substring on `name` without one. */
-  search({ q, index, label, limit = 20, fuzzy }: SearchParams, signal?: AbortSignal): Promise<SearchResponse> {
-    return this.http.get(`${this.graph}/search`, { q, index, label, limit, fuzzy }, signal);
+  /** Ranked search through a search index, or substring on `property` (default `name`) without one. */
+  search(
+    { q, index, label, limit = 20, fuzzy, property }: SearchParams,
+    signal?: AbortSignal,
+  ): Promise<SearchResponse> {
+    return this.http.get(`${this.graph}/search`, { q, index, label, limit, fuzzy, property }, signal);
+  }
+
+  /** Every property name some node carries, with the labels that carry it. */
+  catalogue(): Promise<{ by_property: Record<string, string[]> }> {
+    return this.http.get(`${this.graph}/catalogue`);
   }
 
   /** One node by its id, with the `ETag` to send back on a write. */

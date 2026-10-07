@@ -32,7 +32,7 @@ export function NewEdgeDialog({ opened, fromName, edgeTypes, saving, error, onCa
           selectFirstOptionOnChange
         />
         <Input.Wrapper label="To" error={error}>
-          <NodeSearch placeholder="Find a node" keepSelection width="100%" onPick={(hit) => setTo(hit)} />
+          <NodeSearch placeholder="Find a node" keepSelection scoped width="100%" onPick={(hit) => setTo(hit)} />
         </Input.Wrapper>
         {to ? (
           <Text size="xs" c="dimmed">

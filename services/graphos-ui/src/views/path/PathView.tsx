@@ -92,10 +92,22 @@ export function PathView() {
       <aside className={classes.form} aria-label="Path options">
         <Stack gap="md">
           <Input.Wrapper label="From">
-            <NodeSearch placeholder="Start node" keepSelection width="100%" onPick={(hit) => setFrom(endpoint(hit))} />
+            <NodeSearch
+              placeholder="Start node"
+              keepSelection
+              scoped
+              width="100%"
+              onPick={(hit) => setFrom(endpoint(hit))}
+            />
           </Input.Wrapper>
           <Input.Wrapper label="To">
-            <NodeSearch placeholder="End node" keepSelection width="100%" onPick={(hit) => setTo(endpoint(hit))} />
+            <NodeSearch
+              placeholder="End node"
+              keepSelection
+              scoped
+              width="100%"
+              onPick={(hit) => setTo(endpoint(hit))}
+            />
           </Input.Wrapper>
           <Input.Wrapper label="Direction">
             <SegmentedControl

@@ -15,12 +15,24 @@ export const keys = {
   properties: (tenant: string, label: string) => ["properties", tenant, label] as const,
   scan: (tenant: string, request: NodesScanRequest) => ["scan", tenant, request] as const,
   histogram: (tenant: string, label: string, property: string) => ["histogram", tenant, label, property] as const,
+  catalogue: (tenant: string) => ["catalogue", tenant] as const,
 };
 
 /** Labels, hierarchy and search indexes; changes rarely, so cached for minutes. */
 export function useSchema() {
   const { api, tenant } = useTenantSession();
   return useQuery({ queryKey: keys.schema(tenant), queryFn: () => api.schema(), staleTime: 5 * 60_000 });
+}
+
+/** Every property name nodes of the tenant carry, sorted; for "search in" pickers. */
+export function usePropertyNames() {
+  const { api, tenant } = useTenantSession();
+  return useQuery({
+    queryKey: keys.catalogue(tenant),
+    queryFn: () => api.catalogue(),
+    staleTime: 5 * 60_000,
+    select: (catalogue) => Object.keys(catalogue.by_property).sort(),
+  });
 }
 
 /** Search results for `params`; runs only for a non-empty query and keeps the last results while typing. */
