@@ -14,6 +14,11 @@ each existing tenant once, in the background, to record its property names (abou
 
 ### Added
 
+- **Graph map.** `GET …/graph/map` returns every vertex label with its node count and every
+  (source label, edge type, target label) with its edge count: a large tenant at a glance.
+  `GET …/graph/map/hubs?label=` returns a label's best-connected nodes, a place to start
+  exploring. Large edge tables are sampled and their counts flagged `estimated` (about a second on
+  a tenant of ten million edges); `exact=true` counts every edge.
 - **Search any property without an index.** `GET …/graph/search?property=path` matches the
   substring against that property instead of `name` (the default, which keeps its trigram index).
   Other properties are read row by row, so declare a search index for those searched often.
