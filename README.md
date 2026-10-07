@@ -16,11 +16,11 @@ Your services send JSON over HTTP. graphos owns the database, writes the SQL aga
 - **Tenants are isolated AGE graphs.** Each consumer registers its own labels; tokens are scoped to tenants (wrong tenant → `403`, unknown → `404`) and to `read` or `write`.
 - **Schema-agnostic.** No built-in labels or property names. Every endpoint takes label / property / edge names as parameters.
 - **Fast, idempotent writes:** small batches, NDJSON streaming bulk and single-file snapshot import all go through COPY-staged SQL upserts (`INSERT … ON CONFLICT`); in our measurements this was 37–156× faster than per-row Cypher `MERGE` (see [AGE notes](docs/apache-age.md)).
-- **Ranked search:** declare named search indexes over chosen labels and properties; `identifier` finds `getUserById` from `get user by id` or `getUsrById`, `text` is stemmed full-text search. Plain Postgres indexes, updated with the write.
-- **Web UI (optional):** search, explore and edit the graph on a canvas, find paths, see counts and follow changes live; each user signs in with their own token. `docker compose ... --profile ui up -d`.
+- **Ranked search:** declare named search indexes over chosen labels and properties; `identifier` finds `getUserById` from `get user by id` or `getUsrById`, `text` is stemmed full-text search. Plain Postgres indexes, updated with the write. Without an index, search matches any one property by substring.
+- **Web UI (optional):** a large graph opens on a map of its labels or of its communities; search, expand a page of neighbours at a time with undo, inspect and edit nodes and relationships, find paths, browse a label as a table, see and extend the schema, follow changes live. Each user signs in with their own token, so read-only tokens get a read-only UI. `docker compose ... --profile ui up -d`; see [the UI README](services/graphos-ui/README.md).
 - **Composable reads:** search, neighbors, multi-hop expand, shortest paths, induced subgraph, paginated node scan, stratified sampling, graphology export (sigma.js / Gephi).
 - **Edit in place, safely:** read, patch (JSON Merge Patch) or delete one node or edge; each carries a revision and an `ETag`, and `If-Match` turns a concurrent edit into a `412` instead of a lost update.
-- **Graph analytics:** label histograms, top-K by degree, node/edge aggregates, and (optional extra) Louvain communities with IDs that stay stable across runs; the same graph gives the same communities, computed in a separate process so the API keeps serving.
+- **Graph analytics:** a graph map (every label with its node count and the edge counts between labels, plus a label's best-connected nodes: about a second on ten million edges), label histograms, top-K by degree, node/edge aggregates, and (optional extra) Louvain communities with IDs that stay stable across runs; the same graph gives the same communities, computed in a separate process so the API keeps serving, and each recompute also stores a community map (sizes, members per label, hubs, edges between communities).
 - **Rule-based edge derivation:** declare a property-match rule once at registration; `edges:resolve` writes the edges server-side in one SQL statement.
 - **Change feed:** every write is recorded in the same transaction; read what changed after a cursor, or follow it live (Server-Sent Events, resumable), with no committed change ever skipped.
 - **Background jobs:** long operations (community recompute, edge resolution, vacuum) run as jobs with `Prefer: respond-async`: answered `202` at once, polled at `/v1/jobs/{id}`, cancellable.
@@ -159,6 +159,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | [Feature survey](docs/features.md) | Every capability, briefly |
 | [Concept](docs/concept.md) | Architecture, endpoint catalogue, capacity planning |
 | [Apache AGE notes](docs/apache-age.md) | AGE 1.6 pitfalls, indexing, Postgres tuning, measured numbers |
+| [Web UI](services/graphos-ui/README.md) | Running the UI, its views, how its code and text are organised |
 
 ## Built on Apache AGE
 
@@ -172,6 +173,7 @@ pytest -m "not db" services/graphos/tests      # unit tests, no database
 pytest clients/python/tests
 bash scripts/run-db-tests.sh                   # integration tests against the compose stack
 node tools/docs/diagrams.mjs                    # regenerate docs/images/*.svg
+(cd services/graphos-ui && npm ci && npm test)  # the web UI: tests (npm run dev to run it)
 ```
 
 `run-db-tests.sh` starts the same compose project (`graphos-db`, volume `graphos_data`), and `--down-volumes` deletes that volume: do not run it on a machine where that stack holds data you want to keep.

@@ -97,10 +97,12 @@ by the init scripts only. A volume initialised before `01-app-role.sh`
 existed has no `graphos_app`: run the SQL from that script by hand as the
 superuser, or start from a fresh volume.
 
-On every start `graphos-api` also runs idempotent DDL for
-`graphos_meta.tenants` and `graphos_meta.cache`
-(`db.py::ensure_internal_schema`), so an existing volume picks up new internal
-tables without re-initialisation.
+On every start `graphos-api` also runs idempotent DDL for its internal tables
+(`db.py::ensure_internal_schema`): `graphos_meta.tenants` and `cache`, the
+property record (`node_properties`, `node_properties_complete`), background
+`jobs`, the change feed, and the community map (`community_map`,
+`community_links`, `community_map_runs`, written by each Louvain recompute), so
+an existing volume picks up new internal tables without re-initialisation.
 
 #### Layer 2 — tenant registration (per tenant, idempotent)
 
@@ -353,7 +355,7 @@ Paths under `/v1/{tenant}/graph/...` are abbreviated to `…/graph/...`.
 | `GET /v1/{tenant}/schema` | Labels, label hierarchy, search indexes and rule-derived edge labels (no DDL, rules or `meta`) | tenant |
 | `DELETE /v1/tenants/{name}` | Unregister (see below) | admin |
 | **Reads** | | |
-| `GET …/graph/search?q=&label=&limit=` | Case-insensitive literal substring (`ILIKE`, with `%` / `_` in `q` escaped) on `name`, served by the trigram index; limit ≤200. Hit `id` = AGE graphid (integer); external id in `properties.id` | tenant |
+| `GET …/graph/search?q=&label=&property=&limit=` | Case-insensitive literal substring (`ILIKE`, with `%` / `_` in `q` escaped) on `name` (served by the trigram index), or on `property` (read row by row); limit ≤200. Hit `id` = AGE graphid (integer); external id in `properties.id` | tenant |
 | `GET …/graph/search?q=&index=&label=&fuzzy=&min_score=&limit=` | Ranked search through a named search index (`identifier` or `text` analyzer); hits carry `score` and `matched` | tenant |
 | `GET …/graph/nodes/{external_id}?label=` | One node by external id; 409 if the id is in several labels and `label` is absent | tenant |
 | `GET …/graph/edges/{type}?src=&dst=&src_label=&dst_label=` | One edge by type and end ids; 409 if several match | tenant |
@@ -372,9 +374,12 @@ Paths under `/v1/{tenant}/graph/...` are abbreviated to `…/graph/...`.
 | `POST …/graph/edges/aggregate` | Group edges by endpoint properties and type | tenant |
 | `GET …/graph/labels/{label}/histogram?property=&limit=` | Property-value histogram; limit default 100, ≤1000 | tenant |
 | `GET …/graph/labels/{label}/top?by_edge=&direction=&k=` | Top-k nodes by degree on one edge type; k default 20, ≤200 | tenant |
-| `GET …/graph/stats` | Exact per-label row counts and bytes | tenant |
+| `GET …/graph/stats` | Exact per-label row counts (a parent includes its children) and bytes; totals count each node and edge once | tenant |
+| `GET …/graph/map?exact=` | Labels with their own node counts, and edge counts per (source label, type, target label); large edge tables sampled and flagged `estimated` unless `exact` | tenant |
+| `GET …/graph/map/hubs?label=&limit=` | A label's best-connected nodes; limit default 40, ≤200 | tenant |
 | `GET …/graph/communities?min_size=&include_members=&limit=` | Communities from the last Louvain write | tenant |
 | `GET …/graph/community-summary?top=` | Counts, largest/smallest size, top-N communities | tenant |
+| `GET …/graph/communities/map?limit=` | The community map stored by the last recompute: sizes, members per label, hubs, internal edges, edges between communities; limit default 150, ≤1000 | tenant |
 | `POST …/graph/community-ids` `{ids}` | External id → `community_id`; ≤500 ids, `truncated` flag | tenant |
 | **Cache** | | |
 | `PUT / GET / DELETE …/graph/cache/{key}` | Per-tenant K/V cache (§2.5.9) | tenant |

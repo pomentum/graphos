@@ -130,7 +130,8 @@ reported in the response.
 - **Search** (`GET …/graph/search`): case-insensitive literal substring
   match (`ILIKE`, with `%` and `_` in `q` escaped) on `name`, optional
   `label`. Served by the trigram index graphos
-  creates on every vertex label. Each hit's `id` is the AGE internal graphid
+  creates on every vertex label. `property=` matches another property
+  instead, read row by row (no index). Each hit's `id` is the AGE internal graphid
   (an integer); the caller's external id is in `properties.id`.
 - **Ranked search** (`GET …/graph/search?index=`): through a named search
   index the tenant declares at registration, as with Neo4j's full-text
@@ -143,7 +144,7 @@ reported in the response.
   `score` in [0, 1] and the property it `matched`; the indexes are Postgres
   GIN indexes, updated in the same transaction as the write.
 - **Point read** (`GET …/graph/nodes/{external_id}`): one node with label and
-  properties.
+  properties. Ids may contain `/` (file paths): the rest of the path is the id.
 - **Neighbors** (`GET …/graph/neighbors`): one hop, outgoing and incoming, with
   direction, edge type, and both property bags; the neighbor is identified by
   external id (`neighbor_id`). Optional `rel_types`. Limit default 50, max 500.
@@ -239,6 +240,10 @@ flowchart LR
 - **Response:** node, edge, and community counts, `largest_community_size`,
   `modularity`, and timings (`edge_stream_ms`, `igraph_ms`, `writeback_ms`,
   `elapsed_ms`).
+- **Community map:** each recompute also summarises the communities from the
+  edges it clustered and stores it: size, members per label, best-connected
+  member, internal edges, and edges between communities per type.
+  `GET …/graph/communities/map` serves it, exact and instant at any size.
 - **Reads over the result:**
   - `GET …/graph/communities`: sizes, sample labels, optional member ids.
   - `GET …/graph/community-summary`: counts, largest/smallest size, top N.
@@ -268,7 +273,15 @@ pattern.
 - **Top by degree** (`GET …/graph/labels/{label}/top`): top-k nodes by number
   of edges of one type (`out|in|both`).
 - **Tenant stats** (`GET …/graph/stats`): exact row count and total bytes per
-  vertex and edge label, and tenant totals.
+  vertex and edge label (a parent label includes its children), and tenant
+  totals that count each node and edge once.
+- **Graph map** (`GET …/graph/map`): every label with its own node count and
+  every (source label, type, target label) with its edge count, read from
+  AGE's storage without joins (an edge's ends carry their labels in their
+  graph ids). Edge tables above 300,000 rows are sampled and their counts
+  flagged `estimated` (about a second on ten million edges); `exact=true`
+  counts everything. `GET …/graph/map/hubs?label=` lists a label's
+  best-connected nodes.
 
 ---
 
@@ -408,12 +421,16 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
     or `available: false` when it is missing.
   - `POST /v1/db/vacuum`: named tables or the whole database; `analyze`
     defaults on, `full` off.
-- **Web UI** (`services/graphos-ui`, optional): search, a graph canvas with
-  expand, inspect and edit (saved with `If-Match`), shortest paths, counts per
-  label and live activity. An nginx image with no backend of its own; users
-  sign in with their own token, so permissions and attribution are graphos's.
-  It reads labels and search indexes from `GET /v1/{tenant}/schema`, which any
-  token on the tenant may call, and `GET /v1/me` lists a token's tenants.
+- **Web UI** (`services/graphos-ui`, optional): Explore opens a large tenant
+  on its graph map or its communities and a small one on its whole graph; a
+  canvas that adds neighbours a page at a time with undo, focus and collapse;
+  inspect and edit (saved with `If-Match`); shortest paths; counts per label;
+  live activity; a label as a table; the schema, which admins can extend. An
+  nginx image with no backend of its own; users sign in with their own token,
+  so permissions and attribution are graphos's. It reads labels and search
+  indexes from `GET /v1/{tenant}/schema`, which any token on the tenant may
+  call, and `GET /v1/me` lists a token's tenants. All its text is in one i18n
+  JSON file.
 - **Background jobs:** community recompute, `edges:resolve` and vacuum accept
   `Prefer: respond-async` and answer 202 with a job (`Location: /v1/jobs/{id}`).
   `GET /v1/jobs/{id}` returns its status and, when done, the synchronous

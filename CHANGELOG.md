@@ -7,7 +7,9 @@ are released together under one version.
 
 ### Upgrading
 
-Two tables are added to `graphos_meta` at startup. On the first start, graphos reads every node of
+Five tables are added to `graphos_meta` at startup: the property record (`node_properties`,
+`node_properties_complete`) and the community map (`community_map`, `community_links`,
+`community_map_runs`), which fills at the next Louvain recompute. On the first start, graphos reads every node of
 each existing tenant once, in the background, to record its property names (about as long as one
 `GET …/graph/catalogue?refresh=true` used to take); the API serves meanwhile, and an
 `edges:resolve` that arrives first waits for its tenant's pass.
@@ -27,17 +29,25 @@ each existing tenant once, in the background, to record its property names (abou
 - **Search any property without an index.** `GET …/graph/search?property=path` matches the
   substring against that property instead of `name` (the default, which keeps its trigram index).
   Other properties are read row by row, so declare a search index for those searched often.
-- **Web UI** (`services/graphos-ui`, image `graphos-ui`). Explore (opens on the whole
-  graph, or a 5,000-node sample of a larger one; ranked search with Ctrl K, ⌘K on Apple devices,
-  or `/`; a graph canvas,
-  expand with a choice of relationship types when a node has many neighbours, inspect and edit
-  properties, add and delete nodes and edges), Path (shortest paths between two nodes), Overview
-  (counts and sizes per label, value counts of a property) and Activity (the change feed, live).
-  Edits are saved with `If-Match` and only for the fields changed; a node saved by someone else
-  meanwhile is flagged with who saved it instead of being overwritten. nginx serves the app and
-  forwards `/api/` to graphos on the same origin; users sign in with their own token (kept for
-  the browser tab only), so read-only tokens get a read-only UI and edits are attributed to them.
-  Light and dark themes. Opt in with `docker compose ... --profile ui`.
+- **Web UI** (`services/graphos-ui`, image `graphos-ui`; opt in with
+  `docker compose ... --profile ui`). nginx serves the app and forwards `/api/` to graphos on the
+  same origin; users sign in with their own token (kept for the browser tab only), so read-only
+  tokens get a read-only UI and edits are attributed to them. Views:
+  - **Explore**, in three modes. *Map*: one bubble per label and a line per pair of linked
+    labels, where a tenant of more than 5,000 nodes opens. *Groups*: the Louvain communities,
+    named after their best-connected member, with the relationships between them. *Graph*: the
+    canvas (a small tenant opens on its whole graph); neighbours are added 20 at a time beside
+    the node, the camera follows and the rest fades; Back undoes any step; Collapse, Hide and
+    Focus; colour by label or group; inspect, edit, add and delete nodes and relationships.
+  - **Path** (shortest paths, ends picked by search on any property), **Overview** (counts and
+    value spreads), **Activity** (the change feed, live), **Browse** (a label as a filterable,
+    paged table) and **Schema** (labels as a tree, relationship types, search indexes; admins
+    add labels, types and search indexes).
+  - Edits are saved with `If-Match` and only for the fields changed; a node saved by someone
+    else meanwhile is flagged with who saved it. Search opens with `/` (⌘K on Apple devices).
+    Settings live in the address, so views can be shared and survive navigation. All text is in
+    an i18n JSON file. Light and dark themes; narrow windows and phones supported.
+- **Client:** `graph_map()`, `map_hubs()`, `community_map()` and `search(property=)`.
 - **`GET …/graph/catalogue?property=…`** narrows the catalogue to the given properties.
 - **`GET /v1/me`**: the calling token's consumer, admin flag, access and registered tenants.
 - **`GET /v1/{tenant}/schema`**: a tenant's labels, label hierarchy, search indexes and

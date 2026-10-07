@@ -249,6 +249,8 @@ one. The patch is a JSON Merge Patch (RFC 7396), sent as `application/merge-patc
 `application/json`: a key set to `null` is removed, a nested object merges key by key, any other
 value (arrays included) replaces the old one, and keys not in the patch are kept. A node's `id`
 cannot be patched (422). The row is read, locked, patched and written back in one transaction.
+An id may contain `/` (a file path, say): the routes that take an id in the path read the rest of
+the path as the id, encoded (`%2F`) or not.
 
 ```bash
 curl -s -X PATCH "$G/v1/acme/graph/edges/AUTHORED?src=u1&dst=d1" \
@@ -356,7 +358,7 @@ other reads return every match.
 
 | Endpoint (`/v1/{t}` prefix) | Method | Key inputs (default / max) | Returns |
 |---|---|---|---|
-| `/graph/search` | GET | `q` (1–200 chars), `label`, `limit` (20 / 200); `index`, `fuzzy` (false), `min_score` (0) | `nodes[{id, label, properties, score, matched}]`, `truncated`; `id` is the AGE graphid (integer), the external id is `properties.id` |
+| `/graph/search` | GET | `q` (1–200 chars), `label`, `limit` (20 / 200); `index`, `fuzzy` (false), `min_score` (0); without `index`: `property` (`name`) | `nodes[{id, label, properties, score, matched}]`, `truncated`; `id` is the AGE graphid (integer), the external id is `properties.id` |
 | `/graph/nodes/{external_id}` | GET | `label` | `label`, `properties` (404 if absent) |
 | `/graph/edges/{type}` | GET | `src`, `dst`, `src_label`, `dst_label` | one edge: `src_label`, `dst_label`, `properties` (404 if absent) |
 | `/graph/paths` | POST | `src`, `dst` (+ labels), `rel_types`, `direction` (`both`), `max_hops` (4 / 8), `limit` (1 / 100), `include_properties` | the shortest paths: `hops`, `paths[{hops, nodes[], edges[]}]`, `truncated` |
@@ -395,6 +397,18 @@ curl -s "$G/v1/acme/graph/expand?node_id=u1&seeds=u1&seeds=u2&rel_types=FOLLOWS&
 curl -s -X POST "$G/v1/acme/graph/induced_edges" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"node_ids": ["u1", "u2", "d1"], "rel_types": ["AUTHORED", "FOLLOWS"], "limit": 1000}'
+```
+
+### search without an index
+
+Without `index`, search is a case-insensitive substring match on `name`, unranked, served by the
+trigram index registration creates on `name`. `property=<name>` matches another property
+instead (`property=path`, `property=qualified_name`); those are read row by row until `limit`
+hits are found, which is quick when many nodes match and slow on a large tenant when few do.
+For properties searched often, declare a search index.
+
+```bash
+curl -s "$G/v1/acme/graph/search?q=src/billing&property=path&limit=10" -H "Authorization: Bearer $TOKEN"
 ```
 
 ### search indexes
@@ -534,7 +548,9 @@ scope property.
 | `POST /graph/edges/aggregate` | `group_by_src`, `group_by_dst`, `rel_types`, `src_values`, `dst_values`, `require_different`, `limit` (200 / 5000) | `groups[{src_value, dst_value, rel_type, count}]` |
 | `GET /graph/labels/{label}/histogram` | `property` (required), `limit` (100 / 1000) | `bins[{value, count}]`, `n_total`, `n_distinct` (`-1` when truncated); a missing value counts as `""` |
 | `GET /graph/labels/{label}/top` | `by_edge` (required), `direction` `out\|in\|both` (`out`), `k` (20 / 200) | `rows[{node_id, edge_count}]` |
-| `GET /graph/stats` | – | exact per-label counts, `n_vertices`, `n_edges`, `total_bytes` |
+| `GET /graph/stats` | – | exact per-label counts (a parent label includes its children), `n_vertices` and `n_edges` (each node and edge once), `total_bytes` |
+| `GET /graph/map` | `exact` (false) | `labels[{label, count}]` (each label's own nodes), `links[{src_label, type, dst_label, count, estimated}]`, `estimated` |
+| `GET /graph/map/hubs` | `label` (required), `limit` (40 / 200) | `nodes[{id, label, properties, degree, estimated}]`, most connected first |
 
 ```bash
 curl -s -X POST "$G/v1/acme/graph/edges/aggregate" \
@@ -547,7 +563,27 @@ curl -s "$G/v1/acme/graph/labels/User/top?by_edge=FOLLOWS&direction=in&k=10" \
 
 `histogram` and `top` return 400 when `{label}` or `by_edge` is not registered. The Python methods
 are `aggregate_nodes`, `aggregate_edges`, `label_histogram(label, property=…)`,
-`label_top_by_edge(label, by_edge=…)` and `tenant_stats()`.
+`label_top_by_edge(label, by_edge=…)`, `tenant_stats()`, `graph_map(exact=…)` and
+`map_hubs(label, limit=…)`.
+
+### graph map
+
+`GET /graph/map` is a tenant at a glance: every vertex label with its node count, and every
+(source label, relationship type, target label) with its edge count. It reads AGE's storage
+directly (an edge carries its ends' labels in their graph ids), so no vertex table is joined.
+Edge tables the planner estimates above 300,000 rows are read through `TABLESAMPLE SYSTEM`
+(about 200,000 rows) and their counts scaled and flagged `estimated`: about a second on a tenant
+of ten million edges, with counts within a few percent; a pair with only a handful of edges in a
+very large table can be missed. `exact=true` counts every edge (seconds on such a tenant).
+`GET /graph/map/hubs?label=` returns that label's best-connected nodes (edges in and out, every
+type, sampled the same way), a place to start exploring a label; 404 for an unknown label.
+
+```bash
+curl -s "$G/v1/acme/graph/map" -H "Authorization: Bearer $TOKEN"
+# → {"labels":[{"label":"User","count":1200},…],"links":[{"src_label":"User","type":"AUTHORED",
+#    "dst_label":"Document","count":5400,"estimated":false},…],"estimated":false,…}
+curl -s "$G/v1/acme/graph/map/hubs?label=User&limit=10" -H "Authorization: Bearer $TOKEN"
+```
 
 ---
 
@@ -619,6 +655,14 @@ Reading communities requires only tenant scope.
 | `GET /graph/community-summary?top=10` | `top` up to 100 |
 | `POST /graph/community-ids` `{"ids": [...]}` | returns `community_by_id`. Only the first 500 ids are looked up, and `truncated` is set when there were more. Unknown or unassigned ids are left out. |
 | `GET /graph/expand?...&communities=4&communities=9` | BFS limited to those communities |
+| `GET /graph/communities/map?limit=150` | the community map, below |
+
+Each recompute also stores a **community map**, summarised from the edges it clustered: for each
+community its size, members per label, best-connected member (`hub`) and internal edge count,
+and the edges between communities per relationship type. `GET /graph/communities/map` reads it
+back, largest communities first with the links among them: exact, and instant on any tenant
+size, as current as the last recompute (`computed_at`, `modularity`). Until a recompute has run
+since this was added, it answers `available: false`.
 
 ---
 
@@ -779,8 +823,10 @@ The endpoints without auth report tenant counts, never names; admins list tenant
 
 ### Web UI
 
-`services/graphos-ui` is a web UI for exploring, editing and following a tenant: ranked search,
-a graph canvas with expand on double-click, shortest paths, counts per label, and live activity.
+`services/graphos-ui` is a web UI for exploring, editing and following a tenant. Explore opens a
+large tenant on its graph map (or its communities, under Groups) and a small one on its whole
+graph; the canvas adds neighbours a page at a time with undo. It also has shortest paths, counts
+per label, live activity, a table view of a label, and the schema, which admins can extend.
 It is an nginx image with no backend of its own: it serves the app and forwards `/api/` to
 graphos on the same origin, so graphos needs no CORS setup. Each user signs in with their own
 token, so read-only tokens get a read-only UI and edits are attributed to the person who made
