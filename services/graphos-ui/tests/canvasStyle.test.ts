@@ -8,6 +8,7 @@ import {
   type Emphasis,
 } from "../src/graph/canvasStyle";
 import { GraphModel, type NodeAttributes } from "../src/graph/GraphModel";
+import { nameGroups } from "../src/graph/groups";
 import { CATEGORY_COLORS } from "../src/theme/categories";
 import { DARK } from "../src/theme/tokens";
 
@@ -106,5 +107,22 @@ describe("colour by category", () => {
     const edge = { edgeType: "X", properties: {} };
     expect(edgeDisplay("e2", edge, withEdge, DARK)).toEqual({ color: DARK.accent, size: 4, zIndex: 2 });
     expect(edgeDisplay("e1", edge, withEdge, DARK).size).toBe(2);
+  });
+});
+
+describe("group names", () => {
+  it("names a group after its best-connected member and its labels", () => {
+    const model = new GraphModel();
+    const hub = model.addNode({ id: "h", label: "Class" }, { name: "InvoiceService", community_id: 4 });
+    for (const id of ["a", "b"]) {
+      const leaf = model.addNode({ id, label: "Function" }, { name: id, community_id: 4 });
+      model.addEdge("CALLS", hub, leaf);
+    }
+    model.addNode({ id: "x", label: "File" }, { name: "x", community_id: 9 });
+    const names = nameGroups(model, ["4", "9"]);
+    expect(names.get("4")).toEqual({ title: "InvoiceService", detail: "mostly Function" });
+    expect(names.get("9")).toEqual({ title: "x", detail: "mostly File" });
+    expect(categorize(model, "group").groupNames?.get("4")?.title).toBe("InvoiceService");
+    expect(categorize(model, "label").groupNames).toBeUndefined();
   });
 });

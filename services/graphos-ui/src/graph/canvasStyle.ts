@@ -1,6 +1,7 @@
 import { rankColors } from "../theme/categories";
 import type { Palette } from "../theme/tokens";
 import { displayName, type EdgeAttributes, type GraphModel, type NodeAttributes } from "./GraphModel";
+import { nameGroups, type GroupName } from "./groups";
 
 /** How nodes that are not emphasised are coloured. */
 export type ColorBy = "none" | "label" | "group";
@@ -81,6 +82,8 @@ export interface Categories {
   colors: Map<string, string>;
   /** Nodes outside any category (e.g. not in a group). */
   uncategorised: number;
+  /** Colouring by group: the coloured groups named after their members. */
+  groupNames?: Map<string, GroupName>;
 }
 
 /**
@@ -99,7 +102,9 @@ export function categorize(model: GraphModel, colorBy: ColorBy): Categories {
     });
   }
   const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  return { colorBy, ranked, colors: rankColors(ranked.map(([category]) => category)), uncategorised };
+  const colors = rankColors(ranked.map(([category]) => category));
+  const groupNames = colorBy === "group" ? nameGroups(model, colors.keys()) : undefined;
+  return { colorBy, ranked, colors, uncategorised, groupNames };
 }
 
 function idleColor(node: NodeAttributes, categories: Categories | undefined, palette: Palette): string {
