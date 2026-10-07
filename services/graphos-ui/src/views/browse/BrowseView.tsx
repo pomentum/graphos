@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ColumnPicker } from "../../components/ColumnPicker";
 import { NodeTable, type NodeRow } from "../../components/NodeTable";
-import { useNodePage, usePropertyProfile, useStats } from "../../data/queries";
+import { useNodePage, usePropertyProfile, useSchema, useStats } from "../../data/queries";
 import { useWorkspace } from "../../graph/WorkspaceProvider";
 import { currentCursor, FIRST_PAGE, nextPage, previousPage } from "../../lib/pager";
 import { formatCount } from "../../lib/time";
@@ -20,13 +20,24 @@ const PAGE_SIZE = 50;
  * live in the address, so a view can be bookmarked or sent to someone.
  */
 export function BrowseView() {
+  const schema = useSchema();
   const stats = useStats();
   const [params, setParams] = useSearchParams();
   const state = readBrowseState(params);
+  // Columns chosen per label, kept while the filter changes.
+  const [columnsByLabel, setColumnsByLabel] = useState<Record<string, string[]>>({});
 
-  const labels = (stats.data?.labels ?? []).filter((l) => l.kind === "v").sort((a, b) => b.count - a.count);
-  const label = state.label ?? labels[0]?.label ?? null;
-  const count = labels.find((l) => l.label === label)?.count;
+  // Labels come from the schema (quick); counts from stats when they arrive,
+  // largest first. A failed stats request only costs the counts.
+  const counts = new Map(
+    (stats.data?.labels ?? []).filter((l) => l.kind === "v").map((l) => [l.label, l.count] as const),
+  );
+  const labels = [...(schema.data?.vertex_labels ?? [])].sort(
+    (a, b) => (counts.get(b) ?? -1) - (counts.get(a) ?? -1) || a.localeCompare(b),
+  );
+  const settled = !stats.isLoading;
+  const label = state.label ?? (settled ? (labels[0] ?? null) : null);
+  const count = label ? counts.get(label) : undefined;
   const profile = usePropertyProfile(label);
 
   const show = (next: { label: string | null; filter: BrowseFilter | null }) =>
@@ -40,7 +51,7 @@ export function BrowseView() {
           w={200}
           aria-label="Label"
           placeholder="Label"
-          data={labels.map((l) => ({ value: l.label, label: `${l.label} · ${formatCount(l.count)}` }))}
+          data={labels.map((l) => ({ value: l, label: counts.has(l) ? `${l} · ${formatCount(counts.get(l)!)}` : l }))}
           value={label}
           onChange={(next) => show({ label: next, filter: null })}
           searchable
@@ -56,11 +67,15 @@ export function BrowseView() {
       </Group>
 
       {label === null ? (
-        stats.isLoading ? (
+        schema.error ? (
+          <Text size="sm" c="red" className={classes.empty}>
+            {schema.error.message}
+          </Text>
+        ) : !settled || schema.isLoading ? (
           <Skeleton h={240} radius="lg" />
         ) : (
           <Text c="dimmed" size="sm" className={classes.empty}>
-            No nodes yet.
+            No labels yet.
           </Text>
         )
       ) : (
@@ -69,6 +84,8 @@ export function BrowseView() {
           label={label}
           filter={state.filter}
           total={state.filter ? undefined : count}
+          columns={columnsByLabel[label] ?? null}
+          onColumns={(columns) => setColumnsByLabel((current) => ({ ...current, [label]: columns }))}
         />
       )}
     </div>
@@ -80,12 +97,24 @@ export function BrowseView() {
  * pager. Remounted (key) when the label or filter changes, which starts
  * again from the first page.
  */
-function LabelPages({ label, filter, total }: { label: string; filter: BrowseFilter | null; total?: number }) {
+function LabelPages({
+  label,
+  filter,
+  total,
+  columns: chosen,
+  onColumns,
+}: {
+  label: string;
+  filter: BrowseFilter | null;
+  total?: number;
+  /** The columns chosen for this label, or null for the most common properties. */
+  columns: string[] | null;
+  onColumns: (columns: string[]) => void;
+}) {
   const navigate = useNavigate();
   const { open } = useWorkspace();
   const profile = usePropertyProfile(label);
   const [pager, setPager] = useState(FIRST_PAGE);
-  const [chosen, setChosen] = useState<string[] | null>(null);
 
   // A filter's value is typed from the profile, so wait for it.
   const ready = !filter || profile.data !== undefined;
@@ -116,17 +145,17 @@ function LabelPages({ label, filter, total }: { label: string; filter: BrowseFil
     <>
       <Group justify="space-between" gap="sm">
         <Text size="xs" c="dimmed">
-          {page.isLoading
+          {!ready || page.isLoading
             ? "Loading…"
             : rows.length === 0
               ? "No nodes match."
               : `Rows ${formatCount(from)}–${formatCount(from + rows.length - 1)}${total !== undefined ? ` of ${formatCount(total)}` : ""}`}
         </Text>
-        <ColumnPicker options={names} value={columns} onChange={setChosen} />
+        <ColumnPicker options={names} value={columns} onChange={onColumns} />
       </Group>
 
       <div className={classes.table}>
-        {page.isLoading ? (
+        {!ready || page.isLoading ? (
           <Skeleton h={240} />
         ) : (
           <NodeTable rows={rows} columns={columns} onOpen={openRow} stale={page.isPlaceholderData} />

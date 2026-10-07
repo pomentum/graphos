@@ -1,5 +1,6 @@
-import { Group, Select, SimpleGrid, Skeleton, Stack, Text, Title } from "@mantine/core";
-import { useState } from "react";
+import { Alert, Button, Group, Select, SimpleGrid, Skeleton, Stack, Text, Title } from "@mantine/core";
+import { useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { CountBars } from "../../components/CountBars";
 import { StatTile } from "../../components/StatTile";
 import { useHistogram, useProperties, useStats } from "../../data/queries";
@@ -8,12 +9,21 @@ import classes from "./OverviewView.module.css";
 
 /**
  * Overview: how big the tenant is, which labels and relationships it has,
- * and how the values of one property are spread across a label.
+ * and how the values of one property are spread across a label. The label
+ * and property live in the address, so they survive moving between views.
  */
 export function OverviewView() {
   const stats = useStats();
-  const [label, setLabel] = useState<string | null>(null);
-  const [property, setProperty] = useState<string | null>(null);
+  const [params, setParams] = useSearchParams();
+  const label = params.get("label") || null;
+  const property = (label && params.get("property")) || null;
+  const values = useRef<HTMLDivElement>(null);
+  const show = (next: { label: string | null; property: string | null }) => {
+    const query = new URLSearchParams();
+    if (next.label) query.set("label", next.label);
+    if (next.label && next.property) query.set("property", next.property);
+    setParams(query, { replace: true });
+  };
   const properties = useProperties(label);
   const histogram = useHistogram(label, property);
 
@@ -23,6 +33,25 @@ export function OverviewView() {
     [...items]
       .sort((a, b) => b.count - a.count)
       .map((l) => ({ name: l.label, count: l.count, detail: formatBytes(l.total_bytes) }));
+
+  if (stats.error) {
+    return (
+      <div className={classes.root}>
+        <Alert color="red" variant="light" radius="md" title="Couldn't load the tenant's counts">
+          <Text size="sm">{stats.error.message}</Text>
+          <Button
+            size="compact-xs"
+            variant="default"
+            mt="xs"
+            loading={stats.isFetching}
+            onClick={() => void stats.refetch()}
+          >
+            Try again
+          </Button>
+        </Alert>
+      </div>
+    );
+  }
 
   return (
     <div className={classes.root}>
@@ -44,8 +73,9 @@ export function OverviewView() {
           <CountBars
             rows={toRows(labels)}
             onPick={(name) => {
-              setLabel(name);
-              setProperty(null);
+              show({ label: name, property: null });
+              // With many labels the values are below the fold: bring them into view.
+              requestAnimationFrame(() => values.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
             }}
             active={label}
             empty="No nodes yet"
@@ -59,7 +89,7 @@ export function OverviewView() {
         </Stack>
       </SimpleGrid>
 
-      <Stack gap="xs" mt="xl">
+      <Stack gap="xs" mt="xl" ref={values}>
         <Title order={2} size="sm">
           Values
         </Title>
@@ -76,7 +106,7 @@ export function OverviewView() {
             disabled={!label}
             searchable
             selectFirstOptionOnChange
-            onChange={setProperty}
+            onChange={(next) => show({ label, property: next })}
           />
         </Group>
         {histogram.data ? (

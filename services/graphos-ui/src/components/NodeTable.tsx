@@ -3,6 +3,10 @@ import type { Properties } from "../api/types";
 import { formatValue } from "../lib/properties";
 import classes from "./NodeTable.module.css";
 
+/** Width of the id column; other columns get at least `MIN_COLUMN_WIDTH`. */
+const ID_WIDTH = 240;
+const MIN_COLUMN_WIDTH = 140;
+
 export interface NodeRow {
   id: string;
   label: string;
@@ -22,7 +26,14 @@ export interface NodeTableProps {
 /** Nodes as rows: the id, then one column per property; long values are cut, with the full value on hover. */
 export function NodeTable({ rows, columns, onOpen, stale }: NodeTableProps) {
   return (
-    <Table stickyHeader highlightOnHover className={classes.table} data-stale={stale ? "true" : undefined}>
+    <Table
+      stickyHeader
+      highlightOnHover
+      className={classes.table}
+      // Every column keeps a readable width; past the view, the table scrolls sideways.
+      style={{ minWidth: ID_WIDTH + columns.length * MIN_COLUMN_WIDTH }}
+      data-stale={stale ? "true" : undefined}
+    >
       <Table.Thead>
         <Table.Tr>
           <Table.Th className={classes.id}>id</Table.Th>

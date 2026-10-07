@@ -1,6 +1,7 @@
 import {
   Alert,
   Button,
+  Group,
   Input,
   MultiSelect,
   SegmentedControl,
@@ -9,42 +10,44 @@ import {
   Text,
   UnstyledButton,
 } from "@mantine/core";
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import type { Direction, GraphPath, SearchHit } from "../../api/types";
 import { GraphCanvas } from "../../components/GraphCanvas";
 import { NodeSearch } from "../../components/NodeSearch";
 import { usePaths, useSchema } from "../../data/queries";
-import { edgeKey, GraphModel, nodeKey } from "../../graph/GraphModel";
+import { displayName, edgeKey, GraphModel, nodeKey } from "../../graph/GraphModel";
 import { useWorkspace } from "../../graph/WorkspaceProvider";
 import { usePalette } from "../../theme/usePalette";
 import classes from "./PathView.module.css";
 import { PathSummary } from "./PathSummary";
-
-interface Endpoint {
-  id: string;
-  label: string;
-}
+import { MAX_HOPS, pathParams, readPathState, type Endpoint, type PathState } from "./pathState";
 
 const MAX_PATHS = 10;
 
 function endpoint(hit: SearchHit): Endpoint {
-  return { id: String(hit.properties.id ?? hit.id), label: hit.label };
+  const id = String(hit.properties.id ?? hit.id);
+  return { id, label: hit.label, name: displayName(hit.properties, id) };
 }
 
-/** Path: how two nodes are connected, as every shortest path between them. */
+/**
+ * Path: how two nodes are connected, as every shortest path between them.
+ * The ends and options live in the address, so leaving Path and coming
+ * back (or sharing the link) shows the same search, run again.
+ */
 export function PathView() {
   const palette = usePalette();
   const schema = useSchema();
   const paths = usePaths();
   const workspace = useWorkspace();
   const navigate = useNavigate();
-  const [from, setFrom] = useState<Endpoint | null>(null);
-  const [to, setTo] = useState<Endpoint | null>(null);
-  const [direction, setDirection] = useState<Direction>("both");
-  const [maxHops, setMaxHops] = useState(4);
-  const [relTypes, setRelTypes] = useState<string[]>([]);
+  const [params, setParams] = useSearchParams();
+  const state = readPathState(params);
+  const { from, to, direction, maxHops, relTypes } = state;
+  const update = (change: Partial<PathState>) => setParams(pathParams({ ...state, ...change }), { replace: true });
   const [chosen, setChosen] = useState<number | null>(null);
+  // The hop limit the shown result was searched with (the slider may have moved since).
+  const [searchedHops, setSearchedHops] = useState(maxHops);
   const [model] = useState(() => new GraphModel());
   const [focus, setFocus] = useState({ nodes: new Set<string>(), edges: new Set<string>() });
 
@@ -61,6 +64,7 @@ export function PathView() {
       limit: MAX_PATHS,
       include_properties: true,
     });
+    setSearchedHops(maxHops);
     model.clear();
     setChosen(null);
     setFocus(model.addPaths(result.paths));
@@ -79,9 +83,19 @@ export function PathView() {
     });
   };
 
+  // Coming back to Path with both ends in the address: show the result again, once.
+  const ranOnce = useRef(false);
+  useEffect(() => {
+    if (ranOnce.current || !from || !to) return;
+    ranOnce.current = true;
+    void find().catch(() => undefined);
+  });
+
   const openInExplore = (path: GraphPath) => {
-    workspace.model.addPaths([path]);
-    navigate("/explore");
+    const added = workspace.model.addPaths([path]);
+    workspace.setMode("graph");
+    workspace.frameOn([...added.nodes]);
+    void navigate("/explore");
   };
 
   const emphasis = useMemo(() => ({ selected: null, focus, recent: new Set<string>() }), [focus]);
@@ -97,7 +111,9 @@ export function PathView() {
               keepSelection
               scoped
               width="100%"
-              onPick={(hit) => setFrom(endpoint(hit))}
+              initialText={from?.name}
+              onEdit={() => from && update({ from: null })}
+              onPick={(hit) => update({ from: endpoint(hit) })}
             />
           </Input.Wrapper>
           <Input.Wrapper label="To">
@@ -106,7 +122,9 @@ export function PathView() {
               keepSelection
               scoped
               width="100%"
-              onPick={(hit) => setTo(endpoint(hit))}
+              initialText={to?.name}
+              onEdit={() => to && update({ to: null })}
+              onPick={(hit) => update({ to: endpoint(hit) })}
             />
           </Input.Wrapper>
           <Input.Wrapper label="Direction">
@@ -114,7 +132,7 @@ export function PathView() {
               fullWidth
               size="xs"
               value={direction}
-              onChange={(value) => setDirection(value as Direction)}
+              onChange={(value) => update({ direction: value as Direction })}
               data={[
                 { value: "both", label: "Either" },
                 { value: "out", label: "Forward" },
@@ -123,14 +141,22 @@ export function PathView() {
             />
           </Input.Wrapper>
           <Input.Wrapper label={`Up to ${maxHops} hops`}>
-            <Slider min={1} max={8} step={1} value={maxHops} onChange={setMaxHops} label={null} mt={6} />
+            <Slider
+              min={1}
+              max={MAX_HOPS}
+              step={1}
+              value={maxHops}
+              onChange={(hops) => update({ maxHops: hops })}
+              label={null}
+              mt={6}
+            />
           </Input.Wrapper>
           <MultiSelect
             label="Relationships"
             placeholder={relTypes.length ? undefined : "All"}
             data={schema.data?.edge_labels ?? []}
             value={relTypes}
-            onChange={setRelTypes}
+            onChange={(next) => update({ relTypes: next })}
             searchable
             selectFirstOptionOnChange
             clearable
@@ -143,22 +169,29 @@ export function PathView() {
               {paths.error.message}
             </Alert>
           ) : null}
-          {result ? <PathSummary result={result} maxHops={maxHops} /> : null}
+          {result ? <PathSummary result={result} maxHops={searchedHops} /> : null}
           {result?.paths.map((path, index) => (
-            <UnstyledButton
-              key={index}
-              className={classes.path}
-              data-active={chosen === index}
-              onClick={() => highlight(chosen === index ? null : index, result.paths)}
-              onDoubleClick={() => openInExplore(path)}
-            >
-              <Text size="xs" c="dimmed">
-                Path {index + 1} · double-click to open in Explore
-              </Text>
-              <Text size="sm" lineClamp={2}>
-                {path.nodes.map((n) => String(n.properties?.name ?? n.id)).join(" → ")}
-              </Text>
-            </UnstyledButton>
+            <div key={index} className={classes.path} data-active={chosen === index}>
+              <UnstyledButton
+                className={classes.pathButton}
+                onClick={() => highlight(chosen === index ? null : index, result.paths)}
+                onDoubleClick={() => openInExplore(path)}
+              >
+                <Text size="xs" c="dimmed">
+                  Path {index + 1} · {path.edges.length} {path.edges.length === 1 ? "hop" : "hops"}
+                </Text>
+                <Text size="sm" lineClamp={2}>
+                  {path.nodes.map((n) => displayName(n.properties ?? {}, n.id)).join(" → ")}
+                </Text>
+              </UnstyledButton>
+              {chosen === index ? (
+                <Group justify="flex-end" mt={4}>
+                  <Button size="compact-xs" variant="default" onClick={() => openInExplore(path)}>
+                    Open in Explore
+                  </Button>
+                </Group>
+              ) : null}
+            </div>
           ))}
         </Stack>
       </aside>

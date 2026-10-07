@@ -34,6 +34,10 @@ export interface NodeSearchProps {
   width?: number | string;
   /** Offer a "search in" choice of property above the field (for pickers with room for it). */
   scoped?: boolean;
+  /** Text the field starts with, e.g. the name of a node picked earlier. */
+  initialText?: string;
+  /** The user changed the text after picking: what was picked no longer stands. */
+  onEdit?: () => void;
 }
 
 /** A hit's own id (`properties.id`), falling back to the AGE id. */
@@ -60,9 +64,11 @@ export function NodeSearch({
   keepSelection,
   width = 260,
   scoped,
+  initialText = "",
+  onEdit,
 }: NodeSearchProps) {
   const { api } = useTenantSession();
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialText);
   const [debounced] = useDebouncedValue(query, 150);
   const shift = useRef(false);
   const input = useRef<HTMLInputElement>(null);
@@ -200,6 +206,7 @@ export function NodeSearch({
             onChange={(event) => {
               setQuery(event.currentTarget.value);
               setIdMissing(null);
+              onEdit?.();
               combobox.openDropdown();
               // Nothing is highlighted until the hits for the new text arrive.
               combobox.resetSelectedOption();

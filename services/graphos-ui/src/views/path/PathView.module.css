@@ -28,3 +28,9 @@
   border-color: var(--gx-accent);
   background: var(--gx-accent-soft);
 }
+
+.pathButton {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
