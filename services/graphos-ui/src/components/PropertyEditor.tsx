@@ -1,8 +1,8 @@
 import { ActionIcon, Autocomplete, Group, NumberInput, Switch, Text, TextInput, UnstyledButton } from "@mantine/core";
 import { IconPlus, IconX } from "@tabler/icons-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Properties } from "../api/types";
-import { formatValue, propertyKind, sortedEntries, SYSTEM_PROPERTIES } from "../lib/properties";
+import { formatValue, propertyKind, sortedEntries, SYSTEM_PROPERTIES, typedValue } from "../lib/properties";
 import classes from "./PropertyEditor.module.css";
 
 export interface PropertyEditorProps {
@@ -75,16 +75,7 @@ function ValueInput({ name, value, onChange }: { name: string; value: unknown; o
   const label = `Value of ${name}`;
   switch (propertyKind(value)) {
     case "number":
-      return (
-        <NumberInput
-          variant="unstyled"
-          size="sm"
-          aria-label={label}
-          value={value as number}
-          hideControls
-          onChange={(v) => onChange(typeof v === "number" ? v : Number(v))}
-        />
-      );
+      return <NumberField label={label} value={value as number} onChange={onChange} />;
     case "boolean":
       return (
         <Switch
@@ -107,7 +98,37 @@ function ValueInput({ name, value, onChange }: { name: string; value: unknown; o
   }
 }
 
-/** The last row: a name and a text value for a new property. */
+/**
+ * A number being edited. What is typed stays as typed ("1.", "-", empty)
+ * and the draft only takes it once it is a number, so a half-typed value
+ * never becomes 0 or, saved as `NaN`, a deleted property.
+ */
+function NumberField({ label, value, onChange }: { label: string; value: number; onChange: (value: unknown) => void }) {
+  const [text, setText] = useState<string | number>(value);
+  const valid = typeof text === "number" || (text !== "" && Number.isFinite(Number(text)));
+  return (
+    <NumberInput
+      variant="unstyled"
+      size="sm"
+      aria-label={label}
+      value={text}
+      hideControls
+      error={!valid}
+      title={valid ? undefined : "Not a number yet; the saved value is unchanged"}
+      onChange={(next) => {
+        setText(next);
+        if (typeof next === "number" && Number.isFinite(next)) onChange(next);
+      }}
+    />
+  );
+}
+
+/**
+ * The last row: a name and a value for a new property. Return in the name
+ * moves to the value (after the suggestion list has filled the name in),
+ * Return in the value adds it, Escape cancels. A value that reads exactly as
+ * a number or as true/false is stored as one; anything else as text.
+ */
 function NewProperty({
   existing,
   suggestions,
@@ -120,13 +141,17 @@ function NewProperty({
   const [open, setOpen] = useState(false);
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
+  const valueInput = useRef<HTMLInputElement>(null);
   const taken = key in existing;
-  const add = () => {
-    if (!key.trim() || taken) return;
-    onAdd(key.trim(), value);
+  const cancel = () => {
     setKey("");
     setValue("");
     setOpen(false);
+  };
+  const add = () => {
+    if (!key.trim() || taken) return;
+    onAdd(key.trim(), typedValue(value));
+    cancel();
   };
 
   if (!open) {
@@ -151,16 +176,24 @@ function NewProperty({
         error={taken}
         autoFocus
         onChange={setKey}
-        onKeyDown={(e) => e.key === "Enter" && add()}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") cancel();
+          // After the suggestion list has handled Return (and filled the name in).
+          if (e.key === "Enter") setTimeout(() => valueInput.current?.focus(), 0);
+        }}
       />
       <TextInput
         variant="unstyled"
         size="sm"
         placeholder="value"
         aria-label="New property value"
+        ref={valueInput}
         value={value}
         onChange={(e) => setValue(e.currentTarget.value)}
-        onKeyDown={(e) => e.key === "Enter" && add()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") add();
+          if (e.key === "Escape") cancel();
+        }}
       />
       <ActionIcon variant="subtle" size="xs" aria-label="Add property" onClick={add}>
         <IconPlus size={12} />

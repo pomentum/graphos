@@ -86,3 +86,15 @@ export function valueLike(text: string, example: unknown): unknown {
   if (typeof example === "boolean" && (trimmed === "true" || trimmed === "false")) return trimmed === "true";
   return text;
 }
+
+/**
+ * Typed text as a value for a new property: a number or a boolean when it
+ * reads exactly as one (`42`, `-1.5`, `true`), else the text itself. `0042`
+ * or `1e3` stay text, since they would not read back the same.
+ */
+export function typedValue(text: string): unknown {
+  if (text === "true" || text === "false") return text === "true";
+  const number = Number(text);
+  if (text.trim() !== "" && Number.isFinite(number) && String(number) === text) return number;
+  return text;
+}

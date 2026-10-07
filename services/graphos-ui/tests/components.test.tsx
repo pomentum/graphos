@@ -22,6 +22,35 @@ describe("PropertyEditor", () => {
   });
 });
 
+describe("PropertyEditor input", () => {
+  it("keeps a half-typed number out of the draft", () => {
+    const onChange = vi.fn();
+    renderWithTheme(<PropertyEditor draft={{ lines: 10 }} editable onChange={onChange} />);
+    const input = screen.getByLabelText("Value of lines");
+    fireEvent.change(input, { target: { value: "-" } });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "-5" } });
+    expect(onChange).toHaveBeenLastCalledWith({ lines: -5 });
+  });
+
+  it("adds a property from name and value, typed, and cancels with Escape", () => {
+    const onChange = vi.fn();
+    renderWithTheme(<PropertyEditor draft={{ name: "a" }} editable onChange={onChange} />);
+    fireEvent.click(screen.getByText("Add property"));
+    fireEvent.change(screen.getByRole("textbox", { name: "New property name" }), { target: { value: "size" } });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "New property name" }), { key: "Enter" });
+    expect(onChange).not.toHaveBeenCalled(); // Return in the name only moves on
+    const value = screen.getByLabelText("New property value");
+    fireEvent.change(value, { target: { value: "42" } });
+    fireEvent.keyDown(value, { key: "Enter" });
+    expect(onChange).toHaveBeenLastCalledWith({ name: "a", size: 42 });
+
+    fireEvent.click(screen.getByText("Add property"));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "New property name" }), { key: "Escape" });
+    expect(screen.queryByRole("textbox", { name: "New property name" })).toBeNull();
+  });
+});
+
 describe("ExpandDialog", () => {
   it("adds only the chosen relationships", () => {
     const onConfirm = vi.fn();

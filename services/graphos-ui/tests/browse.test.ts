@@ -1,5 +1,5 @@
 import { currentCursor, FIRST_PAGE, nextPage, previousPage } from "../src/lib/pager";
-import { profileProperties, valueLike } from "../src/lib/properties";
+import { profileProperties, typedValue, valueLike } from "../src/lib/properties";
 import { browseParams, defaultColumns, readBrowseState, scanFilter } from "../src/views/browse/browseState";
 
 describe("cursor pager", () => {
@@ -65,5 +65,17 @@ describe("browse address", () => {
   it("ignores a malformed filter", () => {
     expect(readBrowseState(new URLSearchParams("label=Doc&p=x&op=like"))).toEqual({ label: "Doc", filter: null });
     expect(readBrowseState(new URLSearchParams(""))).toEqual({ label: null, filter: null });
+  });
+});
+
+describe("typed values for new properties", () => {
+  it("keeps exact numbers and booleans, everything else as text", () => {
+    expect(typedValue("42")).toBe(42);
+    expect(typedValue("-1.5")).toBe(-1.5);
+    expect(typedValue("true")).toBe(true);
+    expect(typedValue("0042")).toBe("0042");
+    expect(typedValue("1e3")).toBe("1e3");
+    expect(typedValue("")).toBe("");
+    expect(typedValue("abc")).toBe("abc");
   });
 });
