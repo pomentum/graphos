@@ -4,6 +4,20 @@
   padding: 24px;
 }
 
+/* The diagram fills the page under the heading. */
+.diagramRoot {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 16px 24px 24px;
+}
+
+.diagram {
+  flex: 1;
+  min-height: 360px;
+}
+
 .group {
   background: var(--gx-group);
   border: 0.5px solid var(--gx-separator);
@@ -49,7 +63,8 @@ button.row:hover {
 }
 
 @media (max-width: 600px) {
-  .root {
+  .root,
+  .diagramRoot {
     padding: 12px;
   }
 

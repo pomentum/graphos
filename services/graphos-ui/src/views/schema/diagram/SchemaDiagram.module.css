@@ -1,0 +1,434 @@
+.root {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  border: 0.5px solid var(--gx-separator);
+  border-radius: var(--mantine-radius-lg);
+  overflow: hidden;
+}
+
+.root[data-panel="open"] {
+  grid-template-columns: minmax(0, 1fr) 300px;
+}
+
+.canvas {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* React Flow in the graphos palette. */
+.canvas :global(.react-flow) {
+  --xy-background-color: var(--gx-canvas);
+  --xy-node-border-radius: var(--mantine-radius-md);
+  --xy-controls-button-background-color: var(--gx-group);
+  --xy-controls-button-background-color-hover: var(--gx-accent-soft);
+  --xy-controls-button-color: var(--gx-text);
+  --xy-controls-button-border-color: var(--gx-separator);
+  --xy-minimap-background-color: var(--gx-panel);
+  --xy-attribution-background-color: transparent;
+  --xy-connectionline-stroke-default: var(--gx-accent);
+  --xy-connectionline-stroke-width-default: 1.5;
+  font-family: var(--mantine-font-family);
+}
+
+.canvas :global(.react-flow__node) {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.canvas :global(.react-flow__node:focus-visible) {
+  outline: 2px solid var(--gx-accent);
+  outline-offset: 2px;
+  border-radius: var(--mantine-radius-md);
+}
+
+.canvas :global(.react-flow__controls) {
+  box-shadow: none;
+  border: 0.5px solid var(--gx-separator);
+  border-radius: var(--mantine-radius-md);
+  overflow: hidden;
+}
+
+.canvas :global(.react-flow__minimap) {
+  border: 0.5px solid var(--gx-separator);
+  border-radius: var(--mantine-radius-md);
+  overflow: hidden;
+}
+
+/* ---- boxes ---- */
+
+.box {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 12px;
+  background: var(--gx-group);
+  border: 1px solid var(--gx-separator);
+  border-left: 4px solid var(--gx-node-idle);
+  border-radius: var(--mantine-radius-md);
+  color: var(--gx-text);
+  cursor: grab;
+  transition:
+    opacity 120ms ease,
+    border-color 120ms ease;
+}
+
+.box[data-empty] {
+  background: transparent;
+  border-style: dashed;
+  border-left-style: solid;
+  color: var(--gx-muted);
+}
+
+.box[data-faded] {
+  opacity: 0.32;
+}
+
+.box[data-selected] {
+  border-color: var(--gx-accent);
+  box-shadow: 0 0 0 2px var(--gx-accent-soft);
+}
+
+.box[data-target] {
+  border-color: var(--gx-accent);
+  background: var(--gx-accent-soft);
+}
+
+.canvas[data-drawing] .box {
+  cursor: crosshair;
+}
+
+.boxName {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.boxMeta {
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--gx-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Lines still need a handle at each end; it stays out of sight unless drawing. */
+.handleHidden {
+  opacity: 0;
+  pointer-events: none;
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+}
+
+/* While drawing, the whole box is the handle. */
+.handleWhole {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: none;
+  border: 0;
+  border-radius: var(--mantine-radius-md);
+  opacity: 0;
+  cursor: crosshair;
+}
+
+/* ---- family blocks ---- */
+
+.family {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  border: 1px solid var(--gx-separator);
+  border-radius: var(--mantine-radius-lg);
+  background: color-mix(in srgb, var(--family, var(--gx-node-idle)) 7%, var(--gx-canvas));
+  cursor: grab;
+}
+
+.family[data-nested] {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--family, var(--gx-node-idle)) 10%, var(--gx-canvas));
+}
+
+.familyTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 12px 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.familyName {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gx-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.familySize {
+  font-size: 11px;
+  color: var(--gx-muted);
+}
+
+/* ---- lines ---- */
+
+.line {
+  stroke: var(--gx-muted);
+  stroke-width: 1.3;
+  transition: opacity 120ms ease;
+}
+
+.line[data-kind="inherits"] {
+  stroke-dasharray: 5 4;
+}
+
+.line[data-lit] {
+  stroke: var(--gx-accent-text);
+  stroke-width: 2;
+}
+
+.line[data-faded] {
+  opacity: 0.18;
+}
+
+/* Lines beyond the backbone: present, but quieter. */
+.line[data-extra]:not([data-lit]) {
+  opacity: 0.35;
+  stroke-width: 1;
+}
+
+.line[data-draft] {
+  stroke: var(--gx-accent-text);
+  stroke-dasharray: 2 4;
+}
+
+.markers {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.marker {
+  fill: var(--gx-muted);
+}
+
+.markerLit {
+  fill: var(--gx-accent-text);
+}
+
+.marker[data-open],
+.markerLit[data-open] {
+  fill: var(--gx-canvas);
+  stroke: var(--gx-muted);
+  stroke-width: 1.3;
+}
+
+.markerLit[data-open] {
+  stroke: var(--gx-accent-text);
+}
+
+.caption {
+  position: absolute;
+  pointer-events: all;
+  padding: 1px 6px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  color: var(--gx-text);
+  background: var(--gx-group);
+  border: 0.5px solid var(--gx-separator);
+  border-radius: var(--mantine-radius-sm);
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+.caption:hover,
+.caption[data-lit] {
+  border-color: var(--gx-accent);
+  color: var(--gx-accent-text);
+}
+
+.caption[data-faded] {
+  opacity: 0.25;
+}
+
+.caption[data-draft] {
+  border-style: dashed;
+  color: var(--gx-muted);
+}
+
+.caption:focus-visible {
+  outline: 2px solid var(--gx-accent);
+  outline-offset: 1px;
+}
+
+/* ---- overlays ---- */
+
+.toolbar,
+.legend {
+  background: color-mix(in srgb, var(--gx-panel) 92%, transparent);
+  border: 0.5px solid var(--gx-separator);
+  border-radius: var(--mantine-radius-md);
+  padding: 8px 10px;
+  max-width: min(520px, calc(100% - 24px));
+}
+
+.legend {
+  max-width: 280px;
+  padding-right: 30px;
+}
+
+.legendClose {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+}
+
+.unusedToggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  color: var(--gx-muted);
+}
+
+.unusedToggle:hover p {
+  color: var(--gx-text);
+}
+
+.legendRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legendLine {
+  stroke: var(--gx-muted);
+  stroke-width: 1.3;
+  fill: none;
+}
+
+.legendBlock {
+  flex: none;
+  width: 30px;
+  height: 14px;
+  border: 1px solid var(--gx-muted);
+  border-radius: 4px;
+  margin: 0 2px;
+}
+
+.unused {
+  overflow-wrap: anywhere;
+  max-height: 180px;
+  overflow-y: auto;
+  margin-top: 4px;
+}
+
+.status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  pointer-events: none;
+}
+
+.status > * {
+  pointer-events: auto;
+}
+
+/* ---- side panel ---- */
+
+.panel {
+  position: relative;
+  overflow-y: auto;
+  padding: 16px;
+  background: var(--gx-panel);
+  border-left: 0.5px solid var(--gx-separator);
+}
+
+.panelClose {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+
+.panelHead {
+  padding-right: 28px;
+}
+
+.panelGroup {
+  background: var(--gx-group);
+  border: 0.5px solid var(--gx-separator);
+  border-radius: var(--mantine-radius-lg);
+  overflow: hidden;
+}
+
+.panelRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border-top: 0.5px solid var(--gx-separator);
+}
+
+.panelRow:first-child {
+  border-top: 0;
+}
+
+button.panelRow:hover {
+  background: var(--gx-accent-soft);
+}
+
+.panelPad {
+  padding: 8px 10px;
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.linkText:hover {
+  color: var(--gx-accent-text);
+  text-decoration: underline;
+}
+
+@media (max-width: 800px) {
+  .root[data-panel="open"] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 45%);
+  }
+
+  .panel {
+    border-left: 0;
+    border-top: 0.5px solid var(--gx-separator);
+  }
+
+  .legend {
+    display: none;
+  }
+}

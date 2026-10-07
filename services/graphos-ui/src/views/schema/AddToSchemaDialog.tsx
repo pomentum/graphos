@@ -1,4 +1,4 @@
-import { Alert, Button, Group, Modal, MultiSelect, Select, Stack, Text, TextInput } from "@mantine/core";
+import { Alert, Autocomplete, Button, Group, Modal, MultiSelect, Select, Stack, Text, TextInput } from "@mantine/core";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { SchemaAddition, TenantSchema } from "../../api/types";
@@ -12,6 +12,12 @@ export interface AddToSchemaDialogProps {
   /** Property names the tenant's nodes carry, for a search index. */
   properties: string[];
   saving: boolean;
+  /**
+   * A relationship drawn on the diagram from one label to another: a type
+   * already in the schema may be picked, and the dialog says when the line
+   * will show.
+   */
+  pair?: { src: string; dst: string };
   onCancel: () => void;
   onAdd: (addition: SchemaAddition) => void;
 }
@@ -22,7 +28,7 @@ export interface AddToSchemaDialogProps {
  * labels). Names are checked as graphos checks them, and against what the
  * schema has already, before anything is sent.
  */
-export function AddToSchemaDialog({ kind, schema, properties, saving, onCancel, onAdd }: AddToSchemaDialogProps) {
+export function AddToSchemaDialog({ kind, schema, properties, saving, pair, onCancel, onAdd }: AddToSchemaDialogProps) {
   const { t } = useTranslation();
   const [name, setName] = useState("");
   const [parent, setParent] = useState<string | null>(null);
@@ -43,7 +49,7 @@ export function AddToSchemaDialog({ kind, schema, properties, saving, onCancel, 
     ? null
     : !pattern.test(trimmed)
       ? t("views.schema.dialog.invalidName")
-      : taken
+      : taken && !pair
         ? t("views.schema.dialog.exists")
         : null;
   const valid = Boolean(trimmed) && !nameError && (kind !== "index" || indexProperties.length > 0);
@@ -74,7 +80,9 @@ export function AddToSchemaDialog({ kind, schema, properties, saving, onCancel, 
 
   const title = {
     label: t("views.schema.dialog.labelTitle"),
-    relationship: t("views.schema.dialog.relationshipTitle"),
+    relationship: pair
+      ? t("views.schema.dialog.relationshipBetweenTitle", { src: pair.src, dst: pair.dst })
+      : t("views.schema.dialog.relationshipTitle"),
     index: t("views.schema.dialog.indexTitle"),
   }[kind];
   const hint = {
@@ -86,15 +94,33 @@ export function AddToSchemaDialog({ kind, schema, properties, saving, onCancel, 
   return (
     <Modal opened onClose={onCancel} title={title} centered radius="lg" size="sm">
       <Stack gap="sm">
-        <TextInput
-          label={t("views.schema.dialog.name")}
-          description={hint}
-          value={name}
-          error={nameError}
-          data-autofocus
-          onChange={(e) => setName(e.currentTarget.value)}
-          onKeyDown={(e) => e.key === "Enter" && kind !== "index" && submit()}
-        />
+        {pair ? (
+          <Autocomplete
+            label={t("views.schema.dialog.name")}
+            description={t("views.schema.dialog.pairNameHint")}
+            data={schema.edge_labels}
+            value={name}
+            error={nameError}
+            data-autofocus
+            onChange={setName}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+          />
+        ) : (
+          <TextInput
+            label={t("views.schema.dialog.name")}
+            description={hint}
+            value={name}
+            error={nameError}
+            data-autofocus
+            onChange={(e) => setName(e.currentTarget.value)}
+            onKeyDown={(e) => e.key === "Enter" && kind !== "index" && submit()}
+          />
+        )}
+        {pair ? (
+          <Alert variant="light" color="gray" radius="md">
+            <Text size="xs">{t("views.schema.dialog.pairNote", { src: pair.src, dst: pair.dst })}</Text>
+          </Alert>
+        ) : null}
         {kind === "label" ? (
           <Select
             label={t("views.schema.dialog.parent")}
@@ -153,7 +179,7 @@ export function AddToSchemaDialog({ kind, schema, properties, saving, onCancel, 
             {t("common.actions.cancel")}
           </Button>
           <Button size="xs" disabled={!valid} loading={saving} onClick={submit}>
-            {t("views.schema.dialog.add")}
+            {pair && taken ? t("views.schema.dialog.use") : t("views.schema.dialog.add")}
           </Button>
         </Group>
       </Stack>

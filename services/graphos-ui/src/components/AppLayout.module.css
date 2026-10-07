@@ -26,7 +26,8 @@
 .toolbarStart {
   height: 100%;
   padding: 0 12px;
-  background: var(--gx-panel);
+  /* The same colour as the rest of the header. */
+  background: transparent;
 }
 
 .title {

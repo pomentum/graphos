@@ -7,6 +7,8 @@ import type { NodeRef } from "../graph/GraphModel";
 export interface NewNodeDialogProps {
   opened: boolean;
   labels: string[];
+  /** The label chosen when the dialog opens (e.g. from the schema diagram). */
+  initialLabel?: string;
   saving: boolean;
   error: string | null;
   /** A node with the id asked for exists already: shown instead of overwriting it. */
@@ -25,6 +27,7 @@ export interface NewNodeDialogProps {
 export function NewNodeDialog({
   opened,
   labels,
+  initialLabel,
   saving,
   error,
   existing,
@@ -34,7 +37,7 @@ export function NewNodeDialog({
   onCreate,
 }: NewNodeDialogProps) {
   const { t } = useTranslation();
-  const [chosen, setLabel] = useState<string | null>(null);
+  const [chosen, setLabel] = useState<string | null>(initialLabel ?? null);
   // The first label until one is chosen (the labels may arrive after the dialog).
   const label = chosen ?? labels[0] ?? null;
   const [id, setId] = useState("");

@@ -359,7 +359,63 @@
         "invalidName": "Not a valid name",
         "exists": "Already in the schema",
         "buildNote": "Building the index reads every node it covers; on a large graph this takes a while.",
-        "add": "Add"
+        "add": "Add",
+        "relationshipBetweenTitle": "Relationship from {{src}} to {{dst}}",
+        "pairNameHint": "A type in the schema, or a new one starting with a capital letter",
+        "pairNote": "graphos does not tie relationship types to labels. The line from {{src}} to {{dst}} stays dashed until edges of this type join them.",
+        "use": "Use"
+      },
+      "view": {
+        "label": "Show the schema as",
+        "list": "List",
+        "diagram": "Diagram"
+      },
+      "diagram": {
+        "canvasLabel": "Schema diagram",
+        "hideEmpty": "Hide empty labels",
+        "tidy": "Tidy up",
+        "tidyHint": "Put every label and block back in place",
+        "draw": "Draw relationship",
+        "drawHint": "Drag from one label to another (or onto itself) to add a relationship type.",
+        "laying": "Arranging the labels…",
+        "layoutFailed": "Couldn’t arrange the diagram",
+        "empty": "No labels yet",
+        "more_one": "+{{count}}",
+        "more_other": "+{{count}}",
+        "inherits": "inherits",
+        "noEdgesYet": "no edges yet",
+        "legendRelationship": "relationship types, with edge counts: select a label",
+        "panel": {
+          "label": "Selected on the diagram",
+          "showOnMap": "Show on map",
+          "children": "Inherited by",
+          "properties": "Properties",
+          "outgoing": "Outgoing",
+          "incoming": "Incoming",
+          "types": "Relationship types",
+          "inheritsNote": "Nodes of {{child}} also count as {{parent}}: a search or a filter on {{parent}} finds them too.",
+          "newNode": "New node"
+        },
+        "a11y": {
+          "node": "Press enter or space to select this label. Arrow keys then move it.",
+          "line": "Press enter or space to select this line.",
+          "controls": "Zoom controls",
+          "zoomIn": "Zoom in",
+          "zoomOut": "Zoom out",
+          "fit": "Fit the diagram",
+          "minimap": "Overview of the diagram",
+          "handle": "Connection point"
+        },
+        "unusedCount_one": "{{count}} type not used by any edge yet",
+        "unusedCount_other": "{{count}} types not used by any edge yet",
+        "allLinesHint": "Off: select a label to see its relationship lines. On: every relationship line, drawn faintly.",
+        "hideLegend": "Hide the legend",
+        "showLegend": "Show the legend",
+        "allLinesCount_one": "All lines ({{count}})",
+        "allLinesCount_other": "All lines ({{count}})",
+        "familySize_one": "{{count}} label",
+        "familySize_other": "{{count}} labels",
+        "legendBlock": "a label, holding the labels that inherit from it"
       }
     }
   },

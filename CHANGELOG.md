@@ -4,6 +4,22 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Web UI
+
+- **Schema diagram** (Schema → Diagram): the schema drawn as a tidy grid with React Flow, laid out
+  by ELK in a web worker. A label others inherit from holds them in a block (nested as
+  inheritance nests); the other labels follow, busiest first. Selecting a label draws its
+  relationship lines with their types and edge counts and opens a panel (properties, lines in
+  and out, Browse, Show on map, New node); All lines draws every line. Boxes and blocks can be
+  moved (remembered in the browser) and put back with Tidy up. Administrators add labels and draw
+  a relationship type by dragging from one label to another. Loaded only when opened.
+- New node from the schema diagram opens Explore's new-node dialog with the label chosen.
+- The header has one colour across its whole width.
+- New UI dependencies: `@xyflow/react` (MIT) and `elkjs` (used under EPL-2.0, unmodified); see
+  `THIRD_PARTY_NOTICES.md`.
+
 ## 0.3.0 — 2026-10-07
 
 graphos 0.3.0 adds the web UI, ranked search through search indexes, a map of a tenant's labels and of its

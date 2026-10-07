@@ -1,7 +1,8 @@
 import { CloseButton } from "@mantine/core";
 import { useHotkeys } from "@mantine/hooks";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
 import { ApiError } from "../../api/http";
 import type { NodeUpsert, SearchHit } from "../../api/types";
 import { CanvasLegend } from "../../components/CanvasLegend";
@@ -73,6 +74,9 @@ export function ExploreView() {
   const [existing, setExisting] = useState<NodeRef | null>(null);
   const createNode = useCreateNode();
   const createEdge = useCreateEdge();
+  // `?new=<label>`: arrived to create a node of that label (from the schema diagram).
+  const [params, setParams] = useSearchParams();
+  const [newLabel, setNewLabel] = useState<string | undefined>(undefined);
 
   // `version` changes with the model, so categories and neighbourhoods are recomputed.
   const categories = useMemo(() => categorize(model, colorBy), [model, colorBy, version]);
@@ -104,6 +108,17 @@ export function ExploreView() {
     setDialogKey((k) => k + 1);
     setCreating(kind);
   };
+
+  useEffect(() => {
+    const label = params.get("new");
+    if (!label) return;
+    setParams({}, { replace: true });
+    if (!canWrite) return;
+    setNewLabel(label);
+    startCreating("node");
+    // Only the parameter matters: it is read once and removed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
 
   /** Creates the node unless one with that id exists: creating would overwrite it, so offer it instead. */
   const createNewNode = async (node: NodeUpsert) => {
@@ -192,7 +207,10 @@ export function ExploreView() {
           onBack={() => model.undo()}
           onFocus={() => setFocusOnly((on) => !on)}
           onColorBy={workspace.setColorBy}
-          onNewNode={() => startCreating("node")}
+          onNewNode={() => {
+            setNewLabel(undefined);
+            startCreating("node");
+          }}
           onConnect={() => startCreating("edge")}
           onClear={() => {
             deselect();
@@ -233,6 +251,7 @@ export function ExploreView() {
         key={`node-${dialogKey}`}
         opened={creating === "node"}
         labels={schema.data?.vertex_labels ?? []}
+        initialLabel={newLabel}
         saving={createNode.isPending}
         error={createNode.error instanceof ApiError ? createNode.error.message : null}
         existing={existing}

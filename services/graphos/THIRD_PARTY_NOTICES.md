@@ -78,11 +78,22 @@ file in its npm distribution.
 | sigma | MIT |
 | graphology, graphology-layout, graphology-layout-forceatlas2 | MIT |
 | i18next, react-i18next | MIT |
+| @xyflow/react (React Flow) | MIT |
+| elkjs (Eclipse Layout Kernel) | EPL-2.0 OR GPL-3.0-or-later; used under **EPL-2.0** |
 | @fontsource/inter (Inter typeface) | SIL Open Font License 1.1 |
 | @fontsource/ibm-plex-mono (IBM Plex Mono typeface) | SIL Open Font License 1.1 |
 
-These are the direct dependencies. They bundle 60 packages in all, each under a permissive
-licence: MIT for most, BSD-3-Clause (react-transition-group), 0BSD (tslib) and MIT OR CC0-1.0
-(type-fest). The fonts are redistributed unmodified under the OFL, which permits bundling them
+These are the direct dependencies. They bundle 75 packages in all. Apart from elkjs, each is
+under a permissive licence: MIT for most, ISC (the d3 modules React Flow uses), BSD-3-Clause
+(react-transition-group, d3-ease), 0BSD (tslib) and MIT OR CC0-1.0 (type-fest). The fonts are redistributed unmodified under the OFL, which permits bundling them
 with software. The image is built on `nginxinc/nginx-unprivileged` (nginx: BSD-2-Clause, on
 Alpine Linux, whose packages carry their own licences).
+
+**Note on elkjs.** The schema diagram lays labels out with elkjs, the JavaScript build of the
+Eclipse Layout Kernel, offered under EPL-2.0 or GPL-3.0-or-later; graphos uses it under EPL-2.0.
+It is used unmodified, as published on npm, and ships as its own file in the UI image
+(`assets/elk-worker.min-*.js`), loaded only when the diagram is opened. Its source is at
+https://github.com/kieler/elkjs, and the EPL-2.0 text at https://www.eclipse.org/legal/epl-2.0/.
+EPL-2.0 is a weak, file-level copyleft: it covers elkjs itself and any changes made to it, not
+the graphos code that calls it. Anyone distributing a build with a modified elkjs must make the
+source of those modifications available under EPL-2.0.

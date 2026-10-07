@@ -4,6 +4,7 @@ import {
   Button,
   Group,
   Menu,
+  SegmentedControl,
   Skeleton,
   Stack,
   Text,
@@ -12,16 +13,20 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import { IconChevronDown, IconPlus } from "@tabler/icons-react";
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useAddToSchema, useCatalogue, useGraphMap, useSchema } from "../../data/queries";
 import { formatCount } from "../../lib/time";
 import { useTenantSession } from "../../session/SessionProvider";
 import { browseParams } from "../browse/browseState";
 import { AddToSchemaDialog, type AdditionKind } from "./AddToSchemaDialog";
 import { labelTree, propertiesByLabel, relationshipRows } from "./schemaModel";
+import type { DraftLine } from "./diagram/SchemaDiagram";
 import classes from "./SchemaView.module.css";
+
+// The diagram brings React Flow and ELK: loaded only when it is opened.
+const SchemaDiagram = lazy(() => import("./diagram/SchemaDiagram").then((m) => ({ default: m.SchemaDiagram })));
 
 /** Label pairs listed per relationship type; the rest are summarised. */
 const SHOWN_PAIRS = 3;
@@ -32,7 +37,9 @@ const SHOWN_PAIRS = 3;
  * the relationship types with their edge counts and the label pairs they
  * join; the search indexes. Administrators can add labels, relationship
  * types and search indexes; nothing is ever removed here (graphos keeps
- * every label and the data in it).
+ * every label and the data in it). The same schema can be drawn as a
+ * diagram (`?view=diagram`), where labels are added and relationship types
+ * drawn from one label to another.
  */
 export function SchemaView() {
   const { t } = useTranslation();
@@ -43,6 +50,12 @@ export function SchemaView() {
   const add = useAddToSchema();
   const [adding, setAdding] = useState<AdditionKind | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [params, setParams] = useSearchParams();
+  const view = params.get("view") === "diagram" ? "diagram" : "list";
+  const setView = (next: string) => setParams(next === "diagram" ? { view: "diagram" } : {}, { replace: true });
+  // A relationship drawn on the diagram, waiting for its name; then shown until edges use it.
+  const [pair, setPair] = useState<{ src: string; dst: string } | null>(null);
+  const [drafts, setDrafts] = useState<DraftLine[]>([]);
 
   const counts = useMemo(
     () => (map.data ? new Map(map.data.labels.map((l) => [l.label, l.count] as const)) : null),
@@ -64,8 +77,21 @@ export function SchemaView() {
     );
   }
 
+  const addRelationshipBetween = (src: string, dst: string) => {
+    setPair({ src, dst });
+    setAdding("relationship");
+  };
+  const closeDialog = () => {
+    setAdding(null);
+    setPair(null);
+  };
+  const draw = (type: string) => {
+    if (pair) setDrafts((current) => [...current, { type, ...pair }]);
+    closeDialog();
+  };
+
   return (
-    <div className={classes.root}>
+    <div className={view === "diagram" ? classes.diagramRoot : classes.root}>
       <Group justify="space-between" align="flex-start" mb="xs">
         <div>
           <Title order={1} size="h4">
@@ -75,25 +101,54 @@ export function SchemaView() {
             {isAdmin ? t("views.schema.neverRemoves") : t("views.schema.readOnly")}
           </Text>
         </div>
-        {isAdmin && schema.data ? (
-          <Menu position="bottom-end" width={200}>
-            <Menu.Target>
-              <Button size="xs" leftSection={<IconPlus size={14} />} rightSection={<IconChevronDown size={12} />}>
-                {t("views.schema.add")}
-              </Button>
-            </Menu.Target>
-            <Menu.Dropdown>
-              <Menu.Item onClick={() => setAdding("label")}>{t("views.schema.addLabel")}</Menu.Item>
-              <Menu.Item onClick={() => setAdding("relationship")}>{t("views.schema.addRelationship")}</Menu.Item>
-              <Menu.Item onClick={() => setAdding("index")}>{t("views.schema.addIndex")}</Menu.Item>
-            </Menu.Dropdown>
-          </Menu>
-        ) : null}
+        <Group gap="xs">
+          <SegmentedControl
+            size="xs"
+            aria-label={t("views.schema.view.label")}
+            data={[
+              { value: "list", label: t("views.schema.view.list") },
+              { value: "diagram", label: t("views.schema.view.diagram") },
+            ]}
+            value={view}
+            onChange={setView}
+          />
+          {isAdmin && schema.data ? (
+            <Menu position="bottom-end" width={200}>
+              <Menu.Target>
+                <Button size="xs" leftSection={<IconPlus size={14} />} rightSection={<IconChevronDown size={12} />}>
+                  {t("views.schema.add")}
+                </Button>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item onClick={() => setAdding("label")}>{t("views.schema.addLabel")}</Menu.Item>
+                <Menu.Item onClick={() => setAdding("relationship")}>{t("views.schema.addRelationship")}</Menu.Item>
+                <Menu.Item onClick={() => setAdding("index")}>{t("views.schema.addIndex")}</Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+          ) : null}
+        </Group>
       </Group>
 
       {schema.isLoading ? <Skeleton h={240} radius="lg" /> : null}
 
-      {schema.data ? (
+      {schema.data && view === "diagram" ? (
+        <div className={classes.diagram}>
+          <Suspense fallback={<Skeleton h="100%" radius="lg" />}>
+            <SchemaDiagram
+              tenant={tenant}
+              schema={schema.data}
+              map={map.data}
+              properties={properties}
+              editable={isAdmin}
+              drafts={drafts}
+              onAddLabel={() => setAdding("label")}
+              onDrawRelationship={addRelationshipBetween}
+            />
+          </Suspense>
+        </div>
+      ) : null}
+
+      {schema.data && view === "list" ? (
         <Stack gap="xl" mt="md">
           <section>
             <Title order={2} size="sm" mb="xs">
@@ -232,9 +287,16 @@ export function SchemaView() {
           schema={schema.data}
           properties={allProperties}
           saving={add.isPending}
-          onCancel={() => setAdding(null)}
+          pair={adding === "relationship" ? (pair ?? undefined) : undefined}
+          onCancel={closeDialog}
           onAdd={(addition) => {
-            add.mutate(addition, { onSuccess: () => setAdding(null) });
+            const type = addition.edge_labels?.[0];
+            // A type already in the schema, picked for a drawn line: nothing to register.
+            if (pair && type && schema.data?.edge_labels.includes(type)) {
+              draw(type);
+              return;
+            }
+            add.mutate(addition, { onSuccess: () => (pair && type ? draw(type) : closeDialog()) });
           }}
         />
       ) : null}
