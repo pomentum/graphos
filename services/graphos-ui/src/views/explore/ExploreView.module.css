@@ -21,7 +21,7 @@
 
 .actions {
   position: absolute;
-  top: 12px;
+  top: 10px;
   left: 12px;
   /* Wraps inside the canvas rather than running under the inspector. */
   max-width: calc(100% - 24px);

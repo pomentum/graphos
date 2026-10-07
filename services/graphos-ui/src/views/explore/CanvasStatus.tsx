@@ -2,6 +2,7 @@ import { Button, Loader, Text } from "@mantine/core";
 import type { Overview } from "../../graph/WorkspaceProvider";
 import { searchShortcut } from "../../lib/platform";
 import { formatCount } from "../../lib/time";
+import { WHOLE_GRAPH_LIMIT } from "./useWholeGraph";
 import classes from "./ExploreView.module.css";
 
 /**
@@ -35,7 +36,7 @@ export function CanvasStatus({
           Find a node with search ({searchShortcut()}), then double-click it to see its neighbours.
         </Text>
         <Button size="xs" variant="default" mt="sm" className={classes.emptyAction} onClick={onLoad}>
-          Show the whole graph
+          {overview.total && overview.total > WHOLE_GRAPH_LIMIT ? "Open the map" : "Show the whole graph"}
         </Button>
       </div>
     );

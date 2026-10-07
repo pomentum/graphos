@@ -18,6 +18,8 @@ import { usePalette } from "../../theme/usePalette";
 import { CanvasStatus } from "./CanvasStatus";
 import { ExploreActions } from "./ExploreActions";
 import classes from "./ExploreView.module.css";
+import { MapView } from "./MapView";
+import { ModeSwitch } from "./ModeSwitch";
 import { useExpandNode } from "./useExpandNode";
 import { useFreshNodes } from "./useFreshNodes";
 import { useRecentlyChanged } from "./useRecentlyChanged";
@@ -42,7 +44,8 @@ const HUB_LABELS = 12;
 export function ExploreView() {
   const { canWrite } = useTenantSession();
   const workspace = useWorkspace();
-  const { model, version, selected, select, selectedEdge, selectEdge, colorBy, open, overview, frameOn } = workspace;
+  const { model, version, selected, select, selectedEdge, selectEdge, colorBy, open, overview, frameOn, mode } =
+    workspace;
   const { load } = useWholeGraph();
   const palette = usePalette();
   const schema = useSchema();
@@ -96,14 +99,21 @@ export function ExploreView() {
     model.removeNode(key);
     select(null);
   };
-  useHotkeys([
-    ["mod+Z", () => model.undo()],
-    ["Escape", deselect],
-    ["F", () => selected && setFocusOnly((on) => !on)],
-    ["E", () => selected && void expand(selected)],
-    ["C", () => selected && model.collapse(selected)],
-    ["H", () => selected && hide(selected)],
-  ]);
+  const graphKeys = mode === "graph";
+  useHotkeys(
+    graphKeys
+      ? [
+          ["mod+Z", () => model.undo()],
+          ["Escape", deselect],
+          ["F", () => selected && setFocusOnly((on) => !on)],
+          ["E", () => selected && void expand(selected)],
+          ["C", () => selected && model.collapse(selected)],
+          ["H", () => selected && hide(selected)],
+        ]
+      : [],
+  );
+
+  if (mode === "map") return <MapView onMode={workspace.setMode} />;
 
   const connect = async (type: string, to: SearchHit) => {
     if (!selected || !selectedNode) return;
@@ -143,6 +153,7 @@ export function ExploreView() {
         <CanvasStatus overview={overview} isEmpty={model.isEmpty} onLoad={() => void load()} />
         <CanvasLegend categories={categories} />
         <ExploreActions
+          leading={<ModeSwitch mode="graph" onChange={workspace.setMode} />}
           canWrite={canWrite}
           hasSelection={Boolean(selected)}
           isEmpty={model.isEmpty}

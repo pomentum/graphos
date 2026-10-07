@@ -16,12 +16,19 @@ export const keys = {
   scan: (tenant: string, request: NodesScanRequest) => ["scan", tenant, request] as const,
   histogram: (tenant: string, label: string, property: string) => ["histogram", tenant, label, property] as const,
   catalogue: (tenant: string) => ["catalogue", tenant] as const,
+  map: (tenant: string, exact: boolean) => ["map", tenant, exact] as const,
 };
 
 /** Labels, hierarchy and search indexes; changes rarely, so cached for minutes. */
 export function useSchema() {
   const { api, tenant } = useTenantSession();
   return useQuery({ queryKey: keys.schema(tenant), queryFn: () => api.schema(), staleTime: 5 * 60_000 });
+}
+
+/** The tenant's labels and the links between them; counted again at most every few minutes. */
+export function useGraphMap(exact = false) {
+  const { api, tenant } = useTenantSession();
+  return useQuery({ queryKey: keys.map(tenant, exact), queryFn: () => api.graphMap(exact), staleTime: 5 * 60_000 });
 }
 
 /** Every property name nodes of the tenant carry, sorted; for "search in" pickers. */

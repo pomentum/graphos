@@ -193,6 +193,32 @@ export class GraphModel {
     });
   }
 
+  /**
+   * Adds a set of nodes and the edges among them as one step (e.g. a label's
+   * best-connected nodes). They are laid out on their own and placed beside
+   * what is already on the canvas, which does not move. Returns their keys.
+   */
+  addGroup(
+    title: string,
+    nodes: { ref: NodeRef; properties: Properties }[],
+    edges: { type: string; src: NodeRef; dst: NodeRef; properties?: Properties }[],
+  ): string[] {
+    return this.track(title, () => {
+      const spots = this.groupLayout(
+        nodes.map((n) => nodeKey(n.ref)),
+        edges,
+      );
+      const keys = nodes.map((n) => this.putNode(n.ref, n.properties, undefined, spots.get(nodeKey(n.ref))));
+      for (const edge of edges) {
+        const src = nodeKey(edge.src);
+        const dst = nodeKey(edge.dst);
+        if (this.graph.hasNode(src) && this.graph.hasNode(dst))
+          this.putEdge(edge.type, src, dst, edge.properties ?? {});
+      }
+      return keys;
+    });
+  }
+
   /** Adds every node and edge of the paths; returns the keys on them. */
   addPaths(paths: GraphPath[]): { nodes: Set<string>; edges: Set<string> } {
     return this.track("Add paths", () => {
@@ -499,6 +525,51 @@ export class GraphModel {
       spots.push({ x: origin.x + radius * Math.cos(angle), y: origin.y + radius * Math.sin(angle) });
     }
     fan.next += count;
+    return spots;
+  }
+
+  /**
+   * Positions for a group of new nodes: a ForceAtlas2 layout of the group on
+   * its own, scaled to the canvas's typical edge length, and set beside the
+   * canvas's current extent (at the centre when the canvas is empty).
+   */
+  private groupLayout(keys: string[], edges: { src: NodeRef; dst: NodeRef }[]): Map<string, { x: number; y: number }> {
+    const local = new Graph({ type: "directed", multi: false });
+    keys.forEach((key, i) => {
+      const angle = (2 * Math.PI * i) / Math.max(keys.length, 1);
+      local.mergeNode(key, { x: Math.cos(angle), y: Math.sin(angle) });
+    });
+    for (const edge of edges) {
+      const [src, dst] = [nodeKey(edge.src), nodeKey(edge.dst)];
+      if (src !== dst && local.hasNode(src) && local.hasNode(dst) && !local.hasEdge(src, dst)) local.addEdge(src, dst);
+    }
+    if (local.order > 2) {
+      forceAtlas2.assign(local, {
+        iterations: 150,
+        settings: { ...forceAtlas2.inferSettings(local), strongGravityMode: true, gravity: 1, scalingRatio: 10 },
+      });
+    }
+    // Scale so neighbours sit about one typical edge apart; then move beside the canvas.
+    const xs = local.mapNodes((_, a) => a.x as number);
+    const ys = local.mapNodes((_, a) => a.y as number);
+    const width = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 1e-6);
+    const step = this.typicalEdgeLength();
+    const scale = (step * Math.max(2, Math.sqrt(local.order) * 1.5)) / width;
+    const cx = (Math.max(...xs) + Math.min(...xs)) / 2;
+    const cy = (Math.max(...ys) + Math.min(...ys)) / 2;
+    let offsetX = 0;
+    let offsetY = 0;
+    const existing = this.graph.filterNodes((key) => !local.hasNode(key));
+    if (existing.length > 0) {
+      const ex = existing.map((key) => this.graph.getNodeAttribute(key, "x"));
+      const ey = existing.map((key) => this.graph.getNodeAttribute(key, "y"));
+      offsetX = Math.max(...ex) + step * 2 + (width * scale) / 2;
+      offsetY = (Math.max(...ey) + Math.min(...ey)) / 2;
+    }
+    const spots = new Map<string, { x: number; y: number }>();
+    local.forEachNode((key, a) => {
+      spots.set(key, { x: offsetX + ((a.x as number) - cx) * scale, y: offsetY + ((a.y as number) - cy) * scale });
+    });
     return spots;
   }
 

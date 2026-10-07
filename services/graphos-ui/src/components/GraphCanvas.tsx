@@ -20,19 +20,32 @@ export interface GraphCanvasProps {
   onSelectEdge?: (key: string) => void;
   /** Moves the camera to show these nodes whenever `token` changes. */
   frame?: { keys: string[]; token: number };
+  /** How nodes and edges are drawn; the graph canvas style by default (the map has its own). */
+  style?: { node: typeof nodeDisplay; edge: typeof edgeDisplay };
 }
+
+const GRAPH_STYLE = { node: nodeDisplay, edge: edgeDisplay };
 
 /**
  * Draws a `GraphModel` with sigma (WebGL) and reports clicks. Nodes can be
  * dragged; the camera has zoom controls. Colours and labels come from
  * `canvasStyle`, so this component only connects sigma to React.
  */
-export function GraphCanvas({ model, emphasis, palette, onSelect, onExpand, onSelectEdge, frame }: GraphCanvasProps) {
+export function GraphCanvas({
+  model,
+  emphasis,
+  palette,
+  onSelect,
+  onExpand,
+  onSelectEdge,
+  frame,
+  style = GRAPH_STYLE,
+}: GraphCanvasProps) {
   const container = useRef<HTMLDivElement>(null);
   const sigma = useRef<Sigma<NodeAttributes, EdgeAttributes> | null>(null);
   // Sigma's callbacks read these refs, so they always see the latest props.
-  const latest = useRef({ emphasis, palette, onSelect, onExpand, onSelectEdge });
-  latest.current = { emphasis, palette, onSelect, onExpand, onSelectEdge };
+  const latest = useRef({ emphasis, palette, onSelect, onExpand, onSelectEdge, style });
+  latest.current = { emphasis, palette, onSelect, onExpand, onSelectEdge, style };
   const edgesClickable = Boolean(onSelectEdge);
 
   useEffect(() => {
@@ -49,11 +62,11 @@ export function GraphCanvas({ model, emphasis, palette, onSelect, onExpand, onSe
       enableEdgeEvents: edgesClickable,
       nodeReducer: (key, node) => ({
         ...node,
-        ...nodeDisplay(key, node, latest.current.emphasis, latest.current.palette),
+        ...latest.current.style.node(key, node, latest.current.emphasis, latest.current.palette),
       }),
       edgeReducer: (key, edge) => ({
         ...edge,
-        ...edgeDisplay(key, edge, latest.current.emphasis, latest.current.palette),
+        ...latest.current.style.edge(key, edge, latest.current.emphasis, latest.current.palette),
       }),
       labelColor: { color: palette.text },
       defaultDrawNodeHover: drawHoverLabel(() => latest.current.palette),
@@ -91,7 +104,7 @@ export function GraphCanvas({ model, emphasis, palette, onSelect, onExpand, onSe
   useEffect(() => {
     sigma.current?.setSetting("labelColor", { color: palette.text });
     sigma.current?.refresh();
-  }, [emphasis, palette]);
+  }, [emphasis, palette, style]);
 
   // Frame the given nodes, once they are drawn (the graph's extent may have just changed).
   useEffect(() => {

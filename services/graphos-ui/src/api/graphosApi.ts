@@ -4,6 +4,9 @@ import type {
   EdgeRecord,
   EdgeUpsert,
   GraphExport,
+  GraphMap,
+  HubsResponse,
+  InducedEdgesResponse,
   EdgesUpsertResponse,
   HistogramResponse,
   Me,
@@ -172,6 +175,21 @@ export class GraphosApi {
   /** Up to `limitNodes` nodes and every edge among them. */
   exportGraph(limitNodes: number): Promise<GraphExport> {
     return this.http.get(`${this.graph}/export`, { limit_nodes: limitNodes });
+  }
+
+  /** Every label with its node count and the edge counts between labels; `exact` counts every edge. */
+  graphMap(exact = false): Promise<GraphMap> {
+    return this.http.get(`${this.graph}/map`, { exact: exact || undefined });
+  }
+
+  /** A label's best-connected nodes, most connected first. */
+  hubs(label: string, limit: number): Promise<HubsResponse> {
+    return this.http.get(`${this.graph}/map/hubs`, { label, limit });
+  }
+
+  /** The edges whose both ends are among `nodeIds`. */
+  inducedEdges(nodeIds: string[], limit = 2000): Promise<InducedEdgesResponse> {
+    return this.http.post(`${this.graph}/induced_edges`, { node_ids: nodeIds, limit });
   }
 
   /** Node and edge counts and sizes per label. */

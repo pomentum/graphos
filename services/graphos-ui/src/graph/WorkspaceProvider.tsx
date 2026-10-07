@@ -13,10 +13,17 @@ import { useTenantSession } from "../session/SessionProvider";
 import type { ColorBy } from "./canvasStyle";
 import { GraphModel, nodeKey, type NodeRef } from "./GraphModel";
 
+/** Explore shows the map of labels or the graph canvas. */
+export type ExploreMode = "map" | "graph";
+
 /** Whether the canvas holds the tenant as a whole (in full or as a sample). */
 export interface Overview {
-  /** `dismissed`: the user cleared it; it is not loaded again by itself. */
-  status: "idle" | "loading" | "shown" | "failed" | "dismissed";
+  /**
+   * `shown`: the whole tenant is on the canvas; `map`: too big for that, the
+   * map is shown instead; `dismissed`: the user cleared the canvas, which is
+   * not loaded again by itself.
+   */
+  status: "idle" | "loading" | "shown" | "map" | "failed" | "dismissed";
   /** Nodes drawn, and nodes in the tenant. */
   shown?: number;
   total?: number;
@@ -34,7 +41,7 @@ interface WorkspaceValue {
   selectEdge: (key: string | null) => void;
   colorBy: ColorBy;
   setColorBy: (colorBy: ColorBy) => void;
-  /** Puts a node on the canvas (if it isn't there) and selects it. */
+  /** Puts a node on the canvas (if it isn't there), selects it and shows the graph. */
   open: (ref: NodeRef, properties: Properties) => string;
   overview: Overview;
   setOverview: (overview: Overview) => void;
@@ -42,6 +49,8 @@ interface WorkspaceValue {
   frame: { keys: string[]; token: number } | undefined;
   /** Moves the camera to show these nodes. */
   frameOn: (keys: string[]) => void;
+  mode: ExploreMode;
+  setMode: (mode: ExploreMode) => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceValue | null>(null);
@@ -59,6 +68,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const [colorBy, setColorBy] = useState<ColorBy>("none");
   const [frame, setFrame] = useState<{ keys: string[]; token: number }>();
+  const [mode, setMode] = useState<ExploreMode>("graph");
   const frameOn = useCallback(
     (keys: string[]) => setFrame((current) => ({ keys, token: (current?.token ?? 0) + 1 })),
     [],
@@ -81,6 +91,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setSelected(null);
     setSelectedEdge(null);
     setOverview({ status: "idle" });
+    setMode("graph");
   }, [model, tenant]);
 
   // A selected node that was deleted is no longer selected.
@@ -95,6 +106,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         ? nodeKey(ref)
         : model.addNode(ref, properties, selected ?? undefined);
       select(key);
+      setMode("graph");
       frameOn([key, ...model.graph.neighbors(key)]);
       return key;
     },
@@ -121,8 +133,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setOverview,
       frame,
       frameOn,
+      mode,
+      setMode,
     }),
-    [model, version, liveSelected, select, liveSelectedEdge, selectEdge, colorBy, open, overview, frame, frameOn],
+    [model, version, liveSelected, select, liveSelectedEdge, selectEdge, colorBy, open, overview, frame, frameOn, mode],
   );
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

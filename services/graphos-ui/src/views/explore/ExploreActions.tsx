@@ -8,6 +8,7 @@ import {
   IconPalette,
   IconTrashX,
 } from "@tabler/icons-react";
+import type { ReactNode } from "react";
 import type { ColorBy } from "../../graph/canvasStyle";
 import { isApple } from "../../lib/platform";
 import classes from "./ExploreView.module.css";
@@ -19,6 +20,8 @@ const COLOR_MODES: { value: ColorBy; label: string }[] = [
 ];
 
 export interface ExploreActionsProps {
+  /** Shown first, e.g. the Map / Graph switch. */
+  leading?: ReactNode;
   canWrite: boolean;
   hasSelection: boolean;
   isEmpty: boolean;
@@ -42,6 +45,7 @@ export function ExploreActions(props: ExploreActionsProps) {
   const undoKey = isApple() ? "⌘Z" : "Ctrl+Z";
   return (
     <Group gap={6} className={classes.actions}>
+      {props.leading}
       <Tooltip label={lastStep ? `Undo “${lastStep}” (${undoKey})` : "Nothing to undo"} withArrow>
         <Button
           size="compact-xs"

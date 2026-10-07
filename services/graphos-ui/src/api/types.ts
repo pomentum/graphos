@@ -184,6 +184,26 @@ export interface LabelCount {
   total_bytes: number;
 }
 
+/** `GET …/graph/map`: every label with its node count, and the edge counts between labels. */
+export interface GraphMap {
+  labels: { label: string; count: number }[];
+  links: { src_label: string; type: string; dst_label: string; count: number; estimated: boolean }[];
+  /** Some link counts come from a sample of a large edge table. */
+  estimated: boolean;
+}
+
+/** `GET …/graph/map/hubs`: a label's best-connected nodes. */
+export interface HubsResponse {
+  label: string;
+  nodes: { id: string; label: string; properties: Properties; degree: number; estimated: boolean }[];
+}
+
+/** `POST …/graph/induced_edges`: the edges among a set of node ids. */
+export interface InducedEdgesResponse {
+  edges: { src_id: string; dst_id: string; type: string; properties: Properties }[];
+  truncated: boolean;
+}
+
 export interface TenantStats {
   n_vertices: number;
   n_edges: number;
