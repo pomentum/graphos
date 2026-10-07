@@ -326,8 +326,6 @@ async def tenant_stats(
         # produces a properly-quoted schema."table" string that's safe
         # to interpolate. Fast on AGE's per-label storage.
         labels: list[LabelCount] = []
-        n_vertices = 0
-        n_edges = 0
         total_bytes = 0
         for r in rows:
             size = int(r["total_bytes"] or 0)
@@ -344,11 +342,17 @@ async def tenant_stats(
                     total_bytes=size,
                 ),
             )
-            if kind == "v":
-                n_vertices += count
-            else:
-                n_edges += count
             total_bytes += size
+
+        # A parent label's count includes its children's rows, so the
+        # per-label counts overlap; the totals count each node and edge
+        # once, through the graph-wide tables every label inherits from.
+        n_vertices = int(await conn.fetchval(
+            f'SELECT count(*) FROM "{tenant}"."_ag_label_vertex"',
+        ) or 0)
+        n_edges = int(await conn.fetchval(
+            f'SELECT count(*) FROM "{tenant}"."_ag_label_edge"',
+        ) or 0)
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     return TenantStatsResponse(

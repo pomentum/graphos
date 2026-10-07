@@ -68,6 +68,10 @@ each existing tenant once, in the background, to record its property names (abou
   `POST /nodes/{id}/properties` answered 404 for an id such as a file path (`src/a/B.java`), even
   URL-encoded, because the path is decoded before routing. These routes now take the rest of the
   path as the id.
+- **Graph stats count each node once.** `n_vertices` added up the per-label counts, and a parent
+  label's count includes its children's nodes, so a tenant with a label hierarchy was overcounted
+  (943k reported for 572k nodes). The totals now count the graph's base tables; per-label counts
+  are unchanged.
 
 ## 0.2.1 — 2026-10-06
 
