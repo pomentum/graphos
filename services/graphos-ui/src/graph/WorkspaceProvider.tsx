@@ -14,7 +14,7 @@ import type { ColorBy } from "./canvasStyle";
 import { GraphModel, nodeKey, type NodeRef } from "./GraphModel";
 
 /** Explore shows the map of labels or the graph canvas. */
-export type ExploreMode = "map" | "graph";
+export type ExploreMode = "map" | "groups" | "graph";
 
 /** Whether the canvas holds the tenant as a whole (in full or as a sample). */
 export interface Overview {

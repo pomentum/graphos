@@ -20,6 +20,7 @@ import { usePalette } from "../../theme/usePalette";
 import { CanvasStatus } from "./CanvasStatus";
 import { ExploreActions } from "./ExploreActions";
 import classes from "./ExploreView.module.css";
+import { GroupsView } from "./GroupsView";
 import { MapView } from "./MapView";
 import { ModeSwitch } from "./ModeSwitch";
 import { useExpandNode } from "./useExpandNode";
@@ -140,6 +141,7 @@ export function ExploreView() {
   );
 
   if (mode === "map") return <MapView onMode={workspace.setMode} />;
+  if (mode === "groups") return <GroupsView onMode={workspace.setMode} />;
 
   const connect = async (type: string, to: SearchHit) => {
     if (!selected || !selectedNode) return;

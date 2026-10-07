@@ -1,0 +1,57 @@
+import type { CommunityMap } from "../src/api/types";
+import {
+  buildCommunityModel,
+  communityCategories,
+  groupKey,
+  groupLinks,
+  groupMakeup,
+  groupTitle,
+} from "../src/graph/communityGraph";
+import { CATEGORY_COLORS } from "../src/theme/categories";
+
+const map: CommunityMap = {
+  available: true,
+  computed_at: "2026-10-07T10:00:00Z",
+  modularity: 0.8,
+  n_communities: 3,
+  communities: [
+    {
+      community_id: 4,
+      size: 100,
+      labels: { Function: 70, Class: 30 },
+      hub: { id: "fn:pay", label: "Function", properties: { name: "pay" }, degree: 40 },
+      internal_edges: 300,
+    },
+    { community_id: 9, size: 50, labels: { Class: 20, File: 20, Folder: 10 }, hub: null, internal_edges: 80 },
+  ],
+  links: [
+    { src: 4, dst: 9, count: 12, types: [{ type: "CALLS", count: 12 }] },
+    { src: 9, dst: 4, count: 3, types: [{ type: "USES", count: 3 }] },
+    { src: 4, dst: 77, count: 5, types: [{ type: "CALLS", count: 5 }] },
+  ],
+};
+
+describe("groups view", () => {
+  it("names groups after their hub, or their number", () => {
+    expect(groupTitle(map.communities[0]!)).toBe("pay");
+    expect(groupTitle(map.communities[1]!)).toBe("Group 9");
+    expect(groupMakeup(map.communities[0]!)).toBe("mostly Function");
+    expect(groupMakeup(map.communities[1]!)).toBe("Class, File");
+  });
+
+  it("draws one bubble per group and lines only between shown groups", () => {
+    const model = buildCommunityModel(map);
+    expect(model.graph.order).toBe(2);
+    expect(model.graph.size).toBe(2); // the link to group 77 (not shown) is left out
+    expect(model.graph.getNodeAttribute(groupKey(4), "properties")).toEqual({ name: "pay", count: 100 });
+    expect(communityCategories(map).colors.get(groupKey(4))).toBe(CATEGORY_COLORS[0]);
+  });
+
+  it("lists a group's links both ways, most edges first", () => {
+    expect(groupLinks(map, 4).outgoing.map((l) => [l.id, l.count])).toEqual([
+      [9, 12],
+      [77, 5],
+    ]);
+    expect(groupLinks(map, 4).incoming.map((l) => [l.id, l.count])).toEqual([[9, 3]]);
+  });
+});

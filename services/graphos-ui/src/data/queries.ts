@@ -28,6 +28,7 @@ export const keys = {
   histogram: (tenant: string, label: string, property: string) => ["histogram", tenant, label, property] as const,
   catalogue: (tenant: string) => ["catalogue", tenant] as const,
   map: (tenant: string, exact: boolean) => ["map", tenant, exact] as const,
+  groups: (tenant: string) => ["groups", tenant] as const,
 };
 
 /** Labels, hierarchy and search indexes; changes rarely, so cached for minutes. */
@@ -40,6 +41,12 @@ export function useSchema() {
 export function useGraphMap(exact = false) {
   const { api, tenant } = useTenantSession();
   return useQuery({ queryKey: keys.map(tenant, exact), queryFn: () => api.graphMap(exact), staleTime: 5 * 60_000 });
+}
+
+/** The groups of the last recompute and the edges between them. */
+export function useCommunityMap() {
+  const { api, tenant } = useTenantSession();
+  return useQuery({ queryKey: keys.groups(tenant), queryFn: () => api.communityMap(), staleTime: 5 * 60_000 });
 }
 
 /** Every property name nodes of the tenant carry, sorted; for "search in" pickers. */

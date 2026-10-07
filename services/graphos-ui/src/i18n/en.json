@@ -122,9 +122,10 @@
       "inspector": "Inspector",
       "closeInspector": "Close the inspector (Escape)",
       "mode": {
-        "label": "Map or graph",
+        "label": "Map, groups or graph",
         "map": "Map",
-        "graph": "Graph"
+        "graph": "Graph",
+        "groups": "Groups"
       },
       "actions": {
         "back": "Back",
@@ -163,7 +164,34 @@
       "morePlaceholder_one": "+{{count}} more",
       "morePlaceholder_other": "+{{count}} more",
       "groups": {
-        "mostly": "mostly {{label}}"
+        "mostly": "mostly {{label}}",
+        "fallbackName": "Group {{id}}",
+        "region": "Groups of the graph",
+        "panel": "Group",
+        "loading": "Reading the groups…",
+        "notComputedTitle": "No groups yet",
+        "notComputedBody": "Groups are communities found by clustering the graph: nodes more connected to each other than to the rest. They have not been computed for this tenant yet.",
+        "askAdmin": "An administrator can compute them.",
+        "compute": "Compute groups",
+        "computing": "Computing groups… This can take a few minutes on a large graph.",
+        "computeFailed": "Computing the groups failed",
+        "recompute": "Compute again",
+        "totals": "{{shown}} largest of {{total}} groups · computed {{when}}",
+        "members_one": "{{formatted}} member",
+        "members_other": "{{formatted}} members",
+        "internal_one": "{{formatted}} relationship inside",
+        "internal_other": "{{formatted}} relationships inside",
+        "makeup": "Made of",
+        "hub": "Best-connected member",
+        "hubDegree_one": "{{formatted}} relationship",
+        "hubDegree_other": "{{formatted}} relationships",
+        "openHub": "Open its best-connected member",
+        "browseMembers": "Browse its {{label}} members",
+        "linksTo": "Relationships to",
+        "linksFrom": "Relationships from",
+        "more_one": "and {{count}} more",
+        "more_other": "and {{count}} more",
+        "hint": "Click a group to see what it is made of; double-click to open its best-connected member."
       },
       "map": {
         "bubbleLabel": "{{label}} · {{formatted}}",

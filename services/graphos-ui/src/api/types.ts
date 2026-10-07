@@ -204,6 +204,42 @@ export interface InducedEdgesResponse {
   truncated: boolean;
 }
 
+/** `GET …/graph/communities/map`: the groups of the last recompute and the edges between them. */
+export interface CommunityMap {
+  /** False until a recompute has stored a map. */
+  available: boolean;
+  computed_at: string | null;
+  modularity: number | null;
+  /** All communities; `communities` holds the largest of them. */
+  n_communities: number;
+  communities: {
+    community_id: number;
+    size: number;
+    /** Members per label, most first. */
+    labels: Record<string, number>;
+    hub: { id: string; label: string; properties: Properties; degree: number } | null;
+    internal_edges: number;
+  }[];
+  links: { src: number; dst: number; count: number; types: { type: string; count: number }[] }[];
+}
+
+/** A background job (`/v1/jobs`). */
+export interface Job {
+  id: string;
+  kind: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  error: { message: string } | null;
+}
+
+/** What an admin may add to a tenant's schema: re-registration merges it with what exists. */
+export interface SchemaAddition {
+  vertex_labels?: string[];
+  edge_labels?: string[];
+  /** child label -> parent label */
+  label_hierarchy?: Record<string, string>;
+  search_indexes?: Record<string, SearchIndexSpec>;
+}
+
 export interface TenantStats {
   n_vertices: number;
   n_edges: number;

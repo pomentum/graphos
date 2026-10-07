@@ -99,8 +99,10 @@ export function linksOf(map: GraphMap, label: string): LabelLinks {
  */
 export function mapNodeDisplay(key: string, node: NodeAttributes, emphasis: Emphasis, palette: Palette): NodeDisplay {
   const count = Number(node.properties.count ?? 0);
-  const label = t("views.explore.map.bubbleLabel", { label: node.vertexLabel, formatted: formatCount(count) });
-  const colour = emphasis.categories?.colors.get(node.vertexLabel) ?? palette.nodeIdle;
+  const name = typeof node.properties.name === "string" ? node.properties.name : node.vertexLabel;
+  const label = t("views.explore.map.bubbleLabel", { label: name, formatted: formatCount(count) });
+  // Colours are keyed by the bubble's key: the label on the map, the group in Groups.
+  const colour = emphasis.categories?.colors.get(key) ?? palette.nodeIdle;
   const focused = emphasis.focus.nodes.size > 0;
   if (key === emphasis.selected) {
     return { color: palette.accent, size: node.size + 2, label, fullLabel: label, forceLabel: true, zIndex: 3 };

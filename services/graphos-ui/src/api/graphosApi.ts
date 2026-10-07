@@ -5,6 +5,9 @@ import type {
   EdgeUpsert,
   GraphExport,
   GraphMap,
+  CommunityMap,
+  Job,
+  SchemaAddition,
   HubsResponse,
   InducedEdgesResponse,
   EdgesUpsertResponse,
@@ -180,6 +183,35 @@ export class GraphosApi {
   /** Every label with its node count and the edge counts between labels; `exact` counts every edge. */
   graphMap(exact = false): Promise<GraphMap> {
     return this.http.get(`${this.graph}/map`, { exact: exact || undefined });
+  }
+
+  /** The groups (communities) of the last recompute, largest first, and the edges between them. */
+  communityMap(limit = 150): Promise<CommunityMap> {
+    return this.http.get(`${this.graph}/communities/map`, { limit });
+  }
+
+  /** Starts recomputing the groups as a background job (admin); follow it with `job`. */
+  async recomputeGroups(): Promise<Job> {
+    return (
+      await this.http.request<Job>("POST", `/v1/${enc(this.tenant)}/recompute-communities`, {
+        body: {},
+        headers: { Prefer: "respond-async" },
+      })
+    ).data;
+  }
+
+  /** One background job's status. */
+  job(id: string): Promise<Job> {
+    return this.http.get(`/v1/jobs/${enc(id)}`);
+  }
+
+  /**
+   * Adds labels, relationship types, parents or search indexes to the
+   * tenant (admin). graphos merges a registration with what exists, so
+   * nothing already there is removed.
+   */
+  addToSchema(addition: SchemaAddition): Promise<unknown> {
+    return this.http.post("/v1/tenants", { name: this.tenant, ...addition });
   }
 
   /** A label's best-connected nodes, most connected first. */
