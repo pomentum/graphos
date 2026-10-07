@@ -35,6 +35,7 @@ from graphos.api import (
     info,
     jobs,
     louvain,
+    me,
     paths,
     snapshot,
     tenants,
@@ -265,6 +266,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(info.router, prefix="/v1")
     app.include_router(tenants.router, prefix="/v1")
+    app.include_router(me.router, prefix="/v1")
     app.include_router(graph.router, prefix="/v1")
     app.include_router(paths.router, prefix="/v1")
     app.include_router(bulk.router, prefix="/v1")

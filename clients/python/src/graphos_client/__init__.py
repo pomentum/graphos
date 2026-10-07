@@ -37,6 +37,7 @@ from graphos_client._models import (
     Job,
     JobError,
     LabelCount,
+    Me,
     Neighbor,
     NeighborsResponse,
     NodeAggregateRow,
@@ -57,6 +58,7 @@ from graphos_client._models import (
     SearchHit,
     SearchResponse,
     TenantInfo,
+    TenantSchemaInfo,
     TenantStatsResponse,
 )
 from graphos_client._pool import GraphosPool, TenantSchema, is_schema_drift
@@ -117,6 +119,8 @@ __all__ = [
     "SearchHit",
     "SampleSubgraphResponse",
     "SearchResponse",
+    "Me",
     "TenantInfo",
+    "TenantSchemaInfo",
     "TenantStatsResponse",
 ]

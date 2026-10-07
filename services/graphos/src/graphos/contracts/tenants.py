@@ -436,6 +436,33 @@ class TenantInfo(BaseModel):
     search_indexes: dict[str, SearchIndexSpec] = Field(default_factory=dict)
 
 
+class MeResponse(BaseModel):
+    """Returned by GET /v1/me: what the calling token is and may use."""
+
+    consumer: str = Field(description="The token's consumer; audit and changes record it.")
+    admin: bool
+    access: Literal["read", "write"]
+    tenants: list[str] = Field(
+        default_factory=list,
+        description="Registered tenants the token may use (every tenant for an admin token).",
+    )
+
+
+class TenantSchema(BaseModel):
+    """Returned by GET /v1/{tenant}/schema: the tenant's shape, for any token on it."""
+
+    name: str
+    vertex_labels: list[str] = Field(default_factory=list)
+    edge_labels: list[str] = Field(default_factory=list)
+    label_hierarchy: dict[str, str] = Field(
+        default_factory=dict, description="child label -> parent label",
+    )
+    search_indexes: dict[str, SearchIndexSpec] = Field(default_factory=dict)
+    rule_edge_labels: list[str] = Field(
+        default_factory=list, description="Edge labels derived by a resolve rule.",
+    )
+
+
 class ResolveEdgesRequest(BaseModel):
     """Body for ``POST /v1/{tenant}/graph/edges:resolve``.
 

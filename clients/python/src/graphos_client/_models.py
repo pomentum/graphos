@@ -50,6 +50,22 @@ class TenantInfo(BaseModel):
     search_indexes: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
+class Me(BaseModel):
+    consumer: str
+    admin: bool = False
+    access: Literal["read", "write"] = "write"
+    tenants: list[str] = Field(default_factory=list)
+
+
+class TenantSchemaInfo(BaseModel):
+    name: str
+    vertex_labels: list[str] = Field(default_factory=list)
+    edge_labels: list[str] = Field(default_factory=list)
+    label_hierarchy: dict[str, str] = Field(default_factory=dict)
+    search_indexes: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    rule_edge_labels: list[str] = Field(default_factory=list)
+
+
 # ── Reads ───────────────────────────────────────────────────────────────────
 
 

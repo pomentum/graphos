@@ -653,3 +653,22 @@ async def test_ranked_search_and_search_index_registration() -> None:
     await cli.register_tenant(vertex_labels=["Class"])
     assert "search_indexes" not in json.loads(captured[3].content)
     await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_me_and_schema() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/me":
+            return httpx.Response(200, json={"consumer": "ada", "admin": False,
+                                             "access": "read", "tenants": ["demo"]})
+        assert request.url.path == "/v1/demo/schema"
+        return httpx.Response(200, json={"name": "demo", "vertex_labels": ["Person"],
+                                         "search_indexes": {"names": {"analyzer": "identifier"}}})
+
+    cli = GraphosClient(base_url="http://x", token="tok", tenant="demo")
+    cli._http = httpx.AsyncClient(base_url="http://x", transport=_mock_transport(handler))
+    me = await cli.me()
+    assert (me.consumer, me.access, me.tenants) == ("ada", "read", ["demo"])
+    schema = await cli.schema()
+    assert schema.vertex_labels == ["Person"] and "names" in schema.search_indexes
+    await cli.close()

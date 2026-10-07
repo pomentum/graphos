@@ -36,6 +36,7 @@ from graphos_client._models import (
     HistogramResponse,
     InducedEdgesResponse,
     Job,
+    Me,
     NeighborsResponse,
     NodeGetResponse,
     NodePropertiesUpsertResponse,
@@ -48,6 +49,7 @@ from graphos_client._models import (
     SampleSubgraphResponse,
     SearchResponse,
     TenantInfo,
+    TenantSchemaInfo,
     TenantStatsResponse,
     TopByEdgeResponse,
 )
@@ -273,6 +275,16 @@ class GraphosClient:
     async def list_tenants(self) -> list[TenantInfo]:
         resp = await self._request("GET", "/v1/tenants")
         return [TenantInfo.model_validate(t) for t in resp.json()["tenants"]]
+
+    async def me(self) -> Me:
+        """``GET /v1/me``: this token's consumer, access and tenants."""
+        resp = await self._request("GET", "/v1/me")
+        return Me.model_validate(resp.json())
+
+    async def schema(self, name: str | None = None) -> TenantSchemaInfo:
+        """``GET /v1/{tenant}/schema``: labels, hierarchy and search indexes (any token)."""
+        resp = await self._request("GET", f"/v1/{name or self._tenant}/schema")
+        return TenantSchemaInfo.model_validate(resp.json())
 
     async def get_tenant(self, name: str | None = None) -> TenantInfo:
         target = name or self._tenant
