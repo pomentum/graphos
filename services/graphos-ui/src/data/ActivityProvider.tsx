@@ -3,7 +3,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { ChangeStream, type StreamStatus } from "../api/changeStream";
 import type { ChangeItem } from "../api/types";
 import { useTenantSession } from "../session/SessionProvider";
-import { keys } from "./queries";
+import { changeCategory } from "../lib/changes";
+import { keys, useActiveJobs } from "./queries";
 
 /** How many recent changes are kept in memory. */
 const KEEP = 200;
@@ -26,7 +27,9 @@ const SubscribeContext = createContext<ActivityValue["subscribe"] | null>(null);
 /**
  * Follows the tenant's change feed once for the whole app: keeps recent
  * changes for the Activity view and the bell, lets the canvas react to them,
- * and refreshes cached nodes that someone else changed.
+ * and refreshes cached nodes and schema that someone else changed. Also
+ * watches what runs on the tenant, so the job lists refresh when a job
+ * starts or ends, wherever it was started.
  */
 export function ActivityProvider({ children }: { children: ReactNode }) {
   const { api, tenant, me } = useTenantSession();
@@ -55,12 +58,23 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
         setChanges((current) => [change, ...current].slice(0, KEEP));
         if (change.consumer !== me.consumer) setUnseen((n) => n + 1);
         refreshCached(change);
+        const category = changeCategory(change);
+        if (category === "schema") void client.invalidateQueries({ queryKey: keys.schema(tenant) });
+        if (category === "computations") void client.invalidateQueries({ queryKey: keys.activeJobs(tenant) });
         for (const listener of listeners.current) listener(change);
       },
     });
     stream.start();
     return () => stream.stop();
   }, [api, tenant, me.consumer, client]);
+
+  // A job started or ended: the finished list and the groups job are stale.
+  const active = useActiveJobs();
+  const activeIds = (active.data ?? []).map((job) => job.id).join(",");
+  useEffect(() => {
+    void client.invalidateQueries({ queryKey: keys.recentJobs(tenant) });
+    void client.invalidateQueries({ queryKey: keys.groupsJob(tenant) });
+  }, [activeIds, client, tenant]);
 
   const markSeen = useCallback(() => setUnseen(0), []);
   const subscribe = useCallback((listener: (change: ChangeItem) => void) => {

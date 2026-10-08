@@ -29,7 +29,7 @@ export function useRecomputeGroups(): { recompute: () => Promise<void>; running:
         notifications.show({
           color: "red",
           title: t("views.explore.groups.computeFailed"),
-          message: job.data.error?.message ?? job.data.status,
+          message: job.data.error?.detail ?? job.data.status,
         });
       }
     }

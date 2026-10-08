@@ -16,8 +16,16 @@ class ChangeItem(BaseModel):
 
     cursor: str = Field(..., description="This record's position; pass it as `after`.")
     at: datetime = Field(..., description="Start time of the writing transaction.")
-    op: Literal["upsert", "merge", "patch", "delete", "resolve", "communities", "metrics"]
-    kind: Literal["node", "edge"]
+    op: Literal[
+        "upsert", "merge", "patch", "delete", "resolve", "communities", "metrics", "schema",
+    ] = Field(
+        ...,
+        description=(
+            "`schema`: the tenant's schema changed (kind `tenant`; `detail` says how). "
+            "New values may be added: treat an unknown op as informational."
+        ),
+    )
+    kind: Literal["node", "edge", "tenant"]
     label: str | None = Field(None, description="The node label or edge type.")
     src_label: str | None = None
     dst_label: str | None = None
@@ -33,7 +41,8 @@ class ChangeItem(BaseModel):
         None,
         description=(
             "Per-op detail: `edges_removed` (edges deleted with the nodes, for the whole "
-            "statement) and `where` on node deletes."
+            "statement) and `where` on node deletes; for `schema`, what was added, removed "
+            "or switched."
         ),
     )
     consumer: str | None = Field(None, description="Token consumer that made the write.")
@@ -45,6 +54,15 @@ class ChangesResponse(BaseModel):
     changes: list[ChangeItem]
     next: str = Field(..., description="Pass as `after` for the next page.")
     more: bool = Field(..., description="The page was full: more records may be ready now.")
+
+
+class ChangesHistory(BaseModel):
+    tenant: str
+    changes: list[ChangeItem] = Field(..., description="Newest first.")
+    older: str | None = Field(
+        None, description="Pass as `before` for the page before this one; null at the end.",
+    )
+    more: bool
 
 
 class ChangesHead(BaseModel):

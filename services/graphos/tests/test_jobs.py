@@ -295,6 +295,115 @@ async def test_respond_async_queues_and_answers_202(pool: asyncpg.Pool) -> None:
     assert notified == [True]
 
 
+# ── Synchronous calls, listed as jobs ───────────────────────────────────────
+
+
+async def _tracked(pool: asyncpg.Pool, kind: str, tenant: str, run) -> BaseModel:
+    return await jobs.run_tracked(
+        pool, kind=kind, tenant=tenant, params={"x": 1}, consumer="test",
+        heartbeat_s=0.2, run=run,
+    )
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_synchronous_call_is_listed_while_it_runs(pool: asyncpg.Pool) -> None:
+    tenant = _tenant()
+    release = asyncio.Event()
+
+    async def work() -> BaseModel:
+        await release.wait()
+        return Echo(tenant=tenant, params={})
+
+    call = asyncio.create_task(_tracked(pool, "echo", tenant, work))
+    deadline = time.monotonic() + 5
+    running: list[Job] = []
+    while not running and time.monotonic() < deadline:
+        running = await jobs.list_jobs(
+            pool, tenants=[tenant], status=["queued", "running"], limit=5,
+        )
+        await asyncio.sleep(0.02)
+    assert len(running) == 1
+    job = running[0]
+    assert (job.kind, job.status, job.sync, job.consumer) == ("echo", "running", True, "test")
+    release.set()
+    assert await call == Echo(tenant=tenant, params={})
+    done = await jobs.get(pool, job.id)
+    assert done.status == "succeeded" and done.result == {"tenant": tenant, "params": {}}
+    assert await jobs.list_jobs(pool, tenants=[tenant], status=["running"], limit=5) == []
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_synchronous_failure_is_recorded_and_raised(pool: asyncpg.Pool) -> None:
+    tenant = _tenant()
+
+    async def refuse() -> BaseModel:
+        raise HTTPException(status_code=422, detail="bad rule")
+
+    with pytest.raises(HTTPException):
+        await _tracked(pool, "echo", tenant, refuse)
+    (job,) = await jobs.list_jobs(pool, tenants=[tenant], status=None, limit=5)
+    assert (job.status, job.error.status, job.error.detail) == ("failed", 422, "bad rule")
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_cancelling_a_synchronous_call_answers_409(pool: asyncpg.Pool) -> None:
+    for local in (True, False):   # this process, or another replica (heartbeat)
+        tenant = _tenant()
+
+        async def sleep() -> BaseModel:
+            async with pool.acquire() as conn:
+                await conn.execute("SELECT pg_sleep(30)")
+            return Echo(tenant=None, params={})
+
+        call = asyncio.create_task(_tracked(pool, "echo", tenant, sleep))
+        deadline = time.monotonic() + 5
+        running: list[Job] = []
+        while not running and time.monotonic() < deadline:
+            running = await jobs.list_jobs(pool, tenants=[tenant], status=["running"], limit=5)
+            await asyncio.sleep(0.02)
+        await asyncio.sleep(0.3)
+        started = time.monotonic()
+        await jobs.request_cancel(pool, running[0].id)
+        if local:
+            assert jobs.cancel_tracked(running[0].id)
+        with pytest.raises(HTTPException) as caught:
+            await call
+        assert caught.value.status_code == 409 and "cancelled" in caught.value.detail
+        assert time.monotonic() - started < 5
+        assert (await jobs.get(pool, running[0].id)).status == "cancelled"
+    await asyncio.sleep(0.3)
+    assert await _sleeping_queries(pool) == 0
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_synchronous_whole_graph_call_waits_for_no_job(pool: asyncpg.Pool) -> None:
+    tenant = _tenant()
+    queued = await _submit(pool, "recompute_communities", tenant)
+
+    async def never() -> BaseModel:
+        raise AssertionError("must not run")
+
+    with pytest.raises(jobs.JobConflictError) as caught:
+        await _tracked(pool, "compute_metrics", tenant, never)
+    assert caught.value.existing == queued.id
+
+
+@pytest.mark.asyncio
+async def test_a_call_that_cannot_be_listed_still_runs() -> None:
+    class Down:
+        async def fetchval(self, *_args: object) -> None:
+            raise OSError("database unreachable")
+
+    async def work() -> BaseModel:
+        return Echo(tenant="t", params={})
+
+    assert await _tracked(Down(), "echo", "t", work) == Echo(tenant="t", params={})  # type: ignore[arg-type]
+
+
 def test_job_visibility() -> None:
     from datetime import UTC, datetime
 

@@ -21,9 +21,12 @@ is idempotent and cheap. See ``bootstrap.py`` module docstring for context.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
+import asyncpg
 from fastapi import APIRouter, HTTPException, Request, status
 
+from graphos import schema_changes
 from graphos.auth import ReadPrincipal, WritePrincipal, require_admin
 from graphos.bootstrap import (
     TenantSpec,
@@ -48,6 +51,14 @@ from graphos.resolver.indexer import ensure_resolve_rule_indexes
 log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["tenants"], prefix="/tenants")
+
+
+async def _record_schema(pool: asyncpg.Pool, tenant: str, detail: dict[str, Any]) -> None:
+    """Best-effort: the schema change itself is already stored."""
+    try:
+        await schema_changes.record(pool, tenant, detail)
+    except Exception:  # noqa: BLE001 — never fail the registration over its record
+        log.exception("recording a schema change failed", extra={"tenant": tenant})
 
 
 def _spec_to_info(spec: TenantSpec) -> TenantInfo:
@@ -160,6 +171,7 @@ async def register(
     )
 
     pool = request.app.state.pool
+    previous = await load_spec(pool, spec.name)
     try:
         await bootstrap_tenant(
             pool, spec,
@@ -191,6 +203,9 @@ async def register(
     # or resolve rules registered earlier.
     spec = await load_spec(pool, spec.name) or spec
     remember(spec)
+    change = schema_changes.diff(previous, spec)
+    if change is not None:
+        await _record_schema(pool, spec.name, change)
     # A search index over every label ("*") also covers the labels this
     # registration added; build what the merged spec now needs.
     if spec.search_indexes:
@@ -264,6 +279,7 @@ async def delete_edge_endpoint(
     spec = await load_spec(pool, name)
     if spec is not None:
         remember(spec)
+    await _record_schema(pool, name, {"removed": {"edge_endpoints": [[type, src, dst]]}})
     return {"tenant": name, "type": type, "src": src, "dst": dst, "status": "removed"}
 
 
@@ -291,4 +307,5 @@ async def unregister(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"tenant '{name}' is not registered",
         )
+    await _record_schema(pool, name, {"unregistered": True})
     return {"tenant": name, "status": "unregistered"}

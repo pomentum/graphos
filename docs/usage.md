@@ -798,8 +798,9 @@ changed, not the new values: re-read what you need.
 | `GET /changes?after=&limit=` (100 / 1000) | `changes[]` after the cursor (from the oldest kept without one), `next` (pass it as `after`), `more` (the page was full) |
 | `GET /changes/head` | `cursor`: where to start following after reading the data afresh |
 | `GET /changes/stream?after=` | Server-Sent Events: a `change` event per record with the cursor as its `id`; resumes after `Last-Event-ID` |
+| `GET /changes/history?before=&op=&limit=` | the past, **newest first**: the records before `before` (the newest without one), only the `op`s given (repeatable); `older` (pass it as `before`), `more`. For showing what happened (the UI's Activity page); to follow the feed use `after` or the stream |
 
-Read access is enough for all three. A record:
+Read access is enough for all four. A record:
 
 ```json
 {"cursor": "48211.903", "at": "2026-10-06T09:14:03Z", "op": "patch", "kind": "node",
@@ -816,6 +817,10 @@ Read access is enough for all three. A record:
 | edge delete | `delete` with the pair |
 | `edges:resolve` | one `resolve` summary per edge type, `count` edges, no ids: re-read the type |
 | Louvain write-back | one `communities` summary, `count` nodes, no ids |
+| graph metrics write-back | one `metrics` summary, `count` nodes whose values changed, no ids |
+| schema change (registration that changes something, declared pair removed, unregister) | `op: schema`, `kind: tenant`: `detail.added` / `detail.removed` per part (`vertex_labels`, `edge_labels`, `edge_endpoints`, `label_hierarchy`, `search_indexes`, `resolve_rules` by edge type, `indexes` and `generated_columns` by count), `detail.strict_endpoints` as `[before, after]`, `detail.registered` / `detail.unregistered`. A re-registration that changes nothing records nothing |
+
+New ops may be added; a consumer should treat an op it does not know as informational.
 
 `consumer` is the token's consumer (a job's records name who submitted it, with `trace_id` set to
 `job:<id>`); `trace_id` is the request's W3C trace id when it sent `traceparent`.
@@ -914,7 +919,7 @@ stay per replica: the rate limit (each allows the configured rate), and the toke
 
 ### Background jobs
 
-Community recompute, `edges:resolve` and vacuum can take minutes on a large graph. Send them with
+Community recompute, graph metrics, `edges:resolve` and vacuum can take minutes on a large graph. Send them with
 `Prefer: respond-async` to run them as a background job: graphos validates the request exactly as
 it would synchronously (so a bad body, scope or tenant still fails at once), queues it and answers
 **202** with the job, `Location: /v1/jobs/{id}`, `Retry-After: 2` and
@@ -932,13 +937,21 @@ curl -s "$G/v1/jobs/<id>" -H "Authorization: Bearer $TOKEN"
 | Endpoint | Purpose |
 |---|---|
 | `GET /v1/jobs/{id}` | `status` (`queued`, `running`, `succeeded`, `failed`, `cancelled`); on success `result` is the synchronous response body, on failure `error` is `{"status", "detail"}`: what the synchronous call would have answered |
-| `GET /v1/jobs?tenant=&status=&limit=50` | newest first |
+| `GET /v1/jobs?tenant=&status=&limit=50` | newest first; `status` is repeatable (`status=queued&status=running`: what runs now) |
 | `POST /v1/jobs/{id}:cancel` | a queued job is cancelled at once; a running one is stopped: its database statement is cancelled and a community computation's process is terminated; 409 once finished |
+
+**Direct calls are listed too.** The same four operations called *without* the header are recorded
+as jobs with `"sync": true` while they run: the caller still waits for the response as before, but
+anyone with access to the tenant sees the call in `GET /v1/jobs` (who started it, since when), and
+it can be cancelled like a background job, in which case the waiting caller gets **409**
+(`cancelled: job … was cancelled while running`). Its outcome is kept like a job's. A direct
+whole-graph call (recompute or metrics) is refused with 409 while a job of either kind is queued or
+running for the tenant.
 
 A job id is a UUID. Jobs are visible to admins and to tokens with access to their tenant; vacuum
 jobs, which have no tenant, to admins only; anything else answers 404. Cancelling a recompute or
-vacuum job needs admin scope, as starting one does. One recompute per tenant can be queued or
-running at a time; another is refused with **409**.
+vacuum job needs admin scope, as starting one does. One whole-graph job (recompute or metrics) per
+tenant can be queued or running at a time; another is refused with **409**.
 
 Every API replica runs queued jobs, `GRAPHOS_JOB_CONCURRENCY` at a time (default 1), and the
 database hands each job to exactly one replica. A job whose replica stops (crash or shutdown) is

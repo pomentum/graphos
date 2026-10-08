@@ -89,7 +89,7 @@ Runnable scripts in [`examples/`](examples/). Each reads `GRAPHOS_URL` (default 
 | Graph metrics | `compute_metrics` (degree, PageRank, components, betweenness, stored as `graphos_*` node properties) |
 | Rule-based edges | `resolve_edges`, `catalogue` |
 | Cache | `cache_put`, `cache_get`, `cache_delete` |
-| Change feed | `changes`, `changes_head`, `iter_changes`, `stream_changes` (reconnects with `Last-Event-ID`) |
+| Change feed | `changes`, `changes_head`, `iter_changes`, `stream_changes` (reconnects with `Last-Event-ID`), `changes_history` (newest first, for showing the past) |
 | Operations (admin) | `healthz`, `readyz`, `info`, `db_stats`, `slow_queries`, `vacuum` |
 | Background jobs | `submit_recompute_communities`, `submit_compute_metrics`, `submit_resolve_edges`, `submit_vacuum` (each returns a `Job`), `get_job`, `list_jobs`, `cancel_job`, `wait_for_job` |
 

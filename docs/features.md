@@ -410,12 +410,17 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
 - Every write is recorded in the same transaction: upserts per batch with the
   ids written, merges and patches with the new revision, deletes with the
   ids and the edges removed with them, and one summary for a rule
-  resolution or a Louvain write-back. Records say what changed and who
-  changed it, not the values.
+  resolution, a Louvain write-back or a graph-metrics write-back. Schema
+  changes are recorded too (`op: schema`: what a registration added or
+  removed, a declared pair removed, unregistering); a re-registration that
+  changes nothing records nothing. Records say what changed and who changed
+  it, not the values.
 - `GET …/changes?after=` pages through the records after a cursor;
   `GET …/changes/head` is where to start after reading the data afresh;
   `GET …/changes/stream` follows them live as Server-Sent Events, resumable
-  with `Last-Event-ID` and woken by Postgres `NOTIFY`.
+  with `Last-Event-ID` and woken by Postgres `NOTIFY`;
+  `GET …/changes/history?before=&op=` reads the past newest first, for
+  people.
 - Never skips a committed change, even when transactions commit out of
   order; delivery is at least once. Records are kept for
   `GRAPHOS_CHANGES_RETENTION_H` (7 days); an older cursor gets 410.
@@ -437,7 +442,9 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   on its graph map or its communities and a small one on its whole graph; a
   canvas that adds neighbours a page at a time with undo, focus and collapse;
   inspect and edit (saved with `If-Match`); shortest paths; counts per label;
-  live activity; a label as a table; the schema as a list or a diagram, which
+  activity (what runs now, with cancel, and the writes, computations and
+  schema changes of the last days, filterable, with a running indicator in
+  the toolbar on every page); a label as a table; the schema as a list or a diagram, which
   admins can extend (labels, relationship types, declared label pairs). An
   nginx image with no backend of its own; users sign in with their own token,
   so permissions and attribution are graphos's. It reads labels and search
@@ -448,8 +455,10 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   label pairs it joins (`edge_endpoints`), the schema's associations; a child
   label satisfies its parent's pair. With `strict_endpoints` on, graphos
   refuses edge writes outside them (types that declare none stay open).
-- **Background jobs:** community recompute, `edges:resolve` and vacuum accept
-  `Prefer: respond-async` and answer 202 with a job (`Location: /v1/jobs/{id}`).
+- **Background jobs:** community recompute, graph metrics, `edges:resolve` and
+  vacuum accept `Prefer: respond-async` and answer 202 with a job
+  (`Location: /v1/jobs/{id}`). Called directly they are listed as jobs too
+  (`sync: true`) while they run, so others see them and can cancel them.
   `GET /v1/jobs/{id}` returns its status and, when done, the synchronous
   response body or the error it would have returned; `GET /v1/jobs` lists
   recent jobs; `POST /v1/jobs/{id}:cancel` cancels. Jobs run on any replica,

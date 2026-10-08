@@ -2,6 +2,8 @@
 
 - ``GET /v1/{tenant}/changes?after=&limit=``: the records after a position.
 - ``GET /v1/{tenant}/changes/head``: the position to start a sync from.
+- ``GET /v1/{tenant}/changes/history?before=&op=``: the past, newest first,
+  for people reading it (the Activity page).
 - ``GET /v1/{tenant}/changes/stream``: Server-Sent Events, one ``change``
   event per record, its position as the event id, so a client resumes with
   ``Last-Event-ID`` after a reconnect.
@@ -30,6 +32,7 @@ from graphos.contracts.changes import (
     MAX_CHANGES_LIMIT,
     ChangeItem,
     ChangesHead,
+    ChangesHistory,
     ChangesResponse,
 )
 
@@ -129,6 +132,41 @@ async def changes_head(tenant: str, request: Request, principal: ReadPrincipal) 
     async with request.app.state.pool.acquire() as conn:
         cursor = await changes.head(conn)
     return ChangesHead(tenant=tenant, cursor=str(cursor))
+
+
+@router.get(
+    "/history",
+    response_model=ChangesHistory,
+    summary="Earlier changes, newest first",
+    description=(
+        "The feed read backwards: the newest records first (or those before `before`), "
+        "optionally only some ops. Pass `older` back as `before` for the page before. "
+        "For showing what happened; to follow the feed, use `after` or the stream. "
+        "Records older than the retention period are gone."
+    ),
+)
+async def changes_history(
+    tenant: str,
+    request: Request,
+    principal: ReadPrincipal,
+    before: Annotated[
+        str | None, Query(description="A cursor: only records before it."),
+    ] = None,
+    op: Annotated[
+        list[str] | None, Query(description="Only these ops (repeatable)."),
+    ] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_CHANGES_LIMIT)] = DEFAULT_CHANGES_LIMIT,
+) -> ChangesHistory:
+    _check_tenant(tenant, principal)
+    position = _cursor(before)
+    async with request.app.state.pool.acquire() as conn:
+        page = await changes.history(conn, tenant, position, limit, op)
+    return ChangesHistory(
+        tenant=tenant,
+        changes=[item(c) for c in page.changes],
+        older=None if page.older is None else str(page.older),
+        more=page.more,
+    )
 
 
 @router.get(

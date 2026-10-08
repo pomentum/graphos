@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator, Iterable, Mapping
+from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from http import HTTPStatus
 from typing import Any
 from urllib.parse import quote
@@ -19,6 +19,7 @@ from graphos_client._models import (
     CacheGetResponse,
     CachePutResponse,
     ChangeItem,
+    ChangesHistory,
     ChangesPage,
     CommunitiesResponse,
     CommunityIdsResponse,
@@ -1181,6 +1182,25 @@ class GraphosClient:
         resp = await self._request("GET", f"/v1/{self._tenant}/changes", params=params)
         return ChangesPage.model_validate(resp.json())
 
+    async def changes_history(
+        self,
+        before: str | None = None,
+        *,
+        ops: Sequence[str] | None = None,
+        limit: int = 100,
+    ) -> ChangesHistory:
+        """Earlier records, newest first (before ``before``, or the newest):
+        what happened, for showing it.  ``ops`` keeps only those ops.  Pass
+        ``older`` back as ``before`` for the page before.  To follow the feed
+        use :meth:`changes` or :meth:`stream_changes`."""
+        params: dict[str, Any] = {"limit": limit}
+        if before is not None:
+            params["before"] = before
+        if ops:
+            params["op"] = list(ops)
+        resp = await self._request("GET", f"/v1/{self._tenant}/changes/history", params=params)
+        return ChangesHistory.model_validate(resp.json())
+
     async def changes_head(self) -> str:
         """The position to follow the feed from after reading the data afresh."""
         resp = await self._request("GET", f"/v1/{self._tenant}/changes/head")
@@ -1424,15 +1444,17 @@ class GraphosClient:
         self,
         *,
         tenant: str | None = None,
-        status: str | None = None,
+        status: str | Sequence[str] | None = None,
         limit: int = 50,
     ) -> list[Job]:
-        """``GET /v1/jobs``: newest first, only jobs this token may see."""
+        """``GET /v1/jobs``: newest first, only jobs this token may see.
+        ``status``: one state or several (``["queued", "running"]``: what is
+        active now, synchronous calls included)."""
         params: dict[str, Any] = {"limit": limit}
         if tenant is not None:
             params["tenant"] = tenant
         if status is not None:
-            params["status"] = status
+            params["status"] = [status] if isinstance(status, str) else list(status)
         resp = await self._request("GET", "/v1/jobs", params=params)
         return [Job.model_validate(j) for j in resp.json()["jobs"]]
 

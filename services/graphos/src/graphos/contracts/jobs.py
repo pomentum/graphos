@@ -41,6 +41,13 @@ class Job(BaseModel):
     error: JobError | None = None
     consumer: str | None = Field(default=None, description="Who submitted it (token consumer).")
     cancel_requested: bool = False
+    sync: bool = Field(
+        default=False,
+        description=(
+            "Run by a synchronous call: its caller waits for the response. Listed so "
+            "others see it running; it can be cancelled like a background job."
+        ),
+    )
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None

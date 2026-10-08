@@ -552,6 +552,39 @@ async def test_changes_pages_until_caught_up() -> None:
     await cli.close()
 
 
+async def test_changes_history_reads_backwards() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={
+            "tenant": "demo", "changes": [_change(3), _change(2)], "older": "100.2", "more": True,
+        })
+
+    cli = GraphosClient(base_url="http://x", tenant="demo", transport=_mock_transport(handler))
+    page = await cli.changes_history("100.4", ops=["merge", "schema"], limit=2)
+    assert [c.cursor for c in page.changes] == ["100.3", "100.2"]
+    assert page.older == "100.2" and page.more
+    assert seen[0].url.path == "/v1/demo/changes/history"
+    assert seen[0].url.params.get_list("op") == ["merge", "schema"]
+    assert seen[0].url.params["before"] == "100.4"
+    await cli.close()
+
+
+async def test_list_jobs_takes_several_states() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"jobs": [_job("running", sync=True)]})
+
+    cli = GraphosClient(base_url="http://x", tenant="demo", transport=_mock_transport(handler))
+    (job,) = await cli.list_jobs(tenant="demo", status=["queued", "running"])
+    assert job.sync
+    assert seen[0].url.params.get_list("status") == ["queued", "running"]
+    await cli.close()
+
+
 def _sse(*chunks: str):  # noqa: ANN202
     async def body():  # noqa: ANN202
         for chunk in chunks:

@@ -232,6 +232,8 @@ CREATE TABLE IF NOT EXISTS graphos_meta.jobs (
     heartbeat_at     timestamptz,
     finished_at      timestamptz
 );
+-- A synchronous call of a job kind, listed while it runs (graphos.jobs.run_tracked).
+ALTER TABLE graphos_meta.jobs ADD COLUMN IF NOT EXISTS sync boolean NOT NULL DEFAULT false;
 
 -- Claiming the oldest queued job, and the stale-heartbeat sweep.
 CREATE INDEX IF NOT EXISTS jobs_active

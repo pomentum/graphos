@@ -6,7 +6,9 @@ import type {
   GraphExport,
   GraphMap,
   CommunityMap,
+  ChangesHistory,
   Job,
+  JobStatus,
   SchemaAddition,
   HubsResponse,
   InducedEdgesResponse,
@@ -200,9 +202,19 @@ export class GraphosApi {
     ).data;
   }
 
-  /** The tenant's recent background jobs, newest first. */
-  async jobs(limit = 20): Promise<Job[]> {
-    return (await this.http.get<{ jobs: Job[] }>("/v1/jobs", { tenant: this.tenant, limit })).jobs;
+  /** The tenant's recent jobs, newest first; `status` keeps only those states. */
+  async jobs(limit = 20, status?: JobStatus[]): Promise<Job[]> {
+    return (await this.http.get<{ jobs: Job[] }>("/v1/jobs", { tenant: this.tenant, limit, status })).jobs;
+  }
+
+  /** Cancels a queued or running job, or a synchronous call listed as one. */
+  cancelJob(id: string): Promise<Job> {
+    return this.http.post(`/v1/jobs/${enc(id)}:cancel`, undefined);
+  }
+
+  /** Earlier changes, newest first: before `before` (or the newest), only `ops` when given. */
+  changesHistory(before?: string, ops?: string[], limit = 50): Promise<ChangesHistory> {
+    return this.http.get(`/v1/${enc(this.tenant)}/changes/history`, { before, op: ops, limit });
   }
 
   /** One background job's status. */

@@ -46,15 +46,75 @@
         "delete": "Deleted",
         "resolve": "Derived",
         "communities": "Regrouped",
-        "metrics": "Measured"
+        "metrics": "Measured",
+        "schema": "Changed the schema"
       },
-      "anyNodes": "nodes",
-      "anyEdges": "edges",
+      "anyNode": "node",
+      "anyEdge": "edge",
       "one": "{{verb}} {{what}} {{id}}",
       "nodes_one": "{{verb}} {{formatted}} {{what}} node",
       "nodes_other": "{{verb}} {{formatted}} {{what}} nodes",
       "edges_one": "{{verb}} {{formatted}} {{what}} edge",
-      "edges_other": "{{verb}} {{formatted}} {{what}} edges"
+      "edges_other": "{{verb}} {{formatted}} {{what}} edges",
+      "nodesAny_one": "{{verb}} {{formatted}} node",
+      "nodesAny_other": "{{verb}} {{formatted}} nodes",
+      "edgesAny_one": "{{verb}} {{formatted}} edge",
+      "edgesAny_other": "{{verb}} {{formatted}} edges",
+      "schema": {
+        "registered": "Registered the tenant",
+        "unregistered": "Unregistered the tenant",
+        "changed": "Changed the schema: {{parts}}",
+        "added": "added {{items}}",
+        "removed": "removed {{items}}",
+        "strictOn": "strict endpoints on",
+        "strictOff": "strict endpoints off",
+        "more_one": "{{count}} more",
+        "more_other": "{{count}} more",
+        "fields": {
+          "vertex_labels_one": "label",
+          "vertex_labels_other": "labels",
+          "edge_labels_one": "relationship type",
+          "edge_labels_other": "relationship types",
+          "edge_endpoints_one": "label pair",
+          "edge_endpoints_other": "label pairs",
+          "label_hierarchy_one": "parent",
+          "label_hierarchy_other": "parents",
+          "search_indexes_one": "search index",
+          "search_indexes_other": "search indexes",
+          "resolve_rules_one": "edge rule for",
+          "resolve_rules_other": "edge rules for",
+          "indexes_one": "index",
+          "indexes_other": "indexes",
+          "generated_columns_one": "generated column",
+          "generated_columns_other": "generated columns"
+        }
+      }
+    },
+    "jobs": {
+      "kinds": {
+        "recompute_communities": "Group recompute",
+        "compute_metrics": "Graph metrics",
+        "resolve_edges": "Edge resolution",
+        "vacuum": "Vacuum"
+      },
+      "queued": "Queued",
+      "runningFor": "Running for {{duration}}",
+      "cancelling": "Cancelling…",
+      "direct": "direct call",
+      "background": "background job",
+      "cancel": "Cancel",
+      "cancelOne": "Cancel {{job}}",
+      "cancelRequested": "Cancel requested",
+      "cancelFailed": "Could not cancel",
+      "ran": "ran {{job}}",
+      "succeeded": "finished in {{duration}}",
+      "failed": "failed: {{detail}}",
+      "cancelled": "cancelled",
+      "duration": {
+        "seconds": "{{s}} s",
+        "minutes": "{{m}} min",
+        "hours": "{{h}} h {{m}} min"
+      }
     }
   },
   "shell": {
@@ -88,6 +148,13 @@
       "byWhen": "{{who}} · {{when}}",
       "empty": "No changes since you opened graphos.",
       "showAll": "Show all activity"
+    },
+    "running": {
+      "label_one": "{{count}} job running",
+      "label_other": "{{count}} jobs running",
+      "title": "Running now",
+      "by": "{{who}} · {{state}}",
+      "showAll": "Show activity"
     },
     "account": {
       "label": "Account",
@@ -269,12 +336,24 @@
       "byPerson": "Filter by person",
       "allLabels": "All labels",
       "byLabel": "Filter by label",
-      "noMatch": "No changes match these filters",
-      "empty": "Nothing yet",
-      "hidden_one": "{{count}} change is hidden by the filters.",
-      "hidden_other": "{{count}} changes are hidden by the filters.",
-      "emptyHint": "Changes made from now on appear here as they happen.",
-      "clearFilters": "Clear filters"
+      "category": "Show",
+      "categories": {
+        "all": "All",
+        "writes": "Writes",
+        "computations": "Computations",
+        "schema": "Schema"
+      },
+      "running": "Running now",
+      "history": "Recent",
+      "loadOlder": "Load older",
+      "allLoaded": "That is everything kept (the feed keeps 7 days by default).",
+      "noMatch": "No activity matches these filters",
+      "empty": "No activity yet",
+      "hidden_one": "{{count}} entry is hidden by the filters.",
+      "hidden_other": "{{count}} entries are hidden by the filters.",
+      "emptyHint": "Writes, computations and schema changes appear here as they happen.",
+      "clearFilters": "Clear filters",
+      "loadFailed": "Could not load earlier activity"
     },
     "browse": {
       "label": "Label",

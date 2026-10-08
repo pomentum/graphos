@@ -47,7 +47,7 @@ from fastapi.responses import JSONResponse
 
 from graphos import lookup, reserved, writes
 from graphos import search as search_index
-from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, wants_async
+from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, run_sync, wants_async
 from graphos.auth import ReadPrincipal, WritePrincipal, require_tenant
 from graphos.bootstrap import registered_tenants
 from graphos.contracts.export import (
@@ -3610,7 +3610,10 @@ async def resolve_edges(
             request, kind="resolve_edges", tenant=tenant, body=body,
             principal=principal,
         )
-    return await run_resolve(request.app.state.pool, tenant, body)
+    return await run_sync(
+        request, kind="resolve_edges", tenant=tenant, body=body, principal=principal,
+        run=lambda: run_resolve(request.app.state.pool, tenant, body),
+    )
 
 
 def _resolve_plan(

@@ -1,5 +1,5 @@
 import type { ParseKeys } from "i18next";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { EdgeKey, SearchParams } from "../api/graphosApi";
 import type {
   EdgeUpsert,
@@ -10,6 +10,8 @@ import type {
   Properties,
   SchemaAddition,
 } from "../api/types";
+import { CATEGORY_OPS, type ActivityCategory } from "../lib/changes";
+import { isActiveJob } from "../lib/jobs";
 import { profileProperties } from "../lib/properties";
 import { useTenantSession } from "../session/SessionProvider";
 
@@ -38,6 +40,9 @@ export const keys = {
   map: (tenant: string, exact: boolean) => ["map", tenant, exact] as const,
   groups: (tenant: string) => ["groups", tenant] as const,
   groupsJob: (tenant: string) => ["groupsJob", tenant] as const,
+  activeJobs: (tenant: string) => ["activeJobs", tenant] as const,
+  recentJobs: (tenant: string) => ["recentJobs", tenant] as const,
+  history: (tenant: string, category: ActivityCategory | "all") => ["history", tenant, category] as const,
 };
 
 /** Labels, hierarchy and search indexes; changes rarely, so cached for minutes. */
@@ -64,10 +69,7 @@ export function useCatalogue() {
   return useQuery({ queryKey: keys.catalogue(tenant), queryFn: () => api.catalogue(), staleTime: 5 * 60_000 });
 }
 
-/** A job that has not ended yet. */
-export function isActiveJob(job: Job | null | undefined): boolean {
-  return job?.status === "queued" || job?.status === "running";
-}
+export { isActiveJob };
 
 /** How often a running job is checked. */
 const JOB_POLL_MS = 3_000;
@@ -82,6 +84,51 @@ export function useGroupsJob() {
     queryKey: keys.groupsJob(tenant),
     queryFn: async () => (await api.jobs()).find((job) => job.kind === "recompute_communities") ?? null,
     refetchInterval: (query) => (isActiveJob(query.state.data) ? JOB_POLL_MS : false),
+  });
+}
+
+/** How often the running jobs are checked: often while some run, otherwise to notice new ones. */
+const ACTIVE_POLL_MS = 3_000;
+const IDLE_POLL_MS = 15_000;
+
+/**
+ * What is running on the tenant now, whoever started it: background jobs and
+ * synchronous recomputes, metrics runs, resolutions and vacuums.
+ */
+export function useActiveJobs() {
+  const { api, tenant } = useTenantSession();
+  return useQuery({
+    queryKey: keys.activeJobs(tenant),
+    queryFn: () => api.jobs(50, ["queued", "running"]),
+    refetchInterval: (query) => (query.state.data?.length ? ACTIVE_POLL_MS : IDLE_POLL_MS),
+  });
+}
+
+/** The tenant's latest jobs, finished ones included; read again when the running ones change. */
+export function useRecentJobs() {
+  const { api, tenant } = useTenantSession();
+  return useQuery({ queryKey: keys.recentJobs(tenant), queryFn: () => api.jobs(30), refetchInterval: 60_000 });
+}
+
+/** Cancels a running job (or a synchronous call listed as one). */
+export function useCancelJob() {
+  const { api, tenant } = useTenantSession();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (job: Job) => api.cancelJob(job.id),
+    meta: { success: "common.jobs.cancelRequested", errorTitle: "common.jobs.cancelFailed" },
+    onSettled: () => client.invalidateQueries({ queryKey: keys.activeJobs(tenant) }),
+  });
+}
+
+/** Earlier changes, newest first, a page at a time; only one category's ops unless "all". */
+export function useChangeHistory(category: ActivityCategory | "all") {
+  const { api, tenant } = useTenantSession();
+  return useInfiniteQuery({
+    queryKey: keys.history(tenant, category),
+    queryFn: ({ pageParam }) => api.changesHistory(pageParam, category === "all" ? undefined : CATEGORY_OPS[category]),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.older ?? undefined,
   });
 }
 

@@ -405,9 +405,10 @@ Paths under `/v1/{tenant}/graph/...` are abbreviated to `…/graph/...`.
 | **Change feed** (§4.1) | | |
 | `GET …/changes?after=&limit=` | Records after a cursor; `next`, `more` | tenant |
 | `GET …/changes/head` | The cursor to start following from after a fresh read | tenant |
+| `GET …/changes/history?before=&op=&limit=` | Earlier records, newest first | tenant |
 | `GET …/changes/stream` | Server-Sent Events, resumable with `Last-Event-ID` | tenant |
 | **Background jobs** (§2.6) | | |
-| `GET /v1/jobs/{id}`, `GET /v1/jobs?tenant=&status=&limit=` | A job's status and outcome; recent jobs | the job's tenant, or admin |
+| `GET /v1/jobs/{id}`, `GET /v1/jobs?tenant=&status=&limit=` | A job's status and outcome; recent jobs (`status` repeatable) | the job's tenant, or admin |
 | `POST /v1/jobs/{id}:cancel` | Cancel a queued or running job | as to start it |
 
 The last column is the tenant or admin scope.  Each operation also needs
@@ -746,8 +747,9 @@ curl -X DELETE "$G/v1/acme/graph/cache/dashboard:home" -H "Authorization: Bearer
 
 ### 2.6 Background jobs
 
-`POST …/recompute-communities`, `POST …/graph/edges:resolve` and
-`POST /v1/db/vacuum` take `Prefer: respond-async` (RFC 7240). The endpoint
+`POST …/recompute-communities`, `POST …/graph/metrics:compute`,
+`POST …/graph/edges:resolve` and `POST /v1/db/vacuum` take
+`Prefer: respond-async` (RFC 7240). The endpoint
 runs its usual validation (scope, tenant, body, edge types, table names),
 then inserts a row into `graphos_meta.jobs` and answers 202 with the job and
 `Location: /v1/jobs/{id}`. Without the header nothing changes.
@@ -763,6 +765,13 @@ then inserts a row into `graphos_meta.jobs` and answers 202 with the job and
   and detail the synchronous call would have returned (`{"status", "detail"}`;
   unexpected errors store 500 and a generic detail, the traceback goes to the
   log).
+- **Direct calls** (`jobs.run_tracked`). Called without the header, the same
+  operations insert a `running` row with `sync = true` (never claimed by a
+  runner), keep its heartbeat, and record the outcome when the call returns.
+  A cancel request cancels the request's task (at once in the same process,
+  otherwise at the next heartbeat) and the caller gets 409. The row also
+  takes part in the one-whole-graph-job index, so a direct call and a queued
+  job of the two whole-graph kinds exclude each other.
 - **Heartbeat.** A running job refreshes `heartbeat_at` every
   `GRAPHOS_JOB_HEARTBEAT_S` (10 s); any replica marks a job silent for three
   heartbeats as failed (`interrupted`). Graceful shutdown records running jobs

@@ -227,13 +227,26 @@ export interface CommunityMap {
   links: { src: number; dst: number; count: number; types: { type: string; count: number }[] }[];
 }
 
-/** A background job (`/v1/jobs`). */
+export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+
+/**
+ * A background job (`/v1/jobs`), or a synchronous call of a job kind
+ * (`sync`: its caller waits for the answer), listed while it runs.
+ */
 export interface Job {
   id: string;
   kind: string;
-  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
-  error: { message: string } | null;
+  tenant: string | null;
+  status: JobStatus;
+  params: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  /** The HTTP status and detail the call answered with. */
+  error: { status: number; detail: string } | null;
+  consumer: string | null;
+  cancel_requested: boolean;
+  sync: boolean;
   created_at: string;
+  started_at: string | null;
   finished_at: string | null;
 }
 
@@ -264,12 +277,22 @@ export interface HistogramResponse {
   bins: { value: string; count: number }[];
 }
 
+/** What a schema change added, removed or switched (`op: "schema"`). */
+export interface SchemaChangeDetail {
+  added?: Record<string, unknown[]>;
+  removed?: Record<string, unknown[]>;
+  /** [before, after] */
+  strict_endpoints?: [boolean, boolean];
+  registered?: boolean;
+  unregistered?: boolean;
+}
+
 /** One record of the change feed: what changed and who changed it, not the new values. */
 export interface ChangeItem {
   cursor: string;
   at: string;
-  op: "upsert" | "merge" | "patch" | "delete" | "resolve" | "communities" | "metrics";
-  kind: "node" | "edge";
+  op: "upsert" | "merge" | "patch" | "delete" | "resolve" | "communities" | "metrics" | "schema";
+  kind: "node" | "edge" | "tenant";
   label: string | null;
   src_label: string | null;
   dst_label: string | null;
@@ -277,5 +300,15 @@ export interface ChangeItem {
   edges: [string, string][] | null;
   rev: number | null;
   count: number;
+  /** Per-op detail; for `schema`, a `SchemaChangeDetail`. */
+  detail?: Record<string, unknown> | null;
   consumer: string | null;
+}
+
+/** Earlier changes, newest first (`/changes/history`). */
+export interface ChangesHistory {
+  changes: ChangeItem[];
+  /** Pass as `before` for the page before; null at the end. */
+  older: string | null;
+  more: boolean;
 }

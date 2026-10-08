@@ -12,6 +12,7 @@ import classes from "./AppLayout.module.css";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { NodeSearch, type PickMode } from "./NodeSearch";
 import { Sidebar } from "./Sidebar";
+import { RunningIndicator } from "./RunningJobs";
 import { AccountMenu, ActivityBell, TenantSwitcher } from "./ToolbarMenus";
 
 /**
@@ -64,6 +65,7 @@ export function AppLayout() {
           {current ? t(current.title) : ""}
         </Text>
         <Group gap="sm" justify="flex-end" wrap="nowrap" className={classes.toolbarEnd}>
+          <RunningIndicator />
           <ActivityBell />
           <NodeSearch hotkey allowAdd onPick={openHit} width={narrow ? 150 : 220} />
           <AccountMenu />

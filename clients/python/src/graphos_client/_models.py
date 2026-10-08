@@ -467,6 +467,7 @@ class Job(BaseModel):
     error: JobError | None = None
     consumer: str | None = None
     cancel_requested: bool = False
+    sync: bool = False     # run by a synchronous call (its caller waits); listed while running
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -705,7 +706,8 @@ class ChangeItem(BaseModel):
     cursor: str            # this record's position; pass as ``after``
     at: datetime
     op: str                # upsert | merge | patch | delete | resolve | communities | metrics
-    kind: str              # node | edge
+                           # | schema; more may come: treat an unknown op as informational
+    kind: str              # node | edge | tenant (schema records)
     label: str | None = None
     src_label: str | None = None
     dst_label: str | None = None
@@ -723,3 +725,10 @@ class ChangesPage(BaseModel):
     changes: list[ChangeItem]
     next: str              # pass as ``after`` for the next page
     more: bool             # the page was full: more may be ready now
+
+
+class ChangesHistory(BaseModel):
+    tenant: str
+    changes: list[ChangeItem]   # newest first
+    older: str | None = None    # pass as ``before`` for the page before; None at the end
+    more: bool

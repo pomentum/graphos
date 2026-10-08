@@ -18,9 +18,25 @@ under one version.
   values. Betweenness is exact and skipped above `GRAPHOS_BETWEENNESS_MAX_NODES` (20 000). The top
   nodes by a metric come from `nodes:scan` with `order_by`. `/v1/info` reports `metrics: true`.
 - Python client: `compute_metrics(…)`, `submit_compute_metrics(…)`, `ComputeMetricsResponse`.
+- **Activity in the UI.** What runs on the tenant now (background jobs and direct calls, who
+  started each and for how long, Cancel where the session may), a running indicator in the toolbar
+  on every page, and the writes, computations and schema changes of the last days (filter by kind,
+  person and label; finished jobs with their outcome; older pages on request) instead of only the
+  changes since the page was opened.
+- **Direct calls are listed as jobs.** Recompute, graph metrics, `edges:resolve` and vacuum called
+  without `Prefer: respond-async` are recorded in `graphos_meta.jobs` with `sync: true` while they
+  run: visible in `GET /v1/jobs`, cancellable (the waiting caller gets 409), outcome kept.
+  `GET /v1/jobs` takes `status` more than once.
+- **Feed history:** `GET /v1/{tenant}/changes/history?before=&op=&limit=` reads the feed newest
+  first. Python client: `changes_history(…)`, `ChangesHistory`; `list_jobs(status=[…])`.
+- **Schema changes in the feed:** `op: schema`, `kind: tenant`, with what was added, removed or
+  switched in `detail`; recorded when a registration changes the schema, a declared pair is
+  removed, or a tenant is unregistered. Re-registering an unchanged spec records nothing.
 
 ### Changed
 
+- The change feed has a new op `schema` and kind `tenant`. The Python client types `op` and `kind`
+  as strings, so older clients read them; a consumer should treat an unknown op as informational.
 - **`graphos_*` properties are reserved.** Node and edge writes (single, batch, bulk and
   merge-patch) whose properties use a `graphos_` name are refused with `400`; graphos writes them
   itself. Snapshot import still restores them.
@@ -30,7 +46,9 @@ under one version.
 ### Upgrading from 0.4.2
 
 Nothing to do. Writes that used a `graphos_` property name are now refused. The unique index
-`jobs_one_active_recompute` is replaced by `jobs_one_active_graph_job` at startup.
+`jobs_one_active_recompute` is replaced by `jobs_one_active_graph_job` at startup, and
+`graphos_meta.jobs` gains a `sync` column (added at startup). A direct whole-graph call
+(recompute or metrics) is now refused with 409 while a job of either kind is queued for the tenant.
 
 ## 0.4.2 — 2026-10-08
 

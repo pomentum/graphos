@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from graphos import analysis
 from graphos.api.graph import _check_tenant
-from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, wants_async
+from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, run_sync, wants_async
 from graphos.api.louvain import busy
 from graphos.auth import WritePrincipal, require_admin
 from graphos.contracts.graph_metrics import ComputeMetricsRequest, ComputeMetricsResponse
@@ -47,7 +47,10 @@ async def compute_metrics(
         return await respond_async(
             request, kind="compute_metrics", tenant=tenant, body=body, principal=principal,
         )
-    return await run_compute(request.app.state.pool, tenant, body)
+    return await run_sync(
+        request, kind="compute_metrics", tenant=tenant, body=body, principal=principal,
+        run=lambda: run_compute(request.app.state.pool, tenant, body),
+    )
 
 
 async def run_compute(

@@ -25,7 +25,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
-from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, wants_async
+from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, run_sync, wants_async
 from graphos.auth import ReadPrincipal, TokenPrincipal, WritePrincipal, require_admin
 from graphos.contracts.db import (
     DbStatsResponse,
@@ -236,7 +236,10 @@ async def vacuum(
         return await respond_async(
             request, kind="vacuum", tenant=None, body=body, principal=principal,
         )
-    return await run_vacuum(request.app.state.pool, body)
+    return await run_sync(
+        request, kind="vacuum", tenant=None, body=body, principal=principal,
+        run=lambda: run_vacuum(request.app.state.pool, body),
+    )
 
 
 async def run_vacuum(pool: asyncpg.Pool, body: VacuumRequest) -> VacuumResponse:

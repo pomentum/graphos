@@ -553,3 +553,92 @@ async def test_edge_records_over_http(db_pool: asyncpg.Pool, graph: str) -> None
         last = (await api.get(f"/v1/{t}/changes", params={"limit": 1000})).json()["changes"][-1]
     assert (last["kind"], last["ids"], last["edges"]) == ("edge", None, [["a", "c"]])
     assert (last["src_label"], last["dst_label"]) == ("Doc", "Doc")
+
+
+# ── history and schema records ──────────────────────────────────────────────
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_history_reads_the_feed_backwards(db_pool: asyncpg.Pool, graph: str) -> None:
+    t = graph
+    async with _client(db_pool) as api:
+        await api.post(f"/v1/{t}/graph/nodes/a/properties", json={"properties": {"k": 1}})
+        await api.patch(f"/v1/{t}/graph/nodes/b", json={"k": 2})
+
+        seen, before = [], None
+        while True:
+            params = {"limit": 1} | ({"before": before} if before else {})
+            resp = await api.get(f"/v1/{t}/changes/history", params=params)
+            assert resp.status_code == HTTPStatus.OK, resp.text
+            body = resp.json()
+            seen += body["changes"]
+            before = body["older"]
+            if before is None:
+                break
+        # Newest first: the fixture's two upserts are the oldest.
+        assert [c["op"] for c in seen] == ["patch", "merge", "upsert", "upsert"]
+        forward = (await api.get(f"/v1/{t}/changes")).json()["changes"]
+        assert [c["cursor"] for c in seen] == [c["cursor"] for c in reversed(forward)]
+
+        only = (await api.get(f"/v1/{t}/changes/history", params={"op": ["merge", "patch"]}))
+        assert [c["op"] for c in only.json()["changes"]] == ["patch", "merge"]
+        assert only.json()["older"] is None and only.json()["more"] is False
+        bad = await api.get(f"/v1/{t}/changes/history", params={"before": "nope"})
+        assert bad.status_code == HTTPStatus.BAD_REQUEST
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_schema_changes_are_recorded(db_pool: asyncpg.Pool) -> None:
+    t = _tenant()
+    spec = {"name": t, "vertex_labels": ["Doc"], "edge_labels": ["LINKS"]}
+
+    async def schema_records() -> list[dict]:
+        resp = await api.get(f"/v1/{t}/changes/history", params={"op": "schema"})
+        assert resp.status_code == HTTPStatus.OK, resp.text
+        return resp.json()["changes"]
+
+    try:
+        async with _client(db_pool) as api:
+            assert (await api.post("/v1/tenants", json=spec)).status_code == HTTPStatus.OK
+            (first,) = await schema_records()
+            assert (first["op"], first["kind"]) == ("schema", "tenant")
+            assert first["detail"]["registered"] is True
+            assert first["detail"]["added"]["vertex_labels"] == ["Doc"]
+
+            # The same spec again (a consumer starting up): nothing recorded.
+            assert (await api.post("/v1/tenants", json=spec)).status_code == HTTPStatus.OK
+            assert len(await schema_records()) == 1
+
+            more = spec | {
+                "vertex_labels": ["Doc", "Tag"],
+                "edge_endpoints": {"LINKS": [["Doc", "Tag"]]},
+                "strict_endpoints": True,
+            }
+            assert (await api.post("/v1/tenants", json=more)).status_code == HTTPStatus.OK
+            latest = (await schema_records())[0]["detail"]
+            assert latest["added"] == {
+                "vertex_labels": ["Tag"], "edge_endpoints": [["LINKS", "Doc", "Tag"]],
+            }
+            assert latest["strict_endpoints"] == [False, True]
+            assert (await schema_records())[0]["count"] == 3
+
+            resp = await api.delete(
+                f"/v1/tenants/{t}/edge_endpoints",
+                params={"type": "LINKS", "src": "Doc", "dst": "Tag"},
+            )
+            assert resp.status_code == HTTPStatus.OK, resp.text
+            removed = (await schema_records())[0]["detail"]
+            assert removed == {"removed": {"edge_endpoints": [["LINKS", "Doc", "Tag"]]}}
+
+            assert (await api.delete(f"/v1/tenants/{t}")).status_code == HTTPStatus.OK
+            async with db_pool.acquire() as conn:
+                page = await changes.history(conn, t, None, 10, ["schema"])
+            assert page.changes[0].detail == {"unregistered": True}
+    finally:
+        async with db_pool.acquire() as conn:
+            if await conn.fetchval("SELECT 1 FROM ag_catalog.ag_graph WHERE name = $1;", t):
+                await conn.execute(f"SELECT drop_graph('{t}', true);")
+            await conn.execute("DELETE FROM graphos_meta.tenants WHERE name = $1;", t)
+            await conn.execute("DELETE FROM graphos_meta.changes WHERE tenant = $1;", t)

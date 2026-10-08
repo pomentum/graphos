@@ -55,8 +55,10 @@ log = logging.getLogger(__name__)
 
 CHANNEL = "graphos_changes"
 
-Op = Literal["upsert", "merge", "patch", "delete", "resolve", "communities", "metrics"]
-Kind = Literal["node", "edge"]
+Op = Literal[
+    "upsert", "merge", "patch", "delete", "resolve", "communities", "metrics", "schema",
+]
+Kind = Literal["node", "edge", "tenant"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,19 +217,61 @@ async def read(
     elif after < edge:
         raise CursorGoneError(edge)
     rows = await conn.fetch(_READ_SQL, tenant, str(after.txid), after.seq, limit)
-    changes = [
-        Change(
-            cursor=Cursor(int(r["txid_text"]), int(r["seq"])),
-            at=r["at"], op=r["op"], kind=r["kind"], label=r["label"],
-            src_label=r["src_label"], dst_label=r["dst_label"],
-            ids=None if r["ids_text"] is None else json.loads(r["ids_text"]),
-            rev=r["rev"], count=r["count"],
-            detail=None if r["detail_text"] is None else json.loads(r["detail_text"]),
-            consumer=r["consumer"], trace_id=r["trace_id"],
-        )
-        for r in rows
-    ]
+    changes = [_change(r) for r in rows]
     return Page(changes, next=changes[-1].cursor if changes else after, more=len(rows) == limit)
+
+
+def _change(r: asyncpg.Record) -> Change:
+    return Change(
+        cursor=Cursor(int(r["txid_text"]), int(r["seq"])),
+        at=r["at"], op=r["op"], kind=r["kind"], label=r["label"],
+        src_label=r["src_label"], dst_label=r["dst_label"],
+        ids=None if r["ids_text"] is None else json.loads(r["ids_text"]),
+        rev=r["rev"], count=r["count"],
+        detail=None if r["detail_text"] is None else json.loads(r["detail_text"]),
+        consumer=r["consumer"], trace_id=r["trace_id"],
+    )
+
+
+_HISTORY_SQL = """
+SELECT c.txid::text AS txid_text, c.seq, c.at, c.op, c.kind, c.label,
+       c.src_label, c.dst_label, c.ids::text AS ids_text, c.rev, c.count,
+       c.detail::text AS detail_text, c.consumer, c.trace_id
+FROM graphos_meta.changes c
+WHERE c.tenant = $1
+  AND ($2::text IS NULL OR (c.txid, c.seq) < ($2::text::xid8, $3::bigint))
+  AND c.txid < pg_snapshot_xmin(pg_current_snapshot())
+  AND ($5::text[] IS NULL OR c.op = ANY($5::text[]))
+ORDER BY c.txid DESC, c.seq DESC
+LIMIT $4;
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class HistoryPage:
+    changes: list[Change]      # newest first
+    older: Cursor | None       # pass as ``before`` for the next page; None at the end
+    more: bool
+
+
+async def history(
+    conn: asyncpg.Connection,
+    tenant: str,
+    before: Cursor | None,
+    limit: int,
+    ops: Sequence[str] | None = None,
+) -> HistoryPage:
+    """The visible records before ``before`` (the newest when None), newest
+    first: the past of the feed, for people reading it.  Pruned records are
+    simply absent."""
+    rows = await conn.fetch(
+        _HISTORY_SQL, tenant,
+        None if before is None else str(before.txid), 0 if before is None else before.seq,
+        limit, list(ops) if ops else None,
+    )
+    changes = [_change(r) for r in rows]
+    more = len(rows) == limit
+    return HistoryPage(changes, older=changes[-1].cursor if changes and more else None, more=more)
 
 
 async def head(conn: asyncpg.Connection) -> Cursor:

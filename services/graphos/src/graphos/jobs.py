@@ -17,6 +17,11 @@ the request at once if it is the same process, otherwise within one
 heartbeat).  A running job whose heartbeat stops (its process died) is
 marked failed by any replica; jobs are not retried automatically.
 Finished jobs are deleted after the retention period.
+
+The same kinds called synchronously are recorded too (:func:`run_tracked`,
+``sync``): the caller still waits for the response, but the call is listed
+as running while it runs, can be cancelled like a job, and keeps its
+outcome, so everyone with access to the tenant sees what is running.
 """
 
 from __future__ import annotations
@@ -25,9 +30,9 @@ import asyncio
 import contextlib
 import json
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 from uuid import UUID
 
 import asyncpg
@@ -40,6 +45,7 @@ from graphos.contracts.jobs import Job
 log = logging.getLogger(__name__)
 
 JobFn = Callable[[asyncpg.Pool, str | None, dict[str, Any]], Awaitable[BaseModel]]
+ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
 
 @dataclass(frozen=True)
@@ -71,7 +77,8 @@ class JobConflictError(Exception):
 
 _COLUMNS = (
     "id, kind, tenant, status, params::text AS params, result::text AS result, "
-    "error::text AS error, consumer, cancel_requested, created_at, started_at, finished_at"
+    "error::text AS error, consumer, cancel_requested, sync, created_at, started_at, "
+    "finished_at"
 )
 
 
@@ -103,15 +110,19 @@ async def submit(
             kind, tenant, json.dumps(dict(params)), consumer,
         )
     except asyncpg.exceptions.UniqueViolationError:
-        existing = await pool.fetchval(
-            "SELECT id FROM graphos_meta.jobs "
-            "WHERE kind = ANY($1::text[]) AND tenant IS NOT DISTINCT FROM $2 "
-            "  AND status IN ('queued', 'running') "
-            "ORDER BY created_at LIMIT 1;",
-            list(EXCLUSIVE.get(kind, (kind,))), tenant,
-        )
-        raise JobConflictError(existing) from None
+        raise JobConflictError(await _active_of(pool, kind, tenant)) from None
     return _to_job(row)
+
+
+async def _active_of(pool: asyncpg.Pool, kind: str, tenant: str | None) -> UUID:
+    """The queued or running job that ``kind`` cannot run beside."""
+    return await pool.fetchval(
+        "SELECT id FROM graphos_meta.jobs "
+        "WHERE kind = ANY($1::text[]) AND tenant IS NOT DISTINCT FROM $2 "
+        "  AND status IN ('queued', 'running') "
+        "ORDER BY created_at LIMIT 1;",
+        list(EXCLUSIVE.get(kind, (kind,))), tenant,
+    )
 
 
 async def get(pool: asyncpg.Pool, job_id: UUID) -> Job | None:
@@ -125,17 +136,17 @@ async def list_jobs(
     pool: asyncpg.Pool,
     *,
     tenants: list[str] | None,
-    status: str | None,
+    status: Sequence[str] | None,
     limit: int,
 ) -> list[Job]:
     """Newest first.  ``tenants=None`` lists every job, instance-wide ones
-    included; a list restricts to those tenants."""
+    included; a list restricts to those tenants.  ``status``: any of these."""
     rows = await pool.fetch(
         f"SELECT {_COLUMNS} FROM graphos_meta.jobs "
         f"WHERE ($1::text[] IS NULL OR tenant = ANY($1::text[])) "
-        f"  AND ($2::text IS NULL OR status = $2) "
+        f"  AND ($2::text[] IS NULL OR status = ANY($2::text[])) "
         f"ORDER BY created_at DESC LIMIT $3;",
-        tenants, status, limit,
+        tenants, list(status) if status else None, limit,
     )
     return [_to_job(r) for r in rows]
 
@@ -153,6 +164,132 @@ async def request_cancel(pool: asyncpg.Pool, job_id: UUID) -> Job | None:
         job_id,
     )
     return _to_job(row) if row else None
+
+
+# ── Synchronous calls ────────────────────────────────────────────────────────
+
+# Synchronous calls running in this process: job id -> the request's task.
+_TRACKED: dict[UUID, asyncio.Task[Any]] = {}
+
+
+async def run_tracked(  # noqa: PLR0913 — the job's fields and how to run it
+    pool: asyncpg.Pool,
+    *,
+    kind: str,
+    tenant: str | None,
+    params: Mapping[str, Any],
+    consumer: str | None,
+    heartbeat_s: float,
+    run: Callable[[], Awaitable[ResponseT]],
+) -> ResponseT:
+    """Run a synchronous call of a job kind, recorded as a job (``sync``).
+
+    The caller waits for ``run()`` as before.  Meanwhile the call is listed
+    as running, with a heartbeat (so a process that dies leaves no running
+    row), and a cancel request cancels it: the caller then gets ``409``.
+    The outcome is recorded like a background job's.  Raises
+    :class:`JobConflictError` like :func:`submit`.  Listing is best-effort:
+    if the row cannot be written, the call runs unlisted.
+    """
+    try:
+        job_id: UUID = await pool.fetchval(
+            "INSERT INTO graphos_meta.jobs "
+            "(kind, tenant, params, consumer, status, sync, started_at, heartbeat_at) "
+            "VALUES ($1, $2, $3::jsonb, $4, 'running', true, now(), now()) RETURNING id;",
+            kind, tenant, json.dumps(dict(params)), consumer,
+        )
+    except asyncpg.exceptions.UniqueViolationError:
+        raise JobConflictError(await _active_of(pool, kind, tenant)) from None
+    except Exception:  # noqa: BLE001 — listing the call must never stop it
+        log.warning(
+            "could not list a synchronous call as a job", extra={"kind": kind}, exc_info=True,
+        )
+        return await run()
+    task = asyncio.current_task()
+    if task is not None:
+        _TRACKED[job_id] = task
+    beat = asyncio.create_task(_beat(pool, job_id, task, heartbeat_s))
+    status: str = "failed"
+    result: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
+    try:
+        response = await run()
+        status, result = "succeeded", response.model_dump(mode="json")
+        return response
+    except asyncio.CancelledError:
+        if await pool.fetchval(
+            "SELECT cancel_requested FROM graphos_meta.jobs WHERE id = $1;", job_id,
+        ):
+            if task is not None:
+                task.uncancel()
+            status = "cancelled"
+            raise HTTPException(
+                status_code=409, detail=f"cancelled: job {job_id} was cancelled while running",
+            ) from None
+        error = {"status": 503, "detail": "interrupted: the request was cancelled"}
+        raise
+    except HTTPException as exc:
+        error = {"status": exc.status_code, "detail": str(exc.detail)}
+        raise
+    except asyncpg.exceptions.QueryCanceledError:
+        error = {"status": 504, "detail": "a database statement exceeded its timeout"}
+        raise
+    except Exception:
+        error = {"status": 500, "detail": "internal error; see the server log"}
+        raise
+    finally:
+        beat.cancel()
+        _TRACKED.pop(job_id, None)
+        try:
+            await _finish(pool, job_id, status, result, error)
+        except Exception:  # noqa: BLE001 — the call's own outcome comes first
+            log.warning("recording a synchronous job failed", extra={"job_id": str(job_id)})
+
+
+async def _finish(
+    pool: asyncpg.Pool,
+    job_id: UUID,
+    status: str,
+    result: dict[str, Any] | None,
+    error: dict[str, Any] | None,
+) -> None:
+    await pool.execute(
+        "UPDATE graphos_meta.jobs SET status = $2, finished_at = now(), "
+        "  result = $3::jsonb, error = $4::jsonb "
+        "WHERE id = $1 AND status = 'running';",
+        job_id, status,
+        json.dumps(result) if result is not None else None,
+        json.dumps(error) if error is not None else None,
+    )
+
+
+async def _beat(
+    pool: asyncpg.Pool, job_id: UUID, task: asyncio.Task[Any] | None, heartbeat_s: float,
+) -> None:
+    """Keep a running job's heartbeat; cancel ``task`` when a cancel is requested."""
+    while True:
+        await asyncio.sleep(heartbeat_s)
+        try:
+            cancel = await pool.fetchval(
+                "UPDATE graphos_meta.jobs SET heartbeat_at = now() "
+                "WHERE id = $1 RETURNING cancel_requested;",
+                job_id,
+            )
+        except Exception:  # noqa: BLE001 — try again next beat
+            log.warning("job heartbeat failed", extra={"job_id": str(job_id)})
+            continue
+        if cancel and task is not None:
+            task.cancel()
+            return
+
+
+def cancel_tracked(job_id: UUID) -> bool:
+    """Cancel a synchronous call now if this process runs it."""
+    task = _TRACKED.get(job_id)
+    if task is None:
+        return False
+    task.cancel()
+    return True
 
 
 # ── Runner ───────────────────────────────────────────────────────────────────
@@ -203,10 +340,12 @@ class JobRunner:
         self._wake.set()
 
     def cancel_local(self, job_id: UUID) -> None:
-        """Cancel the job now if this process is running it."""
+        """Cancel the job, or the synchronous call, now if this process runs it."""
         task = self._active.get(job_id)
         if task is not None:
             task.cancel()
+        else:
+            cancel_tracked(job_id)
 
     async def _loop(self) -> None:
         while not self._stopping:
@@ -267,7 +406,9 @@ class JobRunner:
         # Change records of the job's writes name who submitted it.  This
         # task's own context: set here, it is seen by everything it awaits.
         ACTOR.set(Actor(consumer=row["consumer"], trace_id=f"job:{job_id}"))
-        heartbeat = asyncio.create_task(self._heartbeat(job_id, asyncio.current_task()))
+        heartbeat = asyncio.create_task(
+            _beat(self._pool, job_id, asyncio.current_task(), self._heartbeat_s),
+        )
         result: dict[str, Any] | None = None
         error: dict[str, Any] | None = None
         status = "failed"
@@ -293,31 +434,8 @@ class JobRunner:
         finally:
             heartbeat.cancel()
 
-        await self._pool.execute(
-            "UPDATE graphos_meta.jobs SET status = $2, finished_at = now(), "
-            "  result = $3::jsonb, error = $4::jsonb "
-            "WHERE id = $1 AND status = 'running';",
-            job_id, status,
-            json.dumps(result) if result is not None else None,
-            json.dumps(error) if error is not None else None,
-        )
+        await _finish(self._pool, job_id, status, result, error)
         log.info(
             "job finished",
             extra={"job_id": str(job_id), "kind": row["kind"], "status": status},
         )
-
-    async def _heartbeat(self, job_id: UUID, task: asyncio.Task[Any] | None) -> None:
-        while True:
-            await asyncio.sleep(self._heartbeat_s)
-            try:
-                cancel = await self._pool.fetchval(
-                    "UPDATE graphos_meta.jobs SET heartbeat_at = now() "
-                    "WHERE id = $1 RETURNING cancel_requested;",
-                    job_id,
-                )
-            except Exception:  # noqa: BLE001 — try again next beat
-                log.warning("job heartbeat failed", extra={"job_id": str(job_id)})
-                continue
-            if cancel and task is not None:
-                task.cancel()
-                return

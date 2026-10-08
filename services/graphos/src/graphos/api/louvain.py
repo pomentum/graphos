@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from graphos import analysis
 from graphos.api.graph import _check_tenant
-from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, wants_async
+from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, run_sync, wants_async
 from graphos.auth import WritePrincipal, require_admin
 from graphos.contracts.louvain import (
     RecomputeCommunitiesRequest,
@@ -55,7 +55,10 @@ async def recompute(
             request, kind="recompute_communities", tenant=tenant, body=body,
             principal=principal,
         )
-    return await run_recompute(request.app.state.pool, tenant, body)
+    return await run_sync(
+        request, kind="recompute_communities", tenant=tenant, body=body, principal=principal,
+        run=lambda: run_recompute(request.app.state.pool, tenant, body),
+    )
 
 
 async def run_recompute(

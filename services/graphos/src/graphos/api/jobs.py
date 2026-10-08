@@ -8,7 +8,8 @@ answers 404, as if it did not exist.
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from collections.abc import Awaitable, Callable
+from typing import Annotated, Any, TypeVar
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -20,6 +21,8 @@ from graphos.auth import ReadPrincipal, TokenPrincipal, WritePrincipal
 from graphos.contracts.jobs import Job, JobList, JobStatus
 
 router = APIRouter(tags=["jobs"], prefix="/jobs")
+
+ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
 # Shown on the endpoints that accept ``Prefer: respond-async``.
 ACCEPTED_RESPONSE: dict[int | str, dict[str, Any]] = {
@@ -74,6 +77,29 @@ async def respond_async(
     )
 
 
+async def run_sync(  # noqa: PLR0913 — the job's fields and how to run it
+    request: Request,
+    *,
+    kind: str,
+    tenant: str | None,
+    body: BaseModel,
+    principal: TokenPrincipal,
+    run: Callable[[], Awaitable[ResponseT]],
+) -> ResponseT:
+    """Run a synchronous call of ``kind``, listed in ``/v1/jobs`` while it runs."""
+    try:
+        return await jobs.run_tracked(
+            request.app.state.pool, kind=kind, tenant=tenant,
+            params=body.model_dump(mode="json"), consumer=principal.consumer,
+            heartbeat_s=request.app.state.settings.job_heartbeat_s, run=run,
+        )
+    except jobs.JobConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"a {kind} job is already queued or running: {exc.existing}",
+        ) from exc
+
+
 def _visible(principal: TokenPrincipal, job: Job) -> bool:
     if principal.admin:
         return True
@@ -97,7 +123,10 @@ async def list_jobs(
     request: Request,
     principal: ReadPrincipal,
     tenant: Annotated[str | None, Query(description="Only this tenant's jobs.")] = None,
-    status_: Annotated[JobStatus | None, Query(alias="status")] = None,
+    status_: Annotated[
+        list[JobStatus] | None,
+        Query(alias="status", description="Only jobs in one of these states (repeatable)."),
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
 ) -> JobList:
     if tenant is not None:
