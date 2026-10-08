@@ -1,6 +1,6 @@
 [project]
 name = "graphos-client"
-version = "0.4.2"
+version = "0.5.0"
 description = "Async HTTP client for the graphos graph service."
 readme = "README.md"
 requires-python = ">=3.11"

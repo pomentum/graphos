@@ -4,7 +4,7 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.5.0 — 2026-10-08
 
 This release replaces static tokens with users, service accounts and grants: a **breaking change**
 for every deployment (see *Upgrading* below).
@@ -40,8 +40,9 @@ for every deployment (see *Upgrading* below).
   `httpx` becomes a runtime dependency of the service.
 - **UI:** sign-in with user name and password, the forced password change, change password in the
   account menu, and an **Access** page (users and service accounts with their secret shown once,
-  grants on this tenant for its owners, every grant for admins). Controls follow the level: schema
-  editing and recompute need `maintain`.
+  grants on this tenant for its owners, every grant for admins; grants to graphos users and, with
+  single sign-on, to the provider's groups, roles, people and programs). Controls follow the level:
+  schema editing and recompute need `maintain`.
 - Python client: `PasswordAuth(user, password)` (signs in, renews at 80% of the token's life, signs
   in again once on a 401), credentials from `GRAPHOS_USER` / `GRAPHOS_PASSWORD` when no `auth` or
   `token` is given; `GraphosPool(auth=…)` signs in once for all its clients; `Me` has `kind`,
