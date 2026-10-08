@@ -33,13 +33,7 @@ jobs:
             echo "::error::run this workflow from a version tag (e.g. 0.1.0), not ${GITHUB_REF_NAME}"
             exit 1
           fi
-          for f in services/graphos/pyproject.toml clients/python/pyproject.toml; do
-            version="$(python3 -c "import sys,tomllib;print(tomllib.load(open(sys.argv[1],'rb'))['project']['version'])" "$f")"
-            if [ "${version}" != "${GITHUB_REF_NAME}" ]; then
-              echo "::error::tag ${GITHUB_REF_NAME} does not match version ${version} in $f"
-              exit 1
-            fi
-          done
+          node tools/release/version.mjs --check "${GITHUB_REF_NAME}"
 
       - name: Test
         working-directory: clients/python

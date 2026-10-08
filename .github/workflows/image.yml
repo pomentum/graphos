@@ -106,19 +106,8 @@ jobs:
 
       - name: Tag matches the service, UI and client versions
         if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          for f in services/graphos/pyproject.toml clients/python/pyproject.toml; do
-            version="$(python3 -c "import sys,tomllib;print(tomllib.load(open(sys.argv[1],'rb'))['project']['version'])" "$f")"
-            if [ "${version}" != "${GITHUB_REF_NAME}" ]; then
-              echo "::error::tag ${GITHUB_REF_NAME} does not match version ${version} in $f"
-              exit 1
-            fi
-          done
-          ui="$(python3 -c "import json;print(json.load(open('services/graphos-ui/package.json'))['version'])")"
-          if [ "${ui}" != "${GITHUB_REF_NAME}" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} does not match version ${ui} in services/graphos-ui/package.json"
-            exit 1
-          fi
+        # Every place the version lives, and a changelog entry for it (tools/release/version.mjs).
+        run: node tools/release/version.mjs --check "${GITHUB_REF_NAME}"
 
       - uses: docker/setup-qemu-action@v3
 

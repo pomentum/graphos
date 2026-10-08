@@ -4,7 +4,10 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.4.0 — 2026-10-08
+
+graphos 0.4.0 makes the schema a definition: relationship types declare the label pairs they join,
+optionally enforced on writes, and the web UI draws the schema from them as a diagram.
 
 ### Added
 
@@ -18,8 +21,11 @@ under one version.
   leaves those label pairs out. Types that declare no pairs stay open; stored edges are untouched.
 - Python client: `register_tenant(edge_endpoints=…, strict_endpoints=…)`,
   `remove_edge_endpoint(…)`, and `TenantSchemaInfo.edge_endpoints` / `.strict_endpoints`.
+- **Release tooling.** `node tools/release/version.mjs X.Y.Z` sets the one version of server,
+  client and UI in all six places it lives, rolls the changelog and dates the whitepaper; `--check`
+  runs in CI and in both release workflows (which now also require a changelog entry for the tag).
 
-### Upgrading
+### Upgrading from 0.3.0
 
 Nothing to do: two tables are added to `graphos_meta` at startup (`edge_endpoints`,
 `tenant_settings`). Existing tenants declare no pairs, so every write behaves as before. The
