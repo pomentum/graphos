@@ -4,7 +4,14 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.4.2 — 2026-10-08
+
+graphos 0.4.2 fixes the UI image, which would not start without graphos-api; that also kept the
+image workflow from publishing the images.
+
+### Upgrading from 0.4.1
+
+Nothing to do: no API or database change.
 
 ### Fixed
 
