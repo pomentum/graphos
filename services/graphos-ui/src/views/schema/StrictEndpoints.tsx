@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { GraphMap, TenantSchema } from "../../api/types";
 import { useAddToSchema } from "../../data/queries";
 import { formatCount } from "../../lib/time";
-import { Endpoints, undeclaredInData } from "./endpoints";
+import { Endpoints, undeclaredInData } from "../../lib/endpoints";
 
 /** Pairs listed in the confirmation; the rest are counted. */
 const SHOWN = 5;

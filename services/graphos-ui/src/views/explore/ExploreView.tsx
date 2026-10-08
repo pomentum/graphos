@@ -15,6 +15,7 @@ import { NewNodeDialog } from "../../components/NewNodeDialog";
 import { useCreateEdge, useCreateNode, useSchema } from "../../data/queries";
 import { categorize } from "../../graph/canvasStyle";
 import { displayName, moreKey, type NodeRef } from "../../graph/GraphModel";
+import { Endpoints } from "../../lib/endpoints";
 import { useWorkspace } from "../../graph/WorkspaceProvider";
 import { useTenantSession } from "../../session/SessionProvider";
 import { usePalette } from "../../theme/usePalette";
@@ -54,6 +55,7 @@ export function ExploreView() {
   const { load } = useWholeGraph();
   const palette = usePalette();
   const schema = useSchema();
+  const endpoints = useMemo(() => new Endpoints(schema.data ?? { label_hierarchy: {} }), [schema.data]);
   const recent = useRecentlyChanged(model);
   const [fresh, markFresh] = useFreshNodes(selected);
   const [focusOnly, setFocusOnly] = useState(false);
@@ -268,7 +270,10 @@ export function ExploreView() {
           key={`edge-${dialogKey}`}
           opened={creating === "edge"}
           fromName={displayName(selectedNode.properties, selectedNode.id)}
+          fromLabel={selectedNode.vertexLabel}
           edgeTypes={(schema.data?.edge_labels ?? []).filter((type) => !schema.data?.rule_edge_labels.includes(type))}
+          endpoints={endpoints}
+          strict={Boolean(schema.data?.strict_endpoints)}
           saving={createEdge.isPending}
           error={
             createEdge.error

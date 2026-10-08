@@ -1,4 +1,4 @@
-import type { GraphMap, TenantSchema } from "../../api/types";
+import type { GraphMap, TenantSchema } from "../api/types";
 
 /** A label pair an edge type is declared to join. */
 export interface Pair {
@@ -51,6 +51,14 @@ export class Endpoints {
     const dsts = lineage(dst, this.hierarchy);
     const via = pairs.find((p) => srcs.includes(p.src) && dsts.includes(p.dst)) ?? null;
     return { status: via ? "declared" : "undeclared", via };
+  }
+
+  /** Whether an edge of the type may start at a node of this label: open, or a declared pair covers it. */
+  startsFrom(type: string, src: string): boolean {
+    const pairs = this.declared.get(type);
+    if (!pairs?.length) return true;
+    const srcs = lineage(src, this.hierarchy);
+    return pairs.some((p) => srcs.includes(p.src));
   }
 
   /** Whether exactly this pair is declared (not only through a parent): it can be removed. */

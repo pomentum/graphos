@@ -45,6 +45,10 @@ rolling upgrade or after a rollback cannot drop them.
   confirmation listing the pairs in the data it would refuse). Loaded only when opened.
 - The list view shows each relationship type's declared pairs and how many pairs in the data lie
   outside them.
+- Explore's new-edge dialog follows the declared pairs: types the source label may start are listed
+  first, the others apart (hidden when the pairs are enforced); an undeclared pair is flagged once
+  the target is chosen, and cannot be sent when enforced.
+- Diagram captions are placed together so they no longer cover each other or the label boxes.
 - New node from the schema diagram opens Explore's new-node dialog with the label chosen.
 - The header has one colour across its whole width.
 - New UI dependencies: `@xyflow/react` (MIT) and `elkjs` (used under EPL-2.0, unmodified); see

@@ -1,6 +1,6 @@
 import type { ElkNode } from "elkjs/lib/elk-api";
 import type { GraphMap, TenantSchema } from "../../../api/types";
-import { Endpoints, type EndpointStatus, type Pair } from "../endpoints";
+import { Endpoints, type EndpointStatus, type Pair } from "../../../lib/endpoints";
 
 /** One label of the schema, drawn as a box. */
 export interface Box {
@@ -391,18 +391,40 @@ export function exitPoint(box: Rect, toward: Point): Point {
   return { x: box.x + dx * s, y: box.y + dy * s };
 }
 
+/** A quadratic curve from `a` to `b` bent towards `c`. */
+export interface Curve {
+  a: Point;
+  c: Point;
+  b: Point;
+}
+
+/** The point at `t` (0..1) along a curve. */
+export function pointAt(curve: Curve, t: number): Point {
+  const u = 1 - t;
+  return {
+    x: u * u * curve.a.x + 2 * u * t * curve.c.x + t * t * curve.b.x,
+    y: u * u * curve.a.y + 2 * u * t * curve.c.y + t * t * curve.b.y,
+  };
+}
+
 /**
  * A relationship line (boxes given by centre and size): a gentle curve from
- * border to border, bowed further when its reverse also
- * exists so the two do not overlap; a label's line to itself is a loop above it.
+ * border to border, bowed further when its reverse also exists so the two
+ * do not overlap; a label's line to itself is a loop above it (no curve).
  */
-export function freeGeometry(src: Rect, dst: Rect, self: boolean, bowed: boolean): { d: string; caption: Point } {
+export function freeGeometry(
+  src: Rect,
+  dst: Rect,
+  self: boolean,
+  bowed: boolean,
+): { d: string; caption: Point; curve: Curve | null } {
   if (self) {
     const top = src.y - src.h / 2;
     const left = src.x + src.w / 2 - 34;
     return {
       d: `M ${left} ${top} C ${left - 10} ${top - 46}, ${left + 40} ${top - 46}, ${left + 30} ${top}`,
       caption: { x: left + 10, y: top - 46 },
+      curve: null,
     };
   }
   const mid = { x: (src.x + dst.x) / 2, y: (src.y + dst.y) / 2 };
@@ -413,10 +435,69 @@ export function freeGeometry(src: Rect, dst: Rect, self: boolean, bowed: boolean
   const control = { x: mid.x + (nx / len) * bend, y: mid.y + (ny / len) * bend };
   const a = exitPoint(src, control);
   const b = exitPoint(dst, control);
-  return {
-    d: `M ${a.x} ${a.y} Q ${control.x} ${control.y} ${b.x} ${b.y}`,
-    caption: { x: (a.x + 2 * control.x + b.x) / 4, y: (a.y + 2 * control.y + b.y) / 4 },
-  };
+  const curve = { a, c: control, b };
+  return { d: `M ${a.x} ${a.y} Q ${control.x} ${control.y} ${b.x} ${b.y}`, caption: pointAt(curve, 0.5), curve };
+}
+
+const CAPTION_HEIGHT = 18;
+const CAPTION_CHAR_WIDTH = 6.4;
+const CAPTION_PADDING = 14;
+/** Where along a line a caption may sit, best first. */
+const CAPTION_STEPS = [0.5, 0.4, 0.6, 0.3, 0.7, 0.22, 0.78];
+/** A loop's caption may rise above its usual place, in these steps. */
+const LOOP_STEPS = [0, -20, -40];
+
+/** The space a caption takes on the canvas (centre and size). */
+export function captionRect(text: string, at: Point): Rect {
+  return { x: at.x, y: at.y, w: text.length * CAPTION_CHAR_WIDTH + CAPTION_PADDING, h: CAPTION_HEIGHT };
+}
+
+function overlap(a: Rect, b: Rect): number {
+  const w = Math.min(a.x + a.w / 2, b.x + b.w / 2) - Math.max(a.x - a.w / 2, b.x - b.w / 2);
+  const h = Math.min(a.y + a.h / 2, b.y + b.h / 2) - Math.max(a.y - a.h / 2, b.y - b.h / 2);
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+/** A caption to place: its text and the line it belongs to. */
+export interface CaptionInput {
+  key: string;
+  text: string;
+  /** The line's curve, or null for a loop (placed at `at`). */
+  curve: Curve | null;
+  at: Point;
+  /** Placed first: the selection's lines, then busier ones. */
+  priority: number;
+}
+
+/**
+ * Places captions so they do not cover each other or the label boxes: each
+ * takes the first spot along its line (middle first) that is clear, or the
+ * least covered one; captions with higher priority choose first.
+ */
+export function placeCaptions(inputs: CaptionInput[], boxes: Rect[]): Record<string, Point> {
+  const placed: Rect[] = [];
+  const out: Record<string, Point> = {};
+  for (const input of [...inputs].sort((a, b) => b.priority - a.priority || a.key.localeCompare(b.key))) {
+    const spots = input.curve
+      ? CAPTION_STEPS.map((t) => pointAt(input.curve!, t))
+      : LOOP_STEPS.map((dy) => ({ x: input.at.x, y: input.at.y + dy }));
+    let best = spots[0]!;
+    let bestCost = Number.POSITIVE_INFINITY;
+    for (const spot of spots) {
+      const rect = captionRect(input.text, spot);
+      const cost =
+        placed.reduce((sum, other) => sum + 3 * overlap(rect, other), 0) +
+        boxes.reduce((sum, box) => sum + overlap(rect, box), 0);
+      if (cost < bestCost) {
+        best = spot;
+        bestCost = cost;
+        if (cost === 0) break;
+      }
+    }
+    placed.push(captionRect(input.text, best));
+    out[input.key] = best;
+  }
+  return out;
 }
 
 // v2: positions of labels in a block are relative to the block.

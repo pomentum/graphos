@@ -529,7 +529,12 @@
       "relationship": "Relationship",
       "to": "To",
       "findNode": "Find a node",
-      "connect": "Connect"
+      "connect": "Connect",
+      "fits": "Allowed from {{label}}",
+      "notDeclaredFor": "Not declared for {{label}}",
+      "noneDeclared": "No relationship type declares a pair starting at {{label}}.",
+      "refused": "{{src}} -[{{type}}]→ {{dst}} is not declared, and graphos enforces declared pairs. {{type}} may join {{pairs}}.",
+      "undeclared": "{{src}} -[{{type}}]→ {{dst}} is not declared ({{type}} may join {{pairs}}). graphos accepts it, but the schema will show it as not declared."
     },
     "columnPicker": {
       "button": "Columns · {{shown}}"

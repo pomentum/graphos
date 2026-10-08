@@ -1,5 +1,5 @@
 import type { GraphMap, TenantSchema } from "../../api/types";
-import { Endpoints } from "./endpoints";
+import { Endpoints } from "../../lib/endpoints";
 
 /** A vertex label in the schema tree: its depth under its parents and its own node count. */
 export interface LabelRow {

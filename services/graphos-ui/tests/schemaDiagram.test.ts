@@ -8,6 +8,8 @@ import {
   layoutKey,
   linkCaption,
   loadPositions,
+  placeCaptions,
+  captionRect,
   savePositions,
   type Block,
 } from "../src/views/schema/diagram/diagramModel";
@@ -126,6 +128,26 @@ describe("schema diagram", () => {
     const b = { x: 300, y: 0, w: 100, h: 40 };
     expect(freeGeometry(a, b, false, false).d).toMatch(/^M 50 /);
     expect(freeGeometry(a, a, true, false).d).toContain(" C ");
+  });
+
+  it("places captions clear of each other and of the boxes", () => {
+    // Two parallel lines whose middles nearly meet, and a box in the way.
+    const curveA = { a: { x: 0, y: 0 }, c: { x: 200, y: 0 }, b: { x: 400, y: 0 } };
+    const curveB = { a: { x: 0, y: 10 }, c: { x: 200, y: 10 }, b: { x: 400, y: 10 } };
+    const box = { x: 120, y: 5, w: 60, h: 40 };
+    const placed = placeCaptions(
+      [
+        { key: "a", text: "CALLS 12", curve: curveA, at: { x: 200, y: 0 }, priority: 2 },
+        { key: "b", text: "USES 3", curve: curveB, at: { x: 200, y: 10 }, priority: 1 },
+      ],
+      [box],
+    );
+    expect(placed.a).toEqual({ x: 200, y: 0 }); // first choice: the middle
+    const a = captionRect("CALLS 12", placed.a!);
+    const b = captionRect("USES 3", placed.b!);
+    const apart = a.x + a.w / 2 <= b.x - b.w / 2 || b.x + b.w / 2 <= a.x - a.w / 2;
+    expect(apart).toBe(true);
+    expect(placed.b!.x).not.toBe(140); // nor on the box
   });
 
   it("remembers moved boxes per tenant, and copes without storage", () => {

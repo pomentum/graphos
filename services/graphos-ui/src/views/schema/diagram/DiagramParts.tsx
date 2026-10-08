@@ -13,7 +13,7 @@ import {
 } from "@xyflow/react";
 import { createContext, useContext } from "react";
 import { useTranslation } from "react-i18next";
-import { freeGeometry, type Box, type Link, type Rect, type Selection } from "./diagramModel";
+import { freeGeometry, type Box, type Link, type Point, type Rect, type Selection } from "./diagramModel";
 import classes from "./SchemaDiagram.module.css";
 
 /** What every box and line on the diagram needs to know to draw itself. */
@@ -44,6 +44,8 @@ export interface LineData extends Record<string, unknown> {
   bowed: boolean;
   /** A line of a type that declares no pairs, drawn for All: faint, captioned only while lit. */
   extra: boolean;
+  /** Where its caption goes, placed with the others' (null: the middle of the line). */
+  captionAt: Point | null;
 }
 
 export type LineEdge = Edge<LineData, "line">;
@@ -104,9 +106,10 @@ export function SchemaLine({ id, source, target, data }: EdgeProps<LineEdge>) {
   const src = useInternalNode(source);
   const dst = useInternalNode(target);
   if (!src || !dst || !data) return null;
-  const { link, bowed, extra } = data;
+  const { link, bowed, extra, captionAt } = data;
 
-  const { d: path, caption: at } = freeGeometry(rectOf(src), rectOf(dst), source === target, bowed);
+  const { d: path, caption: middle } = freeGeometry(rectOf(src), rectOf(dst), source === target, bowed);
+  const at = captionAt ?? middle;
 
   const selected = state.selection?.kind === "link" && state.selection.id === id;
   const lit = selected || (state.focus?.links.has(id) ?? false);

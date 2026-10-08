@@ -1,6 +1,6 @@
 import type { GraphMap, TenantSchema } from "../src/api/types";
 import { buildDiagram } from "../src/views/schema/diagram/diagramModel";
-import { Endpoints, lineage, undeclaredInData } from "../src/views/schema/endpoints";
+import { Endpoints, lineage, undeclaredInData } from "../src/lib/endpoints";
 import { relationshipRows } from "../src/views/schema/schemaModel";
 
 const schema: TenantSchema = {
@@ -41,6 +41,14 @@ describe("declared endpoints", () => {
     expect(endpoints.check("CALLS", "Symbol", "Function").status).toBe("undeclared");
     expect(endpoints.check("LINKS", "Repo", "File")).toEqual({ status: "open", via: null });
     expect(new Endpoints({ label_hierarchy: {} }).any).toBe(false);
+  });
+
+  it("tells which types a label may start, for the new-edge picker", () => {
+    const endpoints = new Endpoints(schema);
+    expect(endpoints.startsFrom("DEFINES", "File")).toBe(true);
+    expect(endpoints.startsFrom("CALLS", "Function")).toBe(true);
+    expect(endpoints.startsFrom("CALLS", "Class")).toBe(false);
+    expect(endpoints.startsFrom("LINKS", "Repo")).toBe(true); // declares none: open
   });
 
   it("follows parents without looping", () => {

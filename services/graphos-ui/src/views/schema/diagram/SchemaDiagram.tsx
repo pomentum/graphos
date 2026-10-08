@@ -60,6 +60,9 @@ import {
   familyColours,
   familyId,
   focusOf,
+  freeGeometry,
+  placeCaptions,
+  type CaptionInput,
   layoutKey,
   loadPositions,
   savePositions,
@@ -170,6 +173,30 @@ function placeNodes(diagram: Diagram, laid: Layout, kept: Positions, meta: (box:
  * back with Tidy up. Administrators add labels here and declare a pair by
  * dragging from one box to another.
  */
+/** Each label box's centre and size on the canvas (boxes in blocks are placed relative to them). */
+function boxRects(nodes: DiagramNode[]): Map<string, Rect> {
+  const byId = new Map(nodes.map((n) => [n.id, n] as const));
+  const origin = new Map<string, Point>();
+  const topLeft = (node: DiagramNode): Point => {
+    const known = origin.get(node.id);
+    if (known) return known;
+    const parent = node.parentId ? byId.get(node.parentId) : undefined;
+    const base = parent ? topLeft(parent) : { x: 0, y: 0 };
+    const at = { x: base.x + node.position.x, y: base.y + node.position.y };
+    origin.set(node.id, at);
+    return at;
+  };
+  const rects = new Map<string, Rect>();
+  for (const node of nodes) {
+    if (node.type !== "label") continue;
+    const at = topLeft(node);
+    const w = node.width ?? 0;
+    const h = node.height ?? 0;
+    rects.set(node.id, { x: at.x + w / 2, y: at.y + h / 2, w, h });
+  }
+  return rects;
+}
+
 export function SchemaDiagram(props: SchemaDiagramProps) {
   return (
     <ReactFlowProvider>
@@ -275,20 +302,37 @@ function DiagramCanvas({
         l.kind === "relationship" && (touches(l) || lines === "all" || (lines === "declared" && l.status !== "open")),
     );
     const pairs = new Set(drawn.map((l) => `${l.kind}|${l.src}|${l.dst}`));
-    const edgesNow: LineEdge[] = drawn.map((link) => ({
-      id: link.key,
-      type: "line",
-      source: link.src,
-      target: link.dst,
-      data: {
-        link,
-        bowed:
-          link.kind === "relationship" && link.src !== link.dst && pairs.has(`relationship|${link.dst}|${link.src}`),
-        extra: !touches(link) && link.status === "open",
-      },
-    }));
-    setEdges(edgesNow);
-  }, [laid, diagram, lines, selection]);
+    const bowed = (l: { src: string; dst: string }) => l.src !== l.dst && pairs.has(`relationship|${l.dst}|${l.src}`);
+    const extra = (l: (typeof drawn)[number]) => !touches(l) && l.status === "open";
+
+    // Captions placed together, so they do not cover each other or the boxes.
+    const rects = boxRects(nodes);
+    const inputs: CaptionInput[] = [];
+    for (const link of drawn) {
+      const src = rects.get(link.src);
+      const dst = rects.get(link.dst);
+      if (!src || !dst || !link.caption || extra(link)) continue;
+      const geometry = freeGeometry(src, dst, link.src === link.dst, bowed(link));
+      inputs.push({
+        key: link.key,
+        text: link.caption,
+        curve: geometry.curve,
+        at: geometry.caption,
+        priority: (touches(link) ? 1e12 : 0) + link.count,
+      });
+    }
+    const captions = placeCaptions(inputs, [...rects.values()]);
+
+    setEdges(
+      drawn.map((link) => ({
+        id: link.key,
+        type: "line",
+        source: link.src,
+        target: link.dst,
+        data: { link, bowed: bowed(link), extra: extra(link), captionAt: captions[link.key] ?? null },
+      })),
+    );
+  }, [laid, diagram, lines, selection, nodes]);
 
   // Fit the view when the set of boxes changes (first layout, Hide empty labels).
   const boxKeys = useMemo(() => nodes.map((n) => n.id).join("|"), [nodes]);
