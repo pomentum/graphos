@@ -4,6 +4,19 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Fixed
+
+- **The UI image starts without graphos-api.** nginx resolved the API's host name once, at start,
+  and refused to start when it did not resolve yet, so the UI could not start before the API, and
+  the image workflow's smoke test (which runs the UI alone) failed, which kept the images from
+  being published. The address is now looked up per request through the container's DNS: `/api/`
+  answers `502` until graphos-api is reachable, then works without restarting the UI. Forwarding
+  is unchanged (`GRAPHOS_API_UPSTREAM`, paths, query strings and encoding).
+- The image workflow's UI smoke test prints the container's logs when it fails, and checks that
+  the UI starts with no API present.
+
 ## 0.4.1 — 2026-10-08
 
 graphos 0.4.1 lets Docker Compose enable Louvain community detection on the published image,

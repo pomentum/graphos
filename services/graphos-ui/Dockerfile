@@ -14,8 +14,11 @@ FROM nginxinc/nginx-unprivileged:1.29-alpine
 LABEL org.opencontainers.image.source="https://github.com/pomentum/graphos" \
       org.opencontainers.image.description="Web UI for graphos" \
       org.opencontainers.image.licenses="Apache-2.0"
-# Where graphos answers, as seen from this container.
-ENV GRAPHOS_API_UPSTREAM=http://graphos-api:8080
+# Where graphos answers, as seen from this container. It is looked up per request
+# through the container's DNS, which the nginx entrypoint exposes to the config
+# as NGINX_LOCAL_RESOLVERS when NGINX_ENTRYPOINT_LOCAL_RESOLVERS is set.
+ENV GRAPHOS_API_UPSTREAM=http://graphos-api:8080 \
+    NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
 COPY deploy/default.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY LICENSE NOTICE THIRD_PARTY_NOTICES.md /usr/share/licenses/graphos-ui/

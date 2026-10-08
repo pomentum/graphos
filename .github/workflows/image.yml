@@ -86,11 +86,15 @@ jobs:
           cache-to: type=gha,mode=max,scope=ui
 
       - name: Smoke test
+        # Runs the UI alone: it must start without graphos-api (looked up per request).
         run: |
           docker run -d --name ui -p 8081:8080 graphos-ui:ci
+          trap 'echo "::group::ui logs"; docker logs ui; echo "::endgroup::"' EXIT
           for i in $(seq 1 20); do curl -fs http://127.0.0.1:8081/healthz && break; sleep 1; done
+          curl -fs http://127.0.0.1:8081/healthz
           curl -fs http://127.0.0.1:8081/ | grep -q '<div id="root">'
           curl -fsI http://127.0.0.1:8081/ | grep -qi 'content-security-policy'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/api/healthz)" = 502
           docker exec ui ls /usr/share/licenses/graphos-ui
 
   publish:
