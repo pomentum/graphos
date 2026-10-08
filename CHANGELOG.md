@@ -4,6 +4,16 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Added
+
+- **Louvain without rebuilding.** `docker-compose.louvain.yml`, added to the compose command
+  (`docker compose -f docker-compose.graphos.yml -f docker-compose.louvain.yml up -d`), enables
+  community detection on an image built without it, such as the published one: graphos-api
+  downloads python-igraph into its own container on first start, then starts as usual. No volume,
+  no image change; the published images stay free of GPL code.
+
 ## 0.4.0 — 2026-10-08
 
 graphos 0.4.0 makes the schema a definition: relationship types declare the label pairs they join,

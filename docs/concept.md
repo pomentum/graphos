@@ -1022,9 +1022,11 @@ powers-of-ten test fails against the old form.
 ## 5. Community detection (Louvain)
 
 > **Optional extra.** Louvain needs python-igraph (GPL-2.0-or-later),
-> installed with `pip install "graphos[louvain]"` or an image built with
-> `--build-arg GRAPHOS_EXTRAS=louvain`. Without it, `recompute-communities`
-> answers 501 and `GET /v1/info` reports `features.louvain: false`.
+> installed with `pip install "graphos[louvain]"`, an image built with
+> `--build-arg GRAPHOS_EXTRAS=louvain`, or, with no rebuild, the
+> `docker-compose.louvain.yml` overlay (graphos-api downloads it on first
+> start). Without it, `recompute-communities` answers 501 and
+> `GET /v1/info` reports `features.louvain: false`.
 
 `POST /v1/{tenant}/recompute-communities` (admin) answers when done, or
 runs as a background job with `Prefer: respond-async` (§2.6). It is

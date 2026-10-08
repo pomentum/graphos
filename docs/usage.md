@@ -642,7 +642,11 @@ The Python methods are `cache_put(key, value, ttl_seconds=…)`, `cache_get(key)
 
 Louvain is an optional extra because python-igraph is GPL-2.0-or-later: `pip install
 "graphos[louvain]"`, or build the image with `--build-arg GRAPHOS_EXTRAS=louvain`. The bundled compose
-file includes it unless `GRAPHOS_EXTRAS=` is set. Without it, `recompute-communities` returns **501**;
+file includes it unless `GRAPHOS_EXTRAS=` is set. On an image without it (the published one), add the
+overlay instead of rebuilding: `docker compose -f docker-compose.graphos.yml -f
+docker-compose.louvain.yml up -d` makes graphos-api download python-igraph into its own container on
+its first start (PyPI must be reachable then) and start as usual; restarts reuse it. Without it,
+`recompute-communities` returns **501**;
 `GET /v1/info` reports availability in `features.louvain`.
 
 `POST /v1/{tenant}/recompute-communities` requires admin. It answers when the recompute is done,
