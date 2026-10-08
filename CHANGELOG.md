@@ -4,7 +4,14 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.4.1 — 2026-10-08
+
+graphos 0.4.1 lets Docker Compose enable Louvain community detection on the published image,
+without rebuilding it.
+
+### Upgrading from 0.4.0
+
+Nothing to do: no API or database change.
 
 ### Added
 
