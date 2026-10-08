@@ -15,11 +15,11 @@ from http import HTTPStatus
 from graphos_client import GraphosClient, GraphosError
 
 URL = os.environ.get("GRAPHOS_URL", "http://127.0.0.1:8080")
-TOKEN = os.environ["GRAPHOS_TOKEN"]          # recompute needs admin scope
+# Signs in as GRAPHOS_USER / GRAPHOS_PASSWORD and renews its token by itself.
 
 
 async def main() -> None:
-    async with GraphosClient(base_url=URL, token=TOKEN, tenant="acme") as g:
+    async with GraphosClient(base_url=URL, tenant="acme") as g:
         info = await g.info()
         if not info.get("features", {}).get("louvain"):
             print("this server was built without the Louvain extra; nothing to do")

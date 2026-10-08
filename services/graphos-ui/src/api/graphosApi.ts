@@ -1,5 +1,6 @@
 import type { HttpClient, Tagged } from "./http";
 import type {
+  AuthConfig,
   DeleteNodeResponse,
   EdgeRecord,
   EdgeUpsert,
@@ -7,8 +8,12 @@ import type {
   GraphMap,
   CommunityMap,
   ChangesHistory,
+  Grant,
+  GrantLevel,
   Job,
   JobStatus,
+  UserCreated,
+  UserInfo,
   SchemaAddition,
   HubsResponse,
   InducedEdgesResponse,
@@ -205,6 +210,53 @@ export class GraphosApi {
   /** The tenant's recent jobs, newest first; `status` keeps only those states. */
   async jobs(limit = 20, status?: JobStatus[]): Promise<Job[]> {
     return (await this.http.get<{ jobs: Job[] }>("/v1/jobs", { tenant: this.tenant, limit, status })).jobs;
+  }
+
+  /** Users and service accounts (admin). */
+  async users(): Promise<UserInfo[]> {
+    return (await this.http.get<{ users: UserInfo[] }>("/v1/users")).users;
+  }
+
+  /** Creates a person or a service account (admin); the password comes back once. */
+  createUser(name: string, kind: "person" | "service"): Promise<UserCreated> {
+    return this.http.post("/v1/users", { name, kind });
+  }
+
+  /** Disables or enables a user (admin); a disabled user's tokens stop at once. */
+  async setUserDisabled(name: string, disabled: boolean): Promise<UserInfo> {
+    return (await this.http.request<UserInfo>("PATCH", `/v1/users/${enc(name)}`, { body: { disabled } })).data;
+  }
+
+  /** Deletes a user and its grants (admin). */
+  async deleteUser(name: string): Promise<void> {
+    await this.http.request("DELETE", `/v1/users/${enc(name)}`);
+  }
+
+  /** A new password or secret for a user (admin), shown once. */
+  resetUserSecret(name: string): Promise<UserCreated> {
+    return this.http.post(`/v1/users/${enc(name)}:reset-secret`, undefined);
+  }
+
+  /** How people sign in here: passwords, and the identity provider when single sign-on is set up. */
+  authConfig(): Promise<AuthConfig> {
+    return this.http.get<AuthConfig>("/v1/auth/config");
+  }
+
+  /** Grants: all for an admin; for an owner, its own and those on the tenants it owns. */
+  async grants(filter: { subject?: string; tenant?: string } = {}): Promise<Grant[]> {
+    return (await this.http.get<{ grants: Grant[] }>("/v1/grants", filter)).grants;
+  }
+
+  /** Gives a level on a tenant or pattern, or a global right. */
+  grant(subject: string, tenant: string, level: GrantLevel): Promise<Grant> {
+    return this.http.post("/v1/grants", { subject, tenant, level });
+  }
+
+  /** Takes a grant back. */
+  async revoke(grant: Grant): Promise<void> {
+    await this.http.request("DELETE", "/v1/grants", {
+      query: { subject: grant.subject, tenant: grant.tenant, level: grant.level },
+    });
   }
 
   /** Cancels a queued or running job, or a synchronous call listed as one. */

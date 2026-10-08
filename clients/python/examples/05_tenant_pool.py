@@ -15,7 +15,7 @@ import os
 from graphos_client import EdgeUpsert, GraphosPool, NodeUpsert, TenantSchema
 
 URL = os.environ.get("GRAPHOS_URL", "http://127.0.0.1:8080")
-TOKEN = os.environ["GRAPHOS_TOKEN"]          # admin scope: the pool registers tenants
+# Signs in as GRAPHOS_USER / GRAPHOS_PASSWORD and renews its token by itself.
 
 SCHEMA = TenantSchema(
     vertex_labels=["User", "Document"],
@@ -41,7 +41,7 @@ async def load(pool: GraphosPool, tenant: str) -> int:
 
 async def main() -> None:
     tenants = ["team_red", "team_green", "team_blue"]
-    async with GraphosPool(base_url=URL, token=TOKEN, schema=SCHEMA) as pool:
+    async with GraphosPool(base_url=URL, schema=SCHEMA) as pool:
         written = await asyncio.gather(*(load(pool, t) for t in tenants))
         for tenant, n in zip(tenants, written, strict=True):
             hits = await (await pool.client(tenant)).search(q="welcome")

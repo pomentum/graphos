@@ -285,6 +285,80 @@ CREATE TABLE IF NOT EXISTS graphos_meta.change_horizon (
     txid    xid8 NOT NULL,
     seq     bigint NOT NULL
 );
+
+-- Identity and access (graphos.identity).  People and service accounts
+-- sign in with a password or secret, stored only as a scrypt hash.
+-- ``token_version`` is carried in every token graphos signs; bumping it
+-- (password change, reset, disable) refuses the tokens issued before, so a
+-- change applies at once, not at token expiry.
+CREATE TABLE IF NOT EXISTS graphos_meta.users (
+    name           text PRIMARY KEY,
+    kind           text NOT NULL CHECK (kind IN ('person', 'service')),
+    password_hash  text NOT NULL,
+    must_change    boolean NOT NULL DEFAULT false,
+    disabled       boolean NOT NULL DEFAULT false,
+    failed_logins  integer NOT NULL DEFAULT 0,
+    locked_until   timestamptz,
+    token_version  integer NOT NULL DEFAULT 0,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    created_by     text,
+    last_login_at  timestamptz
+);
+
+-- What a subject may do: a level on a tenant pattern ("acme", "sol_*",
+-- "*"), or a global right (create_tenants on a pattern, admin on "*").
+CREATE TABLE IF NOT EXISTS graphos_meta.grants (
+    subject         text NOT NULL,
+    tenant_pattern  text NOT NULL,
+    level           text NOT NULL CHECK (level IN
+                        ('read', 'write', 'maintain', 'owner', 'create_tenants', 'admin')),
+    granted_by      text,
+    granted_at      timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (subject, tenant_pattern, level)
+);
+
+-- Browser sessions of people: one rotating refresh token each (only its
+-- hash is kept).  A rotated token used again revokes its whole family.
+CREATE TABLE IF NOT EXISTS graphos_meta.sessions (
+    id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    family               uuid NOT NULL,
+    user_name            text NOT NULL,
+    refresh_hash         text NOT NULL UNIQUE,
+    created_at           timestamptz NOT NULL DEFAULT now(),
+    idle_expires_at      timestamptz NOT NULL,
+    absolute_expires_at  timestamptz NOT NULL,
+    rotated_at           timestamptz,
+    revoked_at           timestamptz
+);
+-- A session signed in through the identity provider keeps the claims its
+-- tokens are issued from (subject, name, groups, roles).
+ALTER TABLE graphos_meta.sessions ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'native';
+ALTER TABLE graphos_meta.sessions ADD COLUMN IF NOT EXISTS claims jsonb;
+-- The provider's ID token, kept server-side only, sent back as id_token_hint
+-- when signing out there (providers otherwise ask the person to confirm).
+ALTER TABLE graphos_meta.sessions ADD COLUMN IF NOT EXISTS id_token text;
+CREATE INDEX IF NOT EXISTS sessions_family ON graphos_meta.sessions (family);
+
+-- A sign-in at the identity provider in progress: graphos keeps the PKCE
+-- verifier and the nonce, so the browser stores nothing.  Single use, 5 min.
+CREATE TABLE IF NOT EXISTS graphos_meta.oidc_pending (
+    state          text PRIMARY KEY,
+    nonce          text NOT NULL,
+    code_verifier  text NOT NULL,
+    redirect_uri   text NOT NULL,
+    return_to      text NOT NULL,
+    expires_at     timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sessions_user ON graphos_meta.sessions (user_name);
+
+-- Keys graphos signs its tokens with (ES256).  The newest unretired key
+-- signs; every unretired key verifies.
+CREATE TABLE IF NOT EXISTS graphos_meta.signing_keys (
+    kid          text PRIMARY KEY,
+    private_pem  text NOT NULL,
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    retired_at   timestamptz
+);
 """
 
 

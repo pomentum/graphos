@@ -14,13 +14,23 @@ import {
   useMantineColorScheme,
 } from "@mantine/core";
 import { useState } from "react";
-import { IconBell, IconCheck, IconChevronDown, IconLogout, IconMoon, IconSun, IconSunMoon } from "@tabler/icons-react";
+import {
+  IconBell,
+  IconCheck,
+  IconChevronDown,
+  IconKey,
+  IconLogout,
+  IconMoon,
+  IconSun,
+  IconSunMoon,
+} from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useActivity } from "../data/ActivityProvider";
 import { describeChange, streamStatusText } from "../lib/changes";
 import { relativeTime } from "../lib/time";
 import { useSessionContext, useTenantSession } from "../session/SessionProvider";
+import { ChangePasswordDialog } from "./ChangePasswordDialog";
 
 /** Above this many tenants the switcher offers a search box. */
 const TENANT_SEARCH_FROM = 8;
@@ -149,11 +159,12 @@ export function ActivityBell() {
   );
 }
 
-/** Who is signed in, the colour scheme, and sign out. */
+/** Who is signed in and their level here, the colour scheme, the password, and sign out. */
 export function AccountMenu() {
   const { t } = useTranslation();
-  const { me, canWrite } = useTenantSession();
+  const { me, level, isAdmin } = useTenantSession();
   const { signOut } = useSessionContext();
+  const [changing, setChanging] = useState(false);
   const { colorScheme, setColorScheme } = useMantineColorScheme();
   const schemes = [
     { value: "auto", label: t("shell.account.schemes.system"), icon: IconSunMoon },
@@ -161,42 +172,50 @@ export function AccountMenu() {
     { value: "dark", label: t("shell.account.schemes.dark"), icon: IconMoon },
   ] as const;
   return (
-    <Menu position="bottom-end" width={210}>
-      <Menu.Target>
-        <Avatar
-          component="button"
-          size={26}
-          radius="xl"
-          color="gray"
-          aria-label={t("shell.account.label")}
-          style={{ cursor: "pointer", border: 0 }}
-        >
-          {me.consumer.slice(0, 2).toUpperCase()}
-        </Avatar>
-      </Menu.Target>
-      <Menu.Dropdown>
-        <Menu.Label>
-          {t("shell.account.whoAndAccess", {
-            consumer: me.consumer,
-            access: canWrite ? t("shell.account.canEdit") : t("shell.account.readOnly"),
-          })}
-        </Menu.Label>
-        <Menu.Divider />
-        {schemes.map(({ value, label, icon: Icon }) => (
-          <Menu.Item
-            key={value}
-            leftSection={<Icon size={14} />}
-            rightSection={colorScheme === value ? <IconCheck size={14} /> : null}
-            onClick={() => setColorScheme(value)}
+    <>
+      <Menu position="bottom-end" width={210}>
+        <Menu.Target>
+          <Avatar
+            component="button"
+            size={26}
+            radius="xl"
+            color="gray"
+            aria-label={t("shell.account.label")}
+            style={{ cursor: "pointer", border: 0 }}
           >
-            {label}
+            {me.consumer.slice(0, 2).toUpperCase()}
+          </Avatar>
+        </Menu.Target>
+        <Menu.Dropdown>
+          <Menu.Label>
+            {t("shell.account.whoAndAccess", {
+              consumer: me.consumer,
+              access: isAdmin ? t("shell.account.admin") : t(`shell.account.levels.${level ?? "read"}`),
+            })}
+          </Menu.Label>
+          <Menu.Divider />
+          {schemes.map(({ value, label, icon: Icon }) => (
+            <Menu.Item
+              key={value}
+              leftSection={<Icon size={14} />}
+              rightSection={colorScheme === value ? <IconCheck size={14} /> : null}
+              onClick={() => setColorScheme(value)}
+            >
+              {label}
+            </Menu.Item>
+          ))}
+          <Menu.Divider />
+          {me.via === "password" && me.kind === "person" ? (
+            <Menu.Item leftSection={<IconKey size={14} />} onClick={() => setChanging(true)}>
+              {t("shell.account.changePassword")}
+            </Menu.Item>
+          ) : null}
+          <Menu.Item leftSection={<IconLogout size={14} />} onClick={signOut}>
+            {t("shell.account.signOut")}
           </Menu.Item>
-        ))}
-        <Menu.Divider />
-        <Menu.Item leftSection={<IconLogout size={14} />} onClick={signOut}>
-          {t("shell.account.signOut")}
-        </Menu.Item>
-      </Menu.Dropdown>
-    </Menu>
+        </Menu.Dropdown>
+      </Menu>
+      <ChangePasswordDialog opened={changing} onClose={() => setChanging(false)} />
+    </>
   );
 }

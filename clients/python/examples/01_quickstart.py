@@ -1,7 +1,7 @@
 """Register a tenant, write a small graph, read it back.
 
     export GRAPHOS_URL=http://127.0.0.1:8080
-    export GRAPHOS_TOKEN="$(cat services/graphos/deploy/secrets/admin_token.txt)"
+    export GRAPHOS_USER=graphos GRAPHOS_PASSWORD=...   # or a service account
     python clients/python/examples/01_quickstart.py
 """
 
@@ -13,11 +13,11 @@ import os
 from graphos_client import EdgeUpsert, GraphosClient, NodeUpsert
 
 URL = os.environ.get("GRAPHOS_URL", "http://127.0.0.1:8080")
-TOKEN = os.environ["GRAPHOS_TOKEN"]          # admin scope: registration needs it
+# Signs in as GRAPHOS_USER / GRAPHOS_PASSWORD and renews its token by itself.
 
 
 async def main() -> None:
-    async with GraphosClient(base_url=URL, token=TOKEN, tenant="acme") as g:
+    async with GraphosClient(base_url=URL, tenant="acme") as g:
         # 1. Declare the labels this tenant uses. Idempotent: safe on every start.
         await g.register_tenant(
             vertex_labels=["User", "Document", "Tag"],

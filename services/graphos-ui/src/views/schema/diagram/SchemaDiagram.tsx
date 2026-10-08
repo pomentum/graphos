@@ -97,23 +97,16 @@ export interface SchemaDiagramProps {
 const NODE_TYPES = { label: LabelBox, family: FamilyBlock };
 const EDGE_TYPES = { line: SchemaLine };
 const FIT = { padding: 0.12, maxZoom: 1.2 };
-const LEGEND_KEY = "graphos.schemaDiagram.legend";
+// Whether the legend is open, for the life of the page (nothing is kept in
+// the browser's storage).
+let legendOpen = true;
 
-/** Whether the legend was left open, in this browser (open when unknown). */
 function legendWasOpen(): boolean {
-  try {
-    return window.localStorage.getItem(LEGEND_KEY) !== "hidden";
-  } catch {
-    return true;
-  }
+  return legendOpen;
 }
 
 function rememberLegend(open: boolean): void {
-  try {
-    window.localStorage.setItem(LEGEND_KEY, open ? "shown" : "hidden");
-  } catch {
-    /* not kept */
-  }
+  legendOpen = open;
 }
 
 /**

@@ -1,120 +1,262 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { fetchMe, GraphosApi } from "../api/graphosApi";
-import { ApiError, HttpClient } from "../api/http";
-import type { Me } from "../api/types";
-import { SessionStore } from "./sessionStore";
+import { HttpClient } from "../api/http";
+import type { AuthConfig, Level, Me, OidcSignedIn, TokenResponse } from "../api/types";
+import { Credentials } from "./credentials";
+import { atLeast } from "./levels";
+
+export { atLeast };
 
 /** Where the API is reached: nginx (and the dev server) forward `/api` to graphos. */
 export const API_BASE = "/api";
+/** Where the identity provider sends the browser back to. */
+export const CALLBACK_PATH = "/auth/callback";
 
 /** The signed-in state every screen reads. */
 export interface Session {
   me: Me;
-  token: string;
   /** The selected tenant, or null before one is chosen. */
   tenant: string | null;
   /** The API of the selected tenant; null before one is chosen. */
   api: GraphosApi | null;
+  /** The level on the selected tenant (`owner` for an admin). */
+  level: Level | null;
+  /** May write data on the selected tenant. */
   canWrite: boolean;
+  /** May change its schema and run recompute / metrics. */
+  canMaintain: boolean;
+  /** May manage who has access to it. */
+  isOwner: boolean;
   isAdmin: boolean;
 }
 
+/** Why the sign-in page is shown with a note. */
+export type SignInNotice = "expired" | "ssoFailed" | null;
+
 interface SessionContextValue {
   session: Session | null;
-  /** True while a token kept from earlier in the tab is being checked. */
-  restoring: boolean;
-  /** The kept token could not be checked (graphos unreachable): it is kept for `retryRestore`. */
-  restoreFailed: boolean;
-  retryRestore: () => void;
-  /** Checks the token with graphos and keeps it for the tab. */
-  signIn: (token: string) => Promise<void>;
+  /** How to sign in (null while it is being asked). */
+  config: AuthConfig | null;
+  /** True while the page finds out whether someone is already signed in (SSO). */
+  checking: boolean;
+  notice: SignInNotice;
+  /** Signs in with a user name and password; the tokens stay in memory. */
+  signIn: (user: string, password: string) => Promise<void>;
+  /** Goes to the identity provider to sign in. */
+  signInWithSso: () => Promise<void>;
+  /** Changes the password (required first when `me.must_change`). */
+  changePassword: (current: string, next: string) => Promise<void>;
   selectTenant: (tenant: string) => void;
   signOut: () => void;
+  /** The page to show after signing in through the provider, once. */
+  returnTo: string | null;
+  clearReturnTo: () => void;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
 
+interface State {
+  me: Me;
+  credentials: Credentials;
+  tenant: string | null;
+}
+
 /**
- * Owns the session: signs in with a token (`GET /v1/me`), remembers the
- * chosen tenant, and builds the tenant's `GraphosApi` for everything below.
+ * Owns the session. Signs in with a user name and password
+ * (`POST /v1/auth/login`) or through the identity provider; keeps the tokens
+ * in page memory only (no cookie, no browser storage), renews them while the
+ * page is open, and builds the selected tenant's `GraphosApi`.
+ *
+ * With single sign-on, every page load first tries a silent sign-in
+ * (`prompt=none`): someone already signed in at the provider comes straight
+ * back signed in, and only someone who is not sees the sign-in page. graphos
+ * holds the PKCE verifier and exchanges the code, so nothing about the
+ * sign-in is kept in the browser either.
  */
 export function SessionProvider({
   children,
-  store: storeProp,
   initial = null,
+  fetchImpl,
+  navigateTo = (url) => window.location.assign(url),
 }: {
   children: ReactNode;
-  store?: SessionStore;
-  initial?: { me: Me; token: string; tenant: string | null } | null;
+  /** A signed-in state to start from (tests). */
+  initial?: { me: Me; tokens: TokenResponse; tenant: string | null } | null;
+  fetchImpl?: typeof fetch;
+  /** Leaves the page (for the identity provider); replaced in tests. */
+  navigateTo?: (url: string) => void;
 }) {
-  const [store] = useState(() => storeProp ?? new SessionStore());
-  const [state, setState] = useState(initial);
-  const [restoring, setRestoring] = useState(() => !initial && store.load() !== null);
-  const [restoreFailed, setRestoreFailed] = useState(false);
+  const [notice, setNotice] = useState<SignInNotice>(null);
+  const [config, setConfig] = useState<AuthConfig | null>(null);
+  const [checking, setChecking] = useState(initial === null);
+  const [returnTo, setReturnTo] = useState<string | null>(null);
+  const endedRef = useRef<() => void>(() => undefined);
+  const newCredentials = useCallback(
+    (tokens: TokenResponse) => new Credentials(tokens, API_BASE, () => endedRef.current(), fetchImpl),
+    [fetchImpl],
+  );
+  const [state, setState] = useState<State | null>(() =>
+    initial ? { me: initial.me, tenant: initial.tenant, credentials: newCredentials(initial.tokens) } : null,
+  );
+  endedRef.current = () => {
+    setState(null);
+    setNotice("expired");
+  };
+
+  const anonymous = useMemo(() => new HttpClient(API_BASE, null, fetchImpl), [fetchImpl]);
+
+  const startSso = useCallback(
+    async (silent: boolean) => {
+      const { authorization_url } = await anonymous.post<{ authorization_url: string }>("/v1/auth/oidc/start", {
+        redirect_uri: `${window.location.origin}${CALLBACK_PATH}`,
+        return_to: silent ? `${window.location.pathname}${window.location.search}` : "/",
+        silent,
+      });
+      navigateTo(authorization_url);
+    },
+    [anonymous, navigateTo],
+  );
+
+  const enter = useCallback(
+    async (tokens: TokenResponse) => {
+      const credentials = newCredentials(tokens);
+      const me = await fetchMe(new HttpClient(API_BASE, credentials, fetchImpl));
+      setNotice(null);
+      setState({ me, credentials, tenant: me.must_change ? null : pickTenant(me, null) });
+    },
+    [newCredentials, fetchImpl],
+  );
+
+  // Once per page load: how to sign in, then an SSO callback to finish or a
+  // silent sign-in to try. (A ref, not state: StrictMode runs effects twice,
+  // and a sign-in's state is single use.)
+  const started = useRef(false);
+  useEffect(() => {
+    if (initial !== null || started.current) return;
+    started.current = true;
+    void (async () => {
+      const found = await anonymous
+        .get<AuthConfig>("/v1/auth/config")
+        .catch((): AuthConfig => ({ password: true, oidc: null }));
+      const auth: AuthConfig = { password: found.password !== false, oidc: found.oidc ?? null };
+      setConfig(auth);
+      const url = new URL(window.location.href);
+      if (url.pathname === CALLBACK_PATH) {
+        // Back from the provider: the address must not keep the code.
+        window.history.replaceState(null, "", "/");
+        const code = url.searchParams.get("code");
+        const state = url.searchParams.get("state");
+        if (code && state) {
+          try {
+            const signed = await anonymous.post<OidcSignedIn>("/v1/auth/oidc/callback", { code, state });
+            await enter(signed);
+            setReturnTo(signed.return_to);
+          } catch {
+            setNotice("ssoFailed");
+          }
+        } else if (state) {
+          // login_required after a silent attempt: the sign-in page, no retry.
+          await anonymous
+            .post("/v1/auth/oidc/callback", { state, error: url.searchParams.get("error") })
+            .catch(() => undefined);
+        }
+        setChecking(false);
+        return;
+      }
+      if (auth.oidc) {
+        try {
+          await startSso(true); // leaves the page
+          return;
+        } catch {
+          /* the provider is unreachable: the sign-in page still offers passwords */
+        }
+      }
+      setChecking(false);
+    })();
+  }, [initial, anonymous, enter, startSso]);
 
   const signIn = useCallback(
-    async (token: string) => {
-      const me = await fetchMe(new HttpClient(API_BASE, token));
-      const remembered = store.load();
-      const tenant = pickTenant(me, remembered?.token === token ? remembered.tenant : null);
-      store.save({ token, tenant });
-      setState({ me, token, tenant });
+    async (user: string, password: string) => {
+      await enter(await anonymous.post<TokenResponse>("/v1/auth/login", { user, password }));
     },
-    [store],
+    [anonymous, enter],
   );
 
-  // After a reload: sign in again with the token kept for this tab. Only a
-  // refused token is forgotten; when graphos cannot be reached it is kept,
-  // so a network blip does not sign the user out.
-  useEffect(() => {
-    if (!restoring) return;
-    const kept = store.load();
-    if (!kept) {
-      setRestoring(false);
-      return;
-    }
-    signIn(kept.token)
-      .then(() => setRestoreFailed(false))
-      .catch((error: unknown) => {
-        if (error instanceof ApiError && error.status === 401) store.clear();
-        else setRestoreFailed(true);
-      })
-      .finally(() => setRestoring(false));
-  }, [restoring, signIn, store]);
+  const signInWithSso = useCallback(() => startSso(false), [startSso]);
 
-  const retryRestore = useCallback(() => setRestoring(true), []);
-
-  const selectTenant = useCallback(
-    (tenant: string) => {
-      setState((current) => {
-        if (!current) return current;
-        store.save({ token: current.token, tenant });
-        return { ...current, tenant };
-      });
+  const changePassword = useCallback(
+    async (current: string, next: string) => {
+      if (!state) return;
+      const http = new HttpClient(API_BASE, state.credentials, fetchImpl);
+      const tokens = await http.post<TokenResponse>("/v1/me/password", { current, new: next });
+      // Every older token stopped working: carry on with the new ones.
+      state.credentials.apply(tokens);
+      const me = await fetchMe(http);
+      setState((s) => (s ? { ...s, me, tenant: s.tenant ?? pickTenant(me, null) } : s));
     },
-    [store],
+    [state, fetchImpl],
   );
+
+  const selectTenant = useCallback((tenant: string) => {
+    setState((current) => (current ? { ...current, tenant } : current));
+  }, []);
 
   const signOut = useCallback(() => {
-    store.clear();
+    const credentials = state?.credentials;
     setState(null);
-    setRestoreFailed(false);
-  }, [store]);
+    setNotice(null);
+    void credentials?.signOut(`${window.location.origin}/`).then((endSession) => {
+      // Signed in through the provider: end the session there too.
+      if (endSession) navigateTo(endSession);
+    });
+  }, [state, navigateTo]);
+
+  const clearReturnTo = useCallback(() => setReturnTo(null), []);
 
   const session = useMemo<Session | null>(() => {
     if (!state) return null;
-    const api = state.tenant ? new GraphosApi(new HttpClient(API_BASE, state.token), state.tenant) : null;
+    const { me, tenant, credentials } = state;
+    const api = tenant ? new GraphosApi(new HttpClient(API_BASE, credentials, fetchImpl), tenant) : null;
+    const level = me.admin ? "owner" : tenant ? (me.levels[tenant] ?? null) : null;
     return {
-      ...state,
+      me,
+      tenant,
       api,
-      canWrite: state.me.access === "write",
-      isAdmin: state.me.admin,
+      level,
+      canWrite: atLeast(level, "write"),
+      canMaintain: atLeast(level, "maintain"),
+      isOwner: atLeast(level, "owner"),
+      isAdmin: me.admin,
     };
-  }, [state]);
+  }, [state, fetchImpl]);
 
   const value = useMemo(
-    () => ({ session, restoring, restoreFailed, retryRestore, signIn, selectTenant, signOut }),
-    [session, restoring, restoreFailed, retryRestore, signIn, selectTenant, signOut],
+    () => ({
+      session,
+      config,
+      checking,
+      notice,
+      signIn,
+      signInWithSso,
+      changePassword,
+      selectTenant,
+      signOut,
+      returnTo,
+      clearReturnTo,
+    }),
+    [
+      session,
+      config,
+      checking,
+      notice,
+      signIn,
+      signInWithSso,
+      changePassword,
+      selectTenant,
+      signOut,
+      returnTo,
+      clearReturnTo,
+    ],
   );
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
@@ -133,7 +275,7 @@ export function useTenantSession(): Session & { api: GraphosApi; tenant: string 
   return session as Session & { api: GraphosApi; tenant: string };
 }
 
-/** The remembered tenant if the token still has it, else the only one, else none. */
+/** The remembered tenant if the user still has it, else the only one, else none. */
 export function pickTenant(me: Me, remembered: string | null): string | null {
   if (remembered && me.tenants.includes(remembered)) return remembered;
   return me.tenants.length === 1 ? (me.tenants[0] ?? null) : null;

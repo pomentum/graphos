@@ -15,18 +15,19 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import signal
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
 import asyncpg
+import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from graphos import __version__, node_properties
+from graphos import __version__, identity, node_properties, oidc
 from graphos.api import (
+    access,
     bulk,
     cache,
     changes,
@@ -44,7 +45,8 @@ from graphos.api import (
     snapshot,
     tenants,
 )
-from graphos.auth import TokenStore
+from graphos.api import auth as auth_api
+from graphos.auth import TokenAuthenticator
 from graphos.bootstrap import (
     bootstrap_tenant,
     load_registered_tenants,
@@ -67,15 +69,6 @@ from graphos.observability.rate_limit import RateLimitMiddleware
 from graphos.sync import CACHE_CHANNEL, Listener, RegistrySync
 
 log = logging.getLogger(__name__)
-
-
-def _install_sighup_handler(token_store: TokenStore) -> None:
-    """Reload auth tokens on SIGHUP (Unix only; no-op elsewhere)."""
-    try:
-        signal.signal(signal.SIGHUP, lambda *_: token_store.reload())  # type: ignore[attr-defined]
-    except (AttributeError, ValueError):
-        # Windows lacks SIGHUP; or we're not on the main thread.
-        log.info("SIGHUP handler not installed (likely Windows)")
 
 
 def _registered(tenant: str | None) -> str:
@@ -106,40 +99,66 @@ async def _run_vacuum(pool: asyncpg.Pool, _tenant: str | None, params: dict) -> 
 
 # Operations that accept ``Prefer: respond-async``.
 JOB_KINDS: dict[str, JobKind] = {
-    "recompute_communities": JobKind(run=_run_recompute, admin_only=True),
-    "compute_metrics": JobKind(run=_run_metrics, admin_only=True),
+    "recompute_communities": JobKind(run=_run_recompute, needs="maintain"),
+    "compute_metrics": JobKind(run=_run_metrics, needs="maintain"),
     "resolve_edges": JobKind(run=_run_resolve),
-    "vacuum": JobKind(run=_run_vacuum, admin_only=True),
+    "vacuum": JobKind(run=_run_vacuum, needs="admin"),
 }
+
+
+async def setup_identity(
+    app: FastAPI, pool: asyncpg.Pool, settings: Settings,
+    oidc_transport: httpx.AsyncBaseTransport | None = None,
+) -> identity.AccessStore | None:
+    """Users and grants in memory, the signing key, the authenticator, and
+    the bootstrap admin on a first start.  None when auth is disabled."""
+    app.state.authenticator = None
+    app.state.access_store = None
+    app.state.oidc = None
+    if settings.auth_disabled:
+        return None
+    provider = oidc.provider_from(settings, transport=oidc_transport)
+    if provider is not None:
+        try:
+            await provider.metadata()
+        except oidc.OidcError as exc:
+            # Not fatal: graphos users still sign in; SSO works once it answers.
+            log.warning("single sign-on: %s", exc)
+    app.state.oidc = provider
+    store = identity.AccessStore(pool)
+    created = await store.bootstrap(settings.admin_password_file)
+    await store.load()
+    if created is not None:
+        log.warning(
+            "FIRST START: created the admin user '%s' with %s; it must be changed at the "
+            "first sign-in", identity.ADMIN_USER,
+            f"the password '{identity.DEFAULT_ADMIN_PASSWORD}'" if created == "default"
+            else "the password from GRAPHOS_ADMIN_PASSWORD_FILE",
+        )
+    if store.first_password_unchanged():
+        log.warning(
+            "the admin user '%s' still has its first password: sign in and change it",
+            identity.ADMIN_USER,
+        )
+    signer = identity.Signer(issuer=settings.auth_issuer, ttl_s=settings.access_token_ttl_s)
+    await signer.load(pool, settings.auth_signing_key_file)
+    app.state.access_store = store
+    app.state.signer = signer
+    app.state.authenticator = TokenAuthenticator(signer, store, provider)
+    app.state.login_throttle = identity.Throttle(settings.login_attempts_per_min)
+    return store
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
 
-    # 1. Token store.  Fail closed: without a tokens file graphos only
-    # starts when auth was disabled explicitly (local development).
-    if settings.auth_tokens_file is None:
-        if not settings.auth_disabled:
-            raise RuntimeError(
-                "No GRAPHOS_AUTH_TOKENS_FILE configured. Point it at a tokens "
-                "file (scripts/init-secrets.sh creates one), or set "
-                "GRAPHOS_AUTH_DISABLED=true for local development only."
-            )
-        app.state.token_store = None
+    # 1. Say it loudly when nothing is checked.
+    if settings.auth_disabled:
         log.error(
             "AUTHENTICATION DISABLED (GRAPHOS_AUTH_DISABLED=true): every request "
             "is an anonymous admin. Never expose this instance to a network."
         )
-    else:
-        token_store = TokenStore(settings.auth_tokens_file)
-        if token_store.load_error is not None:
-            raise RuntimeError(
-                f"GRAPHOS_AUTH_TOKENS_FILE {settings.auth_tokens_file} is unusable "
-                f"({token_store.load_error}). Fix or create it (scripts/init-secrets.sh)."
-            )
-        app.state.token_store = token_store
-        _install_sighup_handler(token_store)
 
     # 2. asyncpg pool
     pool = await create_pool(settings)
@@ -149,6 +168,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     #    from the previous boot.
     await ensure_internal_schema(pool)
     restored = await load_registered_tenants(pool)
+
+    # 3a. Identity: users and grants in memory, the signing key, and the
+    #     bootstrap admin on a first start (graphos.identity).
+    access_store = await setup_identity(app, pool, settings)
 
     # Re-bootstrap each restored tenant in case AGE was wiped underneath
     # graphos-api (e.g. the operator dropped a graph). Each call is idempotent.
@@ -193,6 +216,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     cache.LRU.max_age_s = settings.cache_max_age_s
     listener.subscribe(CACHE_CHANNEL, cache.on_notification)
     listener.on_connect(cache.LRU.clear)
+    if access_store is not None:
+        listener.subscribe(identity.ACCESS_CHANNEL, access_store.on_notify)
+        listener.on_connect(access_store.on_notify)
+        access_store.start()
     listener.start()
     feed.start()
     registry_sync.start()
@@ -214,6 +241,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await registry_sync.stop()
         await feed.stop()
         await listener.stop()
+        if access_store is not None:
+            await access_store.stop()
         await runner.stop()
         terminate_running()
         await pool.close()
@@ -288,6 +317,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Routers (no prefix on health; /v1 prefix on every other surface)
     app.include_router(health.router)
     app.include_router(info.router, prefix="/v1")
+    app.include_router(auth_api.router, prefix="/v1")
+    app.include_router(access.router, prefix="/v1")
     app.include_router(tenants.router, prefix="/v1")
     app.include_router(me.router, prefix="/v1")
     app.include_router(graph.router, prefix="/v1")

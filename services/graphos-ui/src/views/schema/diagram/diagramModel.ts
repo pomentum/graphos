@@ -500,26 +500,18 @@ export function placeCaptions(inputs: CaptionInput[], boxes: Rect[]): Record<str
   return out;
 }
 
-// v2: positions of labels in a block are relative to the block.
-const STORAGE_PREFIX = "graphos.schemaDiagram.v2.";
+// Positions the user arranged, per tenant, for the life of the page: graphos
+// keeps nothing in the browser's storage, so a reload lays the diagram out
+// again.  Positions of labels in a block are relative to the block.
+const ARRANGED = new Map<string, Positions>();
 
-/** Positions the user arranged for this tenant, in this browser (empty when unavailable). */
+/** Positions the user arranged for this tenant since the page was opened. */
 export function loadPositions(tenant: string): Positions {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_PREFIX + tenant);
-    const parsed: unknown = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === "object" ? (parsed as Positions) : {};
-  } catch {
-    return {};
-  }
+  return { ...(ARRANGED.get(tenant) ?? {}) };
 }
 
-/** Remembers positions in this browser; storage that is unavailable is ignored. */
+/** Remembers positions while the page is open. */
 export function savePositions(tenant: string, positions: Positions): void {
-  try {
-    if (Object.keys(positions).length === 0) window.localStorage.removeItem(STORAGE_PREFIX + tenant);
-    else window.localStorage.setItem(STORAGE_PREFIX + tenant, JSON.stringify(positions));
-  } catch {
-    /* not kept: the layout is computed again next time */
-  }
+  if (Object.keys(positions).length === 0) ARRANGED.delete(tenant);
+  else ARRANGED.set(tenant, { ...positions });
 }

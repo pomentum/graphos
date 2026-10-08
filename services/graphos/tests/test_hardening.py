@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from http import HTTPStatus
-from pathlib import Path
 
 import asyncpg
 import pytest
 from fastapi.testclient import TestClient
 
 from graphos.app import create_app
-from graphos.auth import TokenStore
+from graphos.auth import StaticAuthenticator
 from graphos.config import Settings
 from graphos.contracts.tenants import TenantSpecBody
+from graphos.identity import Principal
 
 _BASE = {"name": "demo", "vertex_labels": ["Doc"], "edge_labels": ["LINKS"]}
 
@@ -111,39 +110,14 @@ def test_requests_rejected_without_tokens_or_explicit_opt_out() -> None:
     assert resp.status_code == HTTPStatus.UNAUTHORIZED
 
 
-def test_startup_refuses_without_tokens_file() -> None:
-    app = create_app(Settings(db_password="placeholder"))
-    with pytest.raises(RuntimeError, match="GRAPHOS_AUTH_TOKENS_FILE"), TestClient(app):
-        pass
-
-
 # ── audit names the real consumer ──────────────────────────────────────────
 
 
-def test_audit_records_token_consumer(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
-    tokens = tmp_path / "tokens.json"
-    tokens.write_text(json.dumps({"tok_ops": {"consumer": "ops", "tenants": [], "admin": True}}))
-    app = create_app(Settings(db_password="placeholder", auth_tokens_file=tokens))
-    app.state.token_store = TokenStore(tokens)   # lifespan is not run in unit tests
+def test_audit_records_the_consumer(caplog: pytest.LogCaptureFixture) -> None:
+    app = create_app(Settings(db_password="placeholder"))
+    app.state.authenticator = StaticAuthenticator({"tok_ops": Principal.static("ops", admin=True)})
     client = TestClient(app, raise_server_exceptions=False)
     with caplog.at_level(logging.INFO, logger="graphos.audit"):
         client.post("/v1/tenants", headers={"Authorization": "Bearer tok_ops"}, json={"name": "t1"})
     (record,) = [r for r in caplog.records if r.name == "graphos.audit"]
     assert record.consumer == "ops"
-
-
-def test_bad_tokens_reload_keeps_existing_tokens(tmp_path: Path) -> None:
-    tokens = tmp_path / "tokens.json"
-    tokens.write_text(json.dumps({"tok_a": {"consumer": "a", "tenants": ["acme"]}}))
-    store = TokenStore(tokens)
-    tokens.write_text("{ not json")            # a typo before SIGHUP
-    store.reload()
-    assert store.lookup("tok_a") is not None   # nobody gets locked out
-    assert store.load_error is not None
-
-
-def test_startup_refuses_unusable_tokens_file(tmp_path: Path) -> None:
-    missing = tmp_path / "missing.json"
-    app = create_app(Settings(db_password="placeholder", auth_tokens_file=missing))
-    with pytest.raises(RuntimeError, match="unusable"), TestClient(app):
-        pass

@@ -5,7 +5,7 @@ import { countByEdgeType } from "../src/lib/expand";
 import { isEmptyPatch, mergePatch, propertyKind, sortedEntries } from "../src/lib/properties";
 import { formatBytes, relativeTime } from "../src/lib/time";
 import { pickTenant } from "../src/session/SessionProvider";
-import { SessionStore } from "../src/session/sessionStore";
+import { atLeast } from "../src/session/levels";
 import { menuGroups, VIEWS, visibleViews, type ViewDefinition } from "../src/views/registry";
 
 describe("mergePatch", () => {
@@ -104,36 +104,40 @@ describe("pickSearchIndex", () => {
 });
 
 describe("session", () => {
-  const me = (tenants: string[]) => ({ consumer: "c", admin: false, access: "read" as const, tenants });
+  const me = (tenants: string[]) => ({
+    consumer: "c",
+    kind: "person" as const,
+    via: "password" as const,
+    admin: false,
+    must_change: false,
+    tenants,
+    levels: {},
+    create_tenants: [],
+  });
   it("picks the remembered tenant, or the only one", () => {
     expect(pickTenant(me(["a", "b"]), "b")).toBe("b");
     expect(pickTenant(me(["a", "b"]), "gone")).toBeNull();
     expect(pickTenant(me(["a"]), null)).toBe("a");
   });
 
-  it("stores the session for the tab and survives broken storage", () => {
-    const data = new Map<string, string>();
-    const storage = {
-      getItem: (k: string) => data.get(k) ?? null,
-      setItem: (k: string, v: string) => void data.set(k, v),
-      removeItem: (k: string) => void data.delete(k),
-    } as Storage;
-    const store = new SessionStore(storage);
-    store.save({ token: "t", tenant: "a" });
-    expect(store.load()).toEqual({ token: "t", tenant: "a" });
-    store.clear();
-    expect(store.load()).toBeNull();
-    data.set("graphos.session", "{not json");
-    expect(store.load()).toBeNull();
-    expect(new SessionStore(null).load()).toBeNull();
+  it("orders levels", () => {
+    expect(atLeast("owner", "maintain")).toBe(true);
+    expect(atLeast("write", "maintain")).toBe(false);
+    expect(atLeast("read", "read")).toBe(true);
+    expect(atLeast(null, "read")).toBe(false);
   });
 });
 
 describe("view registry", () => {
-  it("hides admin views from other tokens and groups the menu", () => {
+  it("hides admin and owner views from the others and groups the menu", () => {
     const admin = { ...VIEWS[0]!, id: "tenants", group: "Admin", requires: "admin" } as ViewDefinition;
-    expect(visibleViews({ isAdmin: false }, [...VIEWS, admin]).map((v) => v.id)).not.toContain("tenants");
-    expect(visibleViews({ isAdmin: true }, [...VIEWS, admin]).map((v) => v.id)).toContain("tenants");
-    expect(menuGroups(VIEWS).map(([group]) => group)).toEqual(["Graph", "Insights", "Data"]);
+    const ids = (session: { isAdmin: boolean; isOwner: boolean }) =>
+      visibleViews(session, [...VIEWS, admin]).map((v) => v.id);
+    expect(ids({ isAdmin: false, isOwner: false })).not.toContain("tenants");
+    expect(ids({ isAdmin: false, isOwner: false })).not.toContain("access");
+    expect(ids({ isAdmin: false, isOwner: true })).toContain("access");
+    expect(ids({ isAdmin: false, isOwner: true })).not.toContain("tenants");
+    expect(ids({ isAdmin: true, isOwner: false })).toEqual(expect.arrayContaining(["tenants", "access"]));
+    expect(menuGroups(VIEWS).map(([group]) => group)).toEqual(["Graph", "Insights", "Data", "Admin"]);
   });
 });

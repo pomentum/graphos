@@ -7,11 +7,69 @@ export type Properties = Record<string, unknown>;
 export type Direction = "out" | "in" | "both";
 
 /** `GET /v1/me`: the signed-in token. */
+export type Level = "read" | "write" | "maintain" | "owner";
+
+/** Who is signed in (`GET /v1/me`): their level on each tenant and their rights. */
 export interface Me {
   consumer: string;
+  kind: "person" | "service" | "anonymous";
+  /** How they signed in: a graphos password, or the identity provider. */
+  via: "password" | "oidc" | "none";
   admin: boolean;
-  access: "read" | "write";
+  /** The password must be changed before anything else. */
+  must_change: boolean;
   tenants: string[];
+  levels: Record<string, Level>;
+  /** Patterns of tenant names this user may create. */
+  create_tenants: string[];
+}
+
+/** Answer of `/v1/auth/login`, `/v1/auth/refresh` and `/v1/me/password`. */
+export interface TokenResponse {
+  access_token: string;
+  expires_in: number;
+  /** People only: renews the access token; kept in memory, rotated on each use. */
+  refresh_token: string | null;
+  must_change: boolean;
+}
+
+/** Answer of `/v1/auth/oidc/callback`: the tokens and the page to return to. */
+export interface OidcSignedIn extends TokenResponse {
+  return_to: string;
+}
+
+/** How to sign in (`GET /v1/auth/config`). */
+export interface AuthConfig {
+  password: boolean;
+  oidc: { issuer: string; client_id: string; scopes: string; display_name: string } | null;
+}
+
+export type GrantLevel = Level | "create_tenants" | "admin";
+
+/** A user or service account (`/v1/users`, admin). */
+export interface UserInfo {
+  name: string;
+  kind: "person" | "service";
+  disabled: boolean;
+  must_change: boolean;
+  created_at: string;
+  created_by: string | null;
+  last_login_at: string | null;
+}
+
+/** A user just created or reset, with its password shown once. */
+export interface UserCreated {
+  user: UserInfo;
+  password: string;
+}
+
+/** What a subject may do on a tenant (or pattern), or a global right. */
+export interface Grant {
+  subject: string;
+  tenant: string;
+  level: GrantLevel;
+  granted_by?: string | null;
+  granted_at?: string;
 }
 
 export interface SearchIndexSpec {

@@ -23,7 +23,7 @@ from graphos.resolver.catalogue import (
 
 
 def _client() -> TestClient:
-    settings = Settings(db_password="placeholder", auth_tokens_file=None, auth_disabled=True)
+    settings = Settings(db_password="placeholder", auth_disabled=True)
     app = create_app(settings=settings)
     # Inject a stub pool so the endpoint's ``request.app.state.pool``
     # access doesn't 500 in a DB-less unit test.  The catalogue refresh

@@ -16,7 +16,7 @@ from graphos.observability.logging import _parse_traceparent
 
 def _client(**overrides) -> TestClient:
     settings = Settings(
-        db_password="placeholder", auth_tokens_file=None, auth_disabled=True,
+        db_password="placeholder", auth_disabled=True,
         **overrides,
     )
     app = create_app(settings=settings)

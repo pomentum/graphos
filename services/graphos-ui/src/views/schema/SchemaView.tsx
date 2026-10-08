@@ -46,7 +46,7 @@ const SHOWN_PAIRS = 3;
  */
 export function SchemaView() {
   const { t } = useTranslation();
-  const { tenant, isAdmin } = useTenantSession();
+  const { tenant, canMaintain } = useTenantSession();
   const schema = useSchema();
   const map = useGraphMap();
   const catalogue = useCatalogue();
@@ -96,11 +96,11 @@ export function SchemaView() {
             {t("views.schema.heading", { tenant })}
           </Title>
           <Text size="xs" c="dimmed">
-            {isAdmin ? t("views.schema.neverRemoves") : t("views.schema.readOnly")}
+            {canMaintain ? t("views.schema.neverRemoves") : t("views.schema.readOnly")}
           </Text>
         </div>
         <Group gap="md">
-          {schema.data ? <StrictEndpoints schema={schema.data} map={map.data} isAdmin={isAdmin} /> : null}
+          {schema.data ? <StrictEndpoints schema={schema.data} map={map.data} editable={canMaintain} /> : null}
           <SegmentedControl
             size="xs"
             aria-label={t("views.schema.view.label")}
@@ -111,7 +111,7 @@ export function SchemaView() {
             value={view}
             onChange={setView}
           />
-          {isAdmin && schema.data ? (
+          {canMaintain && schema.data ? (
             <Menu position="bottom-end" width={200}>
               <Menu.Target>
                 <Button size="xs" leftSection={<IconPlus size={14} />} rightSection={<IconChevronDown size={12} />}>
@@ -138,7 +138,7 @@ export function SchemaView() {
               schema={schema.data}
               map={map.data}
               properties={properties}
-              editable={isAdmin}
+              editable={canMaintain}
               onAddLabel={() => setAdding("label")}
               onDrawRelationship={addRelationshipBetween}
             />

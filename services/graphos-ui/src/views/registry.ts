@@ -1,6 +1,7 @@
 import {
   IconActivity,
   IconChartBar,
+  IconKey,
   IconRoute,
   IconSchema,
   IconTable,
@@ -20,8 +21,8 @@ export interface ViewDefinition {
   title: ParseKeys;
   icon: Icon;
   group: ViewGroup;
-  /** `read`: any token on the tenant; `admin`: admin tokens only. */
-  requires: "read" | "admin";
+  /** `read`: anyone on the tenant; `owner`: its owners and admins; `admin`: admins only. */
+  requires: "read" | "owner" | "admin";
 }
 
 /** The i18n key of each menu group's heading. */
@@ -75,11 +76,24 @@ export const VIEWS: ViewDefinition[] = [
     group: "Data",
     requires: "read",
   },
+  {
+    id: "access",
+    path: "/access",
+    title: "views.registry.titles.access",
+    icon: IconKey,
+    group: "Admin",
+    requires: "owner",
+  },
 ];
 
 /** The views this session may open; views it can't use are hidden, not greyed out. */
-export function visibleViews(session: Pick<Session, "isAdmin">, views: ViewDefinition[] = VIEWS): ViewDefinition[] {
-  return views.filter((view) => view.requires === "read" || session.isAdmin);
+export function visibleViews(
+  session: Pick<Session, "isAdmin" | "isOwner">,
+  views: ViewDefinition[] = VIEWS,
+): ViewDefinition[] {
+  return views.filter(
+    (view) => view.requires === "read" || session.isAdmin || (view.requires === "owner" && session.isOwner),
+  );
 }
 
 /** Visible views grouped for the sidebar, groups in menu order. */

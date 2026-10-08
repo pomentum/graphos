@@ -18,9 +18,10 @@ const job = (extra: Partial<Job> = {}): Job => ({
   ...extra,
 });
 
-const ADMIN = { isAdmin: true, canWrite: true };
-const WRITER = { isAdmin: false, canWrite: true };
-const READER = { isAdmin: false, canWrite: false };
+const ADMIN = { isAdmin: true, level: "owner" as const };
+const MAINTAINER = { isAdmin: false, level: "maintain" as const };
+const WRITER = { isAdmin: false, level: "write" as const };
+const READER = { isAdmin: false, level: "read" as const };
 
 describe("jobs", () => {
   it("treats queued and running jobs as active", () => {
@@ -38,7 +39,9 @@ describe("jobs", () => {
 
   it("lets cancel whoever may start the kind", () => {
     expect(canCancel(job(), ADMIN)).toBe(true);
-    expect(canCancel(job(), WRITER)).toBe(false); // metrics: admin only
+    expect(canCancel(job(), WRITER)).toBe(false); // metrics: maintain
+    expect(canCancel(job(), MAINTAINER)).toBe(true);
+    expect(canCancel(job({ kind: "vacuum" }), MAINTAINER)).toBe(false); // admin only
     expect(canCancel(job({ kind: "resolve_edges" }), WRITER)).toBe(true);
     expect(canCancel(job({ kind: "resolve_edges" }), READER)).toBe(false);
     expect(canCancel(job({ kind: "future_kind" }), WRITER)).toBe(false); // unknown: admin only

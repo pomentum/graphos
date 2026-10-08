@@ -17,15 +17,15 @@ import pytest
 from graphos import writes
 from graphos.api.communities import list_communities
 from graphos.api.graph import aggregate_nodes, export_graph
-from graphos.auth import TokenPrincipal
 from graphos.bootstrap import TenantSpec, register_tenant
 from graphos.contracts.graph import NodesAggregateRequest
 from graphos.cypher import query_cypher
+from graphos.identity import Principal
 
 from .conftest import requires_db
 
 T = "graphos_test_sql_reads"
-ADMIN = TokenPrincipal(consumer="test", tenants=frozenset(), admin=True)
+ADMIN = Principal.static("test", admin=True)
 
 
 def _request(pool: asyncpg.Pool) -> SimpleNamespace:

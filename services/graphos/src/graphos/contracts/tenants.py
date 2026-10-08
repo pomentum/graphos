@@ -511,14 +511,28 @@ class TenantInfo(BaseModel):
 
 
 class MeResponse(BaseModel):
-    """Returned by GET /v1/me: what the calling token is and may use."""
+    """Returned by GET /v1/me: who is signed in and what they may use."""
 
-    consumer: str = Field(description="The token's consumer; audit and changes record it.")
+    consumer: str = Field(description="The user name; audit, changes and jobs record it.")
+    kind: Literal["person", "service", "anonymous"] = "person"
+    via: Literal["password", "oidc", "none"] = Field(
+        "password",
+        description="How the caller signed in: a graphos user, or the identity provider.",
+    )
     admin: bool
-    access: Literal["read", "write"]
+    must_change: bool = Field(
+        False, description="The password must be changed before anything else.",
+    )
     tenants: list[str] = Field(
         default_factory=list,
-        description="Registered tenants the token may use (every tenant for an admin token).",
+        description="Registered tenants the caller may use (every tenant for an admin).",
+    )
+    levels: dict[str, Literal["read", "write", "maintain", "owner"]] = Field(
+        default_factory=dict, description="The caller's level on each of `tenants`.",
+    )
+    create_tenants: list[str] = Field(
+        default_factory=list,
+        description="Patterns of tenant names the caller may create (`*` for an admin).",
     )
 
 

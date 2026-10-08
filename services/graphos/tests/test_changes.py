@@ -26,9 +26,11 @@ from pydantic import BaseModel
 
 from graphos import changes, jobs, lookup, writes
 from graphos.app import create_app
+from graphos.auth import StaticAuthenticator
 from graphos.bootstrap import TenantSpec, register_tenant
 from graphos.changes import ACTOR, Actor, Cursor, CursorGoneError
 from graphos.config import Settings
+from graphos.identity import Principal
 
 from .conftest import requires_db
 
@@ -241,14 +243,13 @@ async def test_a_failed_or_rolled_back_write_records_nothing(
 
 
 def _client(
-    pool: asyncpg.Pool, tokens: Path | None = None, **settings: object,
+    pool: asyncpg.Pool, principals: dict[str, Principal] | None = None, **settings: object,
 ) -> httpx.AsyncClient:
-    if tokens is None:
+    if principals is None:
         app = create_app(Settings(db_password="placeholder", auth_disabled=True, **settings))
     else:
-        from graphos.auth import TokenStore
-        app = create_app(Settings(db_password="placeholder", auth_tokens_file=tokens, **settings))
-        app.state.token_store = TokenStore(tokens)
+        app = create_app(Settings(db_password="placeholder", **settings))
+        app.state.authenticator = StaticAuthenticator(principals)
     app.state.pool = pool
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 
@@ -256,15 +257,12 @@ def _client(
 @requires_db
 @pytest.mark.asyncio
 async def test_requests_record_their_consumer_and_trace(
-    db_pool: asyncpg.Pool, graph: str, tmp_path: Path,
+    db_pool: asyncpg.Pool, graph: str,
 ) -> None:
     t = graph
-    tokens = tmp_path / "tokens.json"
-    tokens.write_text(json.dumps(
-        {"tok_app": {"consumer": "app", "tenants": [t], "access": "write"}},
-    ))
+    principals = {"tok_app": Principal.static("app", tenants={t: "write"})}
     trace = "0af7651916cd43dd8448eb211c80319c"
-    async with _client(db_pool, tokens) as api:
+    async with _client(db_pool, principals) as api:
         resp = await api.patch(
             f"/v1/{t}/graph/nodes/a", json={"x": 1},
             headers={"Authorization": "Bearer tok_app",

@@ -51,10 +51,16 @@ class TenantInfo(BaseModel):
 
 
 class Me(BaseModel):
+    """``GET /v1/me``: who is signed in and what they may use."""
+
     consumer: str
+    kind: str = "person"                      # person | service | anonymous
+    via: str = "password"                     # password | oidc | none: how it signed in
     admin: bool = False
-    access: Literal["read", "write"] = "write"
+    must_change: bool = False                 # the password must change first
     tenants: list[str] = Field(default_factory=list)
+    levels: dict[str, str] = Field(default_factory=dict)   # tenant -> read|write|maintain|owner
+    create_tenants: list[str] = Field(default_factory=list)  # name patterns
 
 
 class EdgeEndpoint(BaseModel):

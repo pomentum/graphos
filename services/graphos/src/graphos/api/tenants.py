@@ -7,10 +7,14 @@ Surface:
 - ``GET  /v1/tenants/{name}``    inspect one tenant's registered spec
 - ``DELETE /v1/tenants/{name}/edge_endpoints``  remove one declared label pair
 
-These endpoints require an admin-scoped token. Authentication is enforced by
-the token store, not by URL path — there is no ``/admin`` URL prefix. The
-typed routes are themselves the contract; admin scope is a token attribute,
-not a path convention.
+Who may do what (grants, see ``graphos.identity``):
+
+- register a new tenant: ``create_tenants`` on a pattern its name matches;
+  the creator becomes the tenant's ``owner``;
+- re-register (publish schema), remove a declared pair, inspect the spec:
+  ``maintain`` on the tenant, or ``create_tenants`` on a matching pattern;
+- unregister: ``owner``;
+- the list shows the tenants the caller may maintain (admins: all).
 
 Consumers own their schemas. graphos accepts whatever spec a token-authorised
 consumer registers and brings the AGE graph up to it. Registrations are
@@ -27,7 +31,13 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Request, status
 
 from graphos import schema_changes
-from graphos.auth import ReadPrincipal, WritePrincipal, require_admin
+from graphos.auth import (
+    MaintainPrincipal,
+    OwnerPrincipal,
+    ReadPrincipal,
+    WritePrincipal,
+    require_level,
+)
 from graphos.bootstrap import (
     TenantSpec,
     bootstrap_tenant,
@@ -46,6 +56,7 @@ from graphos.contracts.tenants import (
     TenantInfo,
     TenantSpecBody,
 )
+from graphos.identity import Level, Principal
 from graphos.resolver.indexer import ensure_resolve_rule_indexes
 
 log = logging.getLogger(__name__)
@@ -75,15 +86,24 @@ def _spec_to_info(spec: TenantSpec) -> TenantInfo:
     )
 
 
-@router.get("", summary="List registered tenants")
+def _may_maintain(principal: Principal, name: str) -> bool:
+    return principal.has(name, Level.MAINTAIN) or principal.can_create(name)
+
+
+@router.get("", summary="List the registered tenants the caller may maintain")
 async def list_tenants(principal: ReadPrincipal) -> dict[str, list[TenantInfo]]:
-    require_admin(principal)
-    return {"tenants": [_spec_to_info(s) for s in registered_tenants().values()]}
+    return {
+        "tenants": [
+            _spec_to_info(s) for name, s in registered_tenants().items()
+            if _may_maintain(principal, name)
+        ],
+    }
 
 
 @router.get("/{name}", summary="Inspect one registered tenant")
-async def get_tenant(name: str, principal: ReadPrincipal) -> TenantInfo:
-    require_admin(principal)
+async def get_tenant(name: str, principal: MaintainPrincipal) -> TenantInfo:
+    if not _may_maintain(principal, name):
+        require_level(principal, name, Level.MAINTAIN)
     specs = registered_tenants()
     if name not in specs:
         raise HTTPException(
@@ -114,8 +134,19 @@ async def register(
     so any new labels in the incoming spec get materialised.  Removed
     labels are NOT dropped from the AGE catalog (operators must drop
     those manually); only the persisted spec narrows.
+
+    A new tenant needs ``create_tenants`` on a matching pattern and makes the
+    caller its owner; an existing one needs ``maintain`` on it (or
+    ``create_tenants`` on a matching pattern).
     """
-    require_admin(principal)
+    if not principal.can_create(body.name) and not principal.has(body.name, Level.MAINTAIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"registering tenant '{body.name}' needs 'create_tenants' on a pattern it "
+                f"matches, or 'maintain' on it"
+            ),
+        )
 
     # ``edge_labels`` arrives normalised to ``EdgeLabelSpec`` objects (the
     # contract coerces bare strings on input).  Split into the bootstrap
@@ -172,6 +203,11 @@ async def register(
 
     pool = request.app.state.pool
     previous = await load_spec(pool, spec.name)
+    if previous is None and not principal.can_create(spec.name):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"tenant '{spec.name}' does not exist; creating it needs 'create_tenants'",
+        )
     try:
         await bootstrap_tenant(
             pool, spec,
@@ -206,6 +242,10 @@ async def register(
     change = schema_changes.diff(previous, spec)
     if change is not None:
         await _record_schema(pool, spec.name, change)
+    # The creator owns what it creates (as in PostgreSQL); an admin needs no grant.
+    store = getattr(request.app.state, "access_store", None)
+    if previous is None and store is not None and principal.subject and not principal.admin:
+        await store.grant(principal.subject, spec.name, Level.OWNER.label, by="creator")
     # A search index over every label ("*") also covers the labels this
     # registration added; build what the merged spec now needs.
     if spec.search_indexes:
@@ -262,9 +302,10 @@ async def delete_edge_endpoint(
     src: str,
     dst: str,
     request: Request,
-    principal: WritePrincipal,
+    principal: MaintainPrincipal,
 ) -> dict[str, object]:
-    require_admin(principal)
+    if not _may_maintain(principal, name):
+        require_level(principal, name, Level.MAINTAIN)
     if name not in registered_tenants():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -297,9 +338,9 @@ async def delete_edge_endpoint(
 async def unregister(
     name: str,
     request: Request,
-    principal: WritePrincipal,
+    principal: OwnerPrincipal,
 ) -> dict[str, object]:
-    require_admin(principal)
+    require_level(principal, name, Level.OWNER)
     pool = request.app.state.pool
     existed = await unregister_tenant(pool, name)
     if not existed:
@@ -308,4 +349,7 @@ async def unregister(
             detail=f"tenant '{name}' is not registered",
         )
     await _record_schema(pool, name, {"unregistered": True})
+    store = getattr(request.app.state, "access_store", None)
+    if store is not None:
+        await store.drop_tenant(name)
     return {"tenant": name, "status": "unregistered"}

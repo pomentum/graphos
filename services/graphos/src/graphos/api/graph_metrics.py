@@ -10,7 +10,7 @@ from graphos import analysis
 from graphos.api.graph import _check_tenant
 from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, run_sync, wants_async
 from graphos.api.louvain import busy
-from graphos.auth import WritePrincipal, require_admin
+from graphos.auth import MaintainPrincipal
 from graphos.contracts.graph_metrics import ComputeMetricsRequest, ComputeMetricsResponse
 from graphos.graph_metrics import run_metrics
 
@@ -28,7 +28,8 @@ router = APIRouter(tags=["metrics"], prefix="/{tenant}/graph")
         "reserved: consumers cannot write them. Only values that changed are written, so a "
         "re-run on an unchanged graph writes nothing. Nodes with no edge of the chosen types "
         "do not take part. One whole-graph job per tenant at a time, shared with community "
-        "recompute (409 while one runs). Admin-scoped. With `Prefer: respond-async` it runs "
+        "recompute (409 while one runs). Needs `maintain` on the tenant. With "
+        "`Prefer: respond-async` it runs "
         "as a background job (202, see `/v1/jobs`). Read the results with the nodes, or the "
         "top ones with `nodes:scan` and `order_by: [{\"property\": \"graphos_pagerank\", "
         "\"desc\": true}]`."
@@ -39,9 +40,8 @@ async def compute_metrics(
     tenant: str,
     body: ComputeMetricsRequest,
     request: Request,
-    principal: WritePrincipal,
+    principal: MaintainPrincipal,
 ) -> ComputeMetricsResponse | JSONResponse:
-    require_admin(principal)
     _check_tenant(tenant, principal)
     if wants_async(request):
         return await respond_async(

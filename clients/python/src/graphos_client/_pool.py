@@ -2,13 +2,13 @@
 
 A service that writes to several tenants (one per customer, project, team…)
 needs the same three things every time: a client per tenant sharing one base
-URL and token, the tenant's schema registered before the first write, and a
+URL and credentials, the tenant's schema registered before the first write, and a
 way to recover when the server no longer knows a label (the tenant was
 re-registered elsewhere with fewer labels, or unregistered). ``GraphosPool``
 does all three.
 
     schema = TenantSchema(vertex_labels=["User", "Document"], edge_labels=["AUTHORED"])
-    async with GraphosPool(base_url=URL, token=TOKEN, schema=schema) as pool:
+    async with GraphosPool(base_url=URL, auth=PasswordAuth(USER, SECRET), schema=schema) as pool:
         cli = await pool.client("acme")            # registered on first use
         await pool.call("acme", lambda c: c.upsert_nodes(nodes))   # self-heals once
 """
@@ -21,6 +21,9 @@ from dataclasses import dataclass, field
 from http import HTTPStatus
 from typing import Any, TypeVar
 
+import httpx
+
+from graphos_client._auth import from_environment
 from graphos_client._client import GraphosClient, GraphosError
 
 T = TypeVar("T")
@@ -78,10 +81,12 @@ def is_schema_drift(exc: BaseException) -> bool:
 class GraphosPool:
     """Lazily created, registered :class:`GraphosClient` per tenant.
 
-    Every client shares ``base_url``, ``token`` and the client options. A
-    tenant is registered with ``schema`` the first time it is used; that call
-    needs a token with admin scope. Concurrent first uses of the same tenant
-    register it once.
+    Every client shares ``base_url``, the credentials (``auth``, ``token``, or
+    ``GRAPHOS_USER`` / ``GRAPHOS_PASSWORD``, signed in once for all of them)
+    and the client options. A tenant is registered with ``schema`` the first
+    time it is used; that needs ``create_tenants`` on a pattern its name
+    matches (or admin). Concurrent first uses of the same tenant register it
+    once.
     """
 
     def __init__(
@@ -90,10 +95,13 @@ class GraphosPool:
         base_url: str,
         schema: TenantSchema,
         token: str | None = None,
+        auth: httpx.Auth | None = None,
         **client_options: Any,
     ) -> None:
         self._base_url = base_url
         self._token = token
+        # One sign-in shared by every tenant's client.
+        self._auth = auth if auth is not None or token else from_environment()
         self._schema = schema
         self._options = client_options
         self._clients: dict[str, GraphosClient] = {}
@@ -118,7 +126,8 @@ class GraphosPool:
             if cli is not None:
                 return cli
             cli = GraphosClient(
-                base_url=self._base_url, tenant=tenant, token=self._token, **self._options,
+                base_url=self._base_url, tenant=tenant, token=self._token, auth=self._auth,
+                **self._options,
             )
             try:
                 await self._register(cli, tenant)

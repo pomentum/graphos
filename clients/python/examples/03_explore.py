@@ -13,11 +13,11 @@ import os
 from graphos_client import GraphosClient
 
 URL = os.environ.get("GRAPHOS_URL", "http://127.0.0.1:8080")
-TOKEN = os.environ["GRAPHOS_TOKEN"]
+# Signs in as GRAPHOS_USER / GRAPHOS_PASSWORD and renews its token by itself.
 
 
 async def main() -> None:
-    async with GraphosClient(base_url=URL, token=TOKEN, tenant="acme") as g:
+    async with GraphosClient(base_url=URL, tenant="acme") as g:
         # Paginated scan with a filter and a projection (cursor handled for you).
         guides = [
             item async for item in g.scan_nodes_iter(

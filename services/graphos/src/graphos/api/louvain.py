@@ -1,4 +1,4 @@
-"""Louvain admin endpoint."""
+"""Louvain community recompute endpoint."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from graphos import analysis
 from graphos.api.graph import _check_tenant
 from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, run_sync, wants_async
-from graphos.auth import WritePrincipal, require_admin
+from graphos.auth import MaintainPrincipal
 from graphos.contracts.louvain import (
     RecomputeCommunitiesRequest,
     RecomputeCommunitiesResponse,
@@ -30,7 +30,7 @@ router = APIRouter(tags=["communities"], prefix="/{tenant}")
         "an in-process igraph, runs Louvain modularity optimisation, and "
         "writes `community_id` back to each vertex. One whole-graph job per "
         "tenant at a time: while a recompute or a graph-metrics run holds "
-        "the tenant, another returns 409. Admin-scoped. Returns "
+        "the tenant, another returns 409. Needs `maintain` on the tenant. Returns "
         "501 when the optional `louvain` extra (python-igraph) is not "
         "installed. With `Prefer: respond-async` it runs as a background job "
         "(202, see `/v1/jobs`)."
@@ -41,9 +41,8 @@ async def recompute(
     tenant: str,
     body: RecomputeCommunitiesRequest,
     request: Request,
-    principal: WritePrincipal,
+    principal: MaintainPrincipal,
 ) -> RecomputeCommunitiesResponse | JSONResponse:
-    require_admin(principal)
     if not LOUVAIN_AVAILABLE:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,

@@ -3,6 +3,8 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 import type { EdgeKey, SearchParams } from "../api/graphosApi";
 import type {
   EdgeUpsert,
+  Grant,
+  GrantLevel,
   Job,
   NodesScanRequest,
   NodeUpsert,
@@ -43,6 +45,9 @@ export const keys = {
   activeJobs: (tenant: string) => ["activeJobs", tenant] as const,
   recentJobs: (tenant: string) => ["recentJobs", tenant] as const,
   history: (tenant: string, category: ActivityCategory | "all") => ["history", tenant, category] as const,
+  users: () => ["users"] as const,
+  grants: (tenant: string | null) => ["grants", tenant] as const,
+  authConfig: () => ["auth-config"] as const,
 };
 
 /** Labels, hierarchy and search indexes; changes rarely, so cached for minutes. */
@@ -130,6 +135,71 @@ export function useChangeHistory(category: ActivityCategory | "all") {
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.older ?? undefined,
   });
+}
+
+/** Users and service accounts (admins only). */
+export function useUsers(enabled: boolean) {
+  const { api } = useTenantSession();
+  return useQuery({ queryKey: keys.users(), queryFn: () => api.users(), enabled });
+}
+
+/** How people sign in: whether single sign-on is set up (it changes only with a restart). */
+export function useAuthConfig() {
+  const { api } = useTenantSession();
+  return useQuery({ queryKey: keys.authConfig(), queryFn: () => api.authConfig(), staleTime: Infinity });
+}
+
+/** Grants: those that apply to `tenant`, or every grant (admins) when null. */
+export function useGrants(tenant: string | null) {
+  const { api } = useTenantSession();
+  return useQuery({
+    queryKey: keys.grants(tenant),
+    queryFn: () => api.grants(tenant ? { tenant } : {}),
+  });
+}
+
+/** What changes users and grants; everything about them is read again after. */
+export function useAccessMutations() {
+  const { api } = useTenantSession();
+  const client = useQueryClient();
+  const refresh = () =>
+    Promise.all([
+      client.invalidateQueries({ queryKey: ["users"] }),
+      client.invalidateQueries({ queryKey: ["grants"] }),
+    ]);
+  return {
+    createUser: useMutation({
+      meta: { errorTitle: "views.access.errors.notCreated" },
+      mutationFn: ({ name, kind }: { name: string; kind: "person" | "service" }) => api.createUser(name, kind),
+      onSuccess: refresh,
+    }),
+    resetSecret: useMutation({
+      meta: { errorTitle: "views.access.errors.notReset" },
+      mutationFn: (name: string) => api.resetUserSecret(name),
+      onSuccess: refresh,
+    }),
+    setDisabled: useMutation({
+      meta: { errorTitle: "views.access.errors.notChanged" },
+      mutationFn: ({ name, disabled }: { name: string; disabled: boolean }) => api.setUserDisabled(name, disabled),
+      onSuccess: refresh,
+    }),
+    deleteUser: useMutation({
+      meta: { success: "views.access.notices.deleted", errorTitle: "views.access.errors.notChanged" },
+      mutationFn: (name: string) => api.deleteUser(name),
+      onSuccess: refresh,
+    }),
+    grant: useMutation({
+      meta: { success: "views.access.notices.granted", errorTitle: "views.access.errors.notGranted" },
+      mutationFn: ({ subject, tenant, level }: { subject: string; tenant: string; level: GrantLevel }) =>
+        api.grant(subject, tenant, level),
+      onSuccess: refresh,
+    }),
+    revoke: useMutation({
+      meta: { success: "views.access.notices.revoked", errorTitle: "views.access.errors.notRevoked" },
+      mutationFn: (grant: Grant) => api.revoke(grant),
+      onSuccess: refresh,
+    }),
+  };
 }
 
 /** Every property name nodes of the tenant carry, sorted; for "search in" pickers. */

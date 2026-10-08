@@ -13,6 +13,8 @@ from uuid import UUID
 
 import httpx
 
+from graphos_client._auth import PasswordAuth, from_environment
+from graphos_client._errors import GraphosError, GraphosNotReady
 from graphos_client._models import (
     BulkEdgesResponse,
     BulkNodesResponse,
@@ -78,27 +80,13 @@ def _if_match_header(if_match: str | None) -> dict[str, str] | None:
 _UNSET: Any = object()
 
 
-class GraphosError(RuntimeError):
-    """Wraps a non-2xx response from graphos with the status code + detail."""
-
-    def __init__(self, status_code: int, detail: str, method: str, url: str):
-        super().__init__(f"{method} {url} → {status_code}: {detail}")
-        self.status_code = status_code
-        self.detail = detail
-        self.method = method
-        self.url = url
-
-
-class GraphosNotReady(GraphosError):
-    """Raised on 503 — graphos-db unreachable or lifespan incomplete."""
-
-
 class GraphosClient:
     """Async HTTP client for the graphos service.
 
     Use as a context manager so the underlying httpx pool gets closed::
 
-        async with GraphosClient(base_url=..., token=..., tenant=...) as cli:
+        async with GraphosClient(base_url=..., tenant=...,
+                                 auth=PasswordAuth("svc", secret)) as cli:
             await cli.search(...)
 
     Or hold the client across many calls and ``close()`` explicitly.
@@ -110,6 +98,7 @@ class GraphosClient:
         base_url: str,
         tenant: str,
         token: str | None = None,
+        auth: httpx.Auth | None = None,
         timeout_s: float = 30.0,
         retries: int = 3,
         retry_backoff_s: float = 0.5,
@@ -117,14 +106,26 @@ class GraphosClient:
     ) -> None:
         """Construct the client.
 
-        ``token`` is optional.  When omitted or empty, no Authorization
-        header is sent — appropriate for dev deployments where graphos
-        runs without an auth-tokens file (anonymous = admin).  Real
-        deployments pass a bearer token; the server's TokenStore maps
-        it to the consumer's tenant + admin scope.
+        How it signs in, first match wins:
+
+        - ``auth``: usually :class:`PasswordAuth` (a user or service account
+          and its password), which signs in and renews the short-lived
+          access token by itself;
+        - ``token``: a bearer token used as is (one obtained elsewhere; it
+          is not renewed);
+        - ``GRAPHOS_USER`` and ``GRAPHOS_PASSWORD`` in the environment, as
+          ``PasswordAuth``;
+        - none: no Authorization header, for a graphos running with
+          ``GRAPHOS_AUTH_DISABLED=true`` (local development).
         """
+        if token and auth is not None:
+            raise ValueError("pass either token or auth, not both")
         self._base_url = base_url.rstrip("/")
         self._token = token or None
+        if self._token is None and auth is None:
+            auth = from_environment()
+        if isinstance(auth, PasswordAuth):
+            auth.bind(self._base_url)
         self._tenant = tenant
         self._retries = retries
         self._retry_backoff_s = retry_backoff_s
@@ -163,6 +164,7 @@ class GraphosClient:
             ),
             # Optional custom transport (tests: httpx.MockTransport; proxies, TLS).
             transport=transport,
+            auth=auth,
         )
 
     async def __aenter__(self) -> GraphosClient:
@@ -282,7 +284,7 @@ class GraphosClient:
         return [TenantInfo.model_validate(t) for t in resp.json()["tenants"]]
 
     async def me(self) -> Me:
-        """``GET /v1/me``: this token's consumer, access and tenants."""
+        """``GET /v1/me``: who is signed in, their level per tenant and rights."""
         resp = await self._request("GET", "/v1/me")
         return Me.model_validate(resp.json())
 

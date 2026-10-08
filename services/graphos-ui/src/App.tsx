@@ -2,13 +2,15 @@ import { Center, Loader, MantineProvider } from "@mantine/core";
 import { Notifications, notifications } from "@mantine/notifications";
 import { MutationCache, QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { ApiError } from "./api/http";
 import { AppLayout } from "./components/AppLayout";
 import { ActivityProvider } from "./data/ActivityProvider";
 import { WorkspaceProvider } from "./graph/WorkspaceProvider";
 import { SessionProvider, useSessionContext } from "./session/SessionProvider";
+import { memoryColorSchemeManager } from "./theme/colorScheme";
 import { resolveCssVariables, theme } from "./theme/mantineTheme";
+import { AccessView } from "./views/access/AccessView";
 import { ActivityView } from "./views/activity/ActivityView";
 import { BrowseView } from "./views/browse/BrowseView";
 import { SchemaView } from "./views/schema/SchemaView";
@@ -27,6 +29,7 @@ const SCREENS: Record<string, ComponentType> = {
   activity: ActivityView,
   browse: BrowseView,
   schema: SchemaView,
+  access: AccessView,
 };
 
 /** Client errors (4xx) are answers, not outages: they are not retried. */
@@ -62,7 +65,12 @@ function createQueryClient(): QueryClient {
 export function App() {
   const [client] = useState(createQueryClient);
   return (
-    <MantineProvider theme={theme} cssVariablesResolver={resolveCssVariables} defaultColorScheme="auto">
+    <MantineProvider
+      theme={theme}
+      cssVariablesResolver={resolveCssVariables}
+      defaultColorScheme="auto"
+      colorSchemeManager={COLOR_SCHEME}
+    >
       <Notifications position="bottom-right" />
       <QueryClientProvider client={client}>
         <SessionProvider>
@@ -77,28 +85,49 @@ export function App() {
 }
 
 function Screens() {
-  const { session, restoring } = useSessionContext();
-  if (restoring) {
+  const { session, checking, returnTo } = useSessionContext();
+  // Finding out whether someone is signed in at the identity provider.
+  if (checking) {
     return (
       <Center h="100vh">
         <Loader size="sm" />
       </Center>
     );
   }
-  if (!session?.tenant) return <ConnectView />;
+  // Signed out, a password to change first, or no tenant chosen yet.
+  if (!session?.tenant || session.me.must_change) return <ConnectView />;
   return (
     <TenantScope key={session.tenant}>
-      <Routes>
-        <Route element={<AppLayout />}>
-          {VIEWS.map((view) => {
-            const Screen = SCREENS[view.id];
-            return Screen ? <Route key={view.id} path={view.path} element={<Screen />} /> : null;
-          })}
-          <Route path="*" element={<Navigate to="/explore" replace />} />
-        </Route>
-      </Routes>
+      {returnTo ? (
+        <ReturnAfterSignIn to={returnTo} />
+      ) : (
+        <Routes>
+          <Route element={<AppLayout />}>
+            {VIEWS.map((view) => {
+              const Screen = SCREENS[view.id];
+              return Screen ? <Route key={view.id} path={view.path} element={<Screen />} /> : null;
+            })}
+            <Route path="*" element={<Navigate to="/explore" replace />} />
+          </Route>
+        </Routes>
+      )}
     </TenantScope>
   );
+}
+
+/**
+ * After signing in through the provider: the page the person was on, once.
+ * Cleared only when the router is there: the router moves in a transition,
+ * so clearing earlier would let the routes see the callback address first.
+ */
+function ReturnAfterSignIn({ to }: { to: string }) {
+  const { clearReturnTo } = useSessionContext();
+  const location = useLocation();
+  const arrived = `${location.pathname}${location.search}` === to;
+  useEffect(() => {
+    if (arrived) clearReturnTo();
+  }, [arrived, clearReturnTo]);
+  return arrived ? null : <Navigate to={to} replace />;
 }
 
 /** State that belongs to one tenant; remounted when the tenant changes. */
@@ -110,7 +139,10 @@ function TenantScope({ children }: { children: ReactNode }) {
   );
 }
 
-/** A token graphos stops accepting (removed or rotated) ends the session. */
+/** The light/dark choice lasts while the page is open: nothing is kept in the browser. */
+const COLOR_SCHEME = memoryColorSchemeManager();
+
+/** A session graphos stops accepting (ended, revoked) signs out. */
 function SignOutOnRejectedToken() {
   const client = useQueryClient();
   const { signOut } = useSessionContext();

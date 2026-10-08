@@ -16,15 +16,15 @@ import pytest
 
 from graphos import writes
 from graphos.api.graph import scan_edges
-from graphos.auth import TokenPrincipal
 from graphos.bootstrap import TenantSpec, register_tenant
 from graphos.contracts.graph import EdgesScanRequest, NodesScanWhere
+from graphos.identity import Principal
 
 from .conftest import requires_db
 
 TEST_TENANT = "graphos_test_scan_edges"
 N_DOCS = 12
-ADMIN = TokenPrincipal(consumer="test", tenants=frozenset(), admin=True)
+ADMIN = Principal.static("test", admin=True)
 
 
 async def _seed(pool: asyncpg.Pool) -> None:

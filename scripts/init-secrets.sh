@@ -4,8 +4,6 @@
 # Writes into services/graphos/deploy/secrets/ (gitignored):
 #   graphos_pw.txt       random password for the database superuser (init only)
 #   graphos_app_pw.txt   random password for graphos_app, the role graphos-api uses
-#   graphos_tokens.json  one random admin token (add consumer tokens here)
-#   admin_token.txt      the same admin token, for `export ADMIN_TOKEN=$(cat ...)`
 #
 # Idempotent: never overwrites an existing file. Safe to run before every
 # `docker compose up`.
@@ -39,19 +37,7 @@ ensure_password() {  # file name
   echo "created: $1"
 }
 
-ensure_tokens() {
-  local target="${secrets_dir}/graphos_tokens.json"
-  if [[ -s "${target}" ]]; then
-    echo "ok: graphos_tokens.json already present"
-    return 0
-  fi
-  local token="tok_$(gen_secret)"
-  printf '{\n  "%s": {"consumer": "admin", "tenants": [], "admin": true, "access": "write"}\n}\n' "${token}" > "${target}"
-  printf '%s' "${token}" > "${secrets_dir}/admin_token.txt"
-  chmod 644 "${target}" "${secrets_dir}/admin_token.txt" 2>/dev/null || true
-  echo "created: graphos_tokens.json with one admin token (also in admin_token.txt)"
-}
-
 ensure_password graphos_pw.txt
 ensure_password graphos_app_pw.txt
-ensure_tokens
+# graphos's own first admin is user "graphos", password "graphos", to be
+# changed at the first sign-in (or set GRAPHOS_ADMIN_PASSWORD_FILE).

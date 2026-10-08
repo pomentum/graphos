@@ -26,7 +26,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, run_sync, wants_async
-from graphos.auth import ReadPrincipal, TokenPrincipal, WritePrincipal, require_admin
+from graphos.auth import AdminPrincipal
 from graphos.contracts.db import (
     DbStatsResponse,
     SlowQueriesResponse,
@@ -50,10 +50,6 @@ _QUALIFIED_IDENT_RE = re.compile(
 )
 
 
-def _ensure_admin(principal: TokenPrincipal) -> None:
-    require_admin(principal)
-
-
 # ── /v1/db/stats ───────────────────────────────────────────────────────────
 
 
@@ -62,8 +58,7 @@ def _ensure_admin(principal: TokenPrincipal) -> None:
     response_model=DbStatsResponse,
     summary="Database stats: sizes, dead-tuple counts, vacuum timestamps",
 )
-async def db_stats(request: Request, principal: ReadPrincipal) -> DbStatsResponse:
-    _ensure_admin(principal)
+async def db_stats(request: Request, principal: AdminPrincipal) -> DbStatsResponse:
 
     pool = request.app.state.pool
     async with pool.acquire() as conn:
@@ -128,10 +123,9 @@ async def db_stats(request: Request, principal: ReadPrincipal) -> DbStatsRespons
 )
 async def slow_queries(
     request: Request,
-    principal: ReadPrincipal,
+    principal: AdminPrincipal,
     limit: Annotated[int, Query(ge=1, le=200)] = 25,
 ) -> SlowQueriesResponse:
-    _ensure_admin(principal)
 
     pool = request.app.state.pool
     async with pool.acquire() as conn:
@@ -228,9 +222,8 @@ def _validated_table_names(tables: list[str] | None) -> list[str]:
 async def vacuum(
     body: VacuumRequest,
     request: Request,
-    principal: WritePrincipal,
+    principal: AdminPrincipal,
 ) -> VacuumResponse | JSONResponse:
-    _ensure_admin(principal)
     _validated_table_names(body.tables)   # reject bad names before queueing
     if wants_async(request):
         return await respond_async(

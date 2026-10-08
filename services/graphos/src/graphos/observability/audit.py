@@ -115,7 +115,7 @@ def _is_write(request: Request) -> bool:
     access = request.scope.get(ACCESS_SCOPE_KEY)
     if access is None:
         return request.method in _WRITE_METHODS
-    return access is Access.WRITE
+    return access is not Access.READ
 
 
 def _emit(request: Request, args_hash: str, status: int, started: float) -> None:

@@ -68,7 +68,20 @@ until curl -fsS http://127.0.0.1:8080/readyz >/dev/null 2>&1; do
     fi
     sleep 2
 done
-TOKEN="$(cat "$SERVICE_DIR/deploy/secrets/admin_token.txt")"
+# Sign in as the bootstrap admin (graphos / graphos on a fresh volume), do
+# the forced password change (to a random password kept in this shell only),
+# and use the token it returns.
+json_field() {  # field — read one field of the JSON on stdin
+    python3 -c "import json, sys; print(json.load(sys.stdin)['$1'])"
+}
+FIRST=graphos
+NEXT="ci-$(openssl rand -hex 16)"
+FIRST_TOKEN="$(curl -fsS -X POST http://127.0.0.1:8080/v1/auth/login \
+    -H "content-type: application/json" \
+    -d "{\"user\": \"graphos\", \"password\": \"$FIRST\"}" | json_field access_token)"
+TOKEN="$(curl -fsS -X POST http://127.0.0.1:8080/v1/me/password \
+    -H "Authorization: Bearer $FIRST_TOKEN" -H "content-type: application/json" \
+    -d "{\"current\": \"$FIRST\", \"new\": \"$NEXT\"}" | json_field access_token)"
 api() {  # method path json
     curl -fsS -X "$1" "http://127.0.0.1:8080$2"         -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" -d "$3" >/dev/null
 }

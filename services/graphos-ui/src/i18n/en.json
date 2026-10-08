@@ -120,14 +120,27 @@
   "shell": {
     "signIn": {
       "title": "Sign in to graphos",
-      "hint": "Use the token your administrator gave you. It stays in this tab only.",
-      "token": "Token",
-      "continue": "Continue",
+      "hint": "Use your graphos user name and password. Nothing is kept in the browser, so reloading the page asks for them again.",
+      "hintSso": "Use your organisation's single sign-on, or a graphos user name and password. Nothing is kept in the browser.",
+      "user": "User name",
+      "password": "Password",
+      "continue": "Sign in",
+      "sessionEnded": "Your session ended. Sign in again.",
+      "ssoFailed": "Signing in at the identity provider didn't work. Try again, or use a graphos account.",
+      "withSso": "Sign in with {{name}}",
+      "orPassword": "or with a graphos account",
+      "changeTitle": "Choose a new password",
+      "changeHint": "{{consumer}}, your password must be changed before you continue: this is your first sign-in, or it was reset.",
+      "currentPassword": "Current password",
+      "newPassword": "New password",
+      "newPasswordHint": "At least 12 characters, not your user name.",
+      "repeatPassword": "Repeat the new password",
+      "mismatch": "The two passwords differ.",
+      "changePassword": "Change password",
       "chooseTenant": "Choose a tenant",
       "signedInAs": "Signed in as {{consumer}}",
-      "noTenants": "This token has no tenants. Ask an administrator to add one.",
-      "useAnotherToken": "Use another token",
-      "tokenKept": "Your token is kept for this tab. Check the connection, then try again."
+      "noTenants": "You have no access to a tenant yet. Ask an administrator, or the owner of a tenant.",
+      "signOut": "Sign out"
     },
     "toolbar": {
       "toggleSidebar": "Show or hide the sidebar"
@@ -159,13 +172,20 @@
     "account": {
       "label": "Account",
       "whoAndAccess": "{{consumer}} · {{access}}",
-      "canEdit": "can edit",
-      "readOnly": "read only",
+      "admin": "admin",
+      "levels": {
+        "read": "can read",
+        "write": "can edit",
+        "maintain": "maintains",
+        "owner": "owns this tenant"
+      },
       "schemes": {
         "system": "System",
         "light": "Light",
         "dark": "Dark"
       },
+      "changePassword": "Change password",
+      "passwordChanged": "Password changed. Your other sessions have ended.",
       "signOut": "Sign out"
     }
   },
@@ -183,7 +203,8 @@
         "overview": "Overview",
         "activity": "Activity",
         "browse": "Browse",
-        "schema": "Schema"
+        "schema": "Schema",
+        "access": "Access"
       }
     },
     "explore": {
@@ -240,7 +261,7 @@
         "loading": "Reading the groups…",
         "notComputedTitle": "No groups yet",
         "notComputedBody": "Groups are communities found by clustering the graph: nodes more connected to each other than to the rest. They have not been computed for this tenant yet.",
-        "askAdmin": "An administrator can compute them.",
+        "askAdmin": "Whoever maintains this tenant can compute them.",
         "compute": "Compute groups",
         "computing": "Computing groups… This can take a few minutes on a large graph.",
         "computeFailed": "Computing the groups failed",
@@ -388,7 +409,7 @@
     },
     "schema": {
       "heading": "Schema of {{tenant}}",
-      "readOnly": "Read only. Administrators can add labels, relationship types and search indexes.",
+      "readOnly": "Read only. Whoever maintains this tenant can add labels, relationship types and search indexes.",
       "neverRemoves": "Labels and relationship types are never removed here (graphos keeps them and their data); a declared pair can be.",
       "add": "Add",
       "addLabel": "Label",
@@ -533,6 +554,102 @@
         "allInside": "Every label pair in the data is declared.",
         "enable": "Enforce"
       }
+    },
+    "access": {
+      "tenantTitle": "Access to {{tenant}}",
+      "tenantHint": "Who may use this tenant, and how much. Owners give and take access here; a grant on a pattern comes from an admin.",
+      "ownerHint": "Users, service accounts, patterns and the right to create tenants are managed by an admin.",
+      "direct": "this tenant",
+      "noGrants": "Nobody has access through a grant yet.",
+      "usersTitle": "Users and service accounts",
+      "usersHint": "People sign in to this UI; service accounts are for programs, which sign in with their secret and renew their token by themselves.",
+      "addUser": "Add user",
+      "personHint": "A person gets a one-time password and chooses their own at the first sign-in.",
+      "serviceHint": "A service account gets a secret to put in the program's configuration, for example GRAPHOS_USER and GRAPHOS_PASSWORD.",
+      "nameRule": "Lower case letters, digits, '_', '.', '-', starting with a letter.",
+      "create": "Create",
+      "secretTitle": "Shown once",
+      "secretOncePerson": "Give this one-time password to the person. graphos does not keep it: they choose a new one at their first sign-in.",
+      "secretOnceService": "Put this secret in the program's configuration now. graphos does not keep it and cannot show it again.",
+      "copy": "Copy",
+      "copied": "Copied",
+      "done": "Done",
+      "actionsFor": "Actions for {{name}}",
+      "resetPassword": "Reset password",
+      "newSecret": "New secret",
+      "disable": "Disable",
+      "enable": "Enable",
+      "delete": "Delete",
+      "never": "never",
+      "allTitle": "All grants",
+      "allHint": "Levels on a tenant or a pattern (sol_*, *), the right to create tenants whose names match, and admin.",
+      "revoke": "Take back",
+      "revokeFrom": "Take {{level}} back from {{name}}",
+      "kinds": {
+        "person": "Person",
+        "service": "Service account"
+      },
+      "status": {
+        "active": "active",
+        "mustChange": "must change password",
+        "disabled": "disabled"
+      },
+      "levels": {
+        "read": "Read",
+        "write": "Write",
+        "maintain": "Maintain",
+        "owner": "Owner",
+        "create_tenants": "Create tenants",
+        "admin": "Admin"
+      },
+      "columns": {
+        "who": "Who",
+        "level": "Level",
+        "through": "Through",
+        "name": "Name",
+        "kind": "Kind",
+        "status": "Status",
+        "lastSignIn": "Last sign-in",
+        "tenants": "Tenants",
+        "grantedBy": "Granted by"
+      },
+      "form": {
+        "user": "User",
+        "userPlaceholder": "user name",
+        "level": "Level",
+        "give": "Give access",
+        "tenants": "Tenant or pattern",
+        "tenantsHint": "acme, sol_*, or *",
+        "kind": "Kind",
+        "name": "Name at the provider",
+        "placeholders": {
+          "user": "user name",
+          "oidc-group": "group, as the provider sends it",
+          "oidc-role": "role, as the provider sends it",
+          "oidc-sub": "the person's subject id",
+          "oidc-client": "the program's client id"
+        },
+        "ssoHint": "SSO identities are matched with what the identity provider sends at each sign-in, exactly as it sends it (case included). graphos does not read the provider's directory."
+      },
+      "notices": {
+        "granted": "Access given",
+        "revoked": "Access taken back",
+        "deleted": "User deleted"
+      },
+      "errors": {
+        "notCreated": "Couldn't create the user",
+        "notReset": "Couldn't reset",
+        "notChanged": "Couldn't change the user",
+        "notGranted": "Couldn't give access",
+        "notRevoked": "Couldn't take access back"
+      },
+      "subjects": {
+        "user": "graphos user",
+        "oidc-group": "SSO group",
+        "oidc-role": "SSO role",
+        "oidc-sub": "SSO person",
+        "oidc-client": "SSO program"
+      }
     }
   },
   "components": {
@@ -665,7 +782,8 @@
     "requestFailed": "Request failed ({{status}})",
     "unreachable": "Couldn't reach graphos",
     "unreachableTryAgain": "Couldn't reach graphos. Try again.",
-    "tokenNotRecognised": "graphos doesn't recognise this token.",
+    "signInRefused": "Wrong user name or password, or the account is locked or disabled.",
+    "signInTooMany": "Too many sign-in attempts. Wait a minute and try again.",
     "viewFailed": "This view stopped working",
     "neighboursNotLoaded": "Couldn't load the neighbours",
     "otherNodeGone": "The other node no longer exists.",

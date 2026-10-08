@@ -8,6 +8,7 @@
 The package is async-only (``asyncio`` + ``httpx``).
 """
 
+from graphos_client._auth import BearerAuth, PasswordAuth
 from graphos_client._client import GraphosClient, GraphosError, GraphosNotReady
 from graphos_client._models import (
     AggregateRow,
@@ -91,6 +92,8 @@ __all__ = [
     "MapLinkType",
     "GraphosClient",
     "GraphosError",
+    "BearerAuth",
+    "PasswordAuth",
     "GraphosNotReady",
     "GraphosPool",
     "TenantSchema",

@@ -17,7 +17,7 @@ from graphos.config import Settings
 
 
 def _bare_app() -> object:
-    settings = Settings(db_password="placeholder", auth_tokens_file=None, auth_disabled=True)
+    settings = Settings(db_password="placeholder", auth_disabled=True)
     return create_app(settings=settings)
 
 

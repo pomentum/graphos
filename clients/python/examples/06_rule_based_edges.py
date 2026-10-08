@@ -16,11 +16,11 @@ import os
 from graphos_client import GraphosClient, NodeUpsert
 
 URL = os.environ.get("GRAPHOS_URL", "http://127.0.0.1:8080")
-TOKEN = os.environ["GRAPHOS_TOKEN"]
+# Signs in as GRAPHOS_USER / GRAPHOS_PASSWORD and renews its token by itself.
 
 
 async def main() -> None:
-    async with GraphosClient(base_url=URL, token=TOKEN, tenant="library") as g:
+    async with GraphosClient(base_url=URL, tenant="library") as g:
         await g.register_tenant(
             vertex_labels=["Document", "Tag"],
             edge_labels=[{

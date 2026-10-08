@@ -45,15 +45,31 @@ export function describeError(status: number, body: unknown): string {
 }
 
 /**
+ * Where the bearer token comes from: the signed-in session, which keeps it in
+ * memory and renews it. `renew` is asked once when graphos answers 401 (the
+ * token expired or was revoked); it returns whether a new token is ready.
+ */
+export interface TokenSource {
+  token(): Promise<string>;
+  renew(): Promise<boolean>;
+}
+
+/**
  * Sends requests to graphos with the bearer token. Knows HTTP only: paths,
  * query strings, JSON bodies, `ETag`s and errors; endpoints live in `GraphosApi`.
+ * Without a token source (signing in) it sends no Authorization header.
  */
 export class HttpClient {
+  private readonly source: TokenSource | null;
+
   constructor(
     private readonly baseUrl: string,
-    private readonly token: string,
+    auth: TokenSource | string | null,
     private readonly fetchImpl: typeof fetch = (...args) => fetch(...args),
-  ) {}
+  ) {
+    this.source =
+      typeof auth === "string" ? { token: () => Promise.resolve(auth), renew: () => Promise.resolve(false) } : auth;
+  }
 
   /** Sends a request and returns the decoded body with the response's `ETag`. */
   async request<T>(method: string, path: string, options: RequestOptions = {}): Promise<Tagged<T>> {
@@ -84,12 +100,16 @@ export class HttpClient {
     return response;
   }
 
-  private send(method: string, path: string, options: RequestOptions): Promise<Response> {
-    const headers: Record<string, string> = {
-      Accept: "application/json",
-      Authorization: `Bearer ${this.token}`,
-      ...options.headers,
-    };
+  /** Sends the request; on 401, renews the token once and sends it again. */
+  private async send(method: string, path: string, options: RequestOptions): Promise<Response> {
+    const response = await this.sendOnce(method, path, options);
+    if (response.status !== 401 || !this.source || !(await this.source.renew())) return response;
+    return this.sendOnce(method, path, options);
+  }
+
+  private async sendOnce(method: string, path: string, options: RequestOptions): Promise<Response> {
+    const headers: Record<string, string> = { Accept: "application/json", ...options.headers };
+    if (this.source) headers.Authorization = `Bearer ${await this.source.token()}`;
     let body: string | undefined;
     if (options.body !== undefined) {
       headers["Content-Type"] = options.contentType ?? "application/json";

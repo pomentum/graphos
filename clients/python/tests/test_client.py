@@ -7,16 +7,19 @@ responses into the right Pydantic types. No real graphos required.
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
 import pytest
 
 from graphos_client import (
+    BearerAuth,
     EdgeUpsert,
     GraphosClient,
     GraphosError,
     NodeUpsert,
+    PasswordAuth,
     SearchHit,
 )
 
@@ -693,7 +696,7 @@ async def test_me_and_schema() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v1/me":
             return httpx.Response(200, json={"consumer": "ada", "admin": False,
-                                             "access": "read", "tenants": ["demo"]})
+                                             "tenants": ["demo"], "levels": {"demo": "read"}})
         assert request.url.path == "/v1/demo/schema"
         return httpx.Response(200, json={"name": "demo", "vertex_labels": ["Person"],
                                          "search_indexes": {"names": {"analyzer": "identifier"}}})
@@ -701,7 +704,7 @@ async def test_me_and_schema() -> None:
     cli = GraphosClient(base_url="http://x", token="tok", tenant="demo")
     cli._http = httpx.AsyncClient(base_url="http://x", transport=_mock_transport(handler))
     me = await cli.me()
-    assert (me.consumer, me.access, me.tenants) == ("ada", "read", ["demo"])
+    assert (me.consumer, me.levels, me.tenants) == ("ada", {"demo": "read"}, ["demo"])
     schema = await cli.schema()
     assert schema.vertex_labels == ["Person"] and "names" in schema.search_indexes
     # A server that predates declared endpoints sends neither field.
@@ -826,4 +829,115 @@ async def test_compute_metrics_and_its_job() -> None:
     job = await cli.submit_compute_metrics()
     assert job.kind == "compute_metrics"
     assert json.loads(captured[1].content)["metrics"] == ["degree", "pagerank", "components"]
+    await cli.close()
+
+
+# ── signing in ────────────────────────────────────────────────────────────────
+
+
+class _Server:
+    """A graphos that signs in and checks tokens; ``expires_in`` and the
+    tokens it still accepts are under the test's control."""
+
+    def __init__(self, expires_in: int = 900) -> None:
+        self.expires_in = expires_in
+        self.logins = 0
+        self.valid: set[str] = set()
+        self.seen: list[tuple[str, str | None]] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/v1/auth/login"):     # under the base path
+            body = json.loads(request.content)
+            if body != {"user": "svc", "password": "s3cret-value"}:
+                return httpx.Response(401, json={"detail": "wrong user name or password"})
+            self.logins += 1
+            token = f"t{self.logins}"
+            self.valid.add(token)
+            return httpx.Response(200, json={"access_token": token, "token_type": "Bearer",
+                                             "expires_in": self.expires_in, "refresh_token": None,
+                                             "must_change": False})
+        auth = request.headers.get("authorization", "")
+        self.seen.append((request.url.path, auth))
+        if auth.removeprefix("Bearer ") not in self.valid:
+            return httpx.Response(401, json={"detail": "invalid or expired token"})
+        return httpx.Response(200, json={"consumer": "svc", "admin": False})
+
+
+@pytest.mark.asyncio
+async def test_password_auth_signs_in_once_and_reuses_the_token() -> None:
+    server = _Server()
+    cli = GraphosClient(base_url="http://x/api", tenant="demo",
+                        auth=PasswordAuth("svc", "s3cret-value"), transport=_mock_transport(server))
+    await asyncio.gather(*(cli.me() for _ in range(5)))
+    assert server.logins == 1                                   # concurrent calls wait for one
+    assert {auth for _, auth in server.seen} == {"Bearer t1"}
+    await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_password_auth_renews_before_expiry_and_after_a_401() -> None:
+    server = _Server(expires_in=0)                              # stale at once: renew each time
+    auth = PasswordAuth("svc", "s3cret-value")
+    cli = GraphosClient(base_url="http://x", tenant="demo", auth=auth,
+                        transport=_mock_transport(server))
+    await cli.me()
+    await cli.me()
+    assert server.logins == 2
+    server.expires_in = 900
+    await cli.me()                                              # t3, kept
+    server.valid.clear()                                        # revoked on the server
+    me = await cli.me()                                         # 401, sign in, sent again
+    assert me.consumer == "svc" and server.logins == 4
+    assert server.seen[-2:] == [("/v1/me", "Bearer t3"), ("/v1/me", "Bearer t4")]
+    assert "s3cret" not in repr(auth)
+    await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_sign_in_raises_graphos_error() -> None:
+    cli = GraphosClient(base_url="http://x", tenant="demo",
+                        auth=PasswordAuth("svc", "wrong"), transport=_mock_transport(_Server()))
+    with pytest.raises(GraphosError) as caught:
+        await cli.me()
+    assert caught.value.status_code == 401 and "sign-in failed" in caught.value.detail
+    await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_credentials_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GRAPHOS_USER", "svc")
+    monkeypatch.setenv("GRAPHOS_PASSWORD", "s3cret-value")
+    server = _Server()
+    cli = GraphosClient(base_url="http://x", tenant="demo", transport=_mock_transport(server))
+    assert (await cli.me()).consumer == "svc" and server.logins == 1
+    await cli.close()
+    # A token passed explicitly wins over the environment.
+    fixed = GraphosClient(base_url="http://x", tenant="demo", token="t1",
+                          transport=_mock_transport(server))
+    await fixed.me()
+    assert server.logins == 1 and server.seen[-1][1] == "Bearer t1"
+    await fixed.close()
+    with pytest.raises(ValueError, match="either token or auth"):
+        GraphosClient(base_url="http://x", tenant="demo", token="t",
+                      auth=PasswordAuth("svc", "s3cret-value"))
+
+
+@pytest.mark.asyncio
+async def test_bearer_auth_gets_its_tokens_from_the_program() -> None:
+    issued: list[str] = []
+
+    async def source() -> tuple[str, float]:
+        issued.append(f"idp{len(issued) + 1}")
+        return issued[-1], 300
+
+    server = _Server()
+    server.valid.add("idp1")
+    cli = GraphosClient(base_url="http://x", tenant="demo", auth=BearerAuth(source),
+                        transport=_mock_transport(server))
+    await cli.me()
+    await cli.me()
+    assert issued == ["idp1"]                                   # reused while valid
+    server.valid = {"idp2"}                                     # the old one was revoked
+    await cli.me()                                              # 401: asks for a new one
+    assert issued == ["idp1", "idp2"] and server.seen[-1][1] == "Bearer idp2"
     await cli.close()

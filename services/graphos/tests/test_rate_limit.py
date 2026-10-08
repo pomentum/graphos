@@ -1,4 +1,4 @@
-"""Per-token rate-limiter tests.
+"""Per-caller rate-limiter tests.
 
 Pure-Python — uses TestClient and a synthetic clock for the bucket so
 we don't actually wait one second of wall time per scenario.
@@ -8,16 +8,16 @@ from __future__ import annotations
 
 import hashlib
 from http import HTTPStatus
-from typing import cast
 
-import pytest
 from fastapi.testclient import TestClient
 
 from graphos.app import create_app
+from graphos.auth import StaticAuthenticator
 from graphos.config import Settings
+from graphos.identity import Principal
 from graphos.observability.rate_limit import (
     _BucketRegistry,
-    _token_id_from,
+    _short_id,
 )
 
 # ── Bucket unit tests (synthetic clock) ────────────────────────────────────
@@ -64,38 +64,32 @@ def test_separate_tokens_have_separate_buckets() -> None:
     assert b.admit(now=100.0)[0] is True   # not blocked by a's bucket
 
 
-# ── token_id extraction ────────────────────────────────────────────────────
+# ── caller id ──────────────────────────────────────────────────────────────
 
 
-class _FakeRequest:
-    def __init__(self, headers: dict[str, str]):
-        self.headers = headers
+def test_caller_id_hides_the_value_and_separates_shared_prefixes() -> None:
+    a, b = _short_id("svc_shared_AAAA"), _short_id("svc_shared_BBBB")
+    assert a != b and len(a) == 12
+    assert a == hashlib.sha256(b"svc_shared_AAAA").hexdigest()[:12]
+    assert "svc" not in a
 
 
-def _sha12(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
-
-
-@pytest.mark.parametrize(
-    ("auth_header", "expected"),
-    [
-        ("Bearer tok_abc123def456_extra", _sha12("tok_abc123def456_extra")),
-        ("bearer  tok_xyz",     _sha12("tok_xyz")),        # spaces tolerated, lowercase ok
-        ("Bearer ",              None),                     # empty token
-        ("tok_no_scheme",        None),                     # missing scheme
-        ("",                     None),
-    ],
-)
-def test_token_id_from(auth_header, expected) -> None:
-    req = cast("object", _FakeRequest({"authorization": auth_header}))
-    assert _token_id_from(req) == expected     # type: ignore[arg-type]
-
-
-def test_token_id_hides_the_token_and_separates_shared_prefixes() -> None:
-    a = _token_id_from(cast("object", _FakeRequest({"authorization": "Bearer tok_shared_AAAA"})))
-    b = _token_id_from(cast("object", _FakeRequest({"authorization": "Bearer tok_shared_BBBB"})))
-    assert a != b
-    assert "tok_" not in (a or "")
+def test_signed_in_callers_are_bucketed_by_user_not_by_token() -> None:
+    settings = Settings(
+        db_password="placeholder", rate_limit_enabled=True, rate_limit_rps=2,
+        rate_limit_window_s=60.0,
+    )
+    app = create_app(settings=settings)
+    same = Principal.static("svc", admin=True)
+    app.state.authenticator = StaticAuthenticator({"tok_1": same, "tok_2": same})
+    client = TestClient(app, raise_server_exceptions=False)
+    assert client.get("/v1/me", headers={"Authorization": "Bearer tok_1"}).status_code != 429
+    assert client.get("/v1/me", headers={"Authorization": "Bearer tok_2"}).status_code != 429
+    # A renewed token is the same caller: the third request is over the cap.
+    assert client.get("/v1/me", headers={"Authorization": "Bearer tok_1"}).status_code == 429
+    # An unknown token is not bucketed (auth answers 401).
+    for _ in range(3):
+        assert client.get("/v1/me", headers={"Authorization": "Bearer nope"}).status_code == 401
 
 
 # ── Middleware end-to-end ──────────────────────────────────────────────────
@@ -106,7 +100,7 @@ def _client(enabled: bool, rps: int, window_s: float = 60.0) -> TestClient:
     we don't have to fight wall-clock during the test."""
     settings = Settings(
         db_password="placeholder",
-        auth_tokens_file=None, auth_disabled=True,
+        auth_disabled=True,
         rate_limit_enabled=enabled,
         rate_limit_rps=rps,
         rate_limit_window_s=window_s,

@@ -1,11 +1,17 @@
-import type { Job } from "../api/types";
+import type { Job, Level } from "../api/types";
 import { t } from "../i18n";
+import { atLeast } from "../session/levels";
 
 const KINDS = ["recompute_communities", "compute_metrics", "resolve_edges", "vacuum"] as const;
 type KnownKind = (typeof KINDS)[number];
 
-/** Kinds only an admin may start, and so cancel. */
-const ADMIN_KINDS: ReadonlySet<string> = new Set(["recompute_communities", "compute_metrics", "vacuum"]);
+/** The level on the tenant that starting a kind needs, and so cancelling it; vacuum is an admin's. */
+const NEEDS: Record<KnownKind, Level | "admin"> = {
+  recompute_communities: "maintain",
+  compute_metrics: "maintain",
+  resolve_edges: "write",
+  vacuum: "admin",
+};
 
 /** A job that has not ended yet. */
 export function isActiveJob(job: Job | null | undefined): boolean {
@@ -18,13 +24,14 @@ export function jobName(kind: string): string {
 }
 
 /**
- * Whether this session may cancel the job: graphos lets the scope that may
- * start a kind cancel it, and treats a kind it does not know as admin-only.
+ * Whether this session may cancel the job: graphos lets whoever may start a
+ * kind cancel it, and treats a kind it does not know as admin-only.
  */
-export function canCancel(job: Job, session: { isAdmin: boolean; canWrite: boolean }): boolean {
+export function canCancel(job: Job, session: { isAdmin: boolean; level: Level | null }): boolean {
   if (!isActiveJob(job) || job.cancel_requested) return false;
   if (session.isAdmin) return true;
-  return session.canWrite && (KINDS as readonly string[]).includes(job.kind) && !ADMIN_KINDS.has(job.kind);
+  const needs = (KINDS as readonly string[]).includes(job.kind) ? NEEDS[job.kind as KnownKind] : "admin";
+  return needs !== "admin" && atLeast(session.level, needs);
 }
 
 /** "45 s", "3 min", "1 h 5 min". */

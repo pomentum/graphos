@@ -18,11 +18,12 @@ const SHOWN = 5;
 export function StrictEndpoints({
   schema,
   map,
-  isAdmin,
+  editable,
 }: {
   schema: TenantSchema;
   map: GraphMap | undefined;
-  isAdmin: boolean;
+  /** May switch it (maintain on the tenant). */
+  editable: boolean;
 }) {
   const { t } = useTranslation();
   const save = useAddToSchema();
@@ -30,7 +31,7 @@ export function StrictEndpoints({
   const strict = Boolean(schema.strict_endpoints);
   const anyDeclared = new Endpoints(schema).any;
 
-  if (!isAdmin) {
+  if (!editable) {
     return strict ? (
       <Tooltip label={t("views.schema.strict.hint")} withArrow multiline w={280}>
         <Badge variant="light" radius="sm" tt="none">

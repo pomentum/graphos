@@ -1,6 +1,6 @@
 """Endpoints any token may call about itself and its tenants.
 
-- ``GET /v1/me``                the calling token: consumer, access, tenants
+- ``GET /v1/me``                who is signed in: user, levels, rights
 - ``GET /v1/{tenant}/schema``   one tenant's labels and search indexes
 
 They give a client (such as the UI) what it needs to start without an admin
@@ -11,6 +11,8 @@ metadata).
 
 from __future__ import annotations
 
+from typing import Literal, cast
+
 from fastapi import APIRouter, HTTPException, status
 
 from graphos.auth import ReadPrincipal
@@ -20,17 +22,20 @@ from graphos.contracts.tenants import EdgeEndpointSpec, MeResponse, TenantSchema
 router = APIRouter(tags=["tenants"])
 
 
-@router.get("/me", summary="The calling token: consumer, access and tenants")
+@router.get("/me", summary="Who is signed in: user, levels per tenant, rights")
 async def me(principal: ReadPrincipal) -> MeResponse:
-    registered = registered_tenants()
-    tenants = registered if principal.admin else {
-        name: spec for name, spec in registered.items() if name in principal.tenants
-    }
+    tenants = principal.visible(registered_tenants())
+    levels = {t: level.label for t in tenants if (level := principal.level(t)) is not None}
     return MeResponse(
         consumer=principal.consumer,
+        kind=cast(Literal["person", "service"], principal.kind)
+        if principal.subject else "anonymous",
+        via=cast(Literal["password", "oidc"], principal.via) if principal.subject else "none",
         admin=principal.admin,
-        access=principal.access.value,
-        tenants=sorted(tenants),
+        must_change=principal.must_change,
+        tenants=tenants,
+        levels=levels,  # type: ignore[arg-type]
+        create_tenants=["*"] if principal.admin else list(principal.create_tenants),
     )
 
 

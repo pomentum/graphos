@@ -200,10 +200,10 @@ function LinkDetail({ diagram, id, onSelect }: { diagram: Diagram; id: string; o
   );
 }
 
-/** One relationship type on a line: its edges, its status, and (for admins) declare or remove. */
+/** One relationship type on a line: its edges, its status, and (for maintainers) declare or remove. */
 function TypeRow({ link, type }: { link: Link; type: LinkType }) {
   const { t } = useTranslation();
-  const { isAdmin } = useTenantSession();
+  const { canMaintain } = useTenantSession();
   const declare = useAddToSchema();
   const remove = useRemoveEdgeEndpoint();
   const exact = type.via !== null && type.via.src === link.src && type.via.dst === link.dst;
@@ -230,7 +230,7 @@ function TypeRow({ link, type }: { link: Link; type: LinkType }) {
         <Text size="xs" className={classes.typeStatus} data-status={type.status} truncate>
           {statusLabel}
         </Text>
-        {isAdmin && type.status !== "declared" ? (
+        {canMaintain && type.status !== "declared" ? (
           <Tooltip
             label={t(
               type.status === "open" ? "views.schema.diagram.declareOpenHint" : "views.schema.diagram.declareHint",
@@ -252,7 +252,7 @@ function TypeRow({ link, type }: { link: Link; type: LinkType }) {
             </Button>
           </Tooltip>
         ) : null}
-        {isAdmin && type.status === "declared" && exact ? (
+        {canMaintain && type.status === "declared" && exact ? (
           <Button
             size="compact-xs"
             variant="subtle"

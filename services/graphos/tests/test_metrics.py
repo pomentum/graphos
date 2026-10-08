@@ -11,7 +11,7 @@ from graphos.config import Settings
 
 
 def _client() -> TestClient:
-    settings = Settings(db_password="placeholder", auth_tokens_file=None, auth_disabled=True)
+    settings = Settings(db_password="placeholder", auth_disabled=True)
     app = create_app(settings=settings)
     return TestClient(app, raise_server_exceptions=False)
 

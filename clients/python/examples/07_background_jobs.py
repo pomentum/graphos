@@ -17,11 +17,11 @@ from http import HTTPStatus
 from graphos_client import GraphosClient, GraphosError
 
 URL = os.environ.get("GRAPHOS_URL", "http://127.0.0.1:8080")
-TOKEN = os.environ["GRAPHOS_TOKEN"]          # recompute and vacuum need admin scope
+# Signs in as GRAPHOS_USER / GRAPHOS_PASSWORD and renews its token by itself.
 
 
 async def main() -> None:
-    async with GraphosClient(base_url=URL, token=TOKEN, tenant="acme") as g:
+    async with GraphosClient(base_url=URL, tenant="acme") as g:
         # Vacuum works on every build; a dry-run recompute needs the Louvain extra.
         job = await g.submit_vacuum(tables=["graphos_meta.jobs"])
         print(f"queued {job.kind} job {job.id} ({job.status})")

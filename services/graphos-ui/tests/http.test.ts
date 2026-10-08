@@ -30,6 +30,35 @@ describe("describeError", () => {
 });
 
 describe("HttpClient", () => {
+  it("renews the token once on 401 and sends the request again", async () => {
+    let token = "old";
+    const seen: string[] = [];
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const auth = new Headers(init?.headers).get("Authorization") ?? "";
+      seen.push(auth);
+      return new Response(auth === "Bearer new" ? "{}" : '{"detail":"expired"}', {
+        status: auth === "Bearer new" ? 200 : 401,
+      });
+    }) as unknown as typeof fetch;
+    const source = {
+      token: () => Promise.resolve(token),
+      renew: vi.fn(async () => {
+        token = "new";
+        return true;
+      }),
+    };
+    await new HttpClient("/api", source, fetchImpl).get("/v1/me");
+    expect(seen).toEqual(["Bearer old", "Bearer new"]);
+    expect(source.renew).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends no Authorization header without a token source (signing in)", async () => {
+    const fetchImpl = vi.fn(async () => new Response("{}")) as unknown as typeof fetch;
+    await new HttpClient("/api", null, fetchImpl).post("/v1/auth/login", {});
+    const [, init] = (fetchImpl as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls[0]!;
+    expect(new Headers(init.headers).has("Authorization")).toBe(false);
+  });
+
   it("sends the bearer token and returns the body with the ETag", async () => {
     const { impl, calls } = fakeFetch(200, { ok: true }, { ETag: '"12.3"' });
     const http = new HttpClient("/api", "secret", impl);

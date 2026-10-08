@@ -17,8 +17,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from graphos import jobs
-from graphos.auth import ReadPrincipal, TokenPrincipal, WritePrincipal
+from graphos.auth import ReadPrincipal, WritePrincipal, require_admin, require_level
+from graphos.bootstrap import registered_tenants
 from graphos.contracts.jobs import Job, JobList, JobStatus
+from graphos.identity import Level, Principal
 
 router = APIRouter(tags=["jobs"], prefix="/jobs")
 
@@ -52,7 +54,7 @@ async def respond_async(
     kind: str,
     tenant: str | None,
     body: BaseModel,
-    principal: TokenPrincipal,
+    principal: Principal,
 ) -> JSONResponse:
     """Queue ``kind`` with ``body`` as its params and answer 202."""
     try:
@@ -83,7 +85,7 @@ async def run_sync(  # noqa: PLR0913 — the job's fields and how to run it
     kind: str,
     tenant: str | None,
     body: BaseModel,
-    principal: TokenPrincipal,
+    principal: Principal,
     run: Callable[[], Awaitable[ResponseT]],
 ) -> ResponseT:
     """Run a synchronous call of ``kind``, listed in ``/v1/jobs`` while it runs."""
@@ -100,10 +102,10 @@ async def run_sync(  # noqa: PLR0913 — the job's fields and how to run it
         ) from exc
 
 
-def _visible(principal: TokenPrincipal, job: Job) -> bool:
+def _visible(principal: Principal, job: Job) -> bool:
     if principal.admin:
         return True
-    return job.tenant is not None and job.tenant in principal.tenants
+    return job.tenant is not None and principal.has(job.tenant, Level.READ)
 
 
 def _not_found(job_id: UUID) -> HTTPException:
@@ -130,11 +132,11 @@ async def list_jobs(
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
 ) -> JobList:
     if tenant is not None:
-        if not principal.admin and tenant not in principal.tenants:
+        if not principal.has(tenant, Level.READ):
             return JobList()
         tenants: list[str] | None = [tenant]
     else:
-        tenants = None if principal.admin else sorted(principal.tenants)
+        tenants = None if principal.admin else principal.visible(registered_tenants())
     found = await jobs.list_jobs(
         request.app.state.pool, tenants=tenants, status=status_, limit=limit,
     )
@@ -159,11 +161,14 @@ async def cancel_job(job_id: UUID, request: Request, principal: WritePrincipal) 
     job = await jobs.get(pool, job_id)
     if job is None or not _visible(principal, job):
         raise _not_found(job_id)
-    # A kind this replica does not know (mid rolling upgrade) counts as
-    # admin-only: fail closed.
+    # Cancelling needs what starting needs.  A kind this replica does not
+    # know (mid rolling upgrade), or one without a tenant, needs admin: fail
+    # closed.
     kind = runner.kinds.get(job.kind)
-    if (kind is None or kind.admin_only) and not principal.admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin scope required")
+    if kind is None or kind.needs == "admin" or job.tenant is None:
+        require_admin(principal)
+    else:
+        require_level(principal, job.tenant, Level.parse(kind.needs))
     updated = await jobs.request_cancel(pool, job_id)
     if updated is None:
         raise HTTPException(

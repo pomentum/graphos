@@ -110,14 +110,54 @@ class Settings(BaseSettings):
     # 428.  Off by default: If-Match is then honoured when sent.
     require_if_match: bool = False
 
-    # ── Auth ─────────────────────────────────────────────────────────────
-    # JSON file: { "<token>": { "consumer": "...", "tenants": ["..."], "admin": false,
-    #                           "access": "read" | "write" } }
-    auth_tokens_file: Path | None = None
-    # Explicit opt-out for local development only.  Without a tokens file
-    # graphos refuses to start unless this is true; when it is, every
-    # request is treated as an anonymous admin.
+    # ── Auth (graphos.identity) ──────────────────────────────────────────
+    # Explicit opt-out for local development only: every request is an
+    # anonymous admin.
     auth_disabled: bool = False
+    # The bootstrap admin's first password, read once when no user exists;
+    # without it, user "graphos" gets the password "graphos".  Either way it
+    # must be changed at the first sign-in.
+    admin_password_file: Path | None = None
+    # False: the bootstrap admin "graphos" cannot sign in (once other admins exist).
+    local_admin: bool = True
+    # ``iss`` of the tokens graphos signs; set it per deployment when several
+    # graphos instances share users of one identity provider.
+    auth_issuer: str = "graphos"
+    # A PEM EC P-256 private key to sign with, instead of the key graphos
+    # generates and keeps in graphos_meta.signing_keys.
+    auth_signing_key_file: Path | None = None
+    access_token_ttl_s: int = Field(default=900, ge=60, le=86_400)
+    # Browser sessions (refresh tokens, people only): idle and absolute limits.
+    session_idle_s: int = Field(default=3_600, ge=60)
+    session_max_s: int = Field(default=43_200, ge=300)
+    # Sign-in protection: failures before a lock, its length, and attempts
+    # per minute from one client address.
+    login_max_failures: int = Field(default=5, ge=1)
+    login_lockout_s: int = Field(default=900, ge=1)
+    login_attempts_per_min: int = Field(default=20, ge=1)
+    password_min_length: int = Field(default=12, ge=8)
+
+    # ── Single sign-on (graphos.oidc) ────────────────────────────────────
+    # Any OpenID Connect provider, found through its discovery document
+    # (<issuer>/.well-known/openid-configuration).  Unset: no SSO.
+    oidc_issuer: str | None = None
+    # graphos's one registration at the provider: a public client using PKCE.
+    oidc_client_id: str | None = None
+    # The ``aud`` access tokens sent straight to the API must carry; defaults
+    # to the client id.
+    oidc_audience: str | None = None
+    oidc_scopes: str = "openid profile email"
+    # Shown on the sign-in button: "Sign in with <name>" ("Sign in with SSO";
+    # or the provider's name).
+    oidc_display_name: str = "SSO"
+    # Claims: the user name shown and recorded, group and role lists.
+    oidc_consumer_claim: str = "preferred_username"
+    oidc_groups_claim: str = "groups"
+    oidc_roles_claim: str = "roles"
+    # Redirect URIs the UI may ask for (the provider checks its own list as
+    # well); empty: any http(s) URI.
+    oidc_redirect_uris: list[str] = Field(default_factory=list)
+    oidc_http_timeout_s: float = Field(default=10.0, gt=0)
 
     # NOTE: graphos has no hardcoded tenants. Consumers register their own
     # schemas at runtime via `POST /v1/tenants`. See bootstrap.py and
@@ -128,12 +168,15 @@ class Settings(BaseSettings):
     def _upper_log_level(cls, v: str) -> str:
         return v.upper()
 
-    @field_validator("auth_tokens_file", mode="before")
+    @field_validator(
+        "admin_password_file", "auth_signing_key_file",
+        "oidc_issuer", "oidc_client_id", "oidc_audience", mode="before",
+    )
     @classmethod
     def _empty_path_to_none(cls, v: Any) -> Any:
         # Treat an empty / whitespace-only env value as ``None`` so an
-        # overlay can unset GRAPHOS_AUTH_TOKENS_FILE="" without Pydantic
-        # coercing it into ``Path(".")``.
+        # overlay can unset a file setting ("") without Pydantic coercing it
+        # into ``Path(".")``.
         if isinstance(v, str) and not v.strip():
             return None
         return v

@@ -99,10 +99,12 @@ services:
       GRAPHOS_BIND_HOST: "0.0.0.0"
       GRAPHOS_BIND_PORT: "8080"
       GRAPHOS_LOG_LEVEL: info
-      # Bearer tokens (created by scripts/init-secrets.sh). graphos refuses
-      # to start without a tokens file unless GRAPHOS_AUTH_DISABLED=true,
-      # which makes every request an anonymous admin: local use only.
-      GRAPHOS_AUTH_TOKENS_FILE: /run/graphos/secrets/graphos_tokens.json
+      # The first admin is user "graphos", password "graphos"; it must be
+      # changed at the first sign-in. Set GRAPHOS_ADMIN_PASSWORD_FILE to start
+      # with another password. People and service accounts are then created
+      # by an admin (UI: Access, or /v1/users). GRAPHOS_AUTH_DISABLED=true
+      # makes every request an anonymous admin instead: local use only.
+      # GRAPHOS_ADMIN_PASSWORD_FILE: /run/graphos/secrets/admin_password.txt
       # No pre-configured tenants: graphos is tenant-agnostic. Consumers
       # register their own context via POST /v1/tenants on startup.
     volumes:
@@ -132,7 +134,8 @@ services:
     mem_reservation: 256m
 
   # The web UI: static files and a same-origin proxy to graphos-api, no state of
-  # its own. Opt in with `--profile ui`. Users sign in with their own graphos token.
+  # its own. Opt in with `--profile ui`. Users sign in with their graphos user name and password,
+  # or through single sign-on when graphos-api has GRAPHOS_OIDC_* set (docs/installation.md).
   graphos-ui:
     profiles: ["ui"]
     image: graphos-ui:${GRAPHOS_UI_TAG:-dev}

@@ -1,6 +1,8 @@
-"""Per-token sliding-window rate limiter.
+"""Per-caller sliding-window rate limiter.
 
-Single-replica, in-memory. Each token has a deque of recent request
+Single-replica, in-memory. Each caller (the signed-in user; access tokens
+are short-lived, so a bucket per token would reset at every renewal) has a
+deque of recent request
 timestamps; the window slides every request. If the count inside the
 window exceeds the configured RPS×window cap, we return 429 with
 `Retry-After` set to the time until the oldest in-window request ages
@@ -114,17 +116,14 @@ class _BucketRegistry:
         return bucket
 
 
-def _token_id_from(request: Request) -> str | None:
-    """Short, opaque identifier for the bearer token.
+def _short_id(value: str) -> str:
+    """Short, opaque identifier of a caller (or, without auth, of the token).
 
-    The first 12 hex chars of the token's SHA-256: stable per token, distinct
-    across tokens even when they share a prefix, and reveals nothing about the
-    secret when it shows up as a metric label or a rate-limit bucket key.
+    The first 12 hex chars of its SHA-256: stable, distinct across values even
+    when they share a prefix, and revealing nothing when it shows up as a
+    metric label or a rate-limit bucket key.
     """
-    token = _bearer(request)
-    if not token:
-        return None
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
 
 
 def _bearer(request: Request) -> str | None:
@@ -155,19 +154,24 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if not self._enabled or request.url.path in _EXEMPT_PATHS:
             return await call_next(request)
 
-        token_id = _token_id_from(request)
-        if token_id is None:
+        bearer = _bearer(request)
+        if bearer is None:
             # Unauthenticated request — let it through; auth middleware
             # will decide. Rate-limiting by IP is a different feature
             # (different storage shape, different concerns) and we don't
             # try to do it here.
             return await call_next(request)
-        store = getattr(request.app.state, "token_store", None)
-        if store is not None and store.lookup(_bearer(request) or "") is None:
-            # Unknown token: auth answers 401.  Not bucketing it keeps random
-            # bearer strings from growing the bucket map or the metric's
-            # label set without bound.
-            return await call_next(request)
+        authenticator = getattr(request.app.state, "authenticator", None)
+        if authenticator is not None:
+            principal = await authenticator.authenticate(bearer)
+            if principal is None:
+                # Unknown or expired token: auth answers 401.  Not bucketing
+                # it keeps random bearer strings from growing the bucket map
+                # or the metric's label set without bound.
+                return await call_next(request)
+            token_id = _short_id(principal.consumer)
+        else:
+            token_id = _short_id(bearer)
 
         bucket = self._registry.get(token_id)
         admitted, retry_after = bucket.admit(time.monotonic())

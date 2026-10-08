@@ -44,8 +44,10 @@ carries its own licence file in its distribution.
 | prometheus-client | Apache-2.0 AND BSD-2-Clause | service |
 | rustworkx | Apache-2.0 | service (graph metrics) |
 | numpy | BSD-3-Clause | service (graph metrics) |
+| PyJWT | MIT | service (access tokens) |
+| cryptography | Apache-2.0 OR BSD-3-Clause | service (token signing keys) |
 | python-igraph | GPL-2.0-or-later | service, **optional** `louvain` extra only |
-| httpx | BSD-3-Clause | client |
+| httpx | BSD-3-Clause | client; service (identity provider) |
 
 These are the direct dependencies. Installing them pulls in further packages
 (for example starlette, anyio, h11, idna, uvloop, httptools, websockets,

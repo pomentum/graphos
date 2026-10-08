@@ -15,7 +15,7 @@ import time
 from graphos_client import EdgeUpsert, GraphosClient, NodeUpsert
 
 URL = os.environ.get("GRAPHOS_URL", "http://127.0.0.1:8080")
-TOKEN = os.environ["GRAPHOS_TOKEN"]
+# Signs in as GRAPHOS_USER / GRAPHOS_PASSWORD and renews its token by itself.
 
 N_USERS = 2_000
 N_DOCS = 5_000
@@ -49,7 +49,7 @@ async def main() -> None:
         for i in range(N_USERS) for _ in range(3)
     ]
 
-    async with GraphosClient(base_url=URL, token=TOKEN, tenant="acme") as g:
+    async with GraphosClient(base_url=URL, tenant="acme") as g:
         await g.register_tenant(
             vertex_labels=["User", "Document", "Tag"],
             edge_labels=["AUTHORED", "FOLLOWS", "TAGGED_WITH"],

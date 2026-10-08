@@ -27,11 +27,11 @@ const NO_FOCUS = { nodes: new Set<string>(), edges: new Set<string>() };
  * pair of groups with relationships between them, thicker with more. Click
  * a group to see what it is made of and what it connects to; double-click
  * to open its best-connected member on the graph. The groups are those of
- * the last recompute; an administrator can compute them again.
+ * the last recompute; whoever maintains the tenant can compute them again.
  */
 export function GroupsView({ onMode }: { onMode: (mode: ExploreMode) => void }) {
   const { t } = useTranslation();
-  const { isAdmin } = useTenantSession();
+  const { canMaintain } = useTenantSession();
   const workspace = useWorkspace();
   const map = useCommunityMap();
   const palette = usePalette();
@@ -63,7 +63,7 @@ export function GroupsView({ onMode }: { onMode: (mode: ExploreMode) => void }) 
     workspace.open({ id: group.hub.id, label: group.hub.label }, group.hub.properties);
   };
 
-  const computeButton = isAdmin ? (
+  const computeButton = canMaintain ? (
     <Button
       size="xs"
       variant="default"

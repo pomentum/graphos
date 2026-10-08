@@ -54,11 +54,12 @@ class JobKind:
 
     ``run(pool, tenant, params)`` returns the response model of the
     synchronous endpoint, or raises ``HTTPException`` as that endpoint
-    would.  ``admin_only`` kinds can be cancelled by admins only.
+    would.  ``needs`` is the access starting it needs, and so cancelling
+    it: ``"write"`` or ``"maintain"`` on its tenant, or ``"admin"``.
     """
 
     run: JobFn
-    admin_only: bool = False
+    needs: str = "write"
 
 
 # Kinds that exclude each other per tenant (the unique index

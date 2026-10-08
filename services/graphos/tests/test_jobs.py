@@ -23,14 +23,14 @@ from starlette.requests import Request
 from graphos import jobs
 from graphos.api.db import vacuum
 from graphos.api.jobs import wants_async
-from graphos.auth import TokenPrincipal
 from graphos.contracts.db import VacuumRequest
 from graphos.contracts.jobs import TERMINAL_STATUSES, Job
 from graphos.db import ensure_internal_schema
+from graphos.identity import Principal
 
 from .conftest import requires_db
 
-ADMIN = TokenPrincipal(consumer="test", tenants=frozenset(), admin=True)
+ADMIN = Principal.static("test", admin=True)
 
 
 class Echo(BaseModel):
@@ -442,7 +442,7 @@ def test_job_visibility() -> None:
         return Job(id=uuid4(), kind="echo", tenant=tenant, status="queued",
                    created_at=datetime.now(UTC))
 
-    reader = TokenPrincipal(consumer="r", tenants=frozenset({"a"}), admin=False)
+    reader = Principal.static("r", tenants={"a": "read"})
     assert _visible(reader, job("a"))
     assert not _visible(reader, job("b"))
     assert not _visible(reader, job(None))          # instance-wide: admins only
@@ -470,10 +470,10 @@ async def test_cancel_needs_admin_for_admin_and_unknown_kinds(pool: asyncpg.Pool
     from graphos.api.jobs import cancel_job
 
     tenant = _tenant()
-    member = TokenPrincipal(consumer="member", tenants=frozenset({tenant}), admin=False)
+    member = Principal.static("member", tenants={tenant: "write"})
     runner = SimpleNamespace(
         kinds={"echo": jobs.JobKind(run=_echo), "recompute_communities": jobs.JobKind(
-            run=_echo, admin_only=True)},
+            run=_echo, needs="admin")},
         cancel_local=lambda _job_id: None,
     )
     request = Request({"type": "http", "headers": [],

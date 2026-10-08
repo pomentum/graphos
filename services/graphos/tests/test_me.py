@@ -5,23 +5,23 @@ Pure Python: tenants are put in the in-memory registry, no database.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterator
 from http import HTTPStatus
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from graphos.app import create_app
-from graphos.auth import TokenStore
+from graphos.auth import StaticAuthenticator
 from graphos.bootstrap import TenantSpec, forget, remember
 from graphos.config import Settings
+from graphos.identity import Principal
 
-TOKENS = {
-    "tok_read": {"consumer": "reader", "tenants": ["acme", "unregistered"], "access": "read"},
-    "tok_write": {"consumer": "writer", "tenants": ["acme"], "access": "write"},
-    "tok_admin": {"consumer": "ops", "tenants": [], "admin": True},
+PRINCIPALS = {
+    "tok_read": Principal.static("reader", tenants={"acme": "read", "unregistered": "read"}),
+    "tok_write": Principal.static("writer", tenants={"acme": "write"}),
+    "tok_svc": Principal.static("svc", tenants={"oth*": "maintain"}, create_tenants=["sol_*"]),
+    "tok_admin": Principal.static("ops", admin=True),
 }
 ACME = TenantSpec(
     name="acme",
@@ -38,11 +38,9 @@ OTHER = TenantSpec(name="other", vertex_labels=("Thing",))
 
 
 @pytest.fixture
-def client(tmp_path: Path) -> Iterator[TestClient]:
-    tokens = tmp_path / "tokens.json"
-    tokens.write_text(json.dumps(TOKENS))
-    app = create_app(Settings(db_password="placeholder", auth_tokens_file=tokens))
-    app.state.token_store = TokenStore(tokens)
+def client() -> Iterator[TestClient]:
+    app = create_app(Settings(db_password="placeholder"))
+    app.state.authenticator = StaticAuthenticator(PRINCIPALS)
     remember(ACME)
     remember(OTHER)
     try:
@@ -56,13 +54,22 @@ def _get(client: TestClient, path: str, token: str):  # noqa: ANN202
     return client.get(path, headers={"Authorization": f"Bearer {token}"})
 
 
-def test_me_lists_the_registered_tenants_a_token_may_use(client: TestClient) -> None:
+def test_me_lists_the_registered_tenants_and_levels(client: TestClient) -> None:
     body = _get(client, "/v1/me", "tok_read").json()
-    assert body == {"consumer": "reader", "admin": False, "access": "read", "tenants": ["acme"]}
-    assert _get(client, "/v1/me", "tok_write").json()["access"] == "write"
+    assert body == {
+        "consumer": "reader", "kind": "person", "via": "password", "admin": False,
+        "must_change": False,
+        "tenants": ["acme"], "levels": {"acme": "read"}, "create_tenants": [],
+    }
+    assert _get(client, "/v1/me", "tok_write").json()["levels"] == {"acme": "write"}
+    svc = _get(client, "/v1/me", "tok_svc").json()
+    assert (svc["tenants"], svc["levels"], svc["create_tenants"]) == (
+        ["other"], {"other": "maintain"}, ["sol_*"],
+    )
     admin = _get(client, "/v1/me", "tok_admin").json()
-    assert admin["admin"] is True
+    assert admin["admin"] is True and admin["create_tenants"] == ["*"]
     assert {"acme", "other"} <= set(admin["tenants"])
+    assert admin["levels"]["acme"] == "owner"
     assert client.get("/v1/me").status_code == HTTPStatus.UNAUTHORIZED
 
 
