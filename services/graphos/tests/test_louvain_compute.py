@@ -91,13 +91,19 @@ async def test_a_failure_in_the_child_is_raised() -> None:
 async def test_cancelling_terminates_the_child() -> None:
     edges = _edges(_clustered(60_000, 10), ["LINK", "BRIDGE"])   # seconds of work
     task = asyncio.create_task(lc.compute_in_process(edges, **OPTIONS))
-    deadline = time.monotonic() + 10
-    while lc._running is None and time.monotonic() < deadline:
-        await asyncio.sleep(0.05)
-    child = lc._running
-    assert child is not None and child.is_alive()
-    await asyncio.sleep(0.5)
-    task.cancel()
+    try:
+        # ``_running`` is set before the child has started (the start runs in
+        # a thread and can be slow on a busy machine): wait until it is alive.
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not (
+            lc._running is not None and lc._running.is_alive()
+        ):
+            await asyncio.sleep(0.05)
+        child = lc._running
+        assert child is not None and child.is_alive()
+        await asyncio.sleep(0.5)
+    finally:
+        task.cancel()           # also when an assertion failed: leave no child behind
     with pytest.raises(asyncio.CancelledError):
         await task
     assert not child.is_alive()
