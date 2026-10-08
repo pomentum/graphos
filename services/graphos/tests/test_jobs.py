@@ -380,6 +380,35 @@ async def test_cancelling_a_synchronous_call_answers_409(pool: asyncpg.Pool) -> 
 
 @requires_db
 @pytest.mark.asyncio
+async def test_a_cancel_noticed_twice_still_answers_409(pool: asyncpg.Pool) -> None:
+    # The cancel endpoint and the heartbeat both notice a request: the second
+    # notice must not interrupt the call while it answers 409.
+    tenant = _tenant()
+    release = asyncio.Event()
+
+    async def work() -> BaseModel:
+        await release.wait()
+        return Echo(tenant=tenant, params={})
+
+    call = asyncio.create_task(_tracked(pool, "echo", tenant, work))
+    deadline = time.monotonic() + 5
+    running: list[Job] = []
+    while not running and time.monotonic() < deadline:
+        running = await jobs.list_jobs(pool, tenants=[tenant], status=["running"], limit=5)
+        await asyncio.sleep(0.02)
+    await jobs.request_cancel(pool, running[0].id)
+    assert jobs.cancel_tracked(running[0].id)
+    for _ in range(3):
+        await asyncio.sleep(0)          # the call is now handling the first cancel
+    jobs.cancel_tracked(running[0].id)
+    with pytest.raises(HTTPException) as caught:
+        await call
+    assert caught.value.status_code == 409
+    assert (await jobs.get(pool, running[0].id)).status == "cancelled"
+
+
+@requires_db
+@pytest.mark.asyncio
 async def test_a_synchronous_whole_graph_call_waits_for_no_job(pool: asyncpg.Pool) -> None:
     tenant = _tenant()
     queued = await _submit(pool, "recompute_communities", tenant)

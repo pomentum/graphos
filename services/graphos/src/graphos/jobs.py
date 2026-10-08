@@ -170,6 +170,16 @@ async def request_cancel(pool: asyncpg.Pool, job_id: UUID) -> Job | None:
 
 # Synchronous calls running in this process: job id -> the request's task.
 _TRACKED: dict[UUID, asyncio.Task[Any]] = {}
+# Those of them cancelled because a cancel was requested.  Both the cancel
+# endpoint and the heartbeat notice a request; the task is cancelled once
+# only, so a second cancel cannot interrupt the call's 409 answer.
+_CANCELLING: set[UUID] = set()
+
+
+def _cancel_once(job_id: UUID, task: asyncio.Task[Any]) -> None:
+    if job_id not in _CANCELLING:
+        _CANCELLING.add(job_id)
+        task.cancel()
 
 
 async def run_tracked(  # noqa: PLR0913 — the job's fields and how to run it
@@ -217,7 +227,8 @@ async def run_tracked(  # noqa: PLR0913 — the job's fields and how to run it
         status, result = "succeeded", response.model_dump(mode="json")
         return response
     except asyncio.CancelledError:
-        if await pool.fetchval(
+        beat.cancel()                     # it must not cancel the call again
+        if job_id in _CANCELLING or await pool.fetchval(
             "SELECT cancel_requested FROM graphos_meta.jobs WHERE id = $1;", job_id,
         ):
             if task is not None:
@@ -240,6 +251,7 @@ async def run_tracked(  # noqa: PLR0913 — the job's fields and how to run it
     finally:
         beat.cancel()
         _TRACKED.pop(job_id, None)
+        _CANCELLING.discard(job_id)
         try:
             await _finish(pool, job_id, status, result, error)
         except Exception:  # noqa: BLE001 — the call's own outcome comes first
@@ -279,7 +291,7 @@ async def _beat(
             log.warning("job heartbeat failed", extra={"job_id": str(job_id)})
             continue
         if cancel and task is not None:
-            task.cancel()
+            _cancel_once(job_id, task)
             return
 
 
@@ -288,7 +300,7 @@ def cancel_tracked(job_id: UUID) -> bool:
     task = _TRACKED.get(job_id)
     if task is None:
         return False
-    task.cancel()
+    _cancel_once(job_id, task)
     return True
 
 
