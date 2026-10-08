@@ -257,6 +257,7 @@ def test_resolve_multi_rule_per_edge_type_returns_single_result(
 async def _e2e_indexer_with_live_db(db_pool) -> None:  # noqa: ANN001
     """Helper for the requires_db E2E test below: register a tenant with
     a resolve_rule and assert the matching pg_indexes rows exist."""
+    from graphos import writes
     from graphos.bootstrap import (
         bootstrap_tenant,
         persist_spec,
@@ -279,17 +280,20 @@ async def _e2e_indexer_with_live_db(db_pool) -> None:  # noqa: ANN001
             }),
         ),
     )
+    # A fresh graph, as on a new database: an earlier run's graph would keep
+    # its property record and hide a seed that bypassed the write path.
+    async with db_pool.acquire() as conn:
+        if await conn.fetchval("SELECT 1 FROM ag_catalog.ag_graph WHERE name = $1;", name):
+            await conn.execute(f"SELECT drop_graph('{name}', true);")
     try:
         await bootstrap_tenant(db_pool, spec)
         await persist_spec(db_pool, spec)
         remember(spec)
-        # Seed at least one node so the catalogue picks the label up.
-        async with db_pool.acquire() as conn:
-            await conn.execute(
-                f"INSERT INTO \"{name}\".\"Document\" (properties) "
-                "VALUES ('{\"tag_keys\": [\"x\"], \"name\": \"n\", "
-                "\"team\": \"r\"}'::agtype);"
-            )
+        # Seed a node through the write path, which records the properties it
+        # carries: the catalogue the indexer reads is that record.
+        await writes.upsert_nodes(db_pool, tenant=name, label="Document", rows=[
+            {"id": "d1", "props": {"tag_keys": ["x"], "name": "n", "team": "r"}},
+        ])
         ensured = await ensure_resolve_rule_indexes(
             db_pool, tenant=name, spec=spec,
         )
