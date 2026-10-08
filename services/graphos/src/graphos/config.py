@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     audit_enabled: bool = True
     audit_endpoints_only_writes: bool = True   # log POST/PUT/DELETE/PATCH only
 
+    # ── Graph metrics (``graphos.graph_metrics``) ─────────────────────────
+    # Exact betweenness costs O(nodes x edges): above this many nodes taking
+    # part, a metrics run skips it (and says so).
+    betweenness_max_nodes: int = 20_000
+
     # ── Rate limiting ────────────────────────────────────────────────────
     # Per-token sliding window. Off by default for tests / dev; on in
     # production via env. Tune `rps` to the typical concurrent-consumer

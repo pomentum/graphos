@@ -23,7 +23,9 @@ class JobError(BaseModel):
 class Job(BaseModel):
     id: UUID
     kind: str = Field(
-        ..., description="`recompute_communities`, `resolve_edges` or `vacuum`.",
+        ..., description=(
+            "`recompute_communities`, `compute_metrics`, `resolve_edges` or `vacuum`."
+        ),
     )
     tenant: str | None = Field(
         default=None, description="Null for instance-wide jobs (vacuum).",

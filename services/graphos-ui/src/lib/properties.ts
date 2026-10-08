@@ -3,6 +3,14 @@ import type { Properties } from "../api/types";
 /** Properties graphos manages itself; shown, never edited. */
 export const SYSTEM_PROPERTIES = new Set(["id", "community_id"]);
 
+/** graphos writes ``graphos_*`` itself (graph metrics) and refuses writes using it. */
+export const RESERVED_PREFIX = "graphos_";
+
+/** A property graphos manages: shown, never edited, never added. */
+export function isSystemProperty(key: string): boolean {
+  return SYSTEM_PROPERTIES.has(key) || key.startsWith(RESERVED_PREFIX);
+}
+
 /** How a property is edited: by its current value's type. */
 export type PropertyKind = "text" | "number" | "boolean" | "json";
 
@@ -36,8 +44,8 @@ export function isEmptyPatch(patch: Properties): boolean {
 /** Editable properties first in name order, system ones last. */
 export function sortedEntries(properties: Properties): [string, unknown][] {
   return Object.entries(properties).sort(([a], [b]) => {
-    const sa = SYSTEM_PROPERTIES.has(a) ? 1 : 0;
-    const sb = SYSTEM_PROPERTIES.has(b) ? 1 : 0;
+    const sa = isSystemProperty(a) ? 1 : 0;
+    const sb = isSystemProperty(b) ? 1 : 0;
     return sa - sb || a.localeCompare(b);
   });
 }

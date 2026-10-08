@@ -425,6 +425,26 @@ class RecomputeCommunitiesResponse(BaseModel):
     dry_run: bool
 
 
+class ComputeMetricsResponse(BaseModel):
+    """``POST /v1/{tenant}/graph/metrics:compute``: what was computed and written."""
+
+    tenant: str
+    metrics: list[str]
+    properties: list[str] = Field(default_factory=list)
+    n_nodes: int
+    n_edges_scanned: int
+    n_components: int | None = None
+    n_changed: int
+    n_cleared: int
+    betweenness_skipped: bool = False
+    warnings: list[str] = Field(default_factory=list)
+    edge_stream_ms: int
+    compute_ms: int
+    writeback_ms: int
+    elapsed_ms: int
+    dry_run: bool
+
+
 # ── Background jobs ─────────────────────────────────────────────────────────
 
 
@@ -684,7 +704,7 @@ class ChangeItem(BaseModel):
 
     cursor: str            # this record's position; pass as ``after``
     at: datetime
-    op: str                # upsert | merge | patch | delete | resolve | communities
+    op: str                # upsert | merge | patch | delete | resolve | communities | metrics
     kind: str              # node | edge
     label: str | None = None
     src_label: str | None = None

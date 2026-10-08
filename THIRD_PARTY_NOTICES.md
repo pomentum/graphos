@@ -42,6 +42,8 @@ carries its own licence file in its distribution.
 | pydantic-settings | MIT | service |
 | structlog | MIT OR Apache-2.0 | service |
 | prometheus-client | Apache-2.0 AND BSD-2-Clause | service |
+| rustworkx | Apache-2.0 | service (graph metrics) |
+| numpy | BSD-3-Clause | service (graph metrics) |
 | python-igraph | GPL-2.0-or-later | service, **optional** `louvain` extra only |
 | httpx | BSD-3-Clause | client |
 

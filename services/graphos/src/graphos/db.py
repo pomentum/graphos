@@ -245,10 +245,13 @@ CREATE INDEX IF NOT EXISTS jobs_finished_at
 CREATE INDEX IF NOT EXISTS jobs_tenant_created
     ON graphos_meta.jobs (tenant, created_at DESC);
 
--- At most one community recompute queued or running per tenant.
-CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_recompute
+-- At most one whole-graph job (community recompute or graph metrics) queued
+-- or running per tenant: both rewrite every node (graphos.analysis).
+DROP INDEX IF EXISTS graphos_meta.jobs_one_active_recompute;
+CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_graph_job
     ON graphos_meta.jobs (tenant)
-    WHERE kind = 'recompute_communities' AND status IN ('queued', 'running');
+    WHERE kind IN ('recompute_communities', 'compute_metrics')
+      AND status IN ('queued', 'running');
 
 -- The change feed (``graphos.changes``): one row per write, inserted in the
 -- write's own transaction.  A record's position is (txid, seq); readers see

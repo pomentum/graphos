@@ -255,6 +255,16 @@ flowchart LR
 Vertices outside any kept community keep their previous `community_id`. Edges
 added after a run have no `end_community_id` until the next run.
 
+**Graph metrics.** `POST …/graph/metrics:compute` (admin) computes degree,
+PageRank, weakly connected components and betweenness with rustworkx (a default
+dependency) in a child process, and stores them on the nodes as
+`graphos_degree` / `graphos_in_degree` / `graphos_out_degree`,
+`graphos_pagerank`, `graphos_component` and `graphos_betweenness` (exact; skipped
+above `GRAPHOS_BETWEENNESS_MAX_NODES`). Only changed values are written, so an
+unchanged graph is not rewritten; component ids are kept across runs. One
+whole-graph job per tenant: metrics and community recompute exclude each other.
+`graphos_*` properties are reserved: writes using them are refused (400).
+
 ---
 
 ## 6. Aggregation

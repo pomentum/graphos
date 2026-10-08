@@ -12,8 +12,8 @@ Why a child process per run:
   and frees its memory at once; the next recompute does not wait behind it.
 * Memory is returned to the system after every run.
 
-One computation runs at a time per API process, which bounds memory to one
-in-memory graph.
+The child process, and the one-at-a-time rule it shares with graph metrics,
+are :mod:`graphos.graph_compute`'s.
 
 The result depends only on the graph and the seed, not on the order the
 edges were read in: vertices are numbered by ascending graphid, and
@@ -22,37 +22,19 @@ edges were read in: vertices are numbered by ascending graphid, and
 
 from __future__ import annotations
 
-import array
-import asyncio
-import contextlib
-import multiprocessing
 import random
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from multiprocessing.connection import Connection
+from dataclasses import dataclass
 from typing import Any
+
+from graphos import graph_compute
+from graphos.graph_compute import EdgeArrays
 
 # python-igraph is an optional extra (GPL); see graphos.louvain.
 try:
     import igraph as ig
 except ImportError:  # pragma: no cover - exercised by installs without the extra
     ig = None
-
-
-@dataclass
-class EdgeArrays:
-    """The tenant's edges as compact columns: ``src[i]``/``dst[i]`` are
-    graphids, ``rel[i]`` indexes ``rel_names``.  About 20 bytes per edge,
-    against well over 100 for a Python tuple, and cheap to hand to the
-    child process."""
-
-    src: array.array = field(default_factory=lambda: array.array("q"))
-    dst: array.array = field(default_factory=lambda: array.array("q"))
-    rel: array.array = field(default_factory=lambda: array.array("I"))
-    rel_names: list[str] = field(default_factory=list)
-
-    def __len__(self) -> int:
-        return len(self.src)
 
 
 @dataclass(frozen=True)
@@ -149,62 +131,19 @@ def compute(
 # ── Child process ────────────────────────────────────────────────────────────
 
 
-def _child(conn: Connection) -> None:
-    try:
-        edges, options = conn.recv()
-        conn.send(("ok", compute(edges, **options)))
-    except BaseException as exc:  # noqa: BLE001 — report every failure to the parent
-        conn.send(("error", f"{type(exc).__name__}: {exc}"))
-    finally:
-        conn.close()
-
-
-def _receive(conn: Connection) -> Partition:
-    try:
-        status, payload = conn.recv()
-    except EOFError:
-        raise RuntimeError(
-            "the Louvain process ended without a result (killed, or out of memory)"
-        ) from None
-    if status != "ok":
-        raise RuntimeError(f"Louvain computation failed: {payload}")
-    return payload
-
-
-_one_at_a_time = asyncio.Lock()
-_running: multiprocessing.process.BaseProcess | None = None
-
-
 async def compute_in_process(edges: EdgeArrays, **options: Any) -> Partition:
-    """:func:`compute` in a child process.  Cancelling the awaiting task
-    terminates the child."""
-    global _running  # noqa: PLW0603 — the one child of this process, for shutdown
-    async with _one_at_a_time:
-        ctx = multiprocessing.get_context("spawn")
-        conn, child_conn = ctx.Pipe()
-        proc = ctx.Process(target=_child, args=(child_conn,), daemon=True)
-        _running = proc
-        # Starting a spawn child and sending it the edges both block until
-        # the new interpreter reads them: keep both off the event loop.  The
-        # start is shielded so a cancel cannot leave a child starting unseen.
-        start = asyncio.ensure_future(asyncio.to_thread(proc.start))
-        try:
-            await asyncio.shield(start)
-            await asyncio.to_thread(conn.send, (edges, options))
-            return await asyncio.to_thread(_receive, conn)
-        finally:
-            with contextlib.suppress(BaseException):
-                await start               # cancelled mid-start: let it finish
-            child_conn.close()
-            if proc.is_alive():
-                proc.terminate()          # cancelled, or the result is already in
-            if proc.pid is not None:
-                await asyncio.to_thread(proc.join, 10)
-            conn.close()
-            _running = None
+    """:func:`compute` in a child process (:func:`graphos.graph_compute.run_in_child`).
+    Cancelling the awaiting task terminates the child."""
+    return await graph_compute.run_in_child(compute, edges, options, what="Louvain")
 
 
 def terminate_running() -> None:
     """Stop the computation in progress, if any (API shutdown)."""
-    if _running is not None and _running.is_alive():
-        _running.terminate()
+    graph_compute.terminate_running()
+
+
+def __getattr__(name: str) -> Any:
+    # ``_running`` moved to graphos.graph_compute; kept readable here.
+    if name == "_running":
+        return graph_compute.running()
+    raise AttributeError(name)

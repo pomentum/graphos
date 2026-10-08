@@ -86,11 +86,12 @@ Runnable scripts in [`examples/`](examples/). Each reads `GRAPHOS_URL` (default 
 | Reads | `search`, `get_node`, `get_edge`, `find_paths`, `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `scan_nodes` / `scan_nodes_iter`, `scan_edges` / `scan_edges_iter`, `export_graph` |
 | Aggregates | `graph_map`, `map_hubs`, `label_histogram`, `label_top_by_edge`, `aggregate_nodes`, `aggregate_edges`, `tenant_stats` |
 | Communities | `recompute_communities`, `community_map`, `list_communities`, `community_summary`, `community_ids` |
+| Graph metrics | `compute_metrics` (degree, PageRank, components, betweenness, stored as `graphos_*` node properties) |
 | Rule-based edges | `resolve_edges`, `catalogue` |
 | Cache | `cache_put`, `cache_get`, `cache_delete` |
 | Change feed | `changes`, `changes_head`, `iter_changes`, `stream_changes` (reconnects with `Last-Event-ID`) |
 | Operations (admin) | `healthz`, `readyz`, `info`, `db_stats`, `slow_queries`, `vacuum` |
-| Background jobs | `submit_recompute_communities`, `submit_resolve_edges`, `submit_vacuum` (each returns a `Job`), `get_job`, `list_jobs`, `cancel_job`, `wait_for_job` |
+| Background jobs | `submit_recompute_communities`, `submit_compute_metrics`, `submit_resolve_edges`, `submit_vacuum` (each returns a `Job`), `get_job`, `list_jobs`, `cancel_job`, `wait_for_job` |
 
 ## Behaviour
 

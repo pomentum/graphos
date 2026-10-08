@@ -692,6 +692,41 @@ back, largest communities first with the links among them: exact, and instant on
 size, as current as the last recompute (`computed_at`, `modularity`). Until a recompute has run
 since this was added, it answers `available: false`.
 
+### Graph metrics
+
+`POST /v1/{tenant}/graph/metrics:compute` (admin) computes metrics over the tenant's edges with
+rustworkx (a default dependency, Apache-2.0) and stores them on each node:
+
+| `metrics` entry | Properties written |
+|---|---|
+| `degree` | `graphos_degree`, `graphos_in_degree`, `graphos_out_degree` (parallel edges and self-loops count) |
+| `pagerank` | `graphos_pagerank` (damping `damping`, default 0.85) |
+| `components` | `graphos_component`: weakly connected, 0 = the largest; ids carried over between runs like community ids |
+| `betweenness` | `graphos_betweenness`: exact, normalised. Skipped (with a warning) when more nodes take part than `GRAPHOS_BETWEENNESS_MAX_NODES` (20 000) |
+
+Default `metrics`: `degree`, `pagerank`, `components`. `rel_types` and `node_filter` limit the
+edges, as for a community recompute; only nodes with an edge of those types take part, and a node
+that no longer does loses its values. Scores are rounded to 6 significant digits and **only values
+that changed are written**: a re-run on an unchanged graph writes nothing, bumps no revision and
+records no change; otherwise one change record summarises the run. `dry_run` computes and reports
+without writing. The response reports nodes, edges, `n_changed`, `n_cleared`, components and timings;
+`Prefer: respond-async` runs it as a job (`compute_metrics`).
+
+Runs happen only when called: writes never trigger one, so values lag the graph until the next run
+(call it after a bulk load, or on a schedule). The first run writes every node taking part, in
+statements of 25 000 nodes within one transaction (all or nothing); on a graph of about 500 000
+nodes and 10 million edges it takes minutes, most of it updating the nodes' indexes. A later run
+on an unchanged graph reads the edges, computes and compares, and writes nothing.
+
+A tenant runs **one whole-graph job at a time**: a metrics run and a community recompute exclude
+each other (`409` while one runs, and as queued jobs). Read the values with the nodes, or the top
+ones with `nodes:scan`: `"order_by": [{"property": "graphos_pagerank", "desc": true}]` (nodes
+without the value are left out).
+
+**`graphos_*` is reserved.** graphos writes these properties itself, so writes that use one
+(node or edge, single, batch or bulk, a merge-patch removing one included) are refused with `400`.
+Snapshot import restores them as exported.
+
 ---
 
 ## 9. Rule-based edges (`resolve_rule`)

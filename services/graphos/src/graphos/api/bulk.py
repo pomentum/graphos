@@ -36,7 +36,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import ValidationError
 
-from graphos import writes
+from graphos import reserved, writes
 from graphos.api.graph import _check_tenant
 from graphos.auth import WritePrincipal
 from graphos.bootstrap import registered_tenants
@@ -147,6 +147,12 @@ async def upsert_nodes_bulk(
                 rows_invalid += 1
                 if len(errors) < _MAX_ERROR_LINES:
                     errors.append(f"line {line_no}: {exc}")
+                continue
+
+            if found := reserved.reserved_keys(node.properties):
+                rows_invalid += 1
+                if len(errors) < _MAX_ERROR_LINES:
+                    errors.append(f"line {line_no}: {reserved.refusal(found)}")
                 continue
 
             if node.label not in allowed_labels:
@@ -281,8 +287,11 @@ async def upsert_edges_bulk(  # noqa: PLR0915 — streaming loop, splitting furt
                     errors.append(f"line {line_no}: {exc}")
                 continue
 
-            err = _validate_edge_labels(edge, allowed_v, allowed_e) or policy.refusal(
-                edge.type, edge.src_label, edge.dst_label,
+            found = reserved.reserved_keys(edge.properties)
+            err = (
+                (reserved.refusal(found) if found else None)
+                or _validate_edge_labels(edge, allowed_v, allowed_e)
+                or policy.refusal(edge.type, edge.src_label, edge.dst_label)
             )
             if err is not None:
                 rows_invalid += 1

@@ -237,6 +237,10 @@ async def test_one_recompute_queued_or_running_per_tenant(pool: asyncpg.Pool) ->
     assert caught.value.existing == first.id
     await _submit(pool, "recompute_communities")   # another tenant is fine
     await _submit(pool, "echo", tenant)            # another kind is fine
+    # A metrics run rewrites every node too: excluded while the recompute is active.
+    with pytest.raises(jobs.JobConflictError) as caught:
+        await _submit(pool, "compute_metrics", tenant)
+    assert caught.value.existing == first.id
     await jobs.request_cancel(pool, first.id)
     await _submit(pool, "recompute_communities", tenant)   # finished: allowed again
 

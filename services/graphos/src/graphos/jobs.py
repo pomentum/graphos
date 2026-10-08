@@ -55,6 +55,12 @@ class JobKind:
     admin_only: bool = False
 
 
+# Kinds that exclude each other per tenant (the unique index
+# jobs_one_active_graph_job in graphos.db): both rewrite every node.
+_GRAPH_JOBS = ("recompute_communities", "compute_metrics")
+EXCLUSIVE: dict[str, tuple[str, ...]] = {kind: _GRAPH_JOBS for kind in _GRAPH_JOBS}
+
+
 class JobConflictError(Exception):
     """An equivalent job is already queued or running."""
 
@@ -99,10 +105,10 @@ async def submit(
     except asyncpg.exceptions.UniqueViolationError:
         existing = await pool.fetchval(
             "SELECT id FROM graphos_meta.jobs "
-            "WHERE kind = $1 AND tenant IS NOT DISTINCT FROM $2 "
+            "WHERE kind = ANY($1::text[]) AND tenant IS NOT DISTINCT FROM $2 "
             "  AND status IN ('queued', 'running') "
             "ORDER BY created_at LIMIT 1;",
-            kind, tenant,
+            list(EXCLUSIVE.get(kind, (kind,))), tenant,
         )
         raise JobConflictError(existing) from None
     return _to_job(row)

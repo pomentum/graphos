@@ -45,7 +45,8 @@
         "patch": "Edited",
         "delete": "Deleted",
         "resolve": "Derived",
-        "communities": "Regrouped"
+        "communities": "Regrouped",
+        "metrics": "Measured"
       },
       "anyNodes": "nodes",
       "anyEdges": "edges",
@@ -506,7 +507,8 @@
       "namePlaceholder": "name",
       "newName": "New property name",
       "valuePlaceholder": "value",
-      "newValue": "New property value"
+      "newValue": "New property value",
+      "reservedName": "graphos keeps this name for itself"
     },
     "expandDialog": {
       "title": "{{name}} has many neighbours",

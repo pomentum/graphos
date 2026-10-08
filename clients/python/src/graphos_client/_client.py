@@ -24,6 +24,7 @@ from graphos_client._models import (
     CommunityIdsResponse,
     CommunityMap,
     CommunitySummary,
+    ComputeMetricsResponse,
     DeleteByPropertyResponse,
     DeleteEdgeResponse,
     DeleteNodeResponse,
@@ -1358,6 +1359,52 @@ class GraphosClient:
         )
         return await self._submit(f"/v1/{self._tenant}/recompute-communities", body)
 
+    async def compute_metrics(
+        self,
+        *,
+        metrics: Iterable[str] = ("degree", "pagerank", "components"),
+        rel_types: list[str] | None = None,
+        node_filter: Mapping[str, Any] | None = None,
+        damping: float = 0.85,
+        dry_run: bool = False,
+    ) -> ComputeMetricsResponse:
+        """Compute graph metrics and store them on the nodes (admin).
+
+        ``metrics``: any of ``degree`` (graphos_degree, graphos_in_degree,
+        graphos_out_degree), ``pagerank`` (graphos_pagerank), ``components``
+        (graphos_component) and ``betweenness`` (graphos_betweenness, skipped
+        on large graphs). Only changed values are written. ``graphos_*``
+        properties are reserved: writes using them are refused.
+        """
+        body = _metrics_body(
+            metrics=metrics, rel_types=rel_types, node_filter=node_filter,
+            damping=damping, dry_run=dry_run,
+        )
+        resp = await self._request(
+            "POST", f"/v1/{self._tenant}/graph/metrics:compute", json_body=body,
+            idempotent=False,   # long-running: never re-run on a 5xx
+        )
+        return ComputeMetricsResponse.model_validate(resp.json())
+
+    async def submit_compute_metrics(
+        self,
+        *,
+        metrics: Iterable[str] = ("degree", "pagerank", "components"),
+        rel_types: list[str] | None = None,
+        node_filter: Mapping[str, Any] | None = None,
+        damping: float = 0.85,
+        dry_run: bool = False,
+    ) -> Job:
+        """:meth:`compute_metrics` as a background job; its ``result`` is the
+        :class:`ComputeMetricsResponse` body. One whole-graph job per tenant: a
+        submission while a metrics run or a community recompute is queued or
+        running raises 409."""
+        body = _metrics_body(
+            metrics=metrics, rel_types=rel_types, node_filter=node_filter,
+            damping=damping, dry_run=dry_run,
+        )
+        return await self._submit(f"/v1/{self._tenant}/graph/metrics:compute", body)
+
     # ── Background jobs ───────────────────────────────────────────────────
 
     async def _submit(self, path: str, body: dict[str, Any]) -> Job:
@@ -1422,6 +1469,22 @@ def _vacuum_body(tables: list[str] | None, full: bool, analyze: bool) -> dict[st
     body: dict[str, Any] = {"full": full, "analyze": analyze}
     if tables:
         body["tables"] = list(tables)
+    return body
+
+
+def _metrics_body(
+    *,
+    metrics: Iterable[str],
+    rel_types: list[str] | None,
+    node_filter: Mapping[str, Any] | None,
+    damping: float,
+    dry_run: bool,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"metrics": list(metrics), "damping": damping, "dry_run": dry_run}
+    if rel_types:
+        body["rel_types"] = rel_types
+    if node_filter:
+        body["node_filter"] = dict(node_filter)
     return body
 
 

@@ -760,3 +760,37 @@ async def test_graph_map_hubs_community_map_and_property_search() -> None:
     await cli.search("src", property="path")
     assert "property=path" in seen[-1]
     await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_compute_metrics_and_its_job() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if request.headers.get("prefer") == "respond-async":
+            return httpx.Response(202, json={
+                "id": "3f1c1a52-6a0e-4c8e-9a51-6c9a8f0b2d11", "kind": "compute_metrics",
+                "tenant": "demo", "status": "queued", "params": {}, "result": None,
+                "error": None, "consumer": "ada", "cancel_requested": False,
+                "created_at": "2026-10-08T00:00:00Z", "started_at": None, "finished_at": None,
+            })
+        return httpx.Response(200, json={
+            "tenant": "demo", "metrics": ["pagerank"], "properties": ["graphos_pagerank"],
+            "n_nodes": 8, "n_edges_scanned": 6, "n_changed": 8, "n_cleared": 0,
+            "edge_stream_ms": 1, "compute_ms": 2, "writeback_ms": 3, "elapsed_ms": 6,
+            "dry_run": False,
+        })
+
+    cli = GraphosClient(base_url="http://x", token="tok", tenant="demo")
+    cli._http = httpx.AsyncClient(base_url="http://x", transport=_mock_transport(handler))
+    result = await cli.compute_metrics(metrics=["pagerank"], rel_types=["CALLS"])
+    assert (result.n_changed, result.properties) == (8, ["graphos_pagerank"])
+    sent = json.loads(captured[0].content)
+    assert captured[0].url.path == "/v1/demo/graph/metrics:compute"
+    assert sent == {"metrics": ["pagerank"], "damping": 0.85, "dry_run": False,
+                    "rel_types": ["CALLS"]}
+    job = await cli.submit_compute_metrics()
+    assert job.kind == "compute_metrics"
+    assert json.loads(captured[1].content)["metrics"] == ["degree", "pagerank", "components"]
+    await cli.close()

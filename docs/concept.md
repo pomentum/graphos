@@ -773,9 +773,10 @@ then inserts a row into `graphos_meta.jobs` and answers 202 with the job and
   the statement in progress and terminates a community computation's process.
   Cancelling needs the scope that starting needs; a kind the receiving
   replica does not know (during a rolling upgrade) counts as admin-only.
-- **One recompute per tenant**: a partial unique index on
-  `graphos_meta.jobs (tenant) WHERE kind = 'recompute_communities' AND status IN
-  ('queued', 'running')`; the advisory lock still guards the synchronous path.
+- **One whole-graph job per tenant** (community recompute or graph metrics): a
+  partial unique index on `graphos_meta.jobs (tenant) WHERE kind IN
+  ('recompute_communities', 'compute_metrics') AND status IN ('queued', 'running')`;
+  a per-tenant advisory lock, shared by both, still guards the synchronous path.
 - **Retention:** finished jobs are deleted after `GRAPHOS_JOB_RETENTION_H`
   (168 h).
 

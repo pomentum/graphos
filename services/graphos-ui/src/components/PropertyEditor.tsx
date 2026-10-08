@@ -3,7 +3,7 @@ import { IconPlus, IconX } from "@tabler/icons-react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Properties } from "../api/types";
-import { formatValue, propertyKind, sortedEntries, SYSTEM_PROPERTIES, typedValue } from "../lib/properties";
+import { formatValue, isSystemProperty, propertyKind, sortedEntries, typedValue } from "../lib/properties";
 import classes from "./PropertyEditor.module.css";
 
 export interface PropertyEditorProps {
@@ -32,7 +32,7 @@ export function PropertyEditor({ draft, editable, onChange, suggestions = [] }: 
   return (
     <div className={classes.group}>
       {sortedEntries(draft).map(([key, value]) => {
-        const locked = !editable || SYSTEM_PROPERTIES.has(key) || propertyKind(value) === "json";
+        const locked = !editable || isSystemProperty(key) || propertyKind(value) === "json";
         return (
           <div key={key} className={classes.row}>
             <Text size="xs" c="dimmed" className={classes.name} title={key}>
@@ -41,7 +41,7 @@ export function PropertyEditor({ draft, editable, onChange, suggestions = [] }: 
             {locked ? (
               <Text
                 size="sm"
-                className={SYSTEM_PROPERTIES.has(key) ? "gx-mono gx-muted" : undefined}
+                className={isSystemProperty(key) ? "gx-mono gx-muted" : undefined}
                 truncate
                 title={formatValue(value)}
               >
@@ -50,7 +50,7 @@ export function PropertyEditor({ draft, editable, onChange, suggestions = [] }: 
             ) : (
               <ValueInput name={key} value={value} onChange={(v) => set(key, v)} />
             )}
-            {editable && !SYSTEM_PROPERTIES.has(key) ? (
+            {editable && !isSystemProperty(key) ? (
               <ActionIcon
                 variant="subtle"
                 color="gray"
@@ -147,7 +147,9 @@ function NewProperty({
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
   const valueInput = useRef<HTMLInputElement>(null);
-  const taken = key in existing;
+  // An existing name, or one graphos keeps for itself (graphos_*).
+  const reservedName = isSystemProperty(key.trim());
+  const taken = key in existing || reservedName;
   const cancel = () => {
     setKey("");
     setValue("");
@@ -176,9 +178,9 @@ function NewProperty({
         size="xs"
         placeholder={t("components.propertyEditor.namePlaceholder")}
         aria-label={t("components.propertyEditor.newName")}
-        data={suggestions.filter((name) => !(name in existing))}
+        data={suggestions.filter((name) => !(name in existing) && !isSystemProperty(name))}
         value={key}
-        error={taken}
+        error={reservedName ? t("components.propertyEditor.reservedName") : taken}
         autoFocus
         onChange={setKey}
         onKeyDown={(e) => {

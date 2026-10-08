@@ -15,6 +15,18 @@ describe("PropertyEditor", () => {
     expect(onChange).toHaveBeenLastCalledWith({ name: "Ada", id: "u1" });
   });
 
+  it("shows graph metrics (graphos_*) read-only and refuses them as new names", () => {
+    renderWithTheme(
+      <PropertyEditor draft={{ name: "Ada", graphos_pagerank: 0.0012 }} editable onChange={() => undefined} />,
+    );
+    expect(screen.queryByLabelText("Value of graphos_pagerank")).toBeNull();
+    expect(screen.queryByLabelText("Remove graphos_pagerank")).toBeNull();
+    expect(screen.getByText("graphos_pagerank")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Add property"));
+    fireEvent.change(screen.getByRole("textbox", { name: "New property name" }), { target: { value: "graphos_x" } });
+    expect(screen.getByText("graphos keeps this name for itself")).toBeInTheDocument();
+  });
+
   it("shows plain values without inputs to read-only tokens", () => {
     renderWithTheme(<PropertyEditor draft={{ name: "Ada" }} editable={false} onChange={() => undefined} />);
     expect(screen.getByText("Ada")).toBeInTheDocument();

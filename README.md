@@ -20,10 +20,10 @@ Your services send JSON over HTTP. graphos owns the database, writes the SQL aga
 - **Web UI (optional):** a large graph opens on a map of its labels or of its communities; search, expand a page of neighbours at a time with undo, inspect and edit nodes and relationships, find paths, browse a label as a table, see and extend the schema, follow changes live. Each user signs in with their own token, so read-only tokens get a read-only UI. `docker compose ... --profile ui up -d`; see [the UI README](services/graphos-ui/README.md).
 - **Composable reads:** search, neighbors, multi-hop expand, shortest paths, induced subgraph, paginated node scan, stratified sampling, graphology export (sigma.js / Gephi).
 - **Edit in place, safely:** read, patch (JSON Merge Patch) or delete one node or edge; each carries a revision and an `ETag`, and `If-Match` turns a concurrent edit into a `412` instead of a lost update.
-- **Graph analytics:** a graph map (every label with its node count and the edge counts between labels, plus a label's best-connected nodes: about a second on ten million edges), label histograms, top-K by degree, node/edge aggregates, and (optional extra) Louvain communities with IDs that stay stable across runs; the same graph gives the same communities, computed in a separate process so the API keeps serving, and each recompute also stores a community map (sizes, members per label, hubs, edges between communities).
+- **Graph analytics:** a graph map (every label with its node count and the edge counts between labels, plus a label's best-connected nodes: about a second on ten million edges), label histograms, top-K by degree, node/edge aggregates, and (optional extra) Louvain communities with IDs that stay stable across runs; the same graph gives the same communities, computed in a separate process so the API keeps serving, and each recompute also stores a community map (sizes, members per label, hubs, edges between communities). Graph metrics (degree, PageRank, connected components, betweenness) are written onto the nodes as `graphos_*` properties, a name space consumers cannot write; re-runs write only what changed.
 - **Rule-based edge derivation:** declare a property-match rule once at registration; `edges:resolve` writes the edges server-side in one SQL statement.
 - **Change feed:** every write is recorded in the same transaction; read what changed after a cursor, or follow it live (Server-Sent Events, resumable), with no committed change ever skipped.
-- **Background jobs:** long operations (community recompute, edge resolution, vacuum) run as jobs with `Prefer: respond-async`: answered `202` at once, polled at `/v1/jobs/{id}`, cancellable.
+- **Background jobs:** long operations (community recompute, graph metrics, edge resolution, vacuum) run as jobs with `Prefer: respond-async`: answered `202` at once, polled at `/v1/jobs/{id}`, cancellable.
 - **Safe by default:** bearer tokens required (the service refuses to start without them unless told otherwise), every query is SQL under a server-side `statement_timeout` (504 when exceeded), registration DDL validated, the database on a network consumers cannot reach.
 - **Operable by people who don't know your domain:** Prometheus metrics, JSON logs with W3C `traceparent`, write audit log naming the caller, per-token rate limiting, token reload on `SIGHUP`.
 
@@ -86,6 +86,14 @@ curl -s -X POST http://127.0.0.1:8080/v1/acme/recompute-communities \
 ```
 
 On a large graph, add `-H "Prefer: respond-async"`: the call answers `202` at once with a job, and `GET /v1/jobs/{id}` (the `Location` header) reports its progress and, when done, the same result.
+
+**Compute graph metrics** (admin token; writes `graphos_degree`, `graphos_pagerank`, `graphos_component`, … onto the nodes; no extra needed):
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/v1/acme/graph/metrics:compute \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "content-type: application/json" \
+  -d '{"metrics": ["degree", "pagerank", "components"]}'
+```
 
 The full, live API contract is at `http://127.0.0.1:8080/docs` (OpenAPI: `/openapi.json`).
 

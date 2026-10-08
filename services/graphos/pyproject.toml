@@ -15,6 +15,9 @@ dependencies = [
     "pydantic-settings>=2.4,<3.0",
     "structlog>=24.4,<25.0",
     "prometheus-client>=0.21,<1.0",
+    # Graph metrics (PageRank, degree, components, betweenness): Apache-2.0.
+    "rustworkx>=0.18,<0.19",
+    "numpy>=2.0,<3.0",
 ]
 
 [project.optional-dependencies]

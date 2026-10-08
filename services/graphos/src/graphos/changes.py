@@ -55,7 +55,7 @@ log = logging.getLogger(__name__)
 
 CHANNEL = "graphos_changes"
 
-Op = Literal["upsert", "merge", "patch", "delete", "resolve", "communities"]
+Op = Literal["upsert", "merge", "patch", "delete", "resolve", "communities", "metrics"]
 Kind = Literal["node", "edge"]
 
 

@@ -711,6 +711,105 @@ async def set_node_communities(
             )
 
 
+# Nodes written per statement by set_node_metrics: each node rewrites all its
+# indexes (properties, id, name, search), so a statement over a whole large
+# tenant would outlast the statement timeout.
+METRICS_BATCH = 25_000
+
+
+async def set_node_metrics(
+    pool: asyncpg.Pool,
+    *,
+    tenant: str,
+    patches: Sequence[tuple[int, str]],
+    clears: Sequence[tuple[int, list[str]]],
+    names: Sequence[str],
+    batch: int | None = None,
+) -> int:
+    """Write graph-metric values (``graphos_*``) onto nodes, in one transaction.
+
+    Args:
+        patches: ``(graphid, json object)``: the values that changed, merged
+            into the node's properties.
+        clears: ``(graphid, [names])``: values to remove (the node no longer
+            takes part, e.g. it lost its last edge).
+        names: every property the run computes, recorded in the property
+            catalogue for the labels written.
+        batch: nodes per statement (default ``METRICS_BATCH``); the transaction
+            stays one, so the run is all or nothing and its change record
+            commits with it.
+
+    Only the given nodes are touched, so only they get a new revision. One
+    change record summarises the run.
+
+    Returns:
+        Nodes written (patched or cleared).
+    """
+    if not patches and not clears:
+        return 0
+    batch = batch or METRICS_BATCH
+    with _db_errors(
+        "metrics write-back failed", query="UPDATE _ag_label_vertex metrics", graph=tenant,
+    ):
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute("SET LOCAL synchronous_commit = off;")
+            if patches:
+                await conn.execute(
+                    "CREATE TEMP TABLE _stg_metrics (n int PRIMARY KEY, gid bigint, patch text) "
+                    "ON COMMIT DROP;"
+                )
+                await conn.copy_records_to_table(
+                    "_stg_metrics",
+                    records=((n, gid, patch) for n, (gid, patch) in enumerate(patches)),
+                    columns=("n", "gid", "patch"),
+                )
+                for first in range(0, len(patches), batch):
+                    await allow_long_statements(conn, 600.0)
+                    # The labels written to are recorded as carrying the metrics.
+                    await conn.execute(
+                        f"WITH updated AS ("
+                        f'UPDATE "{tenant}"."_ag_label_vertex" t '
+                        f"SET properties = t.properties || (s.patch)::agtype, "
+                        f"{lookup.REV} = t.{lookup.REV} + 1 "
+                        f"FROM _stg_metrics s "
+                        f"WHERE s.n >= $3 AND s.n < $4 AND t.id = (s.gid::text)::graphid "
+                        f"RETURNING t.tableoid) "
+                        f"INSERT INTO graphos_meta.node_properties (tenant, label, property) "
+                        f"SELECT DISTINCT $1, c.relname, p.name "
+                        f"FROM updated JOIN pg_class c ON c.oid = updated.tableoid "
+                        f"CROSS JOIN unnest($2::text[]) AS p(name) "
+                        f"ON CONFLICT DO NOTHING;",
+                        tenant, list(names), first, first + batch,
+                        timeout=600.0,
+                    )
+            if clears:
+                await conn.execute(
+                    "CREATE TEMP TABLE _stg_metric_clears "
+                    "(n int PRIMARY KEY, gid bigint, names text[]) ON COMMIT DROP;"
+                )
+                await conn.copy_records_to_table(
+                    "_stg_metric_clears",
+                    records=((n, gid, keys) for n, (gid, keys) in enumerate(clears)),
+                    columns=("n", "gid", "names"),
+                )
+                for first in range(0, len(clears), batch):
+                    await allow_long_statements(conn, 600.0)
+                    await conn.execute(
+                        f'UPDATE "{tenant}"."_ag_label_vertex" t '
+                        f"SET properties = "
+                        f"((((t.properties)::text)::jsonb - s.names)::text)::agtype, "
+                        f"{lookup.REV} = t.{lookup.REV} + 1 "
+                        f"FROM _stg_metric_clears s "
+                        f"WHERE s.n >= $1 AND s.n < $2 AND t.id = (s.gid::text)::graphid;",
+                        first, first + batch,
+                        timeout=600.0,
+                    )
+            written = len(patches) + len(clears)
+            # One summary: the nodes whose metrics changed.
+            await changes.record(conn, tenant=tenant, op="metrics", kind="node", count=written)
+    return written
+
+
 async def set_edge_end_communities(
     pool: asyncpg.Pool,
     *,

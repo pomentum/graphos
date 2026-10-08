@@ -4,6 +4,34 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Added
+
+- **Graph metrics.** `POST /v1/{tenant}/graph/metrics:compute` (admin; `Prefer: respond-async`
+  for a job) computes degree, PageRank, weakly connected components and betweenness with
+  rustworkx (Apache-2.0, a new default dependency, with numpy) in a child process, and stores them
+  on the nodes as `graphos_degree`, `graphos_in_degree`, `graphos_out_degree`,
+  `graphos_pagerank`, `graphos_component` and `graphos_betweenness`. Only changed values are
+  written (scores rounded to 6 significant digits), so a re-run on an unchanged graph writes
+  nothing; component ids carry over between runs; nodes that no longer take part lose their
+  values. Betweenness is exact and skipped above `GRAPHOS_BETWEENNESS_MAX_NODES` (20 000). The top
+  nodes by a metric come from `nodes:scan` with `order_by`. `/v1/info` reports `metrics: true`.
+- Python client: `compute_metrics(…)`, `submit_compute_metrics(…)`, `ComputeMetricsResponse`.
+
+### Changed
+
+- **`graphos_*` properties are reserved.** Node and edge writes (single, batch, bulk and
+  merge-patch) whose properties use a `graphos_` name are refused with `400`; graphos writes them
+  itself. Snapshot import still restores them.
+- **One whole-graph job per tenant.** A community recompute and a metrics run exclude each other:
+  `409` while one runs, and one queued or running job of either kind per tenant.
+
+### Upgrading from 0.4.2
+
+Nothing to do. Writes that used a `graphos_` property name are now refused. The unique index
+`jobs_one_active_recompute` is replaced by `jobs_one_active_graph_job` at startup.
+
 ## 0.4.2 — 2026-10-08
 
 graphos 0.4.2 fixes the UI image, which would not start without graphos-api; that also kept the

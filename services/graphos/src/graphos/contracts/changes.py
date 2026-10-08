@@ -16,7 +16,7 @@ class ChangeItem(BaseModel):
 
     cursor: str = Field(..., description="This record's position; pass it as `after`.")
     at: datetime = Field(..., description="Start time of the writing transaction.")
-    op: Literal["upsert", "merge", "patch", "delete", "resolve", "communities"]
+    op: Literal["upsert", "merge", "patch", "delete", "resolve", "communities", "metrics"]
     kind: Literal["node", "edge"]
     label: str | None = Field(None, description="The node label or edge type.")
     src_label: str | None = None

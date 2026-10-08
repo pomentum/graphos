@@ -45,7 +45,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 
-from graphos import lookup, writes
+from graphos import lookup, reserved, writes
 from graphos import search as search_index
 from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, wants_async
 from graphos.auth import ReadPrincipal, WritePrincipal, require_tenant
@@ -467,6 +467,7 @@ async def upsert_nodes(
 
     spec = registered_tenants()[tenant]
     allowed_labels = set(spec.vertex_labels)
+    reserved.check(*(n.properties for n in body.nodes))
 
     grouped = _group_by_label(body.nodes)
     unknown = sorted(set(grouped) - allowed_labels)
@@ -595,6 +596,7 @@ async def patch_node(  # noqa: PLR0913 — FastAPI route parameters
 ) -> NodeGetResponse:
     _check_tenant(tenant, principal)
     _check_vertex_label(tenant, label)
+    reserved.check(patch)
     precondition = _if_match(request, if_match)
     started = time.perf_counter()
     try:
@@ -658,6 +660,7 @@ async def upsert_node_properties(  # noqa: PLR0913 — FastAPI route parameters
 ) -> NodePropertiesUpsertResponse:
     _check_tenant(tenant, principal)
     _check_vertex_label(tenant, label)
+    reserved.check(body.properties)
     precondition = _if_match(request, if_match)
     started = time.perf_counter()
     pool = request.app.state.pool
@@ -736,6 +739,7 @@ async def upsert_edges(
     spec = registered_tenants()[tenant]
     allowed_v = set(spec.vertex_labels)
     allowed_e = set(spec.edge_labels)
+    reserved.check(*(e.properties for e in body.edges))
 
     grouped = _group_edges(body.edges)
 
@@ -946,6 +950,7 @@ async def patch_edge(  # noqa: PLR0913 — FastAPI route parameters
 ) -> EdgeGetResponse:
     _check_tenant(tenant, principal)
     _check_edge_ref(tenant, edge_type, ref)
+    reserved.check(patch)
     precondition = _if_match(request, if_match)
     started = time.perf_counter()
     try:

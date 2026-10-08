@@ -268,7 +268,7 @@ export interface HistogramResponse {
 export interface ChangeItem {
   cursor: string;
   at: string;
-  op: "upsert" | "merge" | "patch" | "delete" | "resolve" | "communities";
+  op: "upsert" | "merge" | "patch" | "delete" | "resolve" | "communities" | "metrics";
   kind: "node" | "edge";
   label: string | null;
   src_label: string | null;

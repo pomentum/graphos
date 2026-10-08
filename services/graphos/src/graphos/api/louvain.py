@@ -8,6 +8,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
+from graphos import analysis
 from graphos.api.graph import _check_tenant
 from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, wants_async
 from graphos.auth import WritePrincipal, require_admin
@@ -27,9 +28,9 @@ router = APIRouter(tags=["communities"], prefix="/{tenant}")
     description=(
         "Streams every semantic edge (optionally filtered by rel_types) into "
         "an in-process igraph, runs Louvain modularity optimisation, and "
-        "writes `community_id` back to each vertex. Single-flight via a "
-        "postgres advisory lock keyed on the tenant name — concurrent "
-        "recomputes for the same tenant return 409. Admin-scoped. Returns "
+        "writes `community_id` back to each vertex. One whole-graph job per "
+        "tenant at a time: while a recompute or a graph-metrics run holds "
+        "the tenant, another returns 409. Admin-scoped. Returns "
         "501 when the optional `louvain` extra (python-igraph) is not "
         "installed. With `Prefer: respond-async` it runs as a background job "
         "(202, see `/v1/jobs`)."
@@ -61,25 +62,9 @@ async def run_recompute(
     pool: asyncpg.Pool, tenant: str, body: RecomputeCommunitiesRequest,
 ) -> RecomputeCommunitiesResponse:
     """The recompute itself, for the endpoint and for background jobs."""
-    # Single-flight per tenant via an advisory lock on a 64-bit hash of the
-    # tenant name (a 32-bit hash lets two tenants' names collide and block
-    # each other).  Seed 1 keeps it apart from tenant setup's lock on the
-    # same name (bootstrap.py, seed 0), so a recompute never holds up
-    # registration of its own tenant.
-    async with pool.acquire() as lock_conn:
-        got = await lock_conn.fetchval(
-            "SELECT pg_try_advisory_lock(hashtextextended($1, 1))",
-            tenant,
-        )
-        if not got:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    f"another recompute is in progress for tenant '{tenant}'. "
-                    "Retry once it completes."
-                ),
-            )
-        try:
+    # One whole-graph job per tenant at a time, Louvain or graph metrics.
+    try:
+        async with analysis.tenant_lock(pool, tenant):
             started = time.perf_counter()
             result = await recompute_communities(
                 pool,
@@ -92,11 +77,8 @@ async def run_recompute(
                 write=not body.dry_run,
             )
             elapsed_ms = int((time.perf_counter() - started) * 1000)
-        finally:
-            await lock_conn.execute(
-                "SELECT pg_advisory_unlock(hashtextextended($1, 1))",
-                tenant,
-            )
+    except analysis.TenantBusyError:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=busy(tenant)) from None
 
     return RecomputeCommunitiesResponse(
         tenant=tenant,
@@ -112,4 +94,12 @@ async def run_recompute(
         writeback_ms=result.writeback_ms,
         elapsed_ms=elapsed_ms,
         dry_run=body.dry_run,
+    )
+
+
+def busy(tenant: str) -> str:
+    """The 409 message while another whole-graph job holds the tenant."""
+    return (
+        f"another whole-graph job (community recompute or graph metrics) is running "
+        f"for tenant '{tenant}'. Retry once it completes."
     )

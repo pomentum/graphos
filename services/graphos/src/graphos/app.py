@@ -34,6 +34,7 @@ from graphos.api import (
     db,
     graph,
     graph_map,
+    graph_metrics,
     health,
     info,
     jobs,
@@ -52,11 +53,13 @@ from graphos.bootstrap import (
 from graphos.changes import ChangeFeed
 from graphos.config import Settings
 from graphos.contracts.db import VacuumRequest
+from graphos.contracts.graph_metrics import ComputeMetricsRequest
 from graphos.contracts.louvain import RecomputeCommunitiesRequest
 from graphos.contracts.tenants import ResolveEdgesRequest
 from graphos.db import create_pool, ensure_internal_schema
+from graphos.graph_compute import terminate_running
+from graphos.graph_metrics import configure as configure_metrics
 from graphos.jobs import JobKind, JobRunner
-from graphos.louvain_compute import terminate_running
 from graphos.observability.audit import AuditMiddleware
 from graphos.observability.logging import RequestContextMiddleware, configure_logging
 from graphos.observability.metrics import MetricsMiddleware, metrics_handler
@@ -87,6 +90,11 @@ async def _run_recompute(pool: asyncpg.Pool, tenant: str | None, params: dict) -
     return await louvain.run_recompute(pool, _registered(tenant), body)
 
 
+async def _run_metrics(pool: asyncpg.Pool, tenant: str | None, params: dict) -> BaseModel:
+    body = ComputeMetricsRequest.model_validate(params)
+    return await graph_metrics.run_compute(pool, _registered(tenant), body)
+
+
 async def _run_resolve(pool: asyncpg.Pool, tenant: str | None, params: dict) -> BaseModel:
     body = ResolveEdgesRequest.model_validate(params)
     return await graph.run_resolve(pool, _registered(tenant), body)
@@ -99,6 +107,7 @@ async def _run_vacuum(pool: asyncpg.Pool, _tenant: str | None, params: dict) -> 
 # Operations that accept ``Prefer: respond-async``.
 JOB_KINDS: dict[str, JobKind] = {
     "recompute_communities": JobKind(run=_run_recompute, admin_only=True),
+    "compute_metrics": JobKind(run=_run_metrics, admin_only=True),
     "resolve_edges": JobKind(run=_run_resolve),
     "vacuum": JobKind(run=_run_vacuum, admin_only=True),
 }
@@ -226,6 +235,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=_lifespan,
     )
     app.state.settings = settings
+    configure_metrics(betweenness_max_nodes=settings.betweenness_max_nodes)
 
     async def _statement_timeout(request: Request, exc: Exception) -> JSONResponse:
         # Postgres cancelled the statement at ``statement_timeout`` (or the
@@ -286,6 +296,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(bulk.router, prefix="/v1")
     app.include_router(db.router, prefix="/v1")
     app.include_router(louvain.router, prefix="/v1")
+    app.include_router(graph_metrics.router, prefix="/v1")
     app.include_router(communities.router, prefix="/v1")
     app.include_router(cache.router, prefix="/v1")
     app.include_router(snapshot.router, prefix="/v1")
