@@ -6,9 +6,48 @@ under one version.
 
 ## Unreleased
 
+This release replaces static tokens with users, service accounts and grants: a **breaking change**
+for every deployment (see *Upgrading* below).
+
 ### Added
 
-- **Graph metrics.** `POST /v1/{tenant}/graph/metrics:compute` (admin; `Prefer: respond-async`
+- **Users and sign-in.** People and service accounts sign in with a name and password
+  (`POST /v1/auth/login`; a service account's password is its secret; only a scrypt hash is kept)
+  and get an access token valid 15 minutes (`GRAPHOS_ACCESS_TOKEN_TTL_S`), a JWT graphos signs
+  (ES256, key generated at the first start in `graphos_meta.signing_keys`). People also get a
+  refresh token that rotates on each use (`/v1/auth/refresh`; one used twice ends the session),
+  `/v1/auth/logout`, and `POST /v1/me/password`. Failed sign-ins lock an account for a while and
+  are throttled per address. Disabling a user, resetting its secret or changing its password
+  stops its tokens at the next request, on every replica.
+- **Grants and levels.** Access is a level per tenant or name pattern (`sol_*`, `*`): `read`,
+  `write`, `maintain` (publish schema, recompute groups, compute metrics, which needed admin
+  before) and `owner` (grant access to the tenant, unregister it). `create_tenants` on a pattern
+  lets a service create tenants and own them without being an admin; `admin` allows everything.
+  `GET/POST/PATCH/DELETE /v1/users…` (admin), `GET/POST/DELETE /v1/grants` (admin, or a tenant's
+  owner for its tenant). graphos refuses to remove its last admin.
+- **Bootstrap admin.** The first start creates the admin `graphos` with the password `graphos`
+  (or the one in `GRAPHOS_ADMIN_PASSWORD_FILE`); it must be changed at the first sign-in, always,
+  and graphos logs a warning at every start until it is. `python -m graphos reset-admin-password`
+  recovers a lost one. `GRAPHOS_LOCAL_ADMIN=false` disables the `graphos` sign-in.
+- **Single sign-on (OpenID Connect).** Any provider, by discovery (`GRAPHOS_OIDC_ISSUER`,
+  `GRAPHOS_OIDC_CLIENT_ID`, one public client with PKCE). The UI tries a silent sign-in on every page
+  load, so someone signed in at the provider is let straight in, back on the page they asked for;
+  otherwise "Sign in with SSO". graphos keeps the PKCE verifier and nonce, exchanges the code and
+  validates the ID token itself (`/v1/auth/config`, `/v1/auth/oidc/start`, `/oidc/callback`); the
+  browser stores nothing. Grants name `oidc-sub:`, `oidc-group:`, `oidc-role:` and
+  `oidc-client:` subjects; logout ends the provider session too. Programs may send the provider's
+  own access tokens (audience `GRAPHOS_OIDC_AUDIENCE`). Python client: `BearerAuth(source)`.
+  `httpx` becomes a runtime dependency of the service.
+- **UI:** sign-in with user name and password, the forced password change, change password in the
+  account menu, and an **Access** page (users and service accounts with their secret shown once,
+  grants on this tenant for its owners, every grant for admins). Controls follow the level: schema
+  editing and recompute need `maintain`.
+- Python client: `PasswordAuth(user, password)` (signs in, renews at 80% of the token's life, signs
+  in again once on a 401), credentials from `GRAPHOS_USER` / `GRAPHOS_PASSWORD` when no `auth` or
+  `token` is given; `GraphosPool(auth=…)` signs in once for all its clients; `Me` has `kind`,
+  `must_change`, `levels`, `create_tenants`.
+
+- **Graph metrics.** `POST /v1/{tenant}/graph/metrics:compute` (`maintain`; `Prefer: respond-async`
   for a job) computes degree, PageRank, weakly connected components and betweenness with
   rustworkx (Apache-2.0, a new default dependency, with numpy) in a child process, and stores them
   on the nodes as `graphos_degree`, `graphos_in_degree`, `graphos_out_degree`,
@@ -29,12 +68,32 @@ under one version.
   `GET /v1/jobs` takes `status` more than once.
 - **Feed history:** `GET /v1/{tenant}/changes/history?before=&op=&limit=` reads the feed newest
   first. Python client: `changes_history(…)`, `ChangesHistory`; `list_jobs(status=[…])`.
+- **Docs:** an [installation guide](docs/installation.md) (first sign-in, users, single sign-on with
+  every `GRAPHOS_OIDC_*` setting, production settings, upgrading), a page on the
+  [graph algorithms](docs/algorithms.md) and what each one is for, and screenshots of the UI in the
+  README, the UI README and the whitepaper.
+- **Demo tenant:** `clients/python/examples/08_demo_ecosystem.py` loads an invented open-source
+  ecosystem (about 450 nodes in six ecosystems) and runs every algorithm on it; the docs'
+  screenshots are of it. `tools/docs/screenshots.py` retakes them, and `tools/docs/diagrams.mjs`
+  embeds them in the whitepaper.
 - **Schema changes in the feed:** `op: schema`, `kind: tenant`, with what was added, removed or
   switched in `detail`; recorded when a registration changes the schema, a declared pair is
   removed, or a tenant is unregistered. Re-registering an unchanged spec records nothing.
 
 ### Changed
 
+- **Static tokens are gone.** `GRAPHOS_AUTH_TOKENS_FILE` and the tokens file are no longer read.
+  `access` (`read`/`write`) and `tenants` lists give way to grants.
+- `GET /v1/me` answers `{consumer, kind, admin, must_change, tenants, levels, create_tenants}`
+  (no `access`).
+- Recompute, graph metrics, schema re-registration and removing a declared pair need `maintain` on
+  the tenant instead of admin; unregistering needs `owner`; `GET /v1/tenants` lists the tenants the
+  caller may maintain.
+- Rate limiting counts per signed-in user rather than per token (tokens now change every 15
+  minutes); `SIGHUP` no longer reloads anything.
+- **The UI stores nothing in the browser**: no cookie, no local or session storage. Tokens live in
+  page memory, and a reload signs out; the light/dark choice and a schema diagram's arranged layout
+  last while the page is open.
 - The change feed has a new op `schema` and kind `tenant`. The Python client types `op` and `kind`
   as strings, so older clients read them; a consumer should treat an unknown op as informational.
 - **`graphos_*` properties are reserved.** Node and edge writes (single, batch, bulk and
@@ -43,9 +102,30 @@ under one version.
 - **One whole-graph job per tenant.** A community recompute and a metrics run exclude each other:
   `409` while one runs, and one queued or running job of either kind per tenant.
 
+### Fixed
+
+- A cancel noticed twice (the cancel request and the heartbeat of a direct call) could interrupt
+  the call while it answered, so the caller got a dropped request instead of `409`. A call is now
+  cancelled once.
+
 ### Upgrading from 0.4.2
 
-Nothing to do. Writes that used a `graphos_` property name are now refused. The unique index
+**Authentication (breaking).**
+
+1. Remove `GRAPHOS_AUTH_TOKENS_FILE` and the tokens file: graphos no longer reads them, so the
+   tokens stop working (the compose file in this repository no longer sets it).
+2. Start graphos, sign in as `graphos` / `graphos` (UI or `POST /v1/auth/login`) and change the
+   password; or set `GRAPHOS_ADMIN_PASSWORD_FILE` before the first start to begin with another.
+3. For each former token: create a service account (`POST /v1/users`, `"kind": "service"`, or
+   the UI's Access page) and grant it what the token had: `read` or `write` on its tenants;
+   `create_tenants` on a pattern instead of admin for a service that registers its own tenants
+   (it then owns them); `admin` only where needed.
+4. Point each consumer at its account: with the Python client, set `GRAPHOS_USER` and
+   `GRAPHOS_PASSWORD` (or pass `auth=PasswordAuth(…)`) instead of a token.
+
+Deployments running with `GRAPHOS_AUTH_DISABLED=true` are unaffected.
+
+**Other changes.** Writes that used a `graphos_` property name are now refused. The unique index
 `jobs_one_active_recompute` is replaced by `jobs_one_active_graph_job` at startup, and
 `graphos_meta.jobs` gains a `sync` column (added at startup). A direct whole-graph call
 (recompute or metrics) is now refused with 409 while a job of either kind is queued for the tenant.

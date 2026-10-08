@@ -5,11 +5,17 @@ and relationships, find the paths between two nodes, browse a label as a table, 
 schema, and follow changes live.
 
 It has no backend of its own. The image is static files served by nginx, which also forwards
-`/api/` to graphos on the same origin, so graphos needs no CORS setup. Every user signs in with
-their own graphos token; the token is kept in the browser tab only (`sessionStorage`) and is
-what graphos checks on every call, so read-only tokens get a read-only UI and every edit is
-recorded under the user's name in the audit log and the change feed. A network blip on reload
-does not sign anyone out: only a refused token is forgotten.
+`/api/` to graphos on the same origin, so graphos needs no CORS setup. Every person signs in with
+their graphos user name and password (and changes it first when it must change), or through the
+organisation's single sign-on when graphos is set up for it ([installation](../../docs/installation.md#5-single-sign-on-openid-connect)). The UI stores
+nothing in the browser, no cookie and no local or session storage, not even the light/dark choice
+or a diagram's layout: tokens live in page memory, the access token is renewed with the rotating
+refresh token while the page is open, and a reload or a closed tab signs out. graphos checks the
+user's level on every call, so the UI shows what that level allows (a `read` user gets a read-only
+UI, schema editing needs `maintain`, the Access page is for owners and admins) and every edit is
+recorded under the user's name in the audit log and the change feed.
+
+![Explore on the demo tenant, coloured by community](../../docs/images/ui-explore-graph-dark.png)
 
 ## Views
 
@@ -23,6 +29,15 @@ does not sign anyone out: only a refused token is forgotten.
 | **Activity** | The change feed, live, with who made each change; a change to one node opens it. |
 | **Browse** | One label's nodes as a table: a property filter, columns to choose, paging, a row opens in Explore. |
 | **Schema** | Labels as a tree under their parents (counts, properties), relationship types (label pairs, counts), search indexes. Or as a **diagram**: a grid of label boxes, each label holding the labels that inherit from it in a block, busiest first (laid out by ELK). The lines are the schema's associations: each relationship type's declared label pairs (solid), pairs in the data outside them (dashed, warning colour) and, on request, pairs of types that declare none (dotted); the selected label shows all of its lines. Boxes can be moved and put back with Tidy up. Administrators add labels, relationship types and search indexes, declare a label pair by dragging from one label to another (or from a line's panel), remove a declared pair, and can have graphos enforce the declared pairs; labels and types are never removed. |
+
+| Explore · Map | Explore · Groups |
+|---|---|
+| ![Map: one bubble per label, a line per linked pair](../../docs/images/ui-explore-map-dark.png) | ![Groups: one bubble per community, named after its best-connected member](../../docs/images/ui-explore-groups-dark.png) |
+
+![The schema diagram with a label selected and the Add menu open](../../docs/images/ui-schema-editor-dark.png)
+
+The screenshots are of the demo tenant ([`08_demo_ecosystem.py`](../../clients/python/examples/08_demo_ecosystem.py)),
+taken by [`tools/docs/screenshots.py`](../../tools/docs/screenshots.py).
 
 Search (top bar) opens with `/`, or ⌘K on Apple devices; Return opens the top hit even before
 the results arrive. Edits are saved with `If-Match` and only for the fields changed; a node
@@ -73,8 +88,8 @@ graph       theme      session      (all may use i18n and lib)
 
 | Folder | Responsibility |
 |---|---|
-| `api/` | Talking to graphos and nothing else: `HttpClient` (token, JSON, `ETag`, errors), `GraphosApi` (one typed method per endpoint), `ChangeStream` (the live change feed, resumed after a dropped connection). |
-| `session/` | The signed-in token and the chosen tenant (`SessionProvider`), kept for the tab. |
+| `api/` | Talking to graphos and nothing else: `HttpClient` (bearer token with one renewal on 401, JSON, `ETag`, errors), `GraphosApi` (one typed method per endpoint), `ChangeStream` (the live change feed, resumed after a dropped connection). |
+| `session/` | The signed-in user, its tokens in memory (`Credentials`: renewal, sign-out) and the chosen tenant (`SessionProvider`). |
 | `data/` | React Query hooks over `GraphosApi` (`queries.ts`); the shared live activity (`ActivityProvider`); safe editing (`useVersionedEditor`: edits keep the version they started from and send only changed fields with `If-Match`). |
 | `graph/` | Canvas models, independent of React: `GraphModel` (nodes and edges on screen, with an undo history), `canvasStyle` (colours, fading, which nodes are labelled), `graphMap` and `communityGraph` (the label map and the groups as graphs), `WorkspaceProvider` (the Explore canvas, mode and selection). |
 | `components/` | Reusable pieces with no data fetching of their own beyond hooks: canvas, inspectors, property editor, search field, dialogs, table, layout. |

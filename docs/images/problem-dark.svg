@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 430" width="1000" height="430" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" role="img" aria-labelledby="title desc">
 <title id="title">From many database clients to one graph service</title>
-<desc id="desc">Left: three services each embed a database driver, a connection string and their own Cypher, and all reach one shared graph database, so credentials and query text spread, there is no tenant boundary, a slow query affects everyone and each team re-solves bulk load and indexing. Right: the same services call graphos over typed HTTP; graphos alone reaches PostgreSQL with Apache AGE on a private network, giving one scoped token per consumer, a graph per tenant with bounded, timed queries, and built-in bulk load, indexing and community detection.</desc>
+<desc id="desc">Left: three services each embed a database driver, a connection string and their own Cypher, and all reach one shared graph database, so credentials and query text spread, there is no tenant boundary, a slow query affects everyone and each team re-solves bulk load and indexing. Right: the same services call graphos over typed HTTP; graphos alone reaches PostgreSQL with Apache AGE on a private network, giving each consumer its own account and short-lived tokens, a graph per tenant with bounded, timed queries, and built-in bulk load, indexing and community detection.</desc>
 <defs>
   <marker id="h0" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#F2877F"/></marker>
   <marker id="h1" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8AB0FF"/></marker>
@@ -52,7 +52,7 @@
 <text x="905" y="186" font-size="15" font-weight="700" fill="#B7A6F2" text-anchor="middle">Postgres</text>
 <text x="905" y="206" font-size="13" font-weight="600" fill="#B7A6F2" text-anchor="middle">+ Apache AGE</text>
 <text x="905" y="232" font-size="12" font-weight="400" fill="#9AA5B3" text-anchor="middle">private network</text>
-<path d="M525 348 l4 4 l8 -9" fill="none" stroke="#6FCB8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="545" y="352" font-size="13.5" font-weight="400" fill="#E6EAEF">one scoped token per consumer</text>
+<path d="M525 348 l4 4 l8 -9" fill="none" stroke="#6FCB8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="545" y="352" font-size="13.5" font-weight="400" fill="#E6EAEF">one account per consumer</text>
 <path d="M525 374 l4 4 l8 -9" fill="none" stroke="#6FCB8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="545" y="378" font-size="13.5" font-weight="400" fill="#E6EAEF">a graph per tenant; bounded, timed queries</text>
 <path d="M525 400 l4 4 l8 -9" fill="none" stroke="#6FCB8D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="545" y="404" font-size="13.5" font-weight="400" fill="#E6EAEF">bulk load, indexes, communities built in</text>
 </svg>

@@ -5,6 +5,10 @@
  *   node tools/docs/diagrams.mjs          write docs/images/<name>-light.svg and <name>-dark.svg
  *   node tools/docs/diagrams.mjs --check  exit 1 if any file differs from what this draws
  *
+ * It also embeds the web UI screenshots (docs/images/ui-*.jpg, taken by
+ * tools/docs/screenshots.py) in the whitepaper, and --check fails when the page holds
+ * other pictures than the committed ones.
+ *
  * Each diagram comes in two files because GitHub picks one per reader's theme through a
  * <picture> element, and the whitepaper page embeds both and lets its own theme choose. The
  * drawing lives in code rather than in a design tool, so a label change is a reviewable diff
@@ -136,11 +140,11 @@ ${cylinder(905, 100, 60, 190)}
 ${text(905, 186, 'Postgres', { size: 15, weight: 700, fill: t.store, anchor: 'middle' })}
 ${text(905, 206, '+ Apache AGE', { size: 13, weight: 600, fill: t.store, anchor: 'middle' })}
 ${text(905, 232, 'private network', { size: 12, fill: t.soft, anchor: 'middle' })}
-${mark(525, 352, 'one scoped token per consumer', 'ok')}
+${mark(525, 352, 'one account per consumer', 'ok')}
 ${mark(525, 378, 'a graph per tenant; bounded, timed queries', 'ok')}
 ${mark(525, 404, 'bulk load, indexes, communities built in', 'ok')}`;
   return k.svg(1000, 430, 'From many database clients to one graph service',
-    'Left: three services each embed a database driver, a connection string and their own Cypher, and all reach one shared graph database, so credentials and query text spread, there is no tenant boundary, a slow query affects everyone and each team re-solves bulk load and indexing. Right: the same services call graphos over typed HTTP; graphos alone reaches PostgreSQL with Apache AGE on a private network, giving one scoped token per consumer, a graph per tenant with bounded, timed queries, and built-in bulk load, indexing and community detection.',
+    'Left: three services each embed a database driver, a connection string and their own Cypher, and all reach one shared graph database, so credentials and query text spread, there is no tenant boundary, a slow query affects everyone and each team re-solves bulk load and indexing. Right: the same services call graphos over typed HTTP; graphos alone reaches PostgreSQL with Apache AGE on a private network, giving each consumer its own account and short-lived tokens, a graph per tenant with bounded, timed queries, and built-in bulk load, indexing and community detection.',
     body);
 }
 
@@ -153,10 +157,10 @@ function architecture(t) {
     ['Loader job', 'NDJSON / COPY bulk writes', 86],
     ['Application', 'search · neighbors · expand', 172],
     ['Analytics / UI', 'aggregates · export', 258],
-    ['Operator', 'admin token: tenants, Louvain', 344],
+    ['Operator', 'admin: users, grants', 344],
   ];
   const layers = [
-    ['bearer token → tenant, read/write', '403 / 404 before any SQL'],
+    ['token → user → tenant level', '403 / 404 before any SQL'],
     ['typed REST contracts', 'Pydantic models, OpenAPI'],
     ['SQL built inside', 'identifiers checked, limits capped'],
     ['statement_timeout per query', 'a bad query cannot starve the pool'],
@@ -197,7 +201,7 @@ ${text(840, 384, 'pg_trgm · pg_stat_statements', { size: 12, fill: t.soft, anch
 <path d="M48 475 l12 12 M60 475 l-12 12" stroke="${t.stop}" stroke-width="2" stroke-linecap="round"/>
 ${text(72, 486, 'Consumers never receive a database connection string and never send raw Cypher or SQL.', { size: 13.5, weight: 600, fill: t.stop })}`;
   return k.svg(1000, 516, 'How graphos is deployed',
-    'Consumers such as a loader job, an application, an analytics UI and an operator call graphos-api over the graphos-net network with a bearer token. graphos-api checks the token against the tenant in the path and the read or write access each operation needs, validates typed request contracts, builds SQL internally with checked identifiers and capped limits, runs each query under a statement timeout, and emits metrics, JSON logs and an audit trail; it also runs Louvain community detection, in a separate process, and a key/value cache. Only graphos-api reaches graphos-db, PostgreSQL 16 with Apache AGE, over an internal network with no external port. Each tenant is its own AGE graph, and graphos_meta holds registrations and the cache. Consumers never receive a connection string and never send raw Cypher or SQL.',
+    'Consumers such as a loader job, an application, an analytics UI and an operator call graphos-api over the graphos-net network with a short-lived bearer token from signing in. graphos-api checks the grants of the signed-in user against the tenant in the path and the level each operation needs, validates typed request contracts, builds SQL internally with checked identifiers and capped limits, runs each query under a statement timeout, and emits metrics, JSON logs and an audit trail; it also runs Louvain community detection, in a separate process, and a key/value cache. Only graphos-api reaches graphos-db, PostgreSQL 16 with Apache AGE, over an internal network with no external port. Each tenant is its own AGE graph, and graphos_meta holds registrations and the cache. Consumers never receive a connection string and never send raw Cypher or SQL.',
     body);
 }
 
@@ -234,7 +238,7 @@ ${text(530, 236, 'ids persist across runs as membership drifts', { size: 13 })}
 <rect x="30" y="256" width="12" height="12" rx="3" fill="${t.storeSoft}" stroke="${t.storeLine}"/>${text(48, 266, 'inside PostgreSQL', { size: 12.5, fill: t.soft })}
 <rect x="190" y="256" width="12" height="12" rx="3" fill="${t.accentSoft}" stroke="${t.accentLine}"/>${text(208, 266, 'inside graphos-api', { size: 12.5, fill: t.soft })}`;
   return k.svg(1000, 282, 'How communities are computed',
-    'An admin call to recompute-communities streams edges out of PostgreSQL as integer ids with plain SQL, builds a weighted undirected igraph with its vertices in id order, runs Louvain in a separate process with a fixed seed, and matches each new cluster to its predecessor from the last run by Jaccard overlap of at least 0.5 so community ids stay stable. Results are written back with COPY and a single UPDATE, then the community id is denormalised onto every edge so scoped traversals use an index. Only one run per tenant happens at a time, a dry run previews the partition, and the response reports time per step and modularity.',
+    'A call to recompute-communities, by a user with maintain on the tenant, streams edges out of PostgreSQL as integer ids with plain SQL, builds a weighted undirected igraph with its vertices in id order, runs Louvain in a separate process with a fixed seed, and matches each new cluster to its predecessor from the last run by Jaccard overlap of at least 0.5 so community ids stay stable. Results are written back with COPY and a single UPDATE, then the community id is denormalised onto every edge so scoped traversals use an index. Only one run per tenant happens at a time, a dry run previews the partition, and the response reports time per step and modularity.',
     body);
 }
 
@@ -258,6 +262,21 @@ function inline(svg, fig, theme) {
     .trimEnd();
 }
 
+// The UI screenshots: photographs, so they cannot be inline SVG. The page carries the
+// JPEG copies as data: URIs, which keeps it one file; where a viewer blocks data: URIs only
+// these pictures are missing. The alt text says what each one shows.
+const SHOTS = {
+  'ui-explore-graph-dark': 'The Explore view of the demo tenant, an invented software ecosystem: about 450 nodes coloured by the community Louvain found, six clusters around a core of shared libraries. The core library corelog is selected; its panel lists its properties, among them the community id and the graph metrics graphos computed, and its relationships.',
+  'ui-explore-groups-dark': 'The Groups mode of Explore: one bubble per community of the last Louvain recompute, named after its best-connected member, with lines for the relationships between communities.',
+  'ui-explore-map-dark': 'The Map mode of Explore: one bubble per label, sized by its nodes, and a line per pair of labels that are linked.',
+  'ui-schema-editor-dark': 'The schema diagram of the demo tenant. Library, Framework and Tool sit in a block under their parent label Package; the selected label, Library, shows its relationship types to the other labels and, in a panel, its properties and relationships. The Add menu offers a new label, relationship type or search index.',
+};
+for (const [name, alt] of Object.entries(SHOTS)) {
+  let jpeg;
+  try { jpeg = readFileSync(join(OUT, `${name}.jpg`)); } catch { continue; }
+  embedded.set(name, `<img class="shot" src="data:image/jpeg;base64,${jpeg.toString('base64')}" width="1440" height="900" loading="lazy" alt="${alt}">`);
+}
+
 const check = process.argv.includes('--check');
 let stale = 0;
 mkdirSync(OUT, { recursive: true });
@@ -279,9 +298,9 @@ for (const [name, draw] of Object.entries(DIAGRAMS)) {
 {
   // Compare ignoring line endings, so a CRLF checkout does not fail --check.
   const page = readFileSync(PAGE, 'utf8').replaceAll('\r\n', '\n');
-  const next = page.replace(/<!--fig:([a-z-]+)-->[\s\S]*?<!--\/fig:\1-->/g, (m, fig) => {
-    if (!embedded.has(fig)) throw new Error(`whitepaper.html: unknown figure "${fig}"`);
-    return `<!--fig:${fig}-->${embedded.get(fig)}<!--/fig:${fig}-->`;
+  const next = page.replace(/<!--(fig|shot):([a-z-]+)-->[\s\S]*?<!--\/\1:\2-->/g, (m, kind, fig) => {
+    if (!embedded.has(fig)) throw new Error(`whitepaper.html: unknown ${kind === 'fig' ? 'figure' : 'screenshot'} "${fig}"`);
+    return `<!--${kind}:${fig}-->${embedded.get(fig)}<!--/${kind}:${fig}-->`;
   });
   if (check) {
     if (next !== page) { console.error('diagrams: docs/whitepaper.html embeds stale pictures'); stale++; }

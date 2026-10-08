@@ -15,13 +15,15 @@ Requires Python 3.11+. The client is async-only (`asyncio` + `httpx`).
 import asyncio
 import os
 
-from graphos_client import EdgeUpsert, GraphosClient, NodeUpsert
+from graphos_client import EdgeUpsert, GraphosClient, NodeUpsert, PasswordAuth
 
 
 async def main() -> None:
     async with GraphosClient(
         base_url="http://127.0.0.1:8080",
-        token=os.environ["GRAPHOS_TOKEN"],   # registering a tenant needs an admin token
+        # A service account allowed to create the tenant (create_tenants), or an admin.
+        # Without auth=, the client signs in as GRAPHOS_USER / GRAPHOS_PASSWORD.
+        auth=PasswordAuth("loader", os.environ["GRAPHOS_PASSWORD"]),
         tenant="acme",
     ) as g:
         await g.register_tenant(vertex_labels=["User", "Document"], edge_labels=["AUTHORED"])
@@ -58,14 +60,19 @@ schema = TenantSchema(
              "(((properties::text)::jsonb ->> 'kind'))"],   # {tenant} is substituted
 )
 
-async with GraphosPool(base_url=URL, token=ADMIN_TOKEN, schema=schema) as pool:
+async with GraphosPool(base_url=URL, auth=PasswordAuth("loader", SECRET), schema=schema) as pool:
     await pool.call("team_red", lambda g: g.upsert_nodes(nodes))    # registers, writes
     cli = await pool.client("team_red")                              # the same client
 ```
 
 ## Examples
 
-Runnable scripts in [`examples/`](examples/). Each reads `GRAPHOS_URL` (default `http://127.0.0.1:8080`) and `GRAPHOS_TOKEN`; with the repository's compose stack, use `export GRAPHOS_TOKEN="$(cat services/graphos/deploy/secrets/admin_token.txt)"`.
+**Signing in.** `auth=PasswordAuth(user, secret)` (or `GRAPHOS_USER` / `GRAPHOS_PASSWORD`) signs in
+and renews the 15-minute token by itself. A program that holds credentials at graphos's identity
+provider can use `auth=BearerAuth(source)` instead: `source` is an async callable answering
+`(access token, seconds valid)`, called again before expiry and once on a `401`.
+
+Runnable scripts in [`examples/`](examples/). Each reads `GRAPHOS_URL` (default `http://127.0.0.1:8080`) and signs in as `GRAPHOS_USER` / `GRAPHOS_PASSWORD` (an admin, or a service account with `create_tenants` on the example tenants and `maintain` for the recompute examples).
 
 | Script | Shows |
 |---|---|
@@ -76,6 +83,7 @@ Runnable scripts in [`examples/`](examples/). Each reads `GRAPHOS_URL` (default 
 | [`05_tenant_pool.py`](examples/05_tenant_pool.py) | `GraphosPool` serving several tenants with one schema |
 | [`06_rule_based_edges.py`](examples/06_rule_based_edges.py) | declaring a property-match rule and letting the server write the edges |
 | [`07_background_jobs.py`](examples/07_background_jobs.py) | long operations as background jobs: submit, wait, the one-recompute rule, cancel |
+| [`08_demo_ecosystem.py`](examples/08_demo_ecosystem.py) | the demo tenant (an invented software ecosystem, about 450 nodes) and every graph algorithm on it: metrics, the top nodes by PageRank and betweenness, communities |
 
 ## What the client covers
 

@@ -295,7 +295,7 @@ lives in the `graphos_data` volume.
 `graphos-api` is configured through `GRAPHOS_*` environment variables
 (`config.py`): `GRAPHOS_DB_HOST/PORT/NAME`, `GRAPHOS_DB_USER=graphos_app`,
 `GRAPHOS_DB_PASSWORD_FILE=/run/graphos/secrets/graphos_app_pw.txt`,
-`GRAPHOS_BIND_HOST/PORT`, `GRAPHOS_LOG_LEVEL`, and `GRAPHOS_AUTH_TOKENS_FILE`.
+`GRAPHOS_BIND_HOST/PORT` and `GRAPHOS_LOG_LEVEL`.
 `GRAPHOS_FORWARDED_ALLOW_IPS` (default `127.0.0.1`) lists the addresses whose
 `X-Forwarded-*` headers are trusted; set it to the reverse proxy's address.
 The image installs extras from the
@@ -319,13 +319,13 @@ networks:
 services:
   my-service:
     networks: [default, graphos-net]
-    # call http://graphos-api:8080 with a bearer token
+    # sign in as its service account, then call http://graphos-api:8080 with the token
 ```
 
 Bring-up:
 
 ```bash
-scripts/init-secrets.sh        # creates graphos_pw.txt, graphos_app_pw.txt, graphos_tokens.json, admin_token.txt (never overwrites)
+scripts/init-secrets.sh        # creates graphos_pw.txt, graphos_app_pw.txt (never overwrites)
 docker compose -f docker-compose.graphos.yml up -d
 curl -s http://127.0.0.1:8080/readyz
 ```
@@ -338,7 +338,8 @@ Routers are mounted under `/v1` except health (`/healthz`, `/readyz`) and
 #### 2.5.1 Endpoint catalogue
 
 Paths under `/v1/{tenant}/graph/...` are abbreviated to `…/graph/...`.
-"Tenant" scope means the token lists the tenant or is admin.
+"Tenant" scope means the caller's level on the tenant (§2.5.3): `read` for
+the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 
 | Method · Path | Purpose | Scope |
 |---|---|---|
@@ -348,12 +349,19 @@ Paths under `/v1/{tenant}/graph/...` are abbreviated to `…/graph/...`.
 | `GET /v1/info` | Service, Postgres and AGE versions, `tenants` (a count), `features.louvain` | none |
 | `GET /metrics` | Prometheus exposition (§2.5.6) | none |
 | **Tenant control** | | |
-| `POST /v1/tenants[?force_shrink=true]` | Register / re-apply a spec (§2.2) | admin |
-| `GET /v1/tenants` | List registered tenants | admin |
-| `GET /v1/tenants/{name}` | One tenant's spec summary | admin |
-| `GET /v1/me` | The calling token: consumer, `admin`, `access`, and the registered tenants it may use | any token |
+| `POST /v1/tenants[?force_shrink=true]` | Register / re-apply a spec (§2.2) | new: `create_tenants` (the caller becomes owner); existing: `maintain` |
+| `GET /v1/tenants` | The registered tenants the caller may maintain | signed in |
+| `GET /v1/tenants/{name}` | One tenant's spec summary | `maintain` |
+| `GET /v1/me` | The caller: user, kind, `admin`, `must_change`, its tenants, its level on each, `create_tenants` patterns | signed in |
 | `GET /v1/{tenant}/schema` | Labels, label hierarchy, search indexes and rule-derived edge labels (no DDL, rules or `meta`) | tenant |
-| `DELETE /v1/tenants/{name}` | Unregister (see below) | admin |
+| `DELETE /v1/tenants/{name}/edge_endpoints` | Remove one declared pair | `maintain` |
+| `DELETE /v1/tenants/{name}` | Unregister (see below) | `owner` |
+| **Sign-in, users and grants** (§2.5.3) | | |
+| `POST /v1/auth/login`, `/refresh`, `/logout` | Access token (and a person's refresh token); renew; end a session (and the provider's URL to end it there) | none |
+| `GET /v1/auth/config`, `POST /v1/auth/oidc/start`, `/oidc/callback` | How to sign in; single sign-on with PKCE held by graphos | none |
+| `POST /v1/me/password` | Change one's password | signed in |
+| `GET/POST /v1/users`, `PATCH/DELETE /v1/users/{name}`, `POST /v1/users/{name}:reset-secret` | Users and service accounts | admin |
+| `GET/POST/DELETE /v1/grants` | Grants | admin; an owner for its tenant |
 | **Reads** | | |
 | `GET …/graph/search?q=&label=&property=&limit=` | Case-insensitive literal substring (`ILIKE`, with `%` / `_` in `q` escaped) on `name` (served by the trigram index), or on `property` (read row by row); limit ≤200. Hit `id` = AGE graphid (integer); external id in `properties.id` | tenant |
 | `GET …/graph/search?q=&index=&label=&fuzzy=&min_score=&limit=` | Ranked search through a named search index (`identifier` or `text` analyzer); hits carry `score` and `matched` | tenant |
@@ -397,7 +405,7 @@ Paths under `/v1/{tenant}/graph/...` are abbreviated to `…/graph/...`.
 | `DELETE …/graph/edges/{type}?src=&dst=&src_label=&dst_label=` | Delete one edge | tenant |
 | `DELETE …/graph/nodes?property_key=&property_value=` | Delete every node with that property value, and their edges | tenant |
 | **Community detection** | | |
-| `POST /v1/{tenant}/recompute-communities` | Louvain (§5); 501 without the extra | admin |
+| `POST /v1/{tenant}/recompute-communities` | Louvain (§5); 501 without the extra | `maintain` |
 | **Operational** | | |
 | `GET /v1/db/stats` | Version, DB size, top 200 tables by size with tuple counts and vacuum/analyze times | admin |
 | `GET /v1/db/slow-queries?limit=` | Top-N by mean time from `pg_stat_statements` (default 25, ≤200); `available: false` without the extension | admin |
@@ -440,8 +448,8 @@ Error shapes:
 | Status | When | Body |
 |---|---|---|
 | 400 | Unknown label, compile/Cypher error, bad cursor, missing resolve rule, broken `:bulk` stream | `{"detail": "..."}`; a `:bulk` or `snapshot-import` stream error names only the exception type and points to the server log |
-| 401 | Missing/invalid bearer token | `{"detail": "..."}` |
-| 403 | Token lacks the tenant, or admin scope required | `{"detail": "..."}` |
+| 401 | Missing, invalid or expired bearer token; failed sign-in | `{"detail": "..."}` |
+| 403 | No access to the tenant, a level below what the operation needs, admin required, or a password to change first | `{"detail": "..."}` |
 | 404 | Tenant not registered, node or cache key not found | `{"detail": "..."}` |
 | 409 | Louvain already running for the tenant | `{"detail": "..."}` |
 | 413 | `snapshot-import` over 50,000,000 lines | `{"detail": "..."}` |
@@ -459,46 +467,101 @@ Error shapes:
 }
 ```
 
-#### 2.5.3 Auth and tenant model
+#### 2.5.3 Identity, access and tenant model
 
-- **Fail-closed startup.** Without `GRAPHOS_AUTH_TOKENS_FILE`, `graphos-api`
-  refuses to start unless `GRAPHOS_AUTH_DISABLED=true`. With auth disabled,
-  every request is an anonymous admin; this is for local development only.
-  If the variable is set but the file is missing, unreadable or not a JSON
-  object, graphos also refuses to start.
-- **Tokens file:**
-  `{"<token>": {"consumer": "<name>", "tenants": ["acme"], "admin": false, "access": "read"}}`.
-  A token's scope is its tenant list, the `admin` flag and its `access`
-  (`read` or `write`). A token without `access` gets `write` and graphos
-  logs a warning naming its consumer. A malformed entry (an `access` other
-  than `read` / `write` included) is skipped with an error log and the rest
-  still load.
-- **Read and write access.** Every authenticated operation declares `read`
-  or `write`: its handler takes the caller as `ReadPrincipal` or
-  `WritePrincipal`, a FastAPI `Security` dependency whose scope OpenAPI
-  shows on the operation. A read-only token gets 403 on a write, admin or
-  not. A test fails if an operation declares neither and is not one of the
-  public ones, and checks every tenant operation against a token for
-  another tenant.
-  The file is reloaded on `SIGHUP` (Unix); a reload that finds the file
-  unusable logs the error and keeps the tokens already loaded.
-- **Tenant access.** The tenant is in the URL path. A non-admin token gets
-  403 for a tenant it does not list; admin tokens may access every tenant.
-  The same dependency that checks access checks the tenant, before the
-  request body is validated, so a tenant route cannot skip it. Unregistered
-  tenants return 404 (after the scope check).
-- **Admin-only routes:** `/v1/tenants*`, `/recompute-communities`, `/v1/db/*`.
-  There is no `/admin` prefix.
-- `/healthz`, `/readyz`, `/v1/info`, `/metrics`, `/docs`, and `/openapi.json`
-  are unauthenticated; restrict them at a reverse proxy if needed. They report
-  tenant counts, never tenant names; admins list tenants with
-  `GET /v1/tenants`.
+- **Users** (`identity.py`, table `graphos_meta.users`): people and service
+  accounts, each with a scrypt hash of its password or secret, `must_change`,
+  `disabled`, failed-sign-in counter and lock, and a `token_version`.
+- **Sign-in** (`api/auth.py`): `POST /v1/auth/login` checks the password
+  (an unknown user costs the same scrypt time; one 401 message whatever the
+  cause; `GRAPHOS_LOGIN_MAX_FAILURES` failures lock the account for
+  `GRAPHOS_LOGIN_LOCKOUT_S`; at most `GRAPHOS_LOGIN_ATTEMPTS_PER_MIN` attempts a
+  minute per client address, per replica) and answers an access token: a JWT
+  signed ES256 with the newest key of `graphos_meta.signing_keys` (generated at
+  the first start under an advisory lock, or `GRAPHOS_AUTH_SIGNING_KEY_FILE`),
+  claims `iss` (`GRAPHOS_AUTH_ISSUER`), `aud` `graphos`, `sub` (the user),
+  `iat`/`nbf`/`exp` (`GRAPHOS_ACCESS_TOKEN_TTL_S`, 900) and `ver` (the
+  user's `token_version`). A person also gets a refresh token (256 random
+  bits; only its SHA-256 is stored in `graphos_meta.sessions`), rotated on
+  each `POST /v1/auth/refresh`; a rotated one used again revokes its family.
+  Sessions end after `GRAPHOS_SESSION_IDLE_S` without a refresh and
+  `GRAPHOS_SESSION_MAX_S` in all.
+- **Checking a request** (`auth.py`): `TokenAuthenticator` verifies the
+  signature (key by `kid`, algorithm ES256 only), issuer, audience and expiry
+  (30 s leeway), then looks the user up in memory: a missing or disabled user,
+  or a `ver` other than its current `token_version`, is refused. A password
+  change, reset or disable bumps the version, so older tokens stop at the next
+  request, not at expiry. The grants are read from memory on every request.
+- **Grants** (`graphos_meta.grants`): `(subject, tenant_pattern, level)`. The
+  subject is `user:<name>`; the pattern a tenant name or a glob with `*`;
+  the level `read` < `write` < `maintain` < `owner`, or the global rights
+  `create_tenants` (on a pattern) and `admin` (on `*`). A user's level on a
+  tenant is the highest matching grant; an admin is `owner` everywhere.
+  Registering a new tenant needs `create_tenants` on a matching pattern and
+  grants the creator `owner` on it; re-registering needs `maintain` or a
+  matching `create_tenants`; unregistering needs `owner` and drops the
+  tenant's exact grants. Admins manage users and every grant; an owner
+  manages grants on its tenant's exact name. graphos refuses to remove its
+  last enabled admin.
+- **Replicas.** Each replica keeps users and grants in memory
+  (`AccessStore`), reloads them on a `NOTIFY` on `graphos_access` (sent in the
+  writing transaction), when the listener reconnects, and every 60 s.
+- **Bootstrap.** With no user, the first start creates `graphos` (the `admin`
+  grant, `must_change`) with the password `graphos`, or the one in
+  `GRAPHOS_ADMIN_PASSWORD_FILE`, and logs a warning at every start while it is
+  unchanged; an advisory lock makes concurrent replicas
+  create it once. A `must_change` user may call only `GET /v1/me`,
+  `POST /v1/me/password` and logout until it changes its password; nothing
+  turns this off. `python -m graphos reset-admin-password` sets a new random
+  password (`must_change`), restores a disabled or deleted `admin`, and
+  revokes its sessions. `GRAPHOS_LOCAL_ADMIN=false` refuses the `graphos`
+  sign-in.
+- **Single sign-on** (`oidc.py`, `api/auth.py`). With `GRAPHOS_OIDC_ISSUER`
+  and `GRAPHOS_OIDC_CLIENT_ID`, `Provider` reads the discovery document
+  (issuer must match; cached an hour) and the published keys (cached; an
+  unknown key id refetched at most once a minute). `POST /v1/auth/oidc/start`
+  stores `state`, `nonce` and a PKCE verifier in `graphos_meta.oidc_pending`
+  (5 minutes) and answers the authorization URL (`prompt=none` when silent);
+  `/callback` deletes the row (single use), exchanges the code at the token
+  endpoint as a public client, validates the ID token (signature with an
+  asymmetric algorithm only, issuer, audience = client id, nonce, expiry,
+  60 s leeway), adds groups and roles from the access token when it is a JWT
+  for graphos's audience, and issues graphos tokens whose `sub` is
+  `oidc:<sub>` and whose `idn` claim carries the identity (subject, name,
+  groups, roles, client). Such a session renews from the identity stored on
+  it (`sessions.kind = 'oidc'`, `claims`). `AccessStore.principal_for` unions
+  the grants of `oidc-sub:`, `oidc-group:`, `oidc-role:` and `oidc-client:`
+  subjects; ownership grants go to `oidc-sub:<sub>`. A bearer that is not a
+  graphos token is tried as a provider access token for
+  `GRAPHOS_OIDC_AUDIENCE`. Logout answers the provider's
+  `end_session_endpoint` with the session's ID token (`sessions.id_token`,
+  server-side only) as `id_token_hint`. The provider being unreachable never stops the
+  start.
+- **Authentication off only on purpose.** `GRAPHOS_AUTH_DISABLED=true` makes
+  every request an anonymous admin (local development only), and graphos logs
+  an error at every start while it is set.
+- **Declared access.** Every authenticated operation declares the access it
+  needs: its handler takes the caller as `ReadPrincipal`, `WritePrincipal`,
+  `MaintainPrincipal`, `OwnerPrincipal` or `AdminPrincipal`, a FastAPI
+  `Security` dependency whose scope OpenAPI shows on the operation. On a route
+  with `{tenant}` in its path the same dependency checks the caller's level
+  on that tenant before the request body is validated, so a tenant route
+  cannot skip it; routes that name a tenant elsewhere (`/v1/tenants/{name}`,
+  the register body, a job) check it themselves (`require_level`). A test
+  fails if an operation declares nothing and is not public, and checks each
+  tenant operation against a caller one level too low and one for another
+  tenant. Unregistered tenants return 404 (after the access check).
+- `/healthz`, `/readyz`, `/v1/info`, `/metrics`, `/docs`, `/openapi.json` and
+  the sign-in endpoints are unauthenticated; restrict them at a reverse proxy
+  if needed. They report tenant counts, never tenant names.
 
 #### 2.5.4 Python client
 
 [`clients/python`](../clients/python) provides `GraphosClient`, an async
 wrapper over `httpx.AsyncClient` bound to one tenant
-(`GraphosClient(base_url=..., tenant=..., token=...)`), with typed methods for
+(`GraphosClient(base_url=..., tenant=..., auth=PasswordAuth(user, secret))`;
+`PasswordAuth` signs in, renews at 80% of the token's life and once more on a
+401), with typed methods for
 most endpoints. Behaviour (`_client.py`):
 
 - Connection pool of up to 20 connections, 10 s keep-alive expiry, default
@@ -546,7 +609,7 @@ the default):
 | `graphos_request_duration_seconds` (histogram) | `method`, `route` |
 | `graphos_db_pool_size` (refreshed on scrape) | `state` = `total` / `idle` / `active` |
 | `graphos_registered_tenants` | — |
-| `graphos_rate_limited_total` | `token_id` (first 12 hex characters of the token's SHA-256; never the token itself) |
+| `graphos_rate_limited_total` | `token_id` (first 12 hex characters of the SHA-256 of the user name) |
 
 Requests to `/metrics` itself are not counted.
 
@@ -564,18 +627,19 @@ audited; a request that reaches no operation's auth (an unknown path) falls
 back to its method. Each record is a `write` line from the
 `graphos.audit` logger, rendered with all its fields in the JSON log
 (structlog's `ExtraAdder` in `observability/logging.py`): `method`, `path`,
-`tenant` (parsed from the path), `consumer` (the token's consumer name;
+`tenant` (parsed from the path), `consumer` (the user name;
 `anonymous` without one), `args_hash` (first 16 hex characters of the
 SHA-256 of the request body), `status`, and `elapsed_ms`. A request that
 raises is recorded as 500 before the error propagates. To compute the hash the
 middleware reads the full body of every non-`GET` request into memory.
 
 **Rate limiting.** Off by default (`GRAPHOS_RATE_LIMIT_ENABLED`). When on, it
-is an in-memory sliding window per bearer token (`GRAPHOS_RATE_LIMIT_RPS`,
-default 100, over `GRAPHOS_RATE_LIMIT_WINDOW_S`, default 1 s). Buckets are
-keyed by the first 12 hex characters of the token's SHA-256. Only tokens
-present in the tokens file are limited: an unknown bearer string goes straight
-to auth (401) and creates no bucket and no metric series. `/healthz`,
+is an in-memory sliding window per signed-in user (`GRAPHOS_RATE_LIMIT_RPS`,
+default 100, over `GRAPHOS_RATE_LIMIT_WINDOW_S`, default 1 s), so a renewed
+token keeps its bucket. Buckets are keyed by the first 12 hex characters of
+the SHA-256 of the user name. Only valid tokens are limited: an unknown or
+expired bearer string goes straight to auth (401) and creates no bucket and
+no metric series. `/healthz`,
 `/readyz`, and `/metrics` are exempt; requests without a bearer token pass
 through to auth.
 
@@ -604,8 +668,9 @@ from the database on every use, so it needs no syncing):
   and the LRU is cleared when the listener (re)connects, which bounds
   staleness when a notification is lost or a read races a write.
 - **Per replica by design:** rate-limit buckets (each replica allows the
-  configured rate, so N replicas allow N times as much), and the tokens file,
-  read by each replica; send `SIGHUP` to every one after changing it.
+  configured rate, so N replicas allow N times as much) and the sign-in
+  throttle. Users and grants follow the registry's pattern: `NOTIFY` on
+  change, reload on reconnect, and a periodic reload (60 s).
 
 Background jobs, the Louvain lock, revisions and the change feed coordinate
 through the database (§2.6, §4.1).
@@ -623,11 +688,11 @@ through the database (§2.6, §4.1).
 
 Examples use tenant `acme` with labels `User`, `Document`, `Tag` and edge
 types `AUTHORED` (User → Document) and `FOLLOWS` (User → User). They assume
-the shell variables from [usage.md §1.1](usage.md#11-secrets-stack-token):
+the shell variables from [usage.md §1.1](usage.md#11-secrets-stack-signing-in)
+(`TOKEN` is an admin's access token from `POST /v1/auth/login`):
 
 ```bash
 export G=http://localhost:8080
-export TOKEN=$(cat services/graphos/deploy/secrets/admin_token.txt)
 ```
 
 **Merge properties onto a node** (`POST …/nodes/{external_id}/properties`).
@@ -799,7 +864,7 @@ flowchart LR
         R["tenants · graph · bulk · snapshot ·<br/>communities · louvain · cache · db · info · health"]
     end
     CON["contracts/*<br/>Pydantic models, DDL validator"]
-    AUTH["auth.py<br/>TokenStore"]
+    AUTH["auth.py · identity.py<br/>sign-in, users, grants"]
     OBS["observability/*<br/>metrics · logging · audit · rate_limit"]
     BOOT["bootstrap.py<br/>tenant DDL + registry"]
     RES["resolver/*<br/>catalogue · compiler · indexer"]
@@ -996,7 +1061,7 @@ delays an event and never loses it. A stream holds a pool connection only
 while it reads.
 
 **Who.** `require_principal` (async, so it runs in the request's own task)
-puts the token's consumer into the `ACTOR` context variable that `record`
+puts the user name into the `ACTOR` context variable that `record`
 reads; a background job sets it to the consumer that submitted the job and
 the trace id to `job:<id>`. The request's trace id comes from the log
 context.
@@ -1038,7 +1103,7 @@ powers-of-ten test fails against the old form.
 > start). Without it, `recompute-communities` answers 501 and
 > `GET /v1/info` reports `features.louvain: false`.
 
-`POST /v1/{tenant}/recompute-communities` (admin) answers when done, or
+`POST /v1/{tenant}/recompute-communities` (`maintain`) answers when done, or
 runs as a background job with `Prefer: respond-async` (§2.6). It is
 single-flight per tenant via `pg_try_advisory_lock(hashtextextended(tenant, 1))`
 (a 64-bit key, apart from tenant setup's lock on the same name); a
@@ -1207,7 +1272,7 @@ Postgres instance.
 1. **Replicas converge, they are not instantaneous.** A change made through
    one replica normally reaches the others within milliseconds, at worst
    within `GRAPHOS_REGISTRY_SYNC_S` / `GRAPHOS_CACHE_MAX_AGE_S`; the rate
-   limiter and the tokens file stay per replica (§2.5.7).
+   limiter and the sign-in throttle stay per replica (§2.5.7).
 2. **Bulk writes are not atomic per request.** Each 500-row (bulk) or
    5,000-row (snapshot) flush commits independently.
 3. **One edge per type per ordered node pair** (§2.3).

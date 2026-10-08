@@ -1,0 +1,186 @@
+# Graph algorithms
+
+graphos computes a few whole-graph algorithms itself, next to the data, and writes the results onto
+the nodes, where every read, filter, sort and the web UI can use them. This page says what each one
+finds, what it is good for, how to run it and what it costs. The endpoints and every parameter are in
+[usage §8](usage.md#8-communities-louvain).
+
+| Algorithm | Writes | Finds | Use it for |
+|---|---|---|---|
+| [Louvain communities](#louvain-communities) | `community_id` | groups of nodes more connected to each other than to the rest | navigating and summarising a large graph by its parts; scoping a traversal; colouring a picture |
+| [PageRank](#pagerank) | `graphos_pagerank` | how much a node is pointed at, by nodes that are themselves pointed at | what everything depends on; ranking by importance |
+| [Betweenness](#betweenness) | `graphos_betweenness` | how often a node lies on the shortest paths between others | bridges, bottlenecks, single points of failure |
+| [Components](#components) | `graphos_component` | the separate islands of the graph | data quality (orphans, loads that did not link up); splitting work |
+| [Degree](#degree) | `graphos_degree`, `graphos_in_degree`, `graphos_out_degree` | how many relationships a node has, each way | hubs, fan-in and fan-out, outliers |
+
+## How they run
+
+- **On request only.** Writes never trigger a computation: the values are as current as the last
+  run. Run them after a bulk load, or on a schedule.
+- **Next to the data, out of the way.** The edges are read with plain SQL as integer ids, the
+  computation runs in a child process (so the API keeps serving), and the results are written back
+  in bulk. A long run can be a background job (`Prefer: respond-async`); cancelling it stops the
+  child and frees its memory.
+- **Who may run them:** a user with `maintain` on the tenant (or an admin). Reading the results
+  needs only `read`.
+- **One at a time per tenant.** A community recompute and a metrics run exclude each other (`409`
+  while one runs).
+- **Scoped as you choose.** `rel_types` picks the relationship types that count, and `node_filter`
+  keeps only nodes with given property values (both ends of an edge must match). Run the same
+  algorithm over different scopes to answer different questions: PageRank over `DEPENDS_ON` answers
+  "what does everything rely on", over `CITES` "what is most cited".
+- **Stable results.** The same edges give the same results whatever order their rows are stored
+  in. Community and component ids carry over between runs, and only values that changed are
+  written, so re-running on an unchanged graph changes nothing (no revisions, no change records).
+
+## The demo
+
+[`08_demo_ecosystem.py`](../clients/python/examples/08_demo_ecosystem.py) loads a tenant built to
+show what these find: an invented open-source ecosystem of about 450 packages, maintainers, teams,
+organisations and topics in six ecosystems (web, frontend, data, machine learning, operations,
+security), joined by a few shared core libraries and some cross-ecosystem dependencies. It then
+runs every algorithm and prints:
+
+```text
+demo: 443 nodes, 1870 edges
+metrics: 280 packages, 2 components, 280 values written
+most depended on (PageRank): corelog, testbench, fmtcore, cipherlite, proxynest
+bridges (betweenness): shiplite, buildforge, gradientwise, guardium, routeflow
+communities: 6, modularity 0.741
+```
+
+- **Louvain** recovers the six ecosystems from the edges alone; nothing in the data names them.
+- **PageRank** puts the core libraries first, led by the logging library that every other core
+  library depends on.
+- **Betweenness** picks out the packages through which one ecosystem reaches another: remove one
+  and two ecosystems drift apart.
+- **Components** finds two packages that depend only on each other, apart from everything else.
+
+![The Explore view of the demo tenant, coloured by community, with the core library corelog selected and its computed values in the panel](images/ui-explore-graph-dark.png)
+
+*Explore, coloured by community: six ecosystems around the shared core. The selected library's
+panel shows its `community_id` and the `graphos_*` metrics.*
+
+---
+
+## Louvain communities
+
+**What it finds.** A partition of the nodes into communities, groups with many relationships inside
+and few between them. Louvain maximises *modularity*, which compares the edges inside communities
+with what a random graph of the same degrees would have; values above about 0.3 mean a real
+structure, the demo scores 0.74.
+
+**What it is for.**
+
+- **Navigation.** A graph of a million nodes cannot be drawn, but its communities can: the UI's
+  *Groups* view and `GET …/graph/communities/map` show each community with its size, its members
+  per label, its best-connected member (it is named after it) and the relationships between
+  communities.
+- **Summaries.** "Which part of the system is this in", "what does this part consist of",
+  "which parts talk to each other most".
+- **Scoped traversal.** `GET …/graph/expand?communities=4&communities=9` walks only inside those
+  communities; each edge carries its end's community in an indexed column, so this is an index
+  lookup.
+- **Pictures.** Colour by community (the UI's *Colours → By group*).
+
+**How graphos runs it.** Louvain with python-igraph, an [optional extra](../README.md#louvain-is-an-optional-extra)
+(GPL), on an undirected graph; `rel_weights` weighs each relationship type (the demo weighs a
+dependency twice a maintainer link). `resolution` above 1 gives more, smaller communities; below 1,
+fewer and larger. Communities smaller than `min_community_size` (default 3) get no id. The seed is
+fixed and vertices are numbered by id, so the same edges give the same partition.
+
+**Stable ids.** Louvain numbers its clusters arbitrarily, so a plain re-run renames every community.
+graphos matches each new cluster with the previous run's and keeps the old id when they overlap by
+a Jaccard index of at least 0.5: dashboards, caches and saved filters that hold a `community_id`
+keep working while membership drifts.
+
+```bash
+curl -s -X POST "$G/v1/demo/recompute-communities" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"rel_types": ["DEPENDS_ON", "MAINTAINS", "MEMBER_OF", "TAGGED"],
+       "rel_weights": {"MAINTAINS": 0.5, "MEMBER_OF": 0.5, "TAGGED": 0.3}}'
+```
+
+![The Groups view of the demo tenant: six communities named after their hubs, with lines between them](images/ui-explore-groups-dark.png)
+
+*The community map in the UI: one bubble per community, named after its best-connected member.*
+
+## Graph metrics
+
+`POST /v1/{tenant}/graph/metrics:compute` computes any of the four below in one pass, with
+[rustworkx](https://www.rustworkx.org/) (Apache-2.0, always installed), on the **directed** graph of
+the chosen relationship types: only nodes with at least one such edge take part, and parallel
+edges and self-loops count. Scores are rounded to 6 significant digits.
+
+```bash
+curl -s -X POST "$G/v1/demo/graph/metrics:compute" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"metrics": ["degree", "pagerank", "components", "betweenness"], "rel_types": ["DEPENDS_ON"]}'
+```
+
+Read the top nodes with a sorted scan (nodes without the value are left out):
+
+```bash
+curl -s -X POST "$G/v1/demo/graph/nodes:scan" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"labels": ["Package"], "project": ["name", "graphos_pagerank"], "limit": 10,
+       "order_by": [{"property": "graphos_pagerank", "desc": true}]}'
+```
+
+### PageRank
+
+**What it finds.** A node scores high when many nodes point at it, and more so when those are high
+scorers themselves. The scores sum to 1. `damping` (default 0.85) is the chance of following an
+edge rather than jumping to a random node.
+
+**What it is for.** Importance by reference: the libraries everything depends on, the documents
+most cited, the services most called. Direction matters: point the edges from the dependant to what
+it depends on (`A -DEPENDS_ON-> B` raises B).
+
+### Betweenness
+
+**What it finds.** For each node, the share of shortest paths between other pairs of nodes that go
+through it (exact, normalised to 0–1, following edge direction).
+
+**What it is for.** Bridges and bottlenecks: the package two ecosystems share, the service every
+request passes through, the person who connects two teams. A high score with a low degree is a
+quiet single point of failure.
+
+**Cost.** Exact betweenness is the expensive one, roughly the number of nodes times the number of
+edges. It is not in the default set, and it is skipped (with a warning in the response) when more
+nodes take part than `GRAPHOS_BETWEENNESS_MAX_NODES` (20,000): scope it with `rel_types` or
+`node_filter`.
+
+### Components
+
+**What it finds.** The weakly connected components: sets of nodes linked to each other in either
+direction and not at all to the rest. The largest is `0`, then by size; ids carry over between
+runs like community ids.
+
+**What it is for.** Data quality first: a load that left nodes unlinked, a reference to a node that
+was never written, an island that should not exist. Also work that never needs to cross an island
+can be split by component.
+
+### Degree
+
+**What it finds.** The number of relationships of the chosen types each node has: `graphos_degree`
+in total, `graphos_in_degree` and `graphos_out_degree` each way.
+
+**What it is for.** The cheapest view of importance and shape: hubs, nodes with an unusual fan-out,
+nodes with nothing coming in.
+
+## Reserved properties
+
+graphos writes `graphos_*` properties itself, so any write that uses one (node or edge, single,
+batch or bulk, a merge-patch removing one included) is refused with `400`: computed values never
+collide with a consumer's own data. `community_id` is written by the community recompute only.
+Snapshot export and import keep both as they are.
+
+## Sizing
+
+The first metrics run writes every node taking part, in statements of 25,000 nodes in one
+transaction (all or nothing); on about 500,000 nodes and 10 million edges it takes minutes, most of
+it updating the nodes' indexes. A later run on an unchanged graph reads the edges, computes,
+compares and writes nothing. A community recompute on the same graph reads the edges once more
+and writes only the nodes whose community changed. Both hold the edges as compact integer arrays,
+so memory grows with the number of edges, not with their properties.

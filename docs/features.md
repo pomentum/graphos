@@ -27,7 +27,8 @@ by the database init scripts.
 ## 2. Tenant model
 
 A tenant is one AGE graph plus the spec that describes it. There are no
-built-in tenants. An admin token registers each one with `POST /v1/tenants`:
+built-in tenants. An admin, or a user with `create_tenants` on a matching name
+pattern (who then owns it), registers each one with `POST /v1/tenants`:
 `vertex_labels`, `edge_labels` (optionally with a `resolve_rule`, §7),
 `indexes`, `generated_columns`, `label_hierarchy` (child → parent label
 inheritance), and free-form `meta`.
@@ -45,22 +46,39 @@ inheritance), and free-form `meta`.
   a tenant whose re-apply fails is logged and skipped, and the service still
   starts.
 
-**Tokens** are loaded from the JSON file named by `GRAPHOS_AUTH_TOKENS_FILE`
-and reloaded on `SIGHUP`. A token's scope is a tenant list, an `admin` flag
-and its `access`: `read` (operations that change nothing) or `write`. A token
-without `access` gets `write`, with a warning in the log. The file must be a
-JSON object; malformed entries are skipped (logged) and the rest load.
+**Users and grants**, not static tokens. People and service accounts sign in
+with a name and password (`POST /v1/auth/login`; only a scrypt hash is kept)
+and get an access token valid 15 minutes, signed by graphos (ES256); people
+also get a rotating refresh token for their browser session. A grant gives a
+user a level on a tenant or a name pattern (`sol_*`, `*`): `read`, `write`,
+`maintain` (schema, recompute, metrics) or `owner` (grants on the tenant,
+unregister), each including the ones before it; `create_tenants` on a
+pattern lets a user create tenants it then owns, and `admin` allows
+everything. Admins manage users and grants (API or the UI's Access page);
+an owner manages access to its tenant.
 
-- Every operation declares `read` or `write`, shown as its bearer scope in
-  `/openapi.json`; a read-only token gets 403 on a write, admin or not.
+**Single sign-on.** With `GRAPHOS_OIDC_ISSUER` and `GRAPHOS_OIDC_CLIENT_ID`,
+people sign in through any OpenID Connect provider. The UI tries a silent
+sign-in on every page load (`prompt=none`), so someone signed in at the
+provider is let straight in; graphos holds the PKCE verifier, exchanges the
+code and validates the ID token itself, and the browser stores nothing.
+Grants name the provider's subjects, groups, roles and clients
+(`oidc-group:analysts`); signing out ends the provider session too. Programs
+may send the provider's own access tokens.
 
-- Without a tokens file, graphos refuses to start unless
-  `GRAPHOS_AUTH_DISABLED=true` (development only: every request becomes an
-  anonymous admin).
-- The tenant is in the URL path. Out-of-scope tenant → 403; unregistered
-  tenant → 404.
-- Admin tokens reach every tenant and are required for tenant control,
-  Louvain, and `/v1/db/*`.
+- Every operation declares the access it needs, shown as its bearer scope in
+  `/openapi.json`; a test fails on an operation that declares none.
+- Changes apply at once: tokens carry their user's version (bumped by a
+  password change, reset or disable) and grants are read from memory on every
+  request, kept in step across replicas with `NOTIFY`.
+- The first start creates the admin `graphos` with the password `graphos`
+  (or one from `GRAPHOS_ADMIN_PASSWORD_FILE`); it must be changed at the
+  first sign-in. `python -m graphos reset-admin-password`
+  recovers a lost one. Sign-in failures lock the account after five tries.
+- `GRAPHOS_AUTH_DISABLED=true` makes every request an anonymous admin
+  (development only).
+- The tenant is in the URL path. No access or too low a level → 403;
+  unregistered tenant → 404.
 
 `DELETE /v1/tenants/{name}` removes only the registration (stored spec and
 in-process entry). The AGE graph, its data and indexes, and the tenant's cache
@@ -209,6 +227,9 @@ reported in the response.
 
 ## 5. Community detection
 
+What each algorithm (communities and the graph metrics below) finds and what it is for:
+[algorithms.md](algorithms.md).
+
 > **Optional extra.** Louvain needs python-igraph (GPL-2.0-or-later),
 > installed with `pip install "graphos[louvain]"`, an image built with
 > `--build-arg GRAPHOS_EXTRAS=louvain`, or, with no rebuild, the
@@ -216,7 +237,7 @@ reported in the response.
 > start). Without it, `recompute-communities` answers 501 and
 > `GET /v1/info` reports `features.louvain: false`.
 
-`POST /v1/{tenant}/recompute-communities` (admin) runs Louvain in a separate
+`POST /v1/{tenant}/recompute-communities` (`maintain`) runs Louvain in a separate
 worker process, so the API keeps serving meanwhile, and answers when done, or
 at once as a background job with `Prefer: respond-async`. It is single-flight
 per tenant via a Postgres advisory lock (concurrent calls get 409).
@@ -255,7 +276,7 @@ flowchart LR
 Vertices outside any kept community keep their previous `community_id`. Edges
 added after a run have no `end_community_id` until the next run.
 
-**Graph metrics.** `POST …/graph/metrics:compute` (admin) computes degree,
+**Graph metrics.** `POST …/graph/metrics:compute` (`maintain`) computes degree,
 PageRank, weakly connected components and betweenness with rustworkx (a default
 dependency) in a child process, and stores them on the nodes as
 `graphos_degree` / `graphos_in_degree` / `graphos_out_degree`,
@@ -445,12 +466,14 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   activity (what runs now, with cancel, and the writes, computations and
   schema changes of the last days, filterable, with a running indicator in
   the toolbar on every page); a label as a table; the schema as a list or a diagram, which
-  admins can extend (labels, relationship types, declared label pairs). An
-  nginx image with no backend of its own; users sign in with their own token,
-  so permissions and attribution are graphos's. It reads labels and search
-  indexes from `GET /v1/{tenant}/schema`, which any token on the tenant may
-  call, and `GET /v1/me` lists a token's tenants. All its text is in one i18n
-  JSON file.
+  maintainers can extend (labels, relationship types, declared label pairs);
+  an Access page for owners and admins (users, service accounts, grants). An
+  nginx image with no backend of its own; people sign in with their graphos
+  user name and password, so permissions and attribution are graphos's; it
+  keeps nothing in the browser (no cookie, no storage), so a reload signs out.
+  It reads labels and search indexes from `GET /v1/{tenant}/schema`, which
+  anyone on the tenant may call, and `GET /v1/me` lists the user's tenants and
+  levels. All its text is in one i18n JSON file.
 - **Declared relationship endpoints:** each relationship type can declare the
   label pairs it joins (`edge_endpoints`), the schema's associations; a child
   label satisfies its parent's pair. With `strict_endpoints` on, graphos
@@ -477,23 +500,24 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   - `graphos_db_pool_size` (total/idle/active);
   - `graphos_registered_tenants`;
   - `graphos_rate_limited_total` (`token_id` = first 12 hex characters of the
-    token's SHA-256).
+    SHA-256 of the user name).
 - **Logging:** structured JSON. Each request's lines carry `method`, `route`,
   and `trace_id` taken from an inbound W3C `traceparent` (echoed back). No
   spans are produced.
 - **Audit:** on by default for writes: the operations declared `write`,
   whatever their method (a `POST` read such as `nodes:scan` is not audited).
-  One JSON log line per request with `method`, `path`, `tenant`, `consumer` (the token's consumer
+  One JSON log line per request with `method`, `path`, `tenant`, `consumer` (the user
   name), `args_hash` (truncated SHA-256 of the body), `status`, and
   `elapsed_ms`.
-- **Rate limiting:** per-token in-memory sliding window keyed by a SHA-256
-  hash of the token, off by default (`GRAPHOS_RATE_LIMIT_ENABLED`); returns 429
-  with `Retry-After`. Only tokens in the tokens file are limited; unknown
+- **Rate limiting:** per-user in-memory sliding window keyed by a SHA-256
+  hash of the user name, off by default (`GRAPHOS_RATE_LIMIT_ENABLED`); returns
+  429 with `Retry-After`. Only valid tokens are limited; unknown or expired
   bearer strings go straight to 401 and create no bucket or metric series.
 - **Reverse proxy:** `X-Forwarded-*` headers are trusted only from
   `GRAPHOS_FORWARDED_ALLOW_IPS` (default `127.0.0.1`).
-- **Token rotation:** edit the tokens file and send `SIGHUP` to the
-  `graphos-api` process.
+- **Credentials:** access tokens last 15 minutes and clients renew them;
+  revoke or rotate by disabling a user or resetting its secret (API or UI),
+  effective at once on every replica, with no restart.
 
 ---
 
@@ -509,8 +533,8 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   relationships.
 - **No `DROP` through the API.** Schema changes go through (validated)
   registration. Unregistering a tenant does not delete its data.
-- **No shared rate limit.** Each replica limits on its own, and each reads
-  its own copy of the tokens file. Tenant registrations and the K/V cache are
+- **No shared rate limit.** Each replica limits on its own (sign-in
+  attempts too). Users, grants, tenant registrations and the K/V cache are
   kept in step across replicas (`LISTEN` / `NOTIFY`, with periodic
   reconciliation as a fallback).
 - **No export formats besides graphology JSON**, and no server-side layout.
