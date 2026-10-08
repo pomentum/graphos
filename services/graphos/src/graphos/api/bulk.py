@@ -48,6 +48,7 @@ from graphos.contracts.graph import (
     NodeUpsert,
 )
 from graphos.cypher import CypherError
+from graphos.endpoints import policy_for
 
 log = logging.getLogger(__name__)
 
@@ -229,6 +230,8 @@ async def upsert_edges_bulk(  # noqa: PLR0915 — streaming loop, splitting furt
     spec = registered_tenants()[tenant]
     allowed_v = set(spec.vertex_labels)
     allowed_e = set(spec.edge_labels)
+    # With strict_endpoints, a line of a declared type outside its pairs is invalid.
+    policy = policy_for(spec)
 
     started = time.perf_counter()
     pool = request.app.state.pool
@@ -278,7 +281,9 @@ async def upsert_edges_bulk(  # noqa: PLR0915 — streaming loop, splitting furt
                     errors.append(f"line {line_no}: {exc}")
                 continue
 
-            err = _validate_edge_labels(edge, allowed_v, allowed_e)
+            err = _validate_edge_labels(edge, allowed_v, allowed_e) or policy.refusal(
+                edge.type, edge.src_label, edge.dst_label,
+            )
             if err is not None:
                 rows_invalid += 1
                 if len(errors) < _MAX_ERROR_LINES:

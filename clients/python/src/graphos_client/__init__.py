@@ -25,6 +25,7 @@ from graphos_client._models import (
     DeleteByPropertyResponse,
     DeleteEdgeResponse,
     DeleteNodeResponse,
+    EdgeEndpoint,
     EdgeGetResponse,
     EdgeHit,
     EdgesAggregateResponse,
@@ -142,5 +143,6 @@ __all__ = [
     "Me",
     "TenantInfo",
     "TenantSchemaInfo",
+    "EdgeEndpoint",
     "TenantStatsResponse",
 ]

@@ -4,6 +4,7 @@ import {
   Button,
   Group,
   Loader,
+  SegmentedControl,
   Switch,
   Text,
   Tooltip,
@@ -75,12 +76,8 @@ import {
 import { layoutDiagram } from "./elkLayout";
 import classes from "./SchemaDiagram.module.css";
 
-/** A relationship type drawn between two labels here, before any edge uses it. */
-export interface DraftLine {
-  type: string;
-  src: string;
-  dst: string;
-}
+/** Which relationship lines are drawn, besides those of the selection. */
+export type LineMode = "declared" | "all" | "selected";
 
 export interface SchemaDiagramProps {
   tenant: string;
@@ -90,7 +87,6 @@ export interface SchemaDiagramProps {
   properties: Map<string, string[]>;
   /** Administrators add labels and draw relationship types. */
   editable: boolean;
-  drafts: DraftLine[];
   onAddLabel: () => void;
   onDrawRelationship: (src: string, dst: string) => void;
 }
@@ -117,16 +113,6 @@ function rememberLegend(open: boolean): void {
   }
 }
 
-/**
- * The schema drawn as a tidy grid: a box per label, each inheritance family
- * in a block (root on top, children under their parents, dashed lines to
- * the parent), the other labels after them, busiest first; ELK packs it.
- * Relationship lines are drawn for the selected label (all of them, with
- * their types and edge counts), or for every label with All lines. Boxes and
- * blocks can be moved (remembered in this browser) and put back with Tidy
- * up. Administrators add labels here and draw a relationship type by
- * dragging from one box to another.
- */
 /**
  * The canvas nodes for a layout: each block before what it holds (as React
  * Flow needs), everything placed relative to the block around it, the lone
@@ -173,6 +159,17 @@ function placeNodes(diagram: Diagram, laid: Layout, kept: Positions, meta: (box:
   return nodes;
 }
 
+/**
+ * The schema drawn as a tidy grid: a box per label, a label that others
+ * inherit from holding them in a block, the other labels after them,
+ * busiest first; ELK packs it. The lines are the schema's associations:
+ * the declared label pairs of each relationship type (solid), pairs in the
+ * data outside them (dashed, in the warning colour) and, on request, pairs
+ * of types that declare none (dotted). The selected label shows all of its
+ * lines. Boxes and blocks can be moved (remembered in this browser) and put
+ * back with Tidy up. Administrators add labels here and declare a pair by
+ * dragging from one box to another.
+ */
 export function SchemaDiagram(props: SchemaDiagramProps) {
   return (
     <ReactFlowProvider>
@@ -187,7 +184,6 @@ function DiagramCanvas({
   map,
   properties,
   editable,
-  drafts,
   onAddLabel,
   onDrawRelationship,
 }: SchemaDiagramProps) {
@@ -196,7 +192,8 @@ function DiagramCanvas({
   const scheme = useComputedColorScheme("light");
   const flow = useReactFlow();
   const [hideEmpty, setHideEmpty] = useState(false);
-  const [allLines, setAllLines] = useState(false);
+  // Declared lines by default once anything is declared; until then, the selection's.
+  const [chosenLines, setLines] = useState<LineMode | null>(null);
   const [legendOpen, setLegendOpen] = useState(legendWasOpen);
   const [unusedOpen, setUnusedOpen] = useState(false);
   const [drawing, setDrawing] = useState(false);
@@ -229,7 +226,8 @@ function DiagramCanvas({
   const diagram = useMemo(() => buildDiagram(schema, map, { hideEmpty, text }), [schema, map, hideEmpty, text]);
   const colours = useMemo(() => familyColours(diagram.blocks, CATEGORY_COLORS), [diagram]);
   const key = useMemo(() => layoutKey(diagram), [diagram]);
-  const relationshipLines = diagram.links.filter((l) => l.kind === "relationship").length;
+  const anyDeclared = diagram.links.some((l) => l.kind === "relationship" && l.status !== "open");
+  const lines: LineMode = chosenLines ?? (anyDeclared ? "declared" : "selected");
 
   // Lay out again only when the boxes or the blocks change.
   useEffect(() => {
@@ -268,13 +266,16 @@ function DiagramCanvas({
 
   useEffect(() => {
     if (!laid) return;
-    // Relationship lines with All lines, or those of the selection; blocks show inheritance.
+    // The selection's lines always; besides, the declared ones (and those outside
+    // the declarations), or every line. Blocks show inheritance.
     const touches = (l: { key: string; src: string; dst: string }) =>
       selection?.kind === "label" ? l.src === selection.id || l.dst === selection.id : selection?.id === l.key;
-    const drawn = diagram.links.filter((l) => l.kind === "relationship" && (allLines || touches(l)));
+    const drawn = diagram.links.filter(
+      (l) =>
+        l.kind === "relationship" && (touches(l) || lines === "all" || (lines === "declared" && l.status !== "open")),
+    );
     const pairs = new Set(drawn.map((l) => `${l.kind}|${l.src}|${l.dst}`));
-    const shown = new Set(diagram.boxes.map((b) => b.label));
-    const lines: LineEdge[] = drawn.map((link) => ({
+    const edgesNow: LineEdge[] = drawn.map((link) => ({
       id: link.key,
       type: "line",
       source: link.src,
@@ -283,40 +284,11 @@ function DiagramCanvas({
         link,
         bowed:
           link.kind === "relationship" && link.src !== link.dst && pairs.has(`relationship|${link.dst}|${link.src}`),
-        draft: false,
-        extra: !touches(link),
+        extra: !touches(link) && link.status === "open",
       },
     }));
-    const existing = new Set(diagram.links.flatMap((l) => l.types.map((x) => `${x.type}|${l.src}|${l.dst}`)));
-    for (const draft of drafts) {
-      if (!shown.has(draft.src) || !shown.has(draft.dst) || existing.has(`${draft.type}|${draft.src}|${draft.dst}`)) {
-        continue;
-      }
-      const key = `draft|${draft.type}|${draft.src}|${draft.dst}`;
-      lines.push({
-        id: key,
-        type: "line",
-        source: draft.src,
-        target: draft.dst,
-        data: {
-          link: {
-            key,
-            src: draft.src,
-            dst: draft.dst,
-            kind: "relationship",
-            types: [],
-            count: 0,
-            caption: `${draft.type} · ${t("views.schema.diagram.noEdgesYet")}`,
-          },
-          bowed:
-            pairs.has(`relationship|${draft.dst}|${draft.src}`) || pairs.has(`relationship|${draft.src}|${draft.dst}`),
-          draft: true,
-          extra: false,
-        },
-      });
-    }
-    setEdges(lines);
-  }, [laid, diagram, drafts, t, allLines, selection]);
+    setEdges(edgesNow);
+  }, [laid, diagram, lines, selection]);
 
   // Fit the view when the set of boxes changes (first layout, Hide empty labels).
   const boxKeys = useMemo(() => nodes.map((n) => n.id).join("|"), [nodes]);
@@ -334,7 +306,7 @@ function DiagramCanvas({
   const onEdgesChange = useCallback((changes: EdgeChange<LineEdge>[]) => {
     setEdges((current) => applyEdgeChanges(changes, current));
     const picked = changes.find((c) => c.type === "select" && c.selected);
-    if (picked && "id" in picked && !picked.id.startsWith("draft|")) setSelection({ kind: "link", id: picked.id });
+    if (picked && "id" in picked) setSelection({ kind: "link", id: picked.id });
   }, []);
 
   const onMoved = useCallback(
@@ -408,7 +380,7 @@ function DiagramCanvas({
             onNodeDragStop={onMoved}
             onConnect={onConnect}
             onNodeClick={(_event, node) => node.type === "label" && setSelection({ kind: "label", id: node.id })}
-            onEdgeClick={(_event, edge) => !edge.id.startsWith("draft|") && setSelection({ kind: "link", id: edge.id })}
+            onEdgeClick={(_event, edge) => setSelection({ kind: "link", id: edge.id })}
             onPaneClick={() => setSelection(null)}
             nodesDraggable={!drawing}
             nodesConnectable={drawing}
@@ -451,13 +423,17 @@ function DiagramCanvas({
                   checked={hideEmpty}
                   onChange={(e) => setHideEmpty(e.currentTarget.checked)}
                 />
-                <Tooltip label={t("views.schema.diagram.allLinesHint")} withArrow multiline w={260}>
-                  <Switch
+                <Tooltip label={t("views.schema.diagram.linesHint")} withArrow multiline w={280}>
+                  <SegmentedControl
                     size="xs"
-                    label={t("views.schema.diagram.allLinesCount", { count: relationshipLines })}
-                    disabled={relationshipLines === 0}
-                    checked={allLines}
-                    onChange={(e) => setAllLines(e.currentTarget.checked)}
+                    aria-label={t("views.schema.diagram.linesLabel")}
+                    data={[
+                      { value: "declared", label: t("views.schema.diagram.lines.declared") },
+                      { value: "all", label: t("views.schema.diagram.lines.all") },
+                      { value: "selected", label: t("views.schema.diagram.lines.selected") },
+                    ]}
+                    value={lines}
+                    onChange={(value) => setLines(value as LineMode)}
                   />
                 </Tooltip>
                 <Tooltip label={t("views.schema.diagram.tidyHint")} withArrow>
@@ -514,14 +490,21 @@ function DiagramCanvas({
                 >
                   <IconX size={14} />
                 </ActionIcon>
-                <div className={classes.legendRow}>
-                  <svg width="34" height="10" aria-hidden="true">
-                    <path d="M 1 5 L 31 5" className={classes.legendLine} markerEnd="url(#gx-arrow)" />
-                  </svg>
-                  <Text size="xs" c="dimmed">
-                    {t("views.schema.diagram.legendRelationship")}
-                  </Text>
-                </div>
+                {(["declared", "undeclared", "open"] as const).map((status) => (
+                  <div key={status} className={classes.legendRow}>
+                    <svg width="34" height="10" aria-hidden="true">
+                      <path
+                        d="M 1 5 L 31 5"
+                        className={classes.legendLine}
+                        data-status={status}
+                        markerEnd={status === "undeclared" ? "url(#gx-arrow-warn)" : "url(#gx-arrow)"}
+                      />
+                    </svg>
+                    <Text size="xs" c="dimmed">
+                      {t(`views.schema.diagram.legend.${status}`)}
+                    </Text>
+                  </div>
+                ))}
                 <div className={classes.legendRow}>
                   <span className={classes.legendBlock} aria-hidden="true" />
                   <Text size="xs" c="dimmed">

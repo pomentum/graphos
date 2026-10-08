@@ -1,5 +1,6 @@
 import type { ElkNode } from "elkjs/lib/elk-api";
 import type { GraphMap, TenantSchema } from "../../../api/types";
+import { Endpoints, type EndpointStatus, type Pair } from "../endpoints";
 
 /** One label of the schema, drawn as a box. */
 export interface Box {
@@ -15,16 +16,32 @@ export interface Box {
   h: number;
 }
 
+/** One relationship type on a line: its edges, and how it stands against the declarations. */
+export interface LinkType {
+  type: string;
+  /** Edges in the data; 0 for a declared pair no edge uses yet. */
+  count: number;
+  estimated: boolean;
+  status: EndpointStatus;
+  /** The declared pair covering it (this pair, or one for its labels' parents). */
+  via: Pair | null;
+}
+
 /** One line: the relationship types from one label to another, or a label's parent. */
 export interface Link {
   key: string;
   src: string;
   dst: string;
   kind: "relationship" | "inherits";
-  /** Relationship types on this line, most edges first. */
-  types: { type: string; count: number; estimated: boolean }[];
+  /** Relationship types on this line, declared first, then most edges. */
+  types: LinkType[];
   /** Edges on this line, all types together. */
   count: number;
+  /**
+   * The line as a whole: `undeclared` if any type on it is outside its
+   * declared pairs, else `declared` if any is declared, else `open`.
+   */
+  status: EndpointStatus;
   /** The caption drawn on the line. */
   caption: string;
 }
@@ -88,9 +105,9 @@ export function boxSize(label: string, meta: string): { w: number; h: number } {
   return { w: Math.max(MIN_BOX_WIDTH, Math.round(chars * CHAR_WIDTH + BOX_PADDING)), h: BOX_HEIGHT };
 }
 
-/** A line's caption: its busiest types with counts, then how many more. */
+/** A line's caption: its first types with counts (declared first), then how many more. */
 export function linkCaption(
-  types: Link["types"],
+  types: Pick<LinkType, "type" | "count" | "estimated">[],
   formatCount: (count: number) => string,
   more: (count: number) => string,
 ): string {
@@ -136,9 +153,11 @@ function byWeight(a: Box, b: Box): number {
  * The schema as a grid: a box per registered label (its own node count from
  * the graph map); a label others inherit from holds them in its block
  * (largest blocks first), the other labels follow, busiest first.
- * Every pair of labels that edges join gets a line carrying its types; a
- * child gets an `inherits` line to its parent. A label's line to itself is
- * kept (drawn as a loop).
+ * Every declared label pair, and every pair edges join in the data, gets a
+ * line carrying its types, each marked declared, outside the declarations
+ * (`undeclared`) or `open` (its type declares no pairs); a child gets an
+ * `inherits` link to its parent. A label's line to itself is kept (drawn
+ * as a loop).
  */
 export function buildDiagram(
   schema: TenantSchema,
@@ -159,27 +178,53 @@ export function buildDiagram(
   }
   const shown = new Set(boxes.map((b) => b.label));
 
+  const endpoints = new Endpoints(schema);
   const byPair = new Map<string, Link>();
+  const lineFor = (src: string, dst: string): Link => {
+    const key = `rel|${src}|${dst}`;
+    const line = byPair.get(key) ?? {
+      key,
+      src,
+      dst,
+      kind: "relationship" as const,
+      types: [],
+      count: 0,
+      status: "open" as EndpointStatus,
+      caption: "",
+    };
+    byPair.set(key, line);
+    return line;
+  };
   const used = new Set<string>();
   for (const link of map?.links ?? []) {
     used.add(link.type);
     if (!shown.has(link.src_label) || !shown.has(link.dst_label)) continue;
-    const key = `rel|${link.src_label}|${link.dst_label}`;
-    const line: Link = byPair.get(key) ?? {
-      key,
-      src: link.src_label,
-      dst: link.dst_label,
-      kind: "relationship",
-      types: [],
-      count: 0,
-      caption: "",
-    };
-    line.types.push({ type: link.type, count: link.count, estimated: link.estimated });
+    const line = lineFor(link.src_label, link.dst_label);
+    line.types.push({
+      type: link.type,
+      count: link.count,
+      estimated: link.estimated,
+      ...endpoints.check(link.type, link.src_label, link.dst_label),
+    });
     line.count += link.count;
-    byPair.set(key, line);
   }
+  // Declared pairs no edge uses yet are part of the definition too.
+  for (const [type, pairs] of endpoints.declared) {
+    for (const pair of pairs) {
+      if (!shown.has(pair.src) || !shown.has(pair.dst)) continue;
+      const line = lineFor(pair.src, pair.dst);
+      if (line.types.some((t) => t.type === type)) continue;
+      line.types.push({ type, count: 0, estimated: false, status: "declared", via: pair });
+    }
+  }
+  const rank: Record<EndpointStatus, number> = { declared: 0, undeclared: 1, open: 2 };
   for (const line of byPair.values()) {
-    line.types.sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+    line.types.sort((a, b) => rank[a.status] - rank[b.status] || b.count - a.count || a.type.localeCompare(b.type));
+    line.status = line.types.some((t) => t.status === "undeclared")
+      ? "undeclared"
+      : line.types.some((t) => t.status === "declared")
+        ? "declared"
+        : "open";
     line.caption = linkCaption(line.types, text.formatCount, text.more);
   }
 
@@ -235,6 +280,7 @@ export function buildDiagram(
       kind: "inherits" as const,
       types: [],
       count: 0,
+      status: "declared" as const,
       caption: "",
     }));
 

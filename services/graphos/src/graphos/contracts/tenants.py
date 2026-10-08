@@ -285,6 +285,37 @@ class EdgeLabelSpec(BaseModel):
         return self
 
 
+# A registration may declare at most this many label pairs in one request.
+MAX_EDGE_ENDPOINTS = 5000
+
+
+class EdgeEndpointSpec(BaseModel):
+    """One label pair an edge type may join: ``src`` -> ``dst``.
+
+    Accepts ``{"src": "File", "dst": "Function"}`` or ``["File", "Function"]``.
+    A child label (``label_hierarchy``) satisfies a pair declared for its parent.
+    """
+
+    src: str
+    dst: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_pair(cls, v: Any) -> Any:
+        if isinstance(v, (list, tuple)):
+            if len(v) != 2:  # noqa: PLR2004 - a pair
+                raise ValueError("an endpoint pair is [src_label, dst_label]")
+            return {"src": v[0], "dst": v[1]}
+        return v
+
+    @field_validator("src", "dst")
+    @classmethod
+    def _label_safe(cls, v: str) -> str:
+        if not _LABEL_PATTERN.fullmatch(v):
+            raise ValueError(f"label '{v}' must match {_LABEL_PATTERN.pattern} (UpperCamelCase)")
+        return v
+
+
 class TenantSpecBody(BaseModel):
     """Body for POST /v1/tenants.
 
@@ -302,6 +333,12 @@ class TenantSpecBody(BaseModel):
       ``CREATE [UNIQUE] INDEX IF NOT EXISTS`` or ``ALTER TABLE ... ADD
       COLUMN ... GENERATED ALWAYS AS (...) STORED`` statement on this
       tenant's own label tables, with no ``;``, comments or dollar-quoting.
+    - ``edge_endpoints`` declares, per edge type, the label pairs it may
+      join (``{"CALLS": [{"src": "Function", "dst": "Function"}]}``): the
+      schema's associations. Merged by union; checked against the tenant's
+      registered and incoming labels. With ``strict_endpoints`` on, a write
+      of a declared type outside its pairs is refused; types with no
+      declared pairs stay open.
     - ``label_hierarchy`` declares per-label postgres-inheritance edges
       ``{child: parent}``. After ``create_vlabel`` runs, graphos wires
       ``ALTER TABLE <name>."<child>" INHERIT <name>."<parent>"`` so a
@@ -335,6 +372,43 @@ class TenantSpecBody(BaseModel):
             "Declaring a name again replaces its definition."
         ),
     )
+
+    edge_endpoints: dict[str, list[EdgeEndpointSpec]] = Field(
+        default_factory=dict,
+        description=(
+            "Per edge type, the (source label, target label) pairs it may join. "
+            "Added to what is registered (never removed by a merge; "
+            "`DELETE /v1/tenants/{name}/edge_endpoints` removes one). A child "
+            "label satisfies a pair declared for its parent."
+        ),
+    )
+    strict_endpoints: bool | None = Field(
+        default=None,
+        description=(
+            "Refuse edge writes of a declared type outside its declared pairs "
+            "(`true`), or accept them (`false`, the default for a new tenant). "
+            "Omitted: unchanged."
+        ),
+    )
+
+    @field_validator("edge_endpoints")
+    @classmethod
+    def _endpoints_safe(
+        cls, v: dict[str, list[EdgeEndpointSpec]],
+    ) -> dict[str, list[EdgeEndpointSpec]]:
+        total = 0
+        for edge_type, pairs in v.items():
+            if not _LABEL_PATTERN.fullmatch(edge_type):
+                raise ValueError(
+                    f"edge_endpoints type '{edge_type}' must match {_LABEL_PATTERN.pattern}"
+                )
+            total += len(pairs)
+        if total > MAX_EDGE_ENDPOINTS:
+            raise ValueError(f"at most {MAX_EDGE_ENDPOINTS} edge_endpoints pairs per registration")
+        # Duplicates within a type are harmless; keep each pair once.
+        return {
+            t: list({(p.src, p.dst): p for p in pairs}.values()) for t, pairs in v.items()
+        }
 
     @field_validator("search_indexes")
     @classmethod
@@ -461,6 +535,14 @@ class TenantSchema(BaseModel):
     rule_edge_labels: list[str] = Field(
         default_factory=list, description="Edge labels derived by a resolve rule.",
     )
+    edge_endpoints: dict[str, list[EdgeEndpointSpec]] = Field(
+        default_factory=dict,
+        description="Per edge type, the label pairs it is declared to join.",
+    )
+    strict_endpoints: bool = Field(
+        default=False,
+        description="Edge writes of a declared type outside its declared pairs are refused.",
+    )
 
 
 class ResolveEdgesRequest(BaseModel):
@@ -527,4 +609,6 @@ class RegisterResponse(BaseModel):
     # registered or every supporting index already existed and re-creation
     # was a no-op.
     n_resolver_indexes: int = 0
+    n_edge_endpoints: int = 0
+    strict_endpoints: bool = False
     status: str = "bootstrapped"

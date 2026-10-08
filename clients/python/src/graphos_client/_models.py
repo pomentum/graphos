@@ -57,6 +57,13 @@ class Me(BaseModel):
     tenants: list[str] = Field(default_factory=list)
 
 
+class EdgeEndpoint(BaseModel):
+    """One label pair an edge type is declared to join: ``src`` -> ``dst``."""
+
+    src: str
+    dst: str
+
+
 class TenantSchemaInfo(BaseModel):
     name: str
     vertex_labels: list[str] = Field(default_factory=list)
@@ -64,6 +71,9 @@ class TenantSchemaInfo(BaseModel):
     label_hierarchy: dict[str, str] = Field(default_factory=dict)
     search_indexes: dict[str, dict[str, Any]] = Field(default_factory=dict)
     rule_edge_labels: list[str] = Field(default_factory=list)
+    # Empty and False from a server that predates declared endpoints.
+    edge_endpoints: dict[str, list[EdgeEndpoint]] = Field(default_factory=dict)
+    strict_endpoints: bool = False
 
 
 # ── Reads ───────────────────────────────────────────────────────────────────

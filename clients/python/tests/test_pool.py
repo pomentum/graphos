@@ -101,6 +101,13 @@ def test_is_schema_drift() -> None:
     assert is_schema_drift(GraphosError(404, "tenant 'acme' is not registered.", "GET", "/"))
     assert not is_schema_drift(GraphosError(500, "not registered", "POST", "/"))
     assert not is_schema_drift(ValueError("not registered"))
+    # A write refused by declared endpoints (strict_endpoints) is not drift:
+    # registering again would not help.
+    refused = (
+        "Repo-[DEFINES]->Class is not declared: DEFINES may join File->Symbol. "
+        "Declare the pair (edge_endpoints on POST /v1/tenants) or turn strict_endpoints off."
+    )
+    assert not is_schema_drift(GraphosError(400, refused, "POST", "/"))
 
 
 @pytest.mark.asyncio

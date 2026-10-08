@@ -29,6 +29,10 @@ export interface TenantSchema {
   label_hierarchy: Record<string, string>;
   search_indexes: Record<string, SearchIndexSpec>;
   rule_edge_labels: string[];
+  /** Per edge type, the label pairs it is declared to join (absent from older servers). */
+  edge_endpoints?: Record<string, { src: string; dst: string }[]>;
+  /** Writes of a declared type outside its pairs are refused. */
+  strict_endpoints?: boolean;
 }
 
 /**
@@ -240,6 +244,9 @@ export interface SchemaAddition {
   /** child label -> parent label */
   label_hierarchy?: Record<string, string>;
   search_indexes?: Record<string, SearchIndexSpec>;
+  /** Label pairs to declare, per edge type: added to the declared ones. */
+  edge_endpoints?: Record<string, [string, string][]>;
+  strict_endpoints?: boolean;
 }
 
 export interface TenantStats {

@@ -33,6 +33,7 @@ table — no Cypher round-trip, no agtype boxing per row.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from graphos.resolver._normalize import canon_text_sql
@@ -656,6 +657,8 @@ class CompiledEdgeType:
       properties" warning.
     * ``rule_count`` — total number of input rules (so the endpoint
       can compare against ``no_label_rule_count`` without re-counting).
+    * ``undeclared_arm_count`` — label pairs left out because the tenant's
+      declared endpoints do not allow them (``strict_endpoints``).
     """
 
     edge_type: str
@@ -664,6 +667,7 @@ class CompiledEdgeType:
     arm_count: int
     no_label_rule_count: int
     rule_count: int
+    undeclared_arm_count: int = 0
 
 
 def compile_resolve_rules_for_edge_type(
@@ -672,9 +676,14 @@ def compile_resolve_rules_for_edge_type(
     edge_type: str,
     rules: list[dict[str, object]],
     catalogue: PropertyLabelCatalogue,
+    allows: Callable[[str, str], bool] | None = None,
 ) -> CompiledEdgeType:
     """Collapse every ``resolve_rule`` for one ``edge_type`` into a
     single parameterised INSERT.
+
+    ``allows(src_label, dst_label)``, when given, leaves out the label
+    pairs it refuses (declared endpoints under ``strict_endpoints``); they
+    are counted in ``undeclared_arm_count``.
 
     Each rule contributes zero-or-more UNION ALL arms (one per
     (src_label, dst_label) catalogue candidate).  Rules whose required
@@ -693,6 +702,7 @@ def compile_resolve_rules_for_edge_type(
     params: list[object] = []
     arms: list[str] = []
     no_label_rule_count = 0
+    undeclared_arm_count = 0
 
     for rule in rules:
         norm = _normalise(edge_type, rule)
@@ -702,6 +712,9 @@ def compile_resolve_rules_for_edge_type(
             continue
         for sl in src_labels:
             for dl in dst_labels:
+                if allows is not None and not allows(sl, dl):
+                    undeclared_arm_count += 1
+                    continue
                 arms.append(_emit_arm(
                     tenant=tenant,
                     norm=norm,
@@ -718,6 +731,7 @@ def compile_resolve_rules_for_edge_type(
             arm_count=0,
             no_label_rule_count=no_label_rule_count,
             rule_count=len(rules),
+            undeclared_arm_count=undeclared_arm_count,
         )
 
     union = " UNION ALL ".join(arms)
@@ -736,4 +750,5 @@ def compile_resolve_rules_for_edge_type(
         arm_count=len(arms),
         no_label_rule_count=no_label_rule_count,
         rule_count=len(rules),
+        undeclared_arm_count=undeclared_arm_count,
     )

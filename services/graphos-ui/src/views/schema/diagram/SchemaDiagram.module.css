@@ -214,9 +214,15 @@
   stroke-width: 1;
 }
 
-.line[data-draft] {
-  stroke: var(--gx-accent-text);
-  stroke-dasharray: 2 4;
+/* A pair in the data outside its type's declared pairs. */
+.line[data-status="undeclared"] {
+  stroke: var(--gx-danger);
+  stroke-dasharray: 6 4;
+}
+
+/* A type that declares no pairs: any pair accepted. */
+.line[data-status="open"] {
+  stroke-dasharray: 1.5 3.5;
 }
 
 .markers {
@@ -232,6 +238,10 @@
 
 .markerLit {
   fill: var(--gx-accent-text);
+}
+
+.markerWarn {
+  fill: var(--gx-danger);
 }
 
 .marker[data-open],
@@ -271,7 +281,12 @@
   opacity: 0.25;
 }
 
-.caption[data-draft] {
+.caption[data-status="undeclared"] {
+  border-color: var(--gx-danger);
+  color: var(--gx-danger);
+}
+
+.caption[data-status="open"] {
   border-style: dashed;
   color: var(--gx-muted);
 }
@@ -325,6 +340,15 @@
   stroke: var(--gx-muted);
   stroke-width: 1.3;
   fill: none;
+}
+
+.legendLine[data-status="undeclared"] {
+  stroke: var(--gx-danger);
+  stroke-dasharray: 6 4;
+}
+
+.legendLine[data-status="open"] {
+  stroke-dasharray: 1.5 3.5;
 }
 
 .legendBlock {
@@ -401,6 +425,38 @@
 
 button.panelRow:hover {
   background: var(--gx-accent-soft);
+}
+
+/* A relationship type on a line, with its status and actions. */
+.typeRow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  border-top: 0.5px solid var(--gx-separator);
+}
+
+.typeRow:first-child {
+  border-top: 0;
+}
+
+.typeHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.typeStatus {
+  color: var(--gx-muted);
+}
+
+.typeStatus[data-status="declared"] {
+  color: var(--gx-accent-text);
+}
+
+.typeStatus[data-status="undeclared"],
+.panelRow [data-status="undeclared"] {
+  color: var(--gx-danger);
 }
 
 .panelPad {

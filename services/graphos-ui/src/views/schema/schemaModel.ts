@@ -1,4 +1,5 @@
 import type { GraphMap, TenantSchema } from "../../api/types";
+import { Endpoints } from "./endpoints";
 
 /** A vertex label in the schema tree: its depth under its parents and its own node count. */
 export interface LabelRow {
@@ -18,6 +19,10 @@ export interface RelationshipRow {
   pairs: { src: string; dst: string; count: number }[];
   /** Derived by a resolve rule (`edges:resolve`), not written directly. */
   derived: boolean;
+  /** The label pairs it is declared to join; empty: any pair (open). */
+  declared: { src: string; dst: string }[];
+  /** Pairs in the data outside the declared ones. */
+  undeclared: number;
 }
 
 /** Names graphos accepts (the server checks the same patterns). */
@@ -75,10 +80,19 @@ export function labelTree(
 /** The relationship types with their edge counts and label pairs, from the schema and the graph map. */
 export function relationshipRows(schema: TenantSchema, map: GraphMap | undefined): RelationshipRow[] {
   const derived = new Set(schema.rule_edge_labels);
+  const endpoints = new Endpoints(schema);
   const rows = new Map<string, RelationshipRow>(
     schema.edge_labels.map((type) => [
       type,
-      { type, count: 0, estimated: false, pairs: [], derived: derived.has(type) },
+      {
+        type,
+        count: 0,
+        estimated: false,
+        pairs: [],
+        derived: derived.has(type),
+        declared: endpoints.declared.get(type) ?? [],
+        undeclared: 0,
+      },
     ]),
   );
   for (const link of map?.links ?? []) {
@@ -87,6 +101,7 @@ export function relationshipRows(schema: TenantSchema, map: GraphMap | undefined
     row.count += link.count;
     row.estimated ||= link.estimated;
     row.pairs.push({ src: link.src_label, dst: link.dst_label, count: link.count });
+    if (endpoints.check(link.type, link.src_label, link.dst_label).status === "undeclared") row.undeclared += 1;
   }
   for (const row of rows.values()) row.pairs.sort((a, b) => b.count - a.count);
   return [...rows.values()].sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));

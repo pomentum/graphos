@@ -158,6 +158,8 @@ the remaining entries still load.
 | `label_hierarchy` | dict child→parent | both labels must be in `vertex_labels`, and a label cannot be its own parent; reads on the parent see the child's rows |
 | `meta` | dict[str, str] | free-form |
 | `search_indexes` | dict name → `{labels, properties, analyzer, language}` | named search indexes for ranked search (§5, *search*); name `^[a-z][a-z0-9_]{0,39}$` |
+| `edge_endpoints` | dict edge type → list of `{src, dst}` (or `[src, dst]`) | the label pairs each relationship type may join; see *Declared endpoints* below. At most 5000 pairs per request. |
+| `strict_endpoints` | bool, optional | refuse edge writes outside the declared pairs; omitted: unchanged (off for a new tenant) |
 
 **Merge vs replace.** By default, re-registering merges the incoming spec into the stored one.
 Labels, indexes, generated columns, the hierarchy and rules are unioned, and `meta` keys are
@@ -167,6 +169,26 @@ replaces the stored spec instead. Labels removed this way are **not** dropped fr
 and data stay in place. In both modes graphos then serves the stored (merged) spec: the response's
 `vertex_labels` / `edge_labels` are the merged sets, and a partial re-registration does not hide
 labels registered earlier. A `label_hierarchy` that breaks the rule above returns 422.
+
+**Declared endpoints.** A relationship type can declare the label pairs it joins:
+`"edge_endpoints": {"CALLS": [["Function", "Function"]], "DEFINES": [{"src": "File", "dst": "Symbol"}]}`.
+They are the schema's associations: `GET /v1/{tenant}/schema` serves them and the web UI draws the
+schema from them. Each type and label must be registered, already or in the same request (else
+422). Pairs are added to the declared ones on every registration and never removed by a merge; a
+child label satisfies a pair declared for its parent (`File -[DEFINES]-> Function` is declared when
+`Function` inherits `Symbol`). `DELETE /v1/tenants/{name}/edge_endpoints?type=&src=&dst=` removes
+one pair (admin; no data is touched). With `?force_shrink=true`, a request that states
+`edge_endpoints` replaces the declared pairs; one that leaves the field out keeps them.
+
+With `"strict_endpoints": true`, graphos refuses an edge write of a declared type between labels its
+pairs do not cover: `POST …/graph/edges` answers 400 for the whole batch, `edges:bulk` counts the
+line in `rows_invalid`, and `edges:resolve` leaves those label pairs out (its result says how many).
+The message reads `File-[CALLS]->Class is not declared: CALLS may join Function->Function. …`; it
+does not say "not registered", so clients that re-register on schema drift are not set off. A type
+that declares no pairs accepts any pair, strict or not, and edges already stored are never touched.
+Snapshot imports restore edges as they were saved. Declared pairs and the setting are stored apart
+from the spec (`graphos_meta.edge_endpoints`, `graphos_meta.tenant_settings`), so a server that
+predates them cannot drop them when it rewrites a spec.
 
 **Indexes created automatically.** Per vertex label: `<Label>_properties_gin` (GIN on
 `properties`), `<Label>_id_unique` (unique on the `id` property, so ids are unique within a label),
@@ -210,10 +232,12 @@ The expression matches the one `nodes:scan` filters on, so a `where` clause on `
 |---|---|
 | `GET /v1/tenants` | `{"tenants": [TenantInfo…]}` |
 | `GET /v1/tenants/{name}` | one `TenantInfo` (404 if unknown) |
-| `DELETE /v1/tenants/{name}` | **Forgets the registration only.** It deletes the `graphos_meta.tenants` row and the in-memory entry. The AGE graph and its data are kept, and re-POSTing the spec brings the tenant back. Returns `{"tenant", "status": "unregistered"}` (404 if unknown). |
+| `DELETE /v1/tenants/{name}` | **Forgets the registration only.** It deletes the `graphos_meta.tenants` row, the tenant's declared endpoints and settings, and the in-memory entry. The AGE graph and its data are kept, and re-POSTing the spec brings the tenant back. Returns `{"tenant", "status": "unregistered"}` (404 if unknown). |
+| `DELETE /v1/tenants/{name}/edge_endpoints?type=&src=&dst=` | Removes one declared label pair; 404 if it is not declared. |
 
 Any token on a tenant, read-only included, can read its shape with `GET /v1/{tenant}/schema`:
-`{"name", "vertex_labels", "edge_labels", "label_hierarchy", "search_indexes", "rule_edge_labels"}`.
+`{"name", "vertex_labels", "edge_labels", "label_hierarchy", "search_indexes", "rule_edge_labels",
+"edge_endpoints", "strict_endpoints"}`.
 It leaves out what only admins see (declared DDL, rule bodies, `meta`).
 
 While a tenant is unregistered, data-plane calls to it return 404. To remove the data itself, delete
@@ -951,7 +975,7 @@ timeout is the exception: it returns `application/problem+json`.
 
 | Status | When |
 |---|---|
-| 400 | unregistered label or edge type on a write, Cypher/SQL error, bad `where` value or `cursor`, edge type without a rule, bad cache key |
+| 400 | unregistered label or edge type on a write, an edge outside its type's declared label pairs with `strict_endpoints`, Cypher/SQL error, bad `where` value or `cursor`, edge type without a rule, bad cache key |
 | 401 | missing or malformed `Authorization` header, or unknown token |
 | 403 | token lacks access to the tenant, the endpoint needs admin, or a read-only token on a write |
 | 404 | tenant not registered; node (`GET`, `PATCH`, `POST …/properties`), edge (`GET`, `PATCH`), unregistered edge type in the path, or cache key not found; unknown tenant on `GET`/`DELETE /v1/tenants/{name}` |

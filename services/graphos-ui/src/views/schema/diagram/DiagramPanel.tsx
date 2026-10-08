@@ -1,12 +1,13 @@
-import { Badge, Button, CloseButton, Group, Stack, Text, UnstyledButton } from "@mantine/core";
+import { Badge, Button, CloseButton, Group, Stack, Text, Tooltip, UnstyledButton } from "@mantine/core";
 import { IconMap, IconPlus, IconTable } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import { useWorkspace } from "../../../graph/WorkspaceProvider";
+import { useAddToSchema, useRemoveEdgeEndpoint } from "../../../data/queries";
 import { formatCount } from "../../../lib/time";
 import { useTenantSession } from "../../../session/SessionProvider";
 import { browseParams } from "../../browse/browseState";
-import type { Diagram, Link, Selection } from "./diagramModel";
+import type { Diagram, Link, LinkType, Selection } from "./diagramModel";
 import classes from "./SchemaDiagram.module.css";
 
 export interface DiagramPanelProps {
@@ -20,7 +21,9 @@ export interface DiagramPanelProps {
 /**
  * What is selected on the diagram. A label: its counts, parent and
  * children, properties, its lines in and out, and the ways to its nodes.
- * A line: the labels it joins and every relationship type on it.
+ * A line: the labels it joins and every relationship type on it, each with
+ * how it stands against the declarations; administrators declare a pair
+ * or remove a declared one here.
  */
 export function DiagramPanel({ diagram, selection, properties, onSelect }: DiagramPanelProps) {
   const { t } = useTranslation();
@@ -190,18 +193,78 @@ function LinkDetail({ diagram, id, onSelect }: { diagram: Diagram; id: string; o
       </Group>
       <Section title={t("views.schema.diagram.panel.types")}>
         {link.types.map((type) => (
-          <div key={type.type} className={classes.panelRow}>
-            <Text size="sm" className={classes.grow} truncate>
-              {type.type}
-            </Text>
-            <Text size="xs" c="dimmed">
-              {type.estimated ? "≈ " : ""}
-              {t("common.counts.edges", { count: type.count, formatted: formatCount(type.count) })}
-            </Text>
-          </div>
+          <TypeRow key={type.type} link={link} type={type} />
         ))}
       </Section>
     </Stack>
+  );
+}
+
+/** One relationship type on a line: its edges, its status, and (for admins) declare or remove. */
+function TypeRow({ link, type }: { link: Link; type: LinkType }) {
+  const { t } = useTranslation();
+  const { isAdmin } = useTenantSession();
+  const declare = useAddToSchema();
+  const remove = useRemoveEdgeEndpoint();
+  const exact = type.via !== null && type.via.src === link.src && type.via.dst === link.dst;
+  const statusLabel = {
+    declared: exact
+      ? t("views.schema.diagram.status.declared")
+      : t("views.schema.diagram.status.declaredVia", { src: type.via?.src, dst: type.via?.dst }),
+    undeclared: t("views.schema.diagram.status.undeclared"),
+    open: t("views.schema.diagram.status.open"),
+  }[type.status];
+  return (
+    <div className={classes.typeRow}>
+      <div className={classes.typeHead}>
+        <Text size="sm" className={classes.grow} truncate>
+          {type.type}
+        </Text>
+        <Text size="xs" c="dimmed">
+          {type.count === 0
+            ? t("views.schema.diagram.noEdgesYet")
+            : `${type.estimated ? "≈ " : ""}${t("common.counts.edges", { count: type.count, formatted: formatCount(type.count) })}`}
+        </Text>
+      </div>
+      <Group gap={6} justify="space-between" wrap="nowrap">
+        <Text size="xs" className={classes.typeStatus} data-status={type.status} truncate>
+          {statusLabel}
+        </Text>
+        {isAdmin && type.status !== "declared" ? (
+          <Tooltip
+            label={t(
+              type.status === "open" ? "views.schema.diagram.declareOpenHint" : "views.schema.diagram.declareHint",
+              {
+                type: type.type,
+              },
+            )}
+            withArrow
+            multiline
+            w={260}
+          >
+            <Button
+              size="compact-xs"
+              variant="light"
+              loading={declare.isPending}
+              onClick={() => declare.mutate({ edge_endpoints: { [type.type]: [[link.src, link.dst]] } })}
+            >
+              {t("views.schema.diagram.declare")}
+            </Button>
+          </Tooltip>
+        ) : null}
+        {isAdmin && type.status === "declared" && exact ? (
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            color="gray"
+            loading={remove.isPending}
+            onClick={() => remove.mutate({ type: type.type, src: link.src, dst: link.dst })}
+          >
+            {t("views.schema.diagram.undeclare")}
+          </Button>
+        ) : null}
+      </Group>
+    </div>
   );
 }
 
@@ -226,7 +289,13 @@ function LineList({
           className={classes.panelRow}
           onClick={() => onSelect({ kind: "link", id: line.key })}
         >
-          <Text size="sm" className={classes.grow} truncate title={line.types.map((x) => x.type).join(", ")}>
+          <Text
+            size="sm"
+            className={classes.grow}
+            truncate
+            data-status={line.status}
+            title={line.types.map((x) => x.type).join(", ")}
+          >
             {line.types[0]?.type}
             {line.types.length > 1 ? ` ${t("views.schema.diagram.more", { count: line.types.length - 1 })}` : ""}
           </Text>

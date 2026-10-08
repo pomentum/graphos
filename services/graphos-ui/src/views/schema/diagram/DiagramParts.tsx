@@ -42,9 +42,7 @@ export interface LineData extends Record<string, unknown> {
   link: Link;
   /** The reverse line also exists: a free line bows aside. */
   bowed: boolean;
-  /** Drawn here this session; graphos has no edges of it yet. */
-  draft: boolean;
-  /** A relationship line drawn for All lines, not for the selection: faint, captioned only while lit. */
+  /** A line of a type that declares no pairs, drawn for All: faint, captioned only while lit. */
   extra: boolean;
 }
 
@@ -97,14 +95,16 @@ function rectOf(node: InternalNode): Rect {
 
 /**
  * One relationship line: a curve from box to box ending in an arrow,
- * carrying its types and edge counts.
+ * carrying its types and edge counts; drawn by its status (`data-status`):
+ * declared solid, outside the declarations dashed in the warning colour,
+ * open (its types declare no pairs) dotted.
  */
 export function SchemaLine({ id, source, target, data }: EdgeProps<LineEdge>) {
   const state = useContext(DiagramContext);
   const src = useInternalNode(source);
   const dst = useInternalNode(target);
   if (!src || !dst || !data) return null;
-  const { link, bowed, draft, extra } = data;
+  const { link, bowed, extra } = data;
 
   const { d: path, caption: at } = freeGeometry(rectOf(src), rectOf(dst), source === target, bowed);
 
@@ -112,7 +112,15 @@ export function SchemaLine({ id, source, target, data }: EdgeProps<LineEdge>) {
   const lit = selected || (state.focus?.links.has(id) ?? false);
   const faded = state.focus !== null && !lit;
   const inherits = link.kind === "inherits";
-  const marker = inherits ? (lit ? "gx-inherits-lit" : "gx-inherits") : lit ? "gx-arrow-lit" : "gx-arrow";
+  const marker = inherits
+    ? lit
+      ? "gx-inherits-lit"
+      : "gx-inherits"
+    : link.status === "undeclared"
+      ? "gx-arrow-warn"
+      : lit
+        ? "gx-arrow-lit"
+        : "gx-arrow";
 
   return (
     <>
@@ -125,7 +133,7 @@ export function SchemaLine({ id, source, target, data }: EdgeProps<LineEdge>) {
         data-kind={link.kind}
         data-lit={lit || undefined}
         data-faded={faded || undefined}
-        data-draft={draft || undefined}
+        data-status={link.status}
         data-extra={extra || undefined}
       />
       {link.caption && (!extra || lit) ? (
@@ -135,7 +143,7 @@ export function SchemaLine({ id, source, target, data }: EdgeProps<LineEdge>) {
             className={`${classes.caption} nodrag nopan`}
             data-lit={lit || undefined}
             data-faded={faded || undefined}
-            data-draft={draft || undefined}
+            data-status={link.status}
             style={{ transform: `translate(-50%, -50%) translate(${at.x}px, ${at.y}px)` }}
             onClick={() => state.select({ kind: "link", id })}
           >
@@ -165,9 +173,9 @@ export function FamilyBlock({ data }: NodeProps<FamilyNode>) {
   );
 }
 
-/** The arrowheads the lines use, idle and lit. */
+/** The arrowheads the lines use: idle, lit, and for pairs outside the declarations. */
 export function LineMarkers() {
-  const head = (id: string, open: boolean, lit: boolean) => (
+  const head = (id: string, open: boolean, lit: boolean | "warn") => (
     <marker
       id={id}
       viewBox="0 0 12 12"
@@ -180,7 +188,7 @@ export function LineMarkers() {
     >
       <path
         d={open ? "M 1 1 L 11 6 L 1 11 Z" : "M 1 2 L 11 6 L 1 10 Z"}
-        className={lit ? classes.markerLit : classes.marker}
+        className={lit === "warn" ? classes.markerWarn : lit ? classes.markerLit : classes.marker}
         data-open={open || undefined}
       />
     </marker>
@@ -190,6 +198,7 @@ export function LineMarkers() {
       <defs>
         {head("gx-arrow", false, false)}
         {head("gx-arrow-lit", false, true)}
+        {head("gx-arrow-warn", false, "warn")}
         {head("gx-inherits", true, false)}
         {head("gx-inherits-lit", true, true)}
       </defs>

@@ -26,7 +26,9 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import asdict, dataclass, field
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, field, replace
+from typing import Any
 
 import asyncpg
 
@@ -63,6 +65,13 @@ class TenantSpec:
                             Guarded by ``duplicate_column`` exception swallow.
         meta:               Free-form consumer-supplied metadata; surfaced on
                             ``GET /v1/tenants``.
+        edge_endpoints:     ``(edge_type, src_label, dst_label)`` pairs an edge
+                            type is declared to join (``graphos.endpoints``).
+                            Stored in ``graphos_meta.edge_endpoints``, not in
+                            the spec JSON.
+        strict_endpoints:   Refuse writes of a declared type outside its pairs.
+                            ``None`` on an incoming spec: leave as stored.
+                            Stored in ``graphos_meta.tenant_settings``.
     """
 
     name: str
@@ -90,6 +99,12 @@ class TenantSpec:
     # Named search indexes (``graphos.search``): name -> {labels, properties,
     # analyzer, language}.
     search_indexes: dict[str, dict[str, object]] = field(default_factory=dict)
+    edge_endpoints: tuple[tuple[str, str, str], ...] = ()
+    strict_endpoints: bool | None = None
+
+
+# Spec fields stored in their own tables rather than in ``tenants.spec``.
+_KEPT_APART = ("edge_endpoints", "strict_endpoints")
 
 
 # ── In-process registry ─────────────────────────────────────────────────────
@@ -603,8 +618,12 @@ def _spec_to_jsonable(spec: TenantSpec) -> dict[str, object]:
     """Convert a TenantSpec to the JSONB-friendly shape stored in graphos_meta.
 
     ``asdict()`` turns the tuples into lists — that's already what JSON wants.
+    Declared endpoints and settings are left out: they have their own tables.
     """
-    return asdict(spec)
+    data = asdict(spec)
+    for key in _KEPT_APART:
+        data.pop(key, None)
+    return data
 
 
 def _spec_from_jsonable(payload: dict[str, object]) -> TenantSpec:
@@ -646,7 +665,75 @@ def _spec_from_jsonable(payload: dict[str, object]) -> TenantSpec:
     )
 
 
-async def persist_spec(pool: asyncpg.Pool, spec: TenantSpec) -> None:
+def validate_edge_endpoints(
+    endpoints: tuple[tuple[str, str, str], ...],
+    edge_labels: set[str],
+    vertex_labels: set[str],
+) -> None:
+    """Refuse declared pairs naming an edge type or a label the tenant lacks.
+
+    ``edge_labels`` / ``vertex_labels``: what is registered plus what the
+    request adds, so a registration may declare pairs alone.
+    """
+    for edge_type, src, dst in endpoints:
+        if edge_type not in edge_labels:
+            raise ValueError(
+                f"edge_endpoints type {edge_type!r} is not an edge label of the tenant"
+            )
+        for label in (src, dst):
+            if label not in vertex_labels:
+                raise ValueError(
+                    f"edge_endpoints {edge_type!r} names {label!r}, "
+                    "not a vertex label of the tenant"
+                )
+
+
+async def _persist_endpoints(
+    conn: asyncpg.Connection, spec: TenantSpec, *, replace: bool,
+) -> None:
+    """Store the spec's declared pairs (added, or replacing the stored ones) and settings."""
+    if replace:
+        await conn.execute("DELETE FROM graphos_meta.edge_endpoints WHERE tenant = $1;", spec.name)
+    if spec.edge_endpoints:
+        await conn.executemany(
+            """
+            INSERT INTO graphos_meta.edge_endpoints (tenant, edge_type, src_label, dst_label)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT DO NOTHING;
+            """,
+            [(spec.name, t, s, d) for t, s, d in spec.edge_endpoints],
+        )
+    if spec.strict_endpoints is not None:
+        await conn.execute(
+            """
+            INSERT INTO graphos_meta.tenant_settings (tenant, strict_endpoints)
+            VALUES ($1, $2)
+            ON CONFLICT (tenant) DO UPDATE
+            SET strict_endpoints = EXCLUDED.strict_endpoints, updated_at = now();
+            """,
+            spec.name, spec.strict_endpoints,
+        )
+
+
+async def remove_edge_endpoint(
+    pool: asyncpg.Pool, tenant: str, edge_type: str, src_label: str, dst_label: str,
+) -> bool:
+    """Remove one declared pair.  True if it was declared.  Data is not touched."""
+    async with pool.acquire() as conn, conn.transaction():
+        result = await conn.execute(
+            """
+            DELETE FROM graphos_meta.edge_endpoints
+            WHERE tenant = $1 AND edge_type = $2 AND src_label = $3 AND dst_label = $4;
+            """,
+            tenant, edge_type, src_label, dst_label,
+        )
+        await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, tenant)
+    return result == "DELETE 1"
+
+
+async def persist_spec(
+    pool: asyncpg.Pool, spec: TenantSpec, *, replace_endpoints: bool = False,
+) -> None:
     """Upsert the tenant spec into graphos_meta.tenants.
 
     Merge semantics (additive-by-default).  When a row already exists,
@@ -664,6 +751,9 @@ async def persist_spec(pool: asyncpg.Pool, spec: TenantSpec) -> None:
     To intentionally REMOVE a label (deprecation), use the explicit
     ``?force_shrink=true`` query param on ``POST /v1/tenants``,
     which calls ``persist_spec_replace`` below instead.
+
+    Declared endpoints are added to the stored ones (replaced only with
+    ``replace_endpoints``), in the same transaction.
     """
     payload = json.dumps(_spec_to_jsonable(spec))
     async with pool.acquire() as conn, conn.transaction():
@@ -737,10 +827,13 @@ async def persist_spec(pool: asyncpg.Pool, spec: TenantSpec) -> None:
             """,
             spec.name, payload,
         )
+        await _persist_endpoints(conn, spec, replace=replace_endpoints)
         await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, spec.name)
 
 
-async def persist_spec_replace(pool: asyncpg.Pool, spec: TenantSpec) -> None:
+async def persist_spec_replace(
+    pool: asyncpg.Pool, spec: TenantSpec, *, replace_endpoints: bool = False,
+) -> None:
     """Replace the persisted tenant spec wholesale (no merge).
 
     Reserved for the explicit ``?force_shrink=true`` admin path on
@@ -760,7 +853,38 @@ async def persist_spec_replace(pool: asyncpg.Pool, spec: TenantSpec) -> None:
             """,
             spec.name, payload,
         )
+        await _persist_endpoints(conn, spec, replace=replace_endpoints)
         await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, spec.name)
+
+
+# A tenant's stored registration: the spec, its declared endpoints and
+# settings, and a version that changes when any of them does (replicas reload
+# a tenant when its version changes, ``graphos.sync``).
+TENANT_ROWS_SQL = """
+SELECT t.name,
+       t.spec::text AS spec,
+       COALESCE(e.pairs, '[]') AS endpoints,
+       COALESCE(s.strict_endpoints, false) AS strict_endpoints,
+       md5(t.spec::text || '|' || COALESCE(e.pairs, '')
+           || '|' || COALESCE(s.strict_endpoints::text, '')) AS version
+FROM graphos_meta.tenants t
+LEFT JOIN LATERAL (
+    SELECT jsonb_agg(jsonb_build_array(edge_type, src_label, dst_label)
+                     ORDER BY edge_type, src_label, dst_label)::text AS pairs
+    FROM graphos_meta.edge_endpoints
+    WHERE tenant = t.name
+) e ON true
+LEFT JOIN graphos_meta.tenant_settings s ON s.tenant = t.name
+"""
+
+
+def spec_from_row(row: Mapping[str, Any]) -> TenantSpec:
+    """A tenant's spec from a ``TENANT_ROWS_SQL`` row, endpoints included."""
+    spec = _spec_from_jsonable(json.loads(row["spec"]))
+    endpoints = tuple(
+        (str(t), str(s), str(d)) for t, s, d in json.loads(row["endpoints"] or "[]")
+    )
+    return replace(spec, edge_endpoints=endpoints, strict_endpoints=bool(row["strict_endpoints"]))
 
 
 async def load_registered_tenants(pool: asyncpg.Pool) -> int:
@@ -772,14 +896,11 @@ async def load_registered_tenants(pool: asyncpg.Pool) -> int:
     """
     async with pool.acquire() as conn:
         await allow_long_statements(conn, DDL_TIMEOUT_S)
-        rows = await conn.fetch(
-            "SELECT name, spec::text AS spec_text FROM graphos_meta.tenants;"
-        )
+        rows = await conn.fetch(TENANT_ROWS_SQL + ";")
     _REGISTERED.clear()
     for row in rows:
         try:
-            payload = json.loads(row["spec_text"])
-            _REGISTERED[row["name"]] = _spec_from_jsonable(payload)
+            _REGISTERED[row["name"]] = spec_from_row(row)
         except (json.JSONDecodeError, KeyError, TypeError) as exc:
             log.warning(
                 "skipping corrupt tenant spec",
@@ -792,10 +913,8 @@ async def load_registered_tenants(pool: asyncpg.Pool) -> int:
 async def load_spec(pool: asyncpg.Pool, name: str) -> TenantSpec | None:
     """Return the persisted (merged) spec for ``name``, or None."""
     async with pool.acquire() as conn:
-        text = await conn.fetchval(
-            "SELECT spec::text FROM graphos_meta.tenants WHERE name = $1;", name,
-        )
-    return None if text is None else _spec_from_jsonable(json.loads(text))
+        row = await conn.fetchrow(TENANT_ROWS_SQL + " WHERE t.name = $1;", name)
+    return None if row is None else spec_from_row(row)
 
 
 async def register_tenant(
@@ -826,6 +945,9 @@ async def unregister_tenant(pool: asyncpg.Pool, name: str) -> bool:
         result = await conn.execute(
             "DELETE FROM graphos_meta.tenants WHERE name = $1;", name,
         )
+        # Its declared endpoints and settings go with the registration.
+        await conn.execute("DELETE FROM graphos_meta.edge_endpoints WHERE tenant = $1;", name)
+        await conn.execute("DELETE FROM graphos_meta.tenant_settings WHERE tenant = $1;", name)
         await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, name)
     existed = forget(name)
     # asyncpg returns 'DELETE N'; we also count the in-memory removal as success.

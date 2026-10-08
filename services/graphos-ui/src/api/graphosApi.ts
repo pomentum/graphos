@@ -219,6 +219,15 @@ export class GraphosApi {
     return this.http.post("/v1/tenants", { name: this.tenant, ...addition });
   }
 
+  /** Removes one declared label pair of an edge type (admin); no data is touched. */
+  async removeEdgeEndpoint(type: string, src: string, dst: string): Promise<unknown> {
+    return (
+      await this.http.request("DELETE", `/v1/tenants/${enc(this.tenant)}/edge_endpoints`, {
+        query: { type, src, dst },
+      })
+    ).data;
+  }
+
   /** A label's best-connected nodes, most connected first. */
   hubs(label: string, limit: number): Promise<HubsResponse> {
     return this.http.get(`${this.graph}/map/hubs`, { label, limit });

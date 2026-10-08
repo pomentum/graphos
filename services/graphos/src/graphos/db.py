@@ -118,6 +118,26 @@ CREATE TABLE IF NOT EXISTS graphos_meta.tenants (
     updated_at  timestamptz NOT NULL DEFAULT now()
 );
 
+-- Relationship endpoints a tenant declares (``graphos.endpoints``): the label
+-- pairs each edge type may join.  Kept apart from ``tenants.spec``: a server
+-- that predates them rewrites the whole spec on re-registration and would
+-- drop them (a rolling upgrade, a rollback); it never touches this table.
+CREATE TABLE IF NOT EXISTS graphos_meta.edge_endpoints (
+    tenant      text NOT NULL,
+    edge_type   text NOT NULL,
+    src_label   text NOT NULL,
+    dst_label   text NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant, edge_type, src_label, dst_label)
+);
+
+-- Per-tenant schema settings, kept apart from the spec for the same reason.
+CREATE TABLE IF NOT EXISTS graphos_meta.tenant_settings (
+    tenant            text PRIMARY KEY,
+    strict_endpoints  boolean NOT NULL DEFAULT false,
+    updated_at        timestamptz NOT NULL DEFAULT now()
+);
+
 -- Schema-agnostic K/V cache.  Per-tenant key namespace; value is
 -- arbitrary JSON.  ``expires_at`` is the absolute deadline (TTL is
 -- applied by the writer); lazy eviction on read (a stale row is

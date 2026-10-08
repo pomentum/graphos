@@ -6,15 +6,45 @@ under one version.
 
 ## Unreleased
 
+### Added
+
+- **Declared relationship endpoints.** A relationship type can declare the label pairs it joins
+  (`edge_endpoints` on `POST /v1/tenants`, e.g. `{"CALLS": [["Function", "Function"]]}`): the
+  schema's associations, served by `GET /v1/{tenant}/schema` and drawn by the UI. Pairs merge by
+  union, are checked against the tenant's labels and types, and a child label satisfies a pair
+  declared for its parent. `DELETE /v1/tenants/{name}/edge_endpoints` removes one.
+- **`strict_endpoints`** (per tenant, off by default): edge writes of a declared type outside its
+  pairs are refused (`400` on `graph/edges`, an invalid line on `edges:bulk`) and `edges:resolve`
+  leaves those label pairs out. Types that declare no pairs stay open; stored edges are untouched.
+- Python client: `register_tenant(edge_endpoints=…, strict_endpoints=…)`,
+  `remove_edge_endpoint(…)`, and `TenantSchemaInfo.edge_endpoints` / `.strict_endpoints`.
+
+### Upgrading
+
+Nothing to do: two tables are added to `graphos_meta` at startup (`edge_endpoints`,
+`tenant_settings`). Existing tenants declare no pairs, so every write behaves as before. The
+declarations live outside the stored spec on purpose: an older server rewriting a spec during a
+rolling upgrade or after a rollback cannot drop them.
+
+### Fixed
+
+- `GET /v1/{tenant}/schema` lists a rule-based edge type once in `rule_edge_labels`, however many
+  rules it has.
+
 ### Web UI
 
 - **Schema diagram** (Schema → Diagram): the schema drawn as a tidy grid with React Flow, laid out
   by ELK in a web worker. A label others inherit from holds them in a block (nested as
   inheritance nests); the other labels follow, busiest first. Selecting a label draws its
   relationship lines with their types and edge counts and opens a panel (properties, lines in
-  and out, Browse, Show on map, New node); All lines draws every line. Boxes and blocks can be
-  moved (remembered in the browser) and put back with Tidy up. Administrators add labels and draw
-  a relationship type by dragging from one label to another. Loaded only when opened.
+  and out, Browse, Show on map, New node). The lines are drawn from the declared label pairs
+  (solid), with pairs in the data outside them dashed in the warning colour and, on request,
+  pairs of types that declare none dotted. Boxes and blocks can be moved (remembered in the
+  browser) and put back with Tidy up. Administrators add labels, declare a pair by dragging from
+  one label to another or from a line's panel, remove one, and switch enforcement on (after a
+  confirmation listing the pairs in the data it would refuse). Loaded only when opened.
+- The list view shows each relationship type's declared pairs and how many pairs in the data lie
+  outside them.
 - New node from the schema diagram opens Explore's new-node dialog with the label chosen.
 - The header has one colour across its whole width.
 - New UI dependencies: `@xyflow/react` (MIT) and `elkjs` (used under EPL-2.0, unmodified); see

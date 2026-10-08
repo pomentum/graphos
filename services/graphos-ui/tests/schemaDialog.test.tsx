@@ -48,6 +48,32 @@ describe("adding to the schema", () => {
     expect(onAdd).toHaveBeenCalledWith({ edge_labels: ["DEPENDS_ON"] });
   });
 
+  it("declares a drawn label pair, registering the type only when it is new", () => {
+    const onAdd = vi.fn();
+    renderWithTheme(
+      <AddToSchemaDialog
+        kind="relationship"
+        schema={schema}
+        properties={[]}
+        saving={false}
+        pair={{ src: "Function", dst: "Symbol" }}
+        onCancel={() => undefined}
+        onAdd={onAdd}
+      />,
+    );
+    const name = screen.getByRole("textbox", { name: "Name" });
+    fireEvent.change(name, { target: { value: "CALLS" } });
+    expect(screen.queryByText("Already in the schema")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Declare" }));
+    expect(onAdd).toHaveBeenLastCalledWith({ edge_endpoints: { CALLS: [["Function", "Symbol"]] } });
+    fireEvent.change(name, { target: { value: "USES" } });
+    fireEvent.click(screen.getByRole("button", { name: "Declare" }));
+    expect(onAdd).toHaveBeenLastCalledWith({
+      edge_labels: ["USES"],
+      edge_endpoints: { USES: [["Function", "Symbol"]] },
+    });
+  });
+
   it("adds a search index over every label by default", () => {
     const onAdd = open("index");
     fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "by_name" } });

@@ -120,6 +120,7 @@ from graphos.contracts.tenants import (
     ResolveEdgesResult,
 )
 from graphos.cypher import CypherError, parse_agtype
+from graphos.endpoints import policy_for
 from graphos.resolver import (
     CompileError,
     catalogue_for_properties,
@@ -757,6 +758,14 @@ async def upsert_edges(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="; ".join(msg) + ". Re-POST /v1/tenants with the expanded labels.",
         )
+    # With strict_endpoints, a declared type only joins its declared label pairs.
+    policy = policy_for(spec)
+    refusals = [
+        why for (src_lbl, dst_lbl, et) in grouped
+        if (why := policy.refusal(et, src_lbl, dst_lbl)) is not None
+    ]
+    if refusals:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=" ".join(refusals))
 
     started = time.perf_counter()
     pool = request.app.state.pool
@@ -3654,6 +3663,8 @@ async def run_resolve(
 ) -> ResolveEdgesResponse:
     """The resolution itself, for the endpoint and for background jobs."""
     rules_by_type, requested = _resolve_plan(tenant, body)
+    # With strict_endpoints, rules only link the label pairs their type declares.
+    policy = policy_for(registered_tenants()[tenant])
 
     # Catalogue drives the FROM-list label inference.  Looked up for the
     # rules' own properties only, from the database now (one GIN probe per
@@ -3693,6 +3704,7 @@ async def run_resolve(
         written = 0
         warning: str | None = None
         no_label_count = 0
+        undeclared = 0
 
         async with sem:
             # Start timing AFTER acquiring the semaphore so the
@@ -3709,6 +3721,10 @@ async def run_resolve(
                     edge_type=edge_type,
                     rules=rules,
                     catalogue=catalogue,
+                    allows=(
+                        (lambda s, d, et=edge_type: policy.allows(et, s, d))
+                        if policy.strict else None
+                    ),
                 )
             except CompileError as exc:
                 raise HTTPException(
@@ -3719,6 +3735,7 @@ async def run_resolve(
                 ) from exc
 
             no_label_count = compiled.no_label_rule_count
+            undeclared = compiled.undeclared_arm_count
             # One INSERT per edge_type: every (src_label, dst_label) arm of
             # every rule is UNION ALL'd into a single statement, so postgres
             # plans globally and we pay one round-trip.  Bounded at 30 min
@@ -3741,6 +3758,11 @@ async def run_resolve(
             warning = (
                 "no vertex label currently carries the properties "
                 "referenced by this rule; rule remained registered."
+            )
+        elif undeclared:
+            warning = (
+                f"{undeclared} label pair(s) left out: not declared for "
+                f"{edge_type} (strict_endpoints)."
             )
 
         et_elapsed = int((time.perf_counter() - et_started) * 1000)

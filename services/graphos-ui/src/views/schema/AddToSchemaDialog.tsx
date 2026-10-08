@@ -62,6 +62,12 @@ export function AddToSchemaDialog({ kind, schema, properties, saving, pair, onCa
           ? { vertex_labels: [trimmed, parent], label_hierarchy: { [trimmed]: parent } }
           : { vertex_labels: [trimmed] },
       );
+    } else if (kind === "relationship" && pair) {
+      // Declares the drawn pair for the type (registering the type when it is new).
+      onAdd({
+        ...(taken ? {} : { edge_labels: [trimmed] }),
+        edge_endpoints: { [trimmed]: [[pair.src, pair.dst]] },
+      });
     } else if (kind === "relationship") {
       onAdd({ edge_labels: [trimmed] });
     } else {
@@ -179,7 +185,7 @@ export function AddToSchemaDialog({ kind, schema, properties, saving, pair, onCa
             {t("common.actions.cancel")}
           </Button>
           <Button size="xs" disabled={!valid} loading={saving} onClick={submit}>
-            {pair && taken ? t("views.schema.dialog.use") : t("views.schema.dialog.add")}
+            {pair ? t("views.schema.dialog.declare") : t("views.schema.dialog.add")}
           </Button>
         </Group>
       </Stack>

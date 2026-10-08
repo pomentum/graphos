@@ -425,12 +425,17 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   on its graph map or its communities and a small one on its whole graph; a
   canvas that adds neighbours a page at a time with undo, focus and collapse;
   inspect and edit (saved with `If-Match`); shortest paths; counts per label;
-  live activity; a label as a table; the schema, which admins can extend. An
+  live activity; a label as a table; the schema as a list or a diagram, which
+  admins can extend (labels, relationship types, declared label pairs). An
   nginx image with no backend of its own; users sign in with their own token,
   so permissions and attribution are graphos's. It reads labels and search
   indexes from `GET /v1/{tenant}/schema`, which any token on the tenant may
   call, and `GET /v1/me` lists a token's tenants. All its text is in one i18n
   JSON file.
+- **Declared relationship endpoints:** each relationship type can declare the
+  label pairs it joins (`edge_endpoints`), the schema's associations; a child
+  label satisfies its parent's pair. With `strict_endpoints` on, graphos
+  refuses edge writes outside them (types that declare none stay open).
 - **Background jobs:** community recompute, `edges:resolve` and vacuum accept
   `Prefer: respond-async` and answer 202 with a job (`Location: /v1/jobs/{id}`).
   `GET /v1/jobs/{id}` returns its status and, when done, the synchronous

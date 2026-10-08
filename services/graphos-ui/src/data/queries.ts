@@ -271,6 +271,18 @@ export function useAddToSchema() {
   });
 }
 
+/** Removes one declared label pair; the schema and its views refresh. */
+export function useRemoveEdgeEndpoint() {
+  const { api, tenant } = useTenantSession();
+  const client = useQueryClient();
+  return useMutation({
+    meta: { success: "notices.schemaUpdated", errorTitle: "errors.schemaNotUpdated" },
+    mutationFn: ({ type, src, dst }: { type: string; src: string; dst: string }) =>
+      api.removeEdgeEndpoint(type, src, dst),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.schema(tenant) }),
+  });
+}
+
 /** Creates an edge between two existing nodes. */
 export function useCreateEdge() {
   const { api, tenant } = useTenantSession();

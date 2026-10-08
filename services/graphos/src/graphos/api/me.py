@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException, status
 
 from graphos.auth import ReadPrincipal
 from graphos.bootstrap import registered_tenants
-from graphos.contracts.tenants import MeResponse, TenantSchema
+from graphos.contracts.tenants import EdgeEndpointSpec, MeResponse, TenantSchema
 
 router = APIRouter(tags=["tenants"])
 
@@ -36,7 +36,7 @@ async def me(principal: ReadPrincipal) -> MeResponse:
 
 @router.get(
     "/{tenant}/schema",
-    summary="One tenant's labels, label hierarchy and search indexes",
+    summary="One tenant's labels, hierarchy, declared endpoints and search indexes",
     responses={404: {"description": "Tenant not registered."}},
 )
 async def tenant_schema(tenant: str, principal: ReadPrincipal) -> TenantSchema:  # noqa: ARG001 — auth
@@ -52,5 +52,17 @@ async def tenant_schema(tenant: str, principal: ReadPrincipal) -> TenantSchema: 
         edge_labels=list(spec.edge_labels),
         label_hierarchy=dict(spec.label_hierarchy),
         search_indexes=dict(spec.search_indexes),
-        rule_edge_labels=[edge for edge, _ in spec.resolve_rules],
+        # One entry per type, however many rules it has.
+        rule_edge_labels=list(dict.fromkeys(edge for edge, _ in spec.resolve_rules)),
+        edge_endpoints=_endpoints_by_type(spec.edge_endpoints),
+        strict_endpoints=bool(spec.strict_endpoints),
     )
+
+
+def _endpoints_by_type(
+    endpoints: tuple[tuple[str, str, str], ...],
+) -> dict[str, list[EdgeEndpointSpec]]:
+    out: dict[str, list[EdgeEndpointSpec]] = {}
+    for edge_type, src, dst in sorted(endpoints):
+        out.setdefault(edge_type, []).append(EdgeEndpointSpec(src=src, dst=dst))
+    return out

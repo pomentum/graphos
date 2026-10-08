@@ -285,7 +285,8 @@ class GraphosClient:
         return Me.model_validate(resp.json())
 
     async def schema(self, name: str | None = None) -> TenantSchemaInfo:
-        """``GET /v1/{tenant}/schema``: labels, hierarchy and search indexes (any token)."""
+        """``GET /v1/{tenant}/schema``: labels, hierarchy, declared endpoints and
+        search indexes (any token)."""
         resp = await self._request("GET", f"/v1/{name or self._tenant}/schema")
         return TenantSchemaInfo.model_validate(resp.json())
 
@@ -305,8 +306,18 @@ class GraphosClient:
         label_hierarchy: Mapping[str, str] | None = None,
         meta: Mapping[str, str] | None = None,
         search_indexes: Mapping[str, Mapping[str, Any]] | None = None,
+        edge_endpoints: Mapping[str, Iterable[tuple[str, str] | Mapping[str, str]]] | None = None,
+        strict_endpoints: bool | None = None,
     ) -> dict[str, Any]:
         """Register / re-register a tenant.
+
+        ``edge_endpoints`` declares, per edge type, the label pairs it may join:
+        ``{"CALLS": [("Function", "Function")], "DEFINES": [("File", "Symbol")]}``
+        (pairs or ``{"src": ..., "dst": ...}``).  They are added to what is
+        declared; a child label satisfies a pair declared for its parent.
+        ``strict_endpoints=True`` makes graphos refuse writes of a declared type
+        outside its pairs; ``None`` leaves the setting as it is.  See
+        :meth:`remove_edge_endpoint`.
 
         ``search_indexes`` declares named search indexes for :meth:`search`:
         ``{"names": {"labels": ["*"], "properties": ["name"], "analyzer": "identifier"}}``;
@@ -331,7 +342,26 @@ class GraphosClient:
         }
         if search_indexes:
             body["search_indexes"] = {k: dict(v) for k, v in search_indexes.items()}
+        if edge_endpoints:
+            body["edge_endpoints"] = {
+                edge_type: [p if isinstance(p, Mapping) else list(p) for p in pairs]
+                for edge_type, pairs in edge_endpoints.items()
+            }
+        if strict_endpoints is not None:
+            body["strict_endpoints"] = strict_endpoints
         resp = await self._request("POST", "/v1/tenants", json_body=body)
+        return resp.json()
+
+    async def remove_edge_endpoint(
+        self, edge_type: str, src_label: str, dst_label: str, *, name: str | None = None,
+    ) -> dict[str, Any]:
+        """Remove one declared label pair (admin).  No data is touched; a type
+        with no pairs left accepts any pair again."""
+        target = name or self._tenant
+        resp = await self._request(
+            "DELETE", f"/v1/tenants/{target}/edge_endpoints",
+            params={"type": edge_type, "src": src_label, "dst": dst_label},
+        )
         return resp.json()
 
     async def unregister_tenant(self, name: str | None = None) -> dict[str, Any]:

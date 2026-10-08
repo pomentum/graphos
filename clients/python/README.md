@@ -81,7 +81,7 @@ Runnable scripts in [`examples/`](examples/). Each reads `GRAPHOS_URL` (default 
 
 | Area | Methods |
 |---|---|
-| Tenants | `register_tenant`, `list_tenants`, `get_tenant`, `unregister_tenant`, `me`, `schema` |
+| Tenants | `register_tenant` (with `edge_endpoints`, `strict_endpoints`), `remove_edge_endpoint`, `list_tenants`, `get_tenant`, `unregister_tenant`, `me`, `schema` |
 | Writes | `upsert_nodes`, `upsert_edges`, `bulk_upsert_nodes`, `bulk_upsert_edges`, `snapshot_import`, `upsert_node_properties`, `patch_node`, `patch_edge`, `delete_node`, `delete_edge`, `delete_by_property` |
 | Reads | `search`, `get_node`, `get_edge`, `find_paths`, `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `scan_nodes` / `scan_nodes_iter`, `scan_edges` / `scan_edges_iter`, `export_graph` |
 | Aggregates | `graph_map`, `map_hubs`, `label_histogram`, `label_top_by_edge`, `aggregate_nodes`, `aggregate_edges`, `tenant_stats` |

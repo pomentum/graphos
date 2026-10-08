@@ -14,6 +14,7 @@ import {
 } from "@mantine/core";
 import { IconChevronDown, IconPlus } from "@tabler/icons-react";
 import { lazy, Suspense, useMemo, useState } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAddToSchema, useCatalogue, useGraphMap, useSchema } from "../../data/queries";
@@ -22,7 +23,7 @@ import { useTenantSession } from "../../session/SessionProvider";
 import { browseParams } from "../browse/browseState";
 import { AddToSchemaDialog, type AdditionKind } from "./AddToSchemaDialog";
 import { labelTree, propertiesByLabel, relationshipRows } from "./schemaModel";
-import type { DraftLine } from "./diagram/SchemaDiagram";
+import { StrictEndpoints } from "./StrictEndpoints";
 import classes from "./SchemaView.module.css";
 
 // The diagram brings React Flow and ELK: loaded only when it is opened.
@@ -38,8 +39,10 @@ const SHOWN_PAIRS = 3;
  * join; the search indexes. Administrators can add labels, relationship
  * types and search indexes; nothing is ever removed here (graphos keeps
  * every label and the data in it). The same schema can be drawn as a
- * diagram (`?view=diagram`), where labels are added and relationship types
- * drawn from one label to another.
+ * diagram (`?view=diagram`), where labels are added and a relationship
+ * type's label pairs declared by drawing from one label to another. Declared
+ * pairs are the schema's associations; administrators can have graphos
+ * refuse writes outside them (strict).
  */
 export function SchemaView() {
   const { t } = useTranslation();
@@ -53,9 +56,8 @@ export function SchemaView() {
   const [params, setParams] = useSearchParams();
   const view = params.get("view") === "diagram" ? "diagram" : "list";
   const setView = (next: string) => setParams(next === "diagram" ? { view: "diagram" } : {}, { replace: true });
-  // A relationship drawn on the diagram, waiting for its name; then shown until edges use it.
+  // A label pair drawn on the diagram, waiting for the relationship type it declares.
   const [pair, setPair] = useState<{ src: string; dst: string } | null>(null);
-  const [drafts, setDrafts] = useState<DraftLine[]>([]);
 
   const counts = useMemo(
     () => (map.data ? new Map(map.data.labels.map((l) => [l.label, l.count] as const)) : null),
@@ -85,10 +87,6 @@ export function SchemaView() {
     setAdding(null);
     setPair(null);
   };
-  const draw = (type: string) => {
-    if (pair) setDrafts((current) => [...current, { type, ...pair }]);
-    closeDialog();
-  };
 
   return (
     <div className={view === "diagram" ? classes.diagramRoot : classes.root}>
@@ -101,7 +99,8 @@ export function SchemaView() {
             {isAdmin ? t("views.schema.neverRemoves") : t("views.schema.readOnly")}
           </Text>
         </div>
-        <Group gap="xs">
+        <Group gap="md">
+          {schema.data ? <StrictEndpoints schema={schema.data} map={map.data} isAdmin={isAdmin} /> : null}
           <SegmentedControl
             size="xs"
             aria-label={t("views.schema.view.label")}
@@ -140,7 +139,6 @@ export function SchemaView() {
               map={map.data}
               properties={properties}
               editable={isAdmin}
-              drafts={drafts}
               onAddLabel={() => setAdding("label")}
               onDrawRelationship={addRelationshipBetween}
             />
@@ -227,16 +225,19 @@ export function SchemaView() {
                       </Badge>
                     </Tooltip>
                   ) : null}
+                  {row.undeclared ? (
+                    <Tooltip label={t("views.schema.relationships.undeclaredTooltip")} withArrow multiline w={260}>
+                      <Badge size="xs" variant="light" color="red" radius="sm" tt="none">
+                        {t("views.schema.relationships.undeclared", { count: row.undeclared })}
+                      </Badge>
+                    </Tooltip>
+                  ) : null}
                   <Text size="xs" c="dimmed" className={classes.pairs} truncate>
-                    {row.pairs.length === 0
-                      ? t("views.schema.relationships.none")
-                      : row.pairs
-                          .slice(0, SHOWN_PAIRS)
-                          .map((p) => `${p.src} → ${p.dst}`)
-                          .join(", ") +
-                        (row.pairs.length > SHOWN_PAIRS
-                          ? ` ${t("views.schema.relationships.pairsMore", { count: row.pairs.length - SHOWN_PAIRS })}`
-                          : "")}
+                    {row.declared.length
+                      ? t("views.schema.relationships.declared", { pairs: pairList(row.declared, t) })
+                      : row.pairs.length === 0
+                        ? t("views.schema.relationships.none")
+                        : pairList(row.pairs, t)}
                   </Text>
                   <Text size="xs" c="dimmed" className={classes.end}>
                     {row.estimated ? "≈ " : ""}
@@ -289,17 +290,20 @@ export function SchemaView() {
           saving={add.isPending}
           pair={adding === "relationship" ? (pair ?? undefined) : undefined}
           onCancel={closeDialog}
-          onAdd={(addition) => {
-            const type = addition.edge_labels?.[0];
-            // A type already in the schema, picked for a drawn line: nothing to register.
-            if (pair && type && schema.data?.edge_labels.includes(type)) {
-              draw(type);
-              return;
-            }
-            add.mutate(addition, { onSuccess: () => (pair && type ? draw(type) : closeDialog()) });
-          }}
+          onAdd={(addition) => add.mutate(addition, { onSuccess: closeDialog })}
         />
       ) : null}
     </div>
   );
+}
+
+/** "A → B, C → D and 2 more pairs": the first pairs of a relationship type. */
+function pairList(pairs: { src: string; dst: string }[], t: TFunction): string {
+  const shown = pairs
+    .slice(0, SHOWN_PAIRS)
+    .map((p) => `${p.src} → ${p.dst}`)
+    .join(", ");
+  return pairs.length > SHOWN_PAIRS
+    ? `${shown} ${t("views.schema.relationships.pairsMore", { count: pairs.length - SHOWN_PAIRS })}`
+    : shown;
 }

@@ -671,6 +671,47 @@ async def test_me_and_schema() -> None:
     assert (me.consumer, me.access, me.tenants) == ("ada", "read", ["demo"])
     schema = await cli.schema()
     assert schema.vertex_labels == ["Person"] and "names" in schema.search_indexes
+    # A server that predates declared endpoints sends neither field.
+    assert schema.edge_endpoints == {} and schema.strict_endpoints is False
+    await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_declared_endpoints_are_sent_served_and_removed() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if request.url.path == "/v1/demo/schema":
+            return httpx.Response(200, json={
+                "name": "demo", "strict_endpoints": True,
+                "edge_endpoints": {"CALLS": [{"src": "Function", "dst": "Function"}]},
+            })
+        return httpx.Response(200, json={"tenant": "demo"})
+
+    cli = GraphosClient(base_url="http://x", token="tok", tenant="demo")
+    cli._http = httpx.AsyncClient(base_url="http://x", transport=_mock_transport(handler))
+    await cli.register_tenant(
+        edge_endpoints={"CALLS": [("Function", "Function")],
+                        "DEFINES": [{"src": "File", "dst": "Symbol"}]},
+        strict_endpoints=True,
+    )
+    body = json.loads(captured[0].content)
+    assert body["edge_endpoints"] == {"CALLS": [["Function", "Function"]],
+                                      "DEFINES": [{"src": "File", "dst": "Symbol"}]}
+    assert body["strict_endpoints"] is True
+    # Without them, neither field is sent: the stored ones stay as they are.
+    await cli.register_tenant(vertex_labels=["Function"])
+    assert {"edge_endpoints", "strict_endpoints"}.isdisjoint(json.loads(captured[1].content))
+
+    schema = await cli.schema()
+    assert schema.strict_endpoints is True
+    assert [(p.src, p.dst) for p in schema.edge_endpoints["CALLS"]] == [("Function", "Function")]
+
+    await cli.remove_edge_endpoint("CALLS", "Function", "Function")
+    removed = captured[-1]
+    assert (removed.method, removed.url.path) == ("DELETE", "/v1/tenants/demo/edge_endpoints")
+    assert dict(removed.url.params) == {"type": "CALLS", "src": "Function", "dst": "Function"}
     await cli.close()
 
 

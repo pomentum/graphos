@@ -309,7 +309,7 @@
     "schema": {
       "heading": "Schema of {{tenant}}",
       "readOnly": "Read only. Administrators can add labels, relationship types and search indexes.",
-      "neverRemoves": "Nothing is removed here: graphos keeps every label and relationship type, and the data in them.",
+      "neverRemoves": "Labels and relationship types are never removed here (graphos keeps them and their data); a declared pair can be.",
       "add": "Add",
       "addLabel": "Label",
       "addRelationship": "Relationship type",
@@ -331,7 +331,11 @@
         "derivedTooltip": "Created by a resolve rule from matching properties, not written directly",
         "none": "None yet",
         "pairsMore_one": "and {{count}} more pair",
-        "pairsMore_other": "and {{count}} more pairs"
+        "pairsMore_other": "and {{count}} more pairs",
+        "declared": "declared: {{pairs}}",
+        "undeclared_one": "{{count}} pair not declared",
+        "undeclared_other": "{{count}} pairs not declared",
+        "undeclaredTooltip": "Label pairs in the data that this type's declared pairs do not cover."
       },
       "indexes": {
         "allLabels": "every label",
@@ -360,10 +364,10 @@
         "exists": "Already in the schema",
         "buildNote": "Building the index reads every node it covers; on a large graph this takes a while.",
         "add": "Add",
-        "relationshipBetweenTitle": "Relationship from {{src}} to {{dst}}",
-        "pairNameHint": "A type in the schema, or a new one starting with a capital letter",
-        "pairNote": "graphos does not tie relationship types to labels. The line from {{src}} to {{dst}} stays dashed until edges of this type join them.",
-        "use": "Use"
+        "relationshipBetweenTitle": "Declare {{src}} → {{dst}}",
+        "pairNameHint": "The relationship type that may join them: one in the schema, or a new one starting with a capital letter",
+        "pairNote": "Declared pairs are the schema's associations. Once a type declares pairs, edges of it between other labels show as not declared, and are refused when declared pairs are enforced.",
+        "declare": "Declare"
       },
       "view": {
         "label": "Show the schema as",
@@ -375,8 +379,8 @@
         "hideEmpty": "Hide empty labels",
         "tidy": "Tidy up",
         "tidyHint": "Put every label and block back in place",
-        "draw": "Draw relationship",
-        "drawHint": "Drag from one label to another (or onto itself) to add a relationship type.",
+        "draw": "Declare relationship",
+        "drawHint": "Drag from one label to another (or onto itself) to declare a relationship between them.",
         "laying": "Arranging the labels…",
         "layoutFailed": "Couldn’t arrange the diagram",
         "empty": "No labels yet",
@@ -384,7 +388,6 @@
         "more_other": "+{{count}}",
         "inherits": "inherits",
         "noEdgesYet": "no edges yet",
-        "legendRelationship": "relationship types, with edge counts: select a label",
         "panel": {
           "label": "Selected on the diagram",
           "showOnMap": "Show on map",
@@ -408,14 +411,47 @@
         },
         "unusedCount_one": "{{count}} type not used by any edge yet",
         "unusedCount_other": "{{count}} types not used by any edge yet",
-        "allLinesHint": "Off: select a label to see its relationship lines. On: every relationship line, drawn faintly.",
         "hideLegend": "Hide the legend",
         "showLegend": "Show the legend",
-        "allLinesCount_one": "All lines ({{count}})",
-        "allLinesCount_other": "All lines ({{count}})",
         "familySize_one": "{{count}} label",
         "familySize_other": "{{count}} labels",
-        "legendBlock": "a label, holding the labels that inherit from it"
+        "legendBlock": "a label, holding the labels that inherit from it",
+        "linesLabel": "Relationship lines to draw",
+        "linesHint": "Declared: each relationship type's declared label pairs, and pairs in the data outside them. All: also the types that declare none. Selected: only the selected label's. The selected label always shows all of its lines.",
+        "lines": {
+          "declared": "Declared",
+          "all": "All",
+          "selected": "Selected"
+        },
+        "legend": {
+          "declared": "declared label pair",
+          "undeclared": "in the data, not declared",
+          "open": "type declares no pairs"
+        },
+        "status": {
+          "declared": "declared",
+          "declaredVia": "declared as {{src}} → {{dst}}",
+          "undeclared": "not declared",
+          "open": "any pair (none declared)"
+        },
+        "declare": "Declare",
+        "undeclare": "Remove",
+        "declareHint": "Add this label pair to {{type}}'s declared pairs.",
+        "declareOpenHint": "Declare this label pair for {{type}}. Its other pairs in the data then show as not declared until you declare them too."
+      },
+      "strict": {
+        "label": "Enforce declared pairs",
+        "on": "Declared pairs enforced",
+        "hint": "When on, graphos refuses an edge write of a relationship type outside its declared label pairs. Types that declare no pairs accept any pair.",
+        "nothingDeclared": "Declare label pairs for a relationship type first (draw them on the diagram).",
+        "confirmTitle": "Enforce declared pairs?",
+        "confirmBody": "graphos will refuse new edges of a relationship type between labels it does not declare. Edges already stored stay as they are.",
+        "outside_one": "{{count}} label pair in the data is outside the declarations",
+        "outside_other": "{{count}} label pairs in the data are outside the declarations",
+        "more_one": "and {{count}} more",
+        "more_other": "and {{count}} more",
+        "allInside": "Every label pair in the data is declared.",
+        "enable": "Enforce"
       }
     }
   },

@@ -118,8 +118,9 @@ class Listener:
 class RegistrySync:
     """Keeps :func:`graphos.bootstrap.registered_tenants` equal to the table.
 
-    A tenant's version is the md5 of its stored spec, so any change to the
-    spec is seen, whatever the clock says.
+    A tenant's version is the md5 of its stored spec, declared endpoints and
+    settings (``bootstrap.TENANT_ROWS_SQL``), so any change to them is seen,
+    whatever the clock says.
     """
 
     # How long "no such tenant" is remembered, so requests for unknown
@@ -158,28 +159,21 @@ class RegistrySync:
 
     async def apply(self, name: str) -> bool:
         """Load tenant ``name`` from the table (or forget it).  True if it exists."""
-        row = await self._pool.fetchrow(
-            "SELECT spec::text AS spec, md5(spec::text) AS version "
-            "FROM graphos_meta.tenants WHERE name = $1;",
-            name,
-        )
+        row = await self._pool.fetchrow(bootstrap.TENANT_ROWS_SQL + " WHERE t.name = $1;", name)
         if row is None:
             if bootstrap.forget(name):
                 log.info("tenant unregistered by another replica", extra={"tenant": name})
             self._versions.pop(name, None)
             return False
         if self._versions.get(name) != row["version"]:
-            bootstrap.remember(bootstrap.spec_from_json(row["spec"]))
+            bootstrap.remember(bootstrap.spec_from_row(row))
             self._versions[name] = row["version"]
             log.info("tenant registration loaded", extra={"tenant": name})
         return True
 
     async def reconcile(self) -> int:
         """Bring the whole registry up to date.  Returns the tenants changed."""
-        rows = await self._pool.fetch(
-            "SELECT name, spec::text AS spec, md5(spec::text) AS version "
-            "FROM graphos_meta.tenants;",
-        )
+        rows = await self._pool.fetch(bootstrap.TENANT_ROWS_SQL + ";")
         changed = 0
         present = set()
         for row in rows:
@@ -188,7 +182,7 @@ class RegistrySync:
             if self._versions.get(name) != row["version"] or name not in (
                 bootstrap.registered_tenants()
             ):
-                bootstrap.remember(bootstrap.spec_from_json(row["spec"]))
+                bootstrap.remember(bootstrap.spec_from_row(row))
                 self._versions[name] = row["version"]
                 changed += 1
         for name in set(bootstrap.registered_tenants()) - present:

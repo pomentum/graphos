@@ -5,6 +5,7 @@ Surface:
 - ``GET  /v1/tenants``           list currently-registered tenants
 - ``POST /v1/tenants``           register or re-apply a tenant spec (idempotent)
 - ``GET  /v1/tenants/{name}``    inspect one tenant's registered spec
+- ``DELETE /v1/tenants/{name}/edge_endpoints``  remove one declared label pair
 
 These endpoints require an admin-scoped token. Authentication is enforced by
 the token store, not by URL path — there is no ``/admin`` URL prefix. The
@@ -33,7 +34,9 @@ from graphos.bootstrap import (
     persist_spec_replace,
     registered_tenants,
     remember,
+    remove_edge_endpoint,
     unregister_tenant,
+    validate_edge_endpoints,
 )
 from graphos.contracts.tenants import (
     RegisterResponse,
@@ -122,6 +125,23 @@ async def register(
         for e in body.edge_labels
         if e.resolve_rule is not None
     )
+    edge_endpoints = tuple(
+        (edge_type, pair.src, pair.dst)
+        for edge_type, pairs in body.edge_endpoints.items()
+        for pair in pairs
+    )
+    # Declared pairs may name labels and types registered earlier, or added now.
+    known = registered_tenants().get(body.name)
+    try:
+        validate_edge_endpoints(
+            edge_endpoints,
+            edge_labels={*edge_label_names, *(known.edge_labels if known else ())},
+            vertex_labels={*body.vertex_labels, *(known.vertex_labels if known else ())},
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc),
+        ) from exc
 
     spec = TenantSpec(
         name=body.name,
@@ -135,6 +155,8 @@ async def register(
         resolve_rules=resolve_rules,
         meta=dict(body.meta),
         search_indexes={k: v.model_dump() for k, v in body.search_indexes.items()},
+        edge_endpoints=edge_endpoints,
+        strict_endpoints=body.strict_endpoints,
     )
 
     pool = request.app.state.pool
@@ -157,7 +179,11 @@ async def register(
             "will be replaced wholesale, not merged",
             extra={"tenant": spec.name},
         )
-        await persist_spec_replace(pool, spec)
+        # Declared pairs are replaced only when the request states them: a
+        # client that knows nothing of them must not wipe them by accident.
+        await persist_spec_replace(
+            pool, spec, replace_endpoints="edge_endpoints" in body.model_fields_set,
+        )
     else:
         await persist_spec(pool, spec)
     # Persisting merges with the stored spec (unless force_shrink); keep the
@@ -200,7 +226,45 @@ async def register(
         n_inheritance_edges=len(spec.label_hierarchy),
         n_resolve_rules=len(spec.resolve_rules),
         n_resolver_indexes=n_resolver_indexes,
+        n_edge_endpoints=len(spec.edge_endpoints),
+        strict_endpoints=bool(spec.strict_endpoints),
     )
+
+
+@router.delete(
+    "/{name}/edge_endpoints",
+    summary="Remove one declared label pair of an edge type",
+    description=(
+        "Removes `src -[type]-> dst` from the tenant's declared endpoints. "
+        "No data is touched. When the type has no declared pairs left, it is "
+        "open again (any label pair accepted, even with `strict_endpoints`)."
+    ),
+    responses={404: {"description": "Tenant not registered, or the pair is not declared."}},
+)
+async def delete_edge_endpoint(
+    name: str,
+    type: str,  # noqa: A002 - the API's name for an edge type
+    src: str,
+    dst: str,
+    request: Request,
+    principal: WritePrincipal,
+) -> dict[str, object]:
+    require_admin(principal)
+    if name not in registered_tenants():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"tenant '{name}' is not registered",
+        )
+    pool = request.app.state.pool
+    if not await remove_edge_endpoint(pool, name, type, src, dst):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"{src}-[{type}]->{dst} is not a declared pair of '{name}'",
+        )
+    spec = await load_spec(pool, name)
+    if spec is not None:
+        remember(spec)
+    return {"tenant": name, "type": type, "src": src, "dst": dst, "status": "removed"}
 
 
 @router.delete(
