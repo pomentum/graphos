@@ -11,7 +11,10 @@ import { useTenantSession } from "../../session/SessionProvider";
  * like the groups recompute. The job is read from graphos, so leaving the
  * page or a run started elsewhere are seen too.
  */
-export function useComputeMetrics(): { compute: (metrics: string[]) => Promise<void>; running: boolean } {
+export function useComputeMetrics(): {
+  compute: (metrics: string[], relTypes?: string[]) => Promise<void>;
+  running: boolean;
+} {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
   const job = useMetricsJob();
@@ -38,9 +41,9 @@ export function useComputeMetrics(): { compute: (metrics: string[]) => Promise<v
     wasRunning.current = running;
   }, [running, job.data, client, tenant]);
 
-  const compute = async (metrics: string[]) => {
+  const compute = async (metrics: string[], relTypes: string[] = []) => {
     try {
-      await api.computeMetrics(metrics);
+      await api.computeMetrics(metrics, relTypes);
     } catch (error) {
       notifications.show({
         color: "red",

@@ -69,6 +69,17 @@ function server({ louvain }: { louvain: boolean }) {
       return json({ tenant: "acme", available: false, n_communities: 0, communities: [], links: [] });
     }
     if (url.pathname === "/api/v1/jobs") return json({ jobs: [] });
+    if (url.pathname === "/api/v1/acme/schema") {
+      return json({
+        name: "acme",
+        vertex_labels: ["Package"],
+        edge_labels: ["DEPENDS_ON", "TAGGED"],
+        label_hierarchy: {},
+        search_indexes: {},
+        rule_edge_labels: [],
+        edge_endpoints: {},
+      });
+    }
     if (url.pathname === "/api/v1/acme/graph/metrics:compute" && method === "POST") {
       return json({ id: "j1", kind: "compute_metrics", tenant: "acme", status: "queued" }, 202);
     }
@@ -110,6 +121,20 @@ describe("Graph algorithms", () => {
     const call = sent.find((s) => s.path.endsWith("/metrics:compute"))!;
     expect(call.body).toEqual({ metrics: ["degree", "pagerank", "components", "betweenness"] });
     expect(call.prefer).toBe("respond-async");
+  });
+
+  it("computes over the relationship types chosen", async () => {
+    const { fetchImpl, sent } = server({ louvain: true });
+    renderCard(me("maintain"), fetchImpl);
+    // The types come from the schema; the list renders hidden until opened (jsdom cannot scroll it).
+    fireEvent.click(await screen.findByRole("option", { name: "DEPENDS_ON", hidden: true }));
+    const buttons = screen.getAllByRole("button", { name: "Compute" });
+    fireEvent.click(buttons[buttons.length - 1]!);
+    await waitFor(() => expect(sent.some((s) => s.path.endsWith("/metrics:compute"))).toBe(true));
+    expect(sent.find((s) => s.path.endsWith("/metrics:compute"))!.body).toEqual({
+      metrics: ["degree", "pagerank", "components"],
+      rel_types: ["DEPENDS_ON"],
+    });
   });
 
   it("offers nothing to run to a reader", async () => {

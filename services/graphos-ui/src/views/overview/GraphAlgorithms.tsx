@@ -1,10 +1,10 @@
-import { Button, Checkbox, Group, Stack, Text, Title } from "@mantine/core";
+import { Button, Checkbox, Group, MultiSelect, Stack, Text, Title } from "@mantine/core";
 import type { TFunction } from "i18next";
 import { IconRefresh } from "@tabler/icons-react";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { Job } from "../../api/types";
-import { useCommunityMap, useMetricsJob, useServiceInfo } from "../../data/queries";
+import { useCommunityMap, useMetricsJob, useSchema, useServiceInfo } from "../../data/queries";
 import { groupsOffer } from "../../lib/features";
 import { DEFAULT_METRICS, METRICS } from "../../lib/metrics";
 import { relativeTime } from "../../lib/time";
@@ -17,8 +17,10 @@ import { useComputeMetrics } from "./useComputeMetrics";
  * The whole-graph computations of a tenant in one place: the groups (Louvain
  * communities) and the graph metrics, each with what its last run found and,
  * for whoever maintains the tenant, a button to run it. Groups are offered
- * only where the server has the Louvain extra. One runs at a time per tenant,
- * so both wait while either is running.
+ * only where the server has the Louvain extra. The metrics run over chosen
+ * relationship types, or all of them: PageRank over dependencies says what
+ * everything relies on, over every relationship what is most connected. One
+ * runs at a time per tenant, so both wait while either is running.
  */
 export function GraphAlgorithms() {
   const { t } = useTranslation();
@@ -29,6 +31,8 @@ export function GraphAlgorithms() {
   const groups = useRecomputeGroups();
   const metrics = useComputeMetrics();
   const [betweenness, setBetweenness] = useState(false);
+  const [relTypes, setRelTypes] = useState<string[]>([]);
+  const edgeLabels = useSchema().data?.edge_labels ?? [];
 
   const offer = groupsOffer(canMaintain, info.data?.features.louvain);
   const busy = groups.running || metrics.running;
@@ -82,24 +86,39 @@ export function GraphAlgorithms() {
           status={metricsStatus(metricsJob.data ?? null, metrics.running, t)}
           action={
             canMaintain ? (
-              <Group gap="sm" wrap="nowrap">
-                <Checkbox
+              <Stack gap={8} align="flex-end">
+                <MultiSelect
                   size="xs"
-                  label={t("views.overview.algorithms.betweenness")}
-                  checked={betweenness}
-                  onChange={(e) => setBetweenness(e.currentTarget.checked)}
+                  w={300}
+                  label={t("views.overview.algorithms.relTypes")}
+                  placeholder={relTypes.length === 0 ? t("views.overview.algorithms.allRelTypes") : undefined}
+                  data={edgeLabels}
+                  value={relTypes}
+                  onChange={setRelTypes}
+                  searchable
+                  clearable
                 />
-                <Button
-                  size="xs"
-                  variant="default"
-                  leftSection={<IconRefresh size={14} />}
-                  loading={metrics.running}
-                  disabled={busy && !metrics.running}
-                  onClick={() => void metrics.compute([...DEFAULT_METRICS, ...(betweenness ? ["betweenness"] : [])])}
-                >
-                  {t("views.overview.algorithms.compute")}
-                </Button>
-              </Group>
+                <Group gap="sm" wrap="nowrap">
+                  <Checkbox
+                    size="xs"
+                    label={t("views.overview.algorithms.betweenness")}
+                    checked={betweenness}
+                    onChange={(e) => setBetweenness(e.currentTarget.checked)}
+                  />
+                  <Button
+                    size="xs"
+                    variant="default"
+                    leftSection={<IconRefresh size={14} />}
+                    loading={metrics.running}
+                    disabled={busy && !metrics.running}
+                    onClick={() =>
+                      void metrics.compute([...DEFAULT_METRICS, ...(betweenness ? ["betweenness"] : [])], relTypes)
+                    }
+                  >
+                    {t("views.overview.algorithms.compute")}
+                  </Button>
+                </Group>
+              </Stack>
             ) : null
           }
         />
@@ -141,10 +160,15 @@ function metricsStatus(job: Job | null, running: boolean, t: TFunction): string 
   }
   const result = job.result ?? {};
   const ran = Array.isArray(result.metrics) ? (result.metrics as string[]) : [];
+  const types = Array.isArray(job.params.rel_types) ? (job.params.rel_types as string[]) : [];
   const names = METRICS.filter((m) => ran.includes(m)).map((m) => t(`views.overview.algorithms.metricNames.${m}`));
   return t("views.overview.algorithms.metricsStatus", {
     metrics: names.join(", "),
     nodes: typeof result.n_nodes === "number" ? result.n_nodes : 0,
+    over:
+      types.length > 0
+        ? t("views.overview.algorithms.overTypes", { types: types.join(", ") })
+        : t("views.overview.algorithms.overAll"),
     when: job.finished_at ? relativeTime(job.finished_at) : "",
   });
 }

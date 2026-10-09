@@ -395,7 +395,7 @@
         "groupsStatus_other": "{{count}} groups · modularity {{modularity}} · {{when}}",
         "metrics": "Metrics",
         "metricsWhat": "PageRank (what everything depends on), betweenness (bridges), connected components and degree.",
-        "metricsStatus": "{{metrics}} · {{nodes}} nodes · {{when}}",
+        "metricsStatus": "{{metrics}} · {{nodes}} nodes · {{over}} · {{when}}",
         "metricNames": {
           "degree": "degree",
           "pagerank": "PageRank",
@@ -412,7 +412,11 @@
         "louvainMissing": "Needs Louvain, an optional part this server does not have (installation guide, Louvain).",
         "oneAtATime": "One whole-graph computation runs at a time on a tenant; the other waits until it ends.",
         "metricsDone": "Graph metrics computed",
-        "metricsFailed": "Computing the graph metrics failed"
+        "metricsFailed": "Computing the graph metrics failed",
+        "relTypes": "Over these relationship types",
+        "allRelTypes": "All relationship types",
+        "overAll": "over all relationships",
+        "overTypes": "over {{types}}"
       }
     },
     "activity": {

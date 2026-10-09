@@ -35,6 +35,8 @@ under one version.
   client are unchanged. A refresh token used again within 10 seconds of its rotation (two tabs
   renewing at once) gets an access token instead of ending the session. New setting
   `GRAPHOS_AUTH_COOKIE_SECURE` (default `true`).
+- **UI: metrics over chosen relationship types.** Overview's Metrics row takes the relationship
+  types to count (all by default), and the last run says which it used.
 - **UI: Compute groups only where Louvain is installed.** The button reads `GET /v1/info`; on a
   server without the extra the Groups view and Overview say why instead of offering a button that
   answered 501.

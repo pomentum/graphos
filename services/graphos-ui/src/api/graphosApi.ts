@@ -198,11 +198,14 @@ export class GraphosApi {
     return this.http.get(`${this.graph}/communities/map`, { limit });
   }
 
-  /** Starts computing graph metrics as a background job (`maintain`); follow it with `jobs`. */
-  async computeMetrics(metrics: string[]): Promise<Job> {
+  /**
+   * Starts computing graph metrics as a background job (`maintain`); follow it
+   * with `jobs`. Over the relationships of `relTypes` only, or all of them.
+   */
+  async computeMetrics(metrics: string[], relTypes: string[] = []): Promise<Job> {
     return (
       await this.http.request<Job>("POST", `${this.graph}/metrics:compute`, {
-        body: { metrics },
+        body: relTypes.length > 0 ? { metrics, rel_types: relTypes } : { metrics },
         headers: { Prefer: "respond-async" },
       })
     ).data;
