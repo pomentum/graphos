@@ -3,6 +3,7 @@ import { fetchMe, GraphosApi } from "../api/graphosApi";
 import { HttpClient } from "../api/http";
 import type { AuthConfig, Level, Me, OidcSignedIn, TokenResponse } from "../api/types";
 import { Credentials } from "./credentials";
+import { splitTenantPath } from "./tenantPath";
 import { atLeast } from "./levels";
 
 export { atLeast };
@@ -118,12 +119,15 @@ export function SessionProvider({
     [anonymous, navigateTo],
   );
 
+  /** Signed in: the tenant the address names (`path`, by default the page's), else the only one. */
   const enter = useCallback(
-    async (tokens: TokenResponse) => {
+    async (tokens: TokenResponse, path: string = window.location.pathname) => {
       const credentials = newCredentials(tokens);
       const me = await fetchMe(new HttpClient(API_BASE, credentials, fetchImpl));
       setNotice(null);
-      setState({ me, credentials, tenant: me.must_change ? null : pickTenant(me, null) });
+      const tenant = me.must_change ? null : pickTenant(me, splitTenantPath(path, me.tenants).tenant);
+      setState({ me, credentials, tenant });
+      return { me, tenant };
     },
     [newCredentials, fetchImpl],
   );
@@ -154,8 +158,10 @@ export function SessionProvider({
               state,
               session_cookie: true,
             });
-            await enter(signed);
-            setReturnTo(signed.return_to);
+            // The page asked for, under its tenant: the tenant from it, the page inside it.
+            const { me, tenant } = await enter(signed, signed.return_to);
+            const { tenant: named, rest } = splitTenantPath(signed.return_to, me.tenants);
+            setReturnTo(tenant && named === tenant ? rest : signed.return_to);
           } catch {
             setNotice("ssoFailed");
           }

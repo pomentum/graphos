@@ -3,6 +3,7 @@ import { Notifications, notifications } from "@mantine/notifications";
 import { MutationCache, QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { addressFor, tenantBase } from "./session/tenantPath";
 import { ApiError } from "./api/http";
 import { AppLayout } from "./components/AppLayout";
 import { ActivityProvider } from "./data/ActivityProvider";
@@ -74,10 +75,8 @@ export function App() {
       <Notifications position="bottom-right" />
       <QueryClientProvider client={client}>
         <SessionProvider>
-          <BrowserRouter>
-            <SignOutOnRejectedToken />
-            <Screens />
-          </BrowserRouter>
+          <SignOutOnRejectedToken />
+          <Screens />
         </SessionProvider>
       </QueryClientProvider>
     </MantineProvider>
@@ -97,7 +96,7 @@ function Screens() {
   // Signed out, a password to change first, or no tenant chosen yet.
   if (!session?.tenant || session.me.must_change) return <ConnectView />;
   return (
-    <TenantScope key={session.tenant}>
+    <TenantScope key={session.tenant} tenant={session.tenant} tenants={session.me.tenants}>
       {returnTo ? (
         <ReturnAfterSignIn to={returnTo} />
       ) : (
@@ -130,12 +129,27 @@ function ReturnAfterSignIn({ to }: { to: string }) {
   return arrived ? null : <Navigate to={to} replace />;
 }
 
-/** State that belongs to one tenant; remounted when the tenant changes. */
-function TenantScope({ children }: { children: ReactNode }) {
+/**
+ * State that belongs to one tenant; remounted when the tenant changes. The
+ * tenant is the address's first segment and the router's basename, so a
+ * reload or a shared link lands on the same tenant and page; the address is
+ * put right once, before the router reads it (another tenant's page becomes
+ * this tenant's, an older link without a tenant gets it).
+ */
+function TenantScope({ tenant, tenants, children }: { tenant: string; tenants: string[]; children: ReactNode }) {
+  useState(() => {
+    const target = addressFor(tenant, tenants, window.location.pathname, window.location.search);
+    if (target !== `${window.location.pathname}${window.location.search}`) {
+      window.history.replaceState(null, "", `${target}${window.location.hash}`);
+    }
+    return null;
+  });
   return (
-    <ActivityProvider>
-      <WorkspaceProvider>{children}</WorkspaceProvider>
-    </ActivityProvider>
+    <BrowserRouter basename={tenantBase(tenant)}>
+      <ActivityProvider>
+        <WorkspaceProvider>{children}</WorkspaceProvider>
+      </ActivityProvider>
+    </BrowserRouter>
   );
 }
 

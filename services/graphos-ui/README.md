@@ -11,8 +11,9 @@ organisation's single sign-on when graphos is set up for it ([installation](../.
 lives in page memory; the session that renews it is graphos's `graphos_session` cookie (HttpOnly, so
 no script on the page can read it; Secure; SameSite=Strict), rotated at each renewal. A reload or a
 new tab stays signed in until the session ends (an hour unused, twelve hours at most) or the person
-signs out. Nothing is kept in local or session storage, not even the light/dark choice or a
-diagram's layout. graphos checks the
+signs out. The tenant is the first part of the address (`/demo/overview`), so a reload, a new tab
+or a shared link opens the same tenant and page. Nothing is kept in local or session storage, not
+even the light/dark choice or a diagram's layout. graphos checks the
 user's level on every call, so the UI shows what that level allows (a `read` user gets a read-only
 UI, schema editing needs `maintain`, the Access page is for owners and admins) and every edit is
 recorded under the user's name in the audit log and the change feed.

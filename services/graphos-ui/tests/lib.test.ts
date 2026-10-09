@@ -1,3 +1,4 @@
+import { addressFor, splitTenantPath } from "../src/session/tenantPath";
 import { groupsOffer } from "../src/lib/features";
 import type { ChangeItem, Neighbor, TenantSchema } from "../src/api/types";
 import { pickSearchIndex } from "../src/data/searchIndex";
@@ -151,5 +152,25 @@ describe("groupsOffer", () => {
     expect(groupsOffer(false, false)).toBe("notInstalled");
     // Before /v1/info answers: nothing yet, rather than a button that may fail.
     expect(groupsOffer(true, undefined)).toBe("unknown");
+  });
+});
+
+describe("the tenant in the address", () => {
+  const tenants = ["acme", "demo"];
+  it("reads the tenant from the first segment", () => {
+    expect(splitTenantPath("/demo/overview", tenants)).toEqual({ tenant: "demo", rest: "/overview" });
+    expect(splitTenantPath("/demo", tenants)).toEqual({ tenant: "demo", rest: "/" });
+    expect(splitTenantPath("/overview", tenants)).toEqual({ tenant: null, rest: "/overview" });
+  });
+
+  it("puts a page under its tenant", () => {
+    // Already there.
+    expect(addressFor("demo", tenants, "/demo/browse", "?label=Library")).toBe("/demo/browse?label=Library");
+    // Another tenant's page: the page, without its filters.
+    expect(addressFor("acme", tenants, "/demo/browse", "?label=Library")).toBe("/acme/browse");
+    expect(addressFor("acme", tenants, "/demo", "")).toBe("/acme");
+    // An older link without a tenant keeps everything.
+    expect(addressFor("demo", tenants, "/browse", "?label=Library")).toBe("/demo/browse?label=Library");
+    expect(addressFor("demo", tenants, "/", "")).toBe("/demo");
   });
 });
