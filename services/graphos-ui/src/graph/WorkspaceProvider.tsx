@@ -10,6 +10,7 @@ import {
 } from "react";
 import type { Properties } from "../api/types";
 import { useTenantSession } from "../session/SessionProvider";
+import type { Lens, SizeBy } from "../lib/metrics";
 import type { ColorBy } from "./canvasStyle";
 import { GraphModel, nodeKey, type NodeRef } from "./GraphModel";
 
@@ -41,6 +42,12 @@ interface WorkspaceValue {
   selectEdge: (key: string | null) => void;
   colorBy: ColorBy;
   setColorBy: (colorBy: ColorBy) => void;
+  /** What nodes are sized by: their connections on the canvas, or a graph metric. */
+  sizeBy: SizeBy;
+  setSizeBy: (sizeBy: SizeBy) => void;
+  /** What the Groups mode shows: the groups, a metric's ranking, or the components. */
+  lens: Lens;
+  setLens: (lens: Lens) => void;
   /** Puts a node on the canvas (if it isn't there), selects it and shows the graph. */
   open: (ref: NodeRef, properties: Properties) => string;
   overview: Overview;
@@ -73,6 +80,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [overview, setOverview] = useState<Overview>({ status: "idle" });
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const [colorBy, setColorBy] = useState<ColorBy>("none");
+  const [sizeBy, setSizeBy] = useState<SizeBy>("connections");
+  const [lens, setLens] = useState<Lens>("groups");
   const [frame, setFrame] = useState<{ keys: string[]; token: number }>();
   const [mode, setMode] = useState<ExploreMode>("graph");
   const [mapLabel, setMapLabel] = useState<string | null>(null);
@@ -138,6 +147,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectEdge,
       colorBy,
       setColorBy,
+      sizeBy,
+      setSizeBy,
+      lens,
+      setLens,
       open,
       overview,
       setOverview,
@@ -158,6 +171,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       liveSelectedEdge,
       selectEdge,
       colorBy,
+      sizeBy,
+      lens,
       open,
       overview,
       frame,

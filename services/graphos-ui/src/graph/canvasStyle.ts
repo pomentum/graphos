@@ -1,3 +1,4 @@
+import { metricSize } from "../lib/metrics";
 import { middleEllipsis } from "../lib/text";
 import { rankColors } from "../theme/categories";
 import type { Palette } from "../theme/tokens";
@@ -24,6 +25,8 @@ export interface Emphasis {
   hubs?: Set<string>;
   /** Show only the focus; everything else is hidden rather than dimmed. */
   isolate?: boolean;
+  /** Size nodes by this metric property, against its largest value on the canvas. */
+  sizes?: { property: string; max: number };
 }
 
 export interface NodeDisplay {
@@ -69,13 +72,17 @@ export function nodeDisplay(key: string, node: NodeAttributes, emphasis: Emphasi
 
 function nodeDisplayUncut(key: string, node: NodeAttributes, emphasis: Emphasis, palette: Palette): NodeDisplay {
   const name = displayName(node.properties, node.id);
+  const size =
+    emphasis.sizes && node.more === undefined
+      ? metricSize(node.properties[emphasis.sizes.property], emphasis.sizes.max)
+      : node.size;
   const focused = emphasis.focus.nodes.size > 0;
   const inFocus = emphasis.focus.nodes.has(key);
   if (key === emphasis.selected) {
-    return { color: palette.accent, size: node.size + 3, label: name, forceLabel: true, zIndex: 3 };
+    return { color: palette.accent, size: size + 3, label: name, forceLabel: true, zIndex: 3 };
   }
   if (focused && !inFocus && emphasis.isolate) {
-    return { color: palette.nodeIdle, size: node.size, label: name, forceLabel: false, zIndex: 0, hidden: true };
+    return { color: palette.nodeIdle, size, label: name, forceLabel: false, zIndex: 0, hidden: true };
   }
   if (node.more !== undefined) {
     const color = focused && !inFocus ? mix(palette.muted, palette.canvas, DIM) : palette.muted;
@@ -84,15 +91,15 @@ function nodeDisplayUncut(key: string, node: NodeAttributes, emphasis: Emphasis,
   const fresh = emphasis.fresh?.has(key) ?? false;
   if (inFocus) {
     const fewEnough = emphasis.focus.nodes.size <= FOCUS_LABEL_LIMIT;
-    return { color: FOCUS_BLUE, size: node.size + 1, label: name, forceLabel: fewEnough || fresh, zIndex: 2 };
+    return { color: FOCUS_BLUE, size: size + 1, label: name, forceLabel: fewEnough || fresh, zIndex: 2 };
   }
   if (emphasis.recent.has(key)) {
-    return { color: palette.accentText, size: node.size + 1, label: name, forceLabel: false, zIndex: 1 };
+    return { color: palette.accentText, size: size + 1, label: name, forceLabel: false, zIndex: 1 };
   }
   const idle = idleColor(node, emphasis.categories, palette);
   return {
     color: focused ? mix(idle, palette.canvas, DIM) : idle,
-    size: node.size,
+    size,
     label: name,
     forceLabel: !focused && (fresh || (emphasis.hubs?.has(key) ?? false)),
     zIndex: 0,

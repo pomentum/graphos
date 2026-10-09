@@ -15,13 +15,22 @@ describe("PropertyEditor", () => {
     expect(onChange).toHaveBeenLastCalledWith({ name: "Ada", id: "u1" });
   });
 
-  it("shows graph metrics (graphos_*) read-only and refuses them as new names", () => {
+  it("leaves computed values (graphos_*, community_id) to the metrics block and refuses them as new names", () => {
+    const onChange = vi.fn();
     renderWithTheme(
-      <PropertyEditor draft={{ name: "Ada", graphos_pagerank: 0.0012 }} editable onChange={() => undefined} />,
+      <PropertyEditor
+        draft={{ name: "Ada", graphos_pagerank: 0.0012, community_id: 3 }}
+        editable
+        onChange={onChange}
+      />,
     );
-    expect(screen.queryByLabelText("Value of graphos_pagerank")).toBeNull();
+    // Not listed here (GraphMetrics shows them), and nothing to edit or remove.
+    expect(screen.queryByText("graphos_pagerank")).toBeNull();
+    expect(screen.queryByText("community_id")).toBeNull();
     expect(screen.queryByLabelText("Remove graphos_pagerank")).toBeNull();
-    expect(screen.getByText("graphos_pagerank")).toBeInTheDocument();
+    // Editing another property keeps them in the draft, so a save never removes them.
+    fireEvent.change(screen.getByLabelText("Value of name"), { target: { value: "Ada L." } });
+    expect(onChange).toHaveBeenLastCalledWith({ name: "Ada L.", graphos_pagerank: 0.0012, community_id: 3 });
     fireEvent.click(screen.getByText("Add property"));
     fireEvent.change(screen.getByRole("textbox", { name: "New property name" }), { target: { value: "graphos_x" } });
     expect(screen.getByText("graphos keeps this name for itself")).toBeInTheDocument();

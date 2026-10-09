@@ -45,11 +45,14 @@ def _mode(page: Page, name: str) -> None:
 
 
 def explore_graph(page: Page) -> None:
-    """The canvas, coloured by group, a core library open in the panel."""
+    """The canvas, coloured by group and sized by PageRank, a core library open in the panel."""
     _go(page, "/explore")
     _mode(page, "Graph")
     page.get_by_role("button", name="Colours").click()
     page.get_by_text("By group", exact=True).click()
+    page.keyboard.press("Escape")
+    page.get_by_role("button", name="Size").click()
+    page.get_by_text("By PageRank", exact=True).click()
     page.keyboard.press("Escape")
     page.wait_for_timeout(1000)
     page.keyboard.press("/")

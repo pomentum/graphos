@@ -9,3 +9,23 @@
     padding: 12px;
   }
 }
+
+/* The graph algorithms card: one row per computation, like the count lists. */
+.algorithms {
+  background: var(--gx-group);
+  border: 0.5px solid var(--gx-separator);
+  border-radius: var(--mantine-radius-lg);
+  overflow: hidden;
+}
+
+.algorithm {
+  padding: 12px 14px;
+}
+
+.algorithm + .algorithm {
+  border-top: 0.5px solid var(--gx-separator);
+}
+
+.section {
+  margin-top: var(--mantine-spacing-xl);
+}

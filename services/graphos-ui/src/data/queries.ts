@@ -42,12 +42,14 @@ export const keys = {
   map: (tenant: string, exact: boolean) => ["map", tenant, exact] as const,
   groups: (tenant: string) => ["groups", tenant] as const,
   groupsJob: (tenant: string) => ["groupsJob", tenant] as const,
+  metricsJob: (tenant: string) => ["metricsJob", tenant] as const,
   activeJobs: (tenant: string) => ["activeJobs", tenant] as const,
   recentJobs: (tenant: string) => ["recentJobs", tenant] as const,
   history: (tenant: string, category: ActivityCategory | "all") => ["history", tenant, category] as const,
   users: () => ["users"] as const,
   grants: (tenant: string | null) => ["grants", tenant] as const,
   authConfig: () => ["auth-config"] as const,
+  info: () => ["info"] as const,
 };
 
 /** Labels, hierarchy and search indexes; changes rarely, so cached for minutes. */
@@ -88,6 +90,16 @@ export function useGroupsJob() {
   return useQuery({
     queryKey: keys.groupsJob(tenant),
     queryFn: async () => (await api.jobs()).find((job) => job.kind === "recompute_communities") ?? null,
+    refetchInterval: (query) => (isActiveJob(query.state.data) ? JOB_POLL_MS : false),
+  });
+}
+
+/** The tenant's latest graph metrics run, followed like the groups recompute. */
+export function useMetricsJob() {
+  const { api, tenant } = useTenantSession();
+  return useQuery({
+    queryKey: keys.metricsJob(tenant),
+    queryFn: async () => (await api.jobs()).find((job) => job.kind === "compute_metrics") ?? null,
     refetchInterval: (query) => (isActiveJob(query.state.data) ? JOB_POLL_MS : false),
   });
 }
@@ -141,6 +153,12 @@ export function useChangeHistory(category: ActivityCategory | "all") {
 export function useUsers(enabled: boolean) {
   const { api } = useTenantSession();
   return useQuery({ queryKey: keys.users(), queryFn: () => api.users(), enabled });
+}
+
+/** The service and its optional parts (they change only with a restart or a new image). */
+export function useServiceInfo() {
+  const { api } = useTenantSession();
+  return useQuery({ queryKey: keys.info(), queryFn: () => api.info(), staleTime: Infinity });
 }
 
 /** How people sign in: whether single sign-on is set up (it changes only with a restart). */

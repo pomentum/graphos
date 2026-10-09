@@ -13,6 +13,11 @@ finds, what it is good for, how to run it and what it costs. The endpoints and e
 | [Components](#components) | `graphos_component` | the separate islands of the graph | data quality (orphans, loads that did not link up); splitting work |
 | [Degree](#degree) | `graphos_degree`, `graphos_in_degree`, `graphos_out_degree` | how many relationships a node has, each way | hubs, fan-in and fan-out, outliers |
 
+**In the web UI:** Overview → *Graph algorithms* shows what each last run found and runs them;
+Explore → *Groups* shows each one as its own view (the groups, the top nodes by PageRank,
+betweenness or degree with the relationships among them, or the components); the node panel
+shows a node's group and metrics.
+
 ## How they run
 
 - **On request only.** Writes never trigger a computation: the values are as current as the last

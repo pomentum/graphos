@@ -6,6 +6,7 @@ import { useNodeEditor } from "../data/useNodeEditor";
 import { displayName, type GraphModel } from "../graph/GraphModel";
 import { useTenantSession } from "../session/SessionProvider";
 import { ConfirmDelete } from "./ConfirmDelete";
+import { GraphMetrics } from "./GraphMetrics";
 import { ConnectionList } from "./ConnectionList";
 import classes from "./Inspector.module.css";
 import { RecordForm } from "./RecordForm";
@@ -99,6 +100,8 @@ export function Inspector({ model, selected, onSelect, onSelectEdge, onExpand, o
           </Tooltip>
         </Group>
       </div>
+
+      <GraphMetrics properties={editor.record?.properties ?? attributes.properties} />
 
       <RecordForm
         editor={editor}

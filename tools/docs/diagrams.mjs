@@ -266,7 +266,7 @@ function inline(svg, fig, theme) {
 // JPEG copies as data: URIs, which keeps it one file; where a viewer blocks data: URIs only
 // these pictures are missing. The alt text says what each one shows.
 const SHOTS = {
-  'ui-explore-graph-dark': 'The Explore view of the demo tenant, an invented software ecosystem: about 450 nodes coloured by the community Louvain found, six clusters around a core of shared libraries. The core library corelog is selected; its panel lists its properties, among them the community id and the graph metrics graphos computed, and its relationships.',
+  'ui-explore-graph-dark': 'The Explore view of the demo tenant, an invented software ecosystem: about 450 nodes coloured by the community Louvain found and sized by PageRank, six clusters around a core of shared libraries. The core library corelog is selected; its panel shows what graphos computed for it (its group, PageRank, betweenness, degree and component), its properties and its relationships.',
   'ui-explore-groups-dark': 'The Groups mode of Explore: one bubble per community of the last Louvain recompute, named after its best-connected member, with lines for the relationships between communities.',
   'ui-explore-map-dark': 'The Map mode of Explore: one bubble per label, sized by its nodes, and a line per pair of labels that are linked.',
   'ui-schema-editor-dark': 'The schema diagram of the demo tenant. Library, Framework and Tool sit in a block under their parent label Package; the selected label, Library, shows its relationship types to the other labels and, in a panel, its properties and relationships. The Add menu offers a new label, relationship type or search index.',

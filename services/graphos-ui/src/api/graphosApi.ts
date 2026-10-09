@@ -29,6 +29,7 @@ import type {
   PathsResponse,
   Properties,
   SearchResponse,
+  ServiceInfo,
   TenantSchema,
   TenantStats,
 } from "./types";
@@ -197,7 +198,17 @@ export class GraphosApi {
     return this.http.get(`${this.graph}/communities/map`, { limit });
   }
 
-  /** Starts recomputing the groups as a background job (admin); follow it with `job`. */
+  /** Starts computing graph metrics as a background job (`maintain`); follow it with `jobs`. */
+  async computeMetrics(metrics: string[]): Promise<Job> {
+    return (
+      await this.http.request<Job>("POST", `${this.graph}/metrics:compute`, {
+        body: { metrics },
+        headers: { Prefer: "respond-async" },
+      })
+    ).data;
+  }
+
+  /** Starts recomputing the groups as a background job (`maintain`); follow it with `jobs`. */
   async recomputeGroups(): Promise<Job> {
     return (
       await this.http.request<Job>("POST", `/v1/${enc(this.tenant)}/recompute-communities`, {
@@ -235,6 +246,11 @@ export class GraphosApi {
   /** A new password or secret for a user (admin), shown once. */
   resetUserSecret(name: string): Promise<UserCreated> {
     return this.http.post(`/v1/users/${enc(name)}:reset-secret`, undefined);
+  }
+
+  /** The service and the optional parts this server has, such as Louvain. */
+  info(): Promise<ServiceInfo> {
+    return this.http.get<ServiceInfo>("/v1/info");
   }
 
   /** How people sign in here: passwords, and the identity provider when single sign-on is set up. */

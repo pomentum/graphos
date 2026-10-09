@@ -6,6 +6,11 @@ export const SYSTEM_PROPERTIES = new Set(["id", "community_id"]);
 /** graphos writes ``graphos_*`` itself (graph metrics) and refuses writes using it. */
 export const RESERVED_PREFIX = "graphos_";
 
+/** Computed by graphos (graph metrics, the group): shown apart from the properties one edits. */
+export function isComputedProperty(key: string): boolean {
+  return key === "community_id" || key.startsWith(RESERVED_PREFIX);
+}
+
 /** A property graphos manages: shown, never edited, never added. */
 export function isSystemProperty(key: string): boolean {
   return SYSTEM_PROPERTIES.has(key) || key.startsWith(RESERVED_PREFIX);

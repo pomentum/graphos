@@ -3,15 +3,18 @@ import { IconRefresh } from "@tabler/icons-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { GraphCanvas } from "../../components/GraphCanvas";
-import { useCommunityMap } from "../../data/queries";
+import { useCommunityMap, useServiceInfo } from "../../data/queries";
 import { buildCommunityModel, communityCategories, groupKey, type Community } from "../../graph/communityGraph";
 import { largestBubbles, mapEdgeDisplay, mapNodeDisplay } from "../../graph/graphMap";
 import { useWorkspace, type ExploreMode } from "../../graph/WorkspaceProvider";
+import type { Lens } from "../../lib/metrics";
+import { groupsOffer } from "../../lib/features";
 import { relativeTime } from "../../lib/time";
 import { useTenantSession } from "../../session/SessionProvider";
 import { usePalette } from "../../theme/usePalette";
 import classes from "./ExploreView.module.css";
 import { GroupPanel } from "./GroupPanel";
+import { LensSwitch } from "./LensSwitch";
 import { ModeSwitch } from "./ModeSwitch";
 import { useRecomputeGroups } from "./useRecomputeGroups";
 
@@ -19,6 +22,11 @@ const GROUP_STYLE = { node: mapNodeDisplay, edge: mapEdgeDisplay };
 /** How many of the largest groups are drawn; more crowd the canvas without saying more. */
 const SHOWN_CHOICES = [25, 50, 100, 150];
 const DEFAULT_SHOWN = 50;
+
+/** The choices worth offering for this many groups (always at least the smallest). */
+function shownChoices(groups: number): number[] {
+  return SHOWN_CHOICES.filter((n) => n <= Math.max(groups, SHOWN_CHOICES[0]!));
+}
 const NO_FOCUS = { nodes: new Set<string>(), edges: new Set<string>() };
 
 /**
@@ -27,9 +35,18 @@ const NO_FOCUS = { nodes: new Set<string>(), edges: new Set<string>() };
  * pair of groups with relationships between them, thicker with more. Click
  * a group to see what it is made of and what it connects to; double-click
  * to open its best-connected member on the graph. The groups are those of
- * the last recompute; whoever maintains the tenant can compute them again.
+ * the last recompute; whoever maintains the tenant can compute them again,
+ * where the server has the Louvain extra (`/v1/info`).
  */
-export function GroupsView({ onMode }: { onMode: (mode: ExploreMode) => void }) {
+export function GroupsView({
+  onMode,
+  lens,
+  onLens,
+}: {
+  onMode: (mode: ExploreMode) => void;
+  lens: Lens;
+  onLens: (lens: Lens) => void;
+}) {
   const { t } = useTranslation();
   const { canMaintain } = useTenantSession();
   const workspace = useWorkspace();
@@ -38,6 +55,7 @@ export function GroupsView({ onMode }: { onMode: (mode: ExploreMode) => void }) 
   // Kept in the workspace: leaving the view keeps the group selected.
   const { selectedGroup: selected, setSelectedGroup: setSelected } = workspace;
   const { recompute, running } = useRecomputeGroups();
+  const offer = groupsOffer(canMaintain, useServiceInfo().data?.features.louvain);
 
   const data = map.data?.available ? map.data : null;
   const [shown, setShown] = useState(DEFAULT_SHOWN);
@@ -63,17 +81,25 @@ export function GroupsView({ onMode }: { onMode: (mode: ExploreMode) => void }) 
     workspace.open({ id: group.hub.id, label: group.hub.label }, group.hub.properties);
   };
 
-  const computeButton = canMaintain ? (
-    <Button
-      size="xs"
-      variant="default"
-      leftSection={<IconRefresh size={14} />}
-      loading={running}
-      onClick={() => void recompute()}
-    >
-      {data ? t("views.explore.groups.recompute") : t("views.explore.groups.compute")}
-    </Button>
-  ) : null;
+  const computeButton =
+    offer === "allowed" ? (
+      <Button
+        size="xs"
+        variant="default"
+        leftSection={<IconRefresh size={14} />}
+        loading={running}
+        onClick={() => void recompute()}
+      >
+        {data ? t("views.explore.groups.recompute") : t("views.explore.groups.compute")}
+      </Button>
+    ) : null;
+  // Why there is no button, when there is a reason to give.
+  const noCompute =
+    offer === "notInstalled"
+      ? t("views.explore.groups.notInstalled")
+      : offer === "noAccess"
+        ? t("views.explore.groups.askAdmin")
+        : null;
 
   return (
     <div className={classes.root} data-inspector={community ? "open" : "closed"}>
@@ -114,27 +140,30 @@ export function GroupsView({ onMode }: { onMode: (mode: ExploreMode) => void }) 
                     {t("views.explore.groups.computing")}
                   </Text>
                 ) : null}
-                {computeButton ?? (
-                  <Text size="sm" c="dimmed">
-                    {t("views.explore.groups.askAdmin")}
-                  </Text>
-                )}
+                {computeButton ??
+                  (noCompute ? (
+                    <Text size="sm" c="dimmed">
+                      {noCompute}
+                    </Text>
+                  ) : null)}
               </Stack>
             )}
           </div>
         )}
         <Group gap={6} className={classes.actions}>
           <ModeSwitch mode="groups" onChange={onMode} />
+          <LensSwitch lens={lens} onChange={onLens} />
           {data ? (
             <Select
               size="xs"
               w={150}
               aria-label={t("views.explore.groups.shownLabel")}
-              data={SHOWN_CHOICES.filter((n) => n <= Math.max(data.communities.length, SHOWN_CHOICES[0]!)).map((n) => ({
+              data={shownChoices(data.communities.length).map((n) => ({
                 value: String(n),
                 label: t("views.explore.groups.shownOption", { count: n }),
               }))}
-              value={String(shown)}
+              // With few groups the default is not offered: show the largest choice there is.
+              value={String(Math.min(shown, shownChoices(data.communities.length).at(-1)!))}
               onChange={(value) => value && setShown(Number(value))}
               allowDeselect={false}
             />

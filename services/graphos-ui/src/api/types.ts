@@ -46,6 +46,13 @@ export interface AuthConfig {
 
 export type GrantLevel = Level | "create_tenants" | "admin";
 
+/** `GET /v1/info`: the service, and the optional parts this server has (no sign-in needed). */
+export interface ServiceInfo {
+  service: string;
+  version: string;
+  features: { louvain: boolean; metrics: boolean };
+}
+
 /** A user or service account (`/v1/users`, admin). */
 export interface UserInfo {
   name: string;
@@ -119,6 +126,8 @@ export interface NodesScanRequest {
   project?: string[];
   limit?: number;
   cursor?: string | null;
+  /** Sort by these properties (nodes without the first are left out); `null` for no order. */
+  order_by?: { property: string; desc?: boolean }[] | null;
 }
 
 export interface NodesScanResponse {

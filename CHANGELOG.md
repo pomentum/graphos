@@ -4,6 +4,37 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Added
+
+- **UI: graph algorithms in Overview.** A "Graph algorithms" card shows what the last groups
+  recompute (Louvain) and the last metrics run found, and lets whoever maintains the tenant run
+  them: the metrics (degree, PageRank, components, and betweenness on request) had no trigger in
+  the UI before. One runs at a time per tenant.
+- **UI: the graph through one algorithm.** Explore's Groups mode switches between Groups,
+  PageRank, Betweenness, Degree and Components. A score view draws the tenant's top 25 to 200
+  nodes by that score, across every label, with the relationships among them, sized and coloured
+  by the score and ranked beside the canvas; Components lists the islands by size and draws one.
+- **UI: size by a metric.** Explore's graph can size nodes by PageRank, betweenness or degree, as
+  well as by their connections on the canvas.
+- **UI: computed values apart.** A node's panel shows its group (named after its hub) and its graph
+  metrics in plain words, read-only; the raw `graphos_*` and `community_id` rows are no longer
+  listed with the properties one edits.
+- Docs: running the published images with Louvain, with a tested compose override
+  ([installation guide](docs/installation.md#louvain-with-the-published-images)).
+
+### Changed
+
+- **UI: Compute groups only where Louvain is installed.** The button reads `GET /v1/info`; on a
+  server without the extra the Groups view and Overview say why instead of offering a button that
+  answered 501.
+
+### Fixed
+
+- UI: with fewer groups than the default number shown, the Groups view's "largest" selector was
+  blank.
+
 ## 0.5.0 — 2026-10-08
 
 This release replaces static tokens with users, service accounts and grants: a **breaking change**

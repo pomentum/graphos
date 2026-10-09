@@ -3,7 +3,14 @@ import { IconPlus, IconX } from "@tabler/icons-react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Properties } from "../api/types";
-import { formatValue, isSystemProperty, propertyKind, sortedEntries, typedValue } from "../lib/properties";
+import {
+  formatValue,
+  isComputedProperty,
+  isSystemProperty,
+  propertyKind,
+  sortedEntries,
+  typedValue,
+} from "../lib/properties";
 import classes from "./PropertyEditor.module.css";
 
 export interface PropertyEditorProps {
@@ -31,42 +38,45 @@ export function PropertyEditor({ draft, editable, onChange, suggestions = [] }: 
 
   return (
     <div className={classes.group}>
-      {sortedEntries(draft).map(([key, value]) => {
-        const locked = !editable || isSystemProperty(key) || propertyKind(value) === "json";
-        return (
-          <div key={key} className={classes.row}>
-            <Text size="xs" c="dimmed" className={classes.name} title={key}>
-              {key}
-            </Text>
-            {locked ? (
-              <Text
-                size="sm"
-                className={isSystemProperty(key) ? "gx-mono gx-muted" : undefined}
-                truncate
-                title={formatValue(value)}
-              >
-                {formatValue(value)}
+      {/* Computed values (metrics, the group) are shown by GraphMetrics; the draft keeps them. */}
+      {sortedEntries(draft)
+        .filter(([key]) => !isComputedProperty(key))
+        .map(([key, value]) => {
+          const locked = !editable || isSystemProperty(key) || propertyKind(value) === "json";
+          return (
+            <div key={key} className={classes.row}>
+              <Text size="xs" c="dimmed" className={classes.name} title={key}>
+                {key}
               </Text>
-            ) : (
-              <ValueInput name={key} value={value} onChange={(v) => set(key, v)} />
-            )}
-            {editable && !isSystemProperty(key) ? (
-              <ActionIcon
-                variant="subtle"
-                color="gray"
-                size="xs"
-                aria-label={t("components.propertyEditor.remove", { name: key })}
-                className={classes.remove}
-                onClick={() => remove(key)}
-              >
-                <IconX size={12} />
-              </ActionIcon>
-            ) : (
-              <span />
-            )}
-          </div>
-        );
-      })}
+              {locked ? (
+                <Text
+                  size="sm"
+                  className={isSystemProperty(key) ? "gx-mono gx-muted" : undefined}
+                  truncate
+                  title={formatValue(value)}
+                >
+                  {formatValue(value)}
+                </Text>
+              ) : (
+                <ValueInput name={key} value={value} onChange={(v) => set(key, v)} />
+              )}
+              {editable && !isSystemProperty(key) ? (
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="xs"
+                  aria-label={t("components.propertyEditor.remove", { name: key })}
+                  className={classes.remove}
+                  onClick={() => remove(key)}
+                >
+                  <IconX size={12} />
+                </ActionIcon>
+              ) : (
+                <span />
+              )}
+            </div>
+          );
+        })}
       {editable ? <NewProperty existing={draft} suggestions={suggestions} onAdd={set} /> : null}
     </div>
   );

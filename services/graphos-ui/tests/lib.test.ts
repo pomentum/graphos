@@ -1,3 +1,4 @@
+import { groupsOffer } from "../src/lib/features";
 import type { ChangeItem, Neighbor, TenantSchema } from "../src/api/types";
 import { pickSearchIndex } from "../src/data/searchIndex";
 import { describeChange } from "../src/lib/changes";
@@ -139,5 +140,16 @@ describe("view registry", () => {
     expect(ids({ isAdmin: false, isOwner: true })).not.toContain("tenants");
     expect(ids({ isAdmin: true, isOwner: false })).toEqual(expect.arrayContaining(["tenants", "access"]));
     expect(menuGroups(VIEWS).map(([group]) => group)).toEqual(["Graph", "Insights", "Data", "Admin"]);
+  });
+});
+
+describe("groupsOffer", () => {
+  it("offers computing the groups only where the server has Louvain", () => {
+    expect(groupsOffer(true, true)).toBe("allowed");
+    expect(groupsOffer(false, true)).toBe("noAccess");
+    expect(groupsOffer(true, false)).toBe("notInstalled");
+    expect(groupsOffer(false, false)).toBe("notInstalled");
+    // Before /v1/info answers: nothing yet, rather than a button that may fail.
+    expect(groupsOffer(true, undefined)).toBe("unknown");
   });
 });

@@ -226,7 +226,8 @@
         "newNode": "Node",
         "connect": "Connect",
         "colours": "Colours",
-        "clear": "Clear"
+        "clear": "Clear",
+        "size": "Size"
       },
       "colours": {
         "none": "No colours",
@@ -285,7 +286,8 @@
         "computeDone": "Groups computed",
         "shownLabel": "How many groups to show",
         "shownOption_one": "Largest {{count}}",
-        "shownOption_other": "Largest {{count}}"
+        "shownOption_other": "Largest {{count}}",
+        "notInstalled": "Computing groups needs Louvain, an optional part this graphos server does not have. An administrator can add it (installation guide, Louvain)."
       },
       "map": {
         "bubbleLabel": "{{label}} · {{formatted}}",
@@ -301,6 +303,39 @@
         "relationshipsFrom": "Relationships from",
         "more_one": "and {{count}} more",
         "more_other": "and {{count}} more"
+      },
+      "sizes": {
+        "connections": "By connections on the canvas",
+        "graphos_pagerank": "By PageRank",
+        "graphos_betweenness": "By betweenness",
+        "graphos_degree": "By degree",
+        "noMetrics": "No metrics on these nodes: compute them in Overview."
+      },
+      "lens": {
+        "label": "What to show",
+        "groups": "Groups",
+        "graphos_pagerank": "PageRank",
+        "graphos_betweenness": "Betweenness",
+        "graphos_degree": "Degree",
+        "components": "Components",
+        "countLabel": "How many nodes",
+        "top_one": "Top {{count}}",
+        "top_other": "Top {{count}}",
+        "totals": "{{nodes}} nodes and the {{edges}} relationships among them · size and colour: the score",
+        "truncated": "(more exist than are drawn)",
+        "ranking": "Ranking",
+        "rankingHint": "Highest first. Click to select; double-click to open it in Graph.",
+        "openInGraph": "Open in Graph",
+        "notComputedTitle": "No values yet",
+        "notComputedBody": "The graph metrics have not been computed for this tenant, or not for these nodes. Whoever maintains the tenant computes them in Overview.",
+        "toOverview": "Go to Overview",
+        "componentLabel": "Component",
+        "componentLargest_one": "The largest · {{count}} node",
+        "componentLargest_other": "The largest · {{count}} nodes",
+        "componentOption_one": "Component {{id}} · {{count}} node",
+        "componentOption_other": "Component {{id}} · {{count}} nodes",
+        "componentNote_one": "{{shown}} of {{count}} node in this component · {{islands}} components in all",
+        "componentNote_other": "{{shown}} of {{count}} nodes in this component (at most {{limit}} drawn) · {{islands}} components in all"
       }
     },
     "path": {
@@ -350,7 +385,35 @@
       "property": "Property",
       "distinct": "{{values}} across {{nodes}}",
       "distinctValues_one": "{{formatted}} distinct value",
-      "distinctValues_other": "{{formatted}} distinct values"
+      "distinctValues_other": "{{formatted}} distinct values",
+      "algorithms": {
+        "title": "Graph algorithms",
+        "hint": "Computed by graphos over the whole graph and stored on the nodes, where Explore, Browse and the API use them. They run only when started: run them again after a large load.",
+        "groups": "Groups (Louvain)",
+        "groupsWhat": "Communities: nodes more connected to each other than to the rest of the graph.",
+        "groupsStatus_one": "{{count}} group · modularity {{modularity}} · {{when}}",
+        "groupsStatus_other": "{{count}} groups · modularity {{modularity}} · {{when}}",
+        "metrics": "Metrics",
+        "metricsWhat": "PageRank (what everything depends on), betweenness (bridges), connected components and degree.",
+        "metricsStatus": "{{metrics}} · {{nodes}} nodes · {{when}}",
+        "metricNames": {
+          "degree": "degree",
+          "pagerank": "PageRank",
+          "components": "components",
+          "betweenness": "betweenness"
+        },
+        "betweenness": "Include betweenness (slow on large graphs)",
+        "notComputed": "Not computed yet.",
+        "noRecentRun": "No recent run.",
+        "running": "Computing…",
+        "lastFailed": "The last run failed: {{detail}}",
+        "compute": "Compute",
+        "computeAgain": "Compute again",
+        "louvainMissing": "Needs Louvain, an optional part this server does not have (installation guide, Louvain).",
+        "oneAtATime": "One whole-graph computation runs at a time on a tenant; the other waits until it ends.",
+        "metricsDone": "Graph metrics computed",
+        "metricsFailed": "Computing the graph metrics failed"
+      }
     },
     "activity": {
       "everyone": "Everyone",
@@ -762,6 +825,17 @@
       "zoomOut": "Zoom out",
       "showAll": "Show everything",
       "zoomIn": "Zoom in"
+    },
+    "graphMetrics": {
+      "title": "Computed by graphos",
+      "group": "group",
+      "groupNamed": "{{name}} ({{id}})",
+      "pagerank": "PageRank",
+      "betweenness": "betweenness",
+      "degree": "degree",
+      "degreeValue": "{{total}} (in {{in}}, out {{out}})",
+      "component": "component",
+      "largest": "the largest"
     }
   },
   "notices": {

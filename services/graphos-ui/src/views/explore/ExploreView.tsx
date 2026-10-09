@@ -14,15 +14,16 @@ import { NewEdgeDialog } from "../../components/NewEdgeDialog";
 import { NewNodeDialog } from "../../components/NewNodeDialog";
 import { useCreateEdge, useCreateNode, useSchema } from "../../data/queries";
 import { categorize } from "../../graph/canvasStyle";
-import { displayName, moreKey, type NodeRef } from "../../graph/GraphModel";
+import { displayName, moreKey, type GraphModel, type NodeRef } from "../../graph/GraphModel";
 import { Endpoints } from "../../lib/endpoints";
+import { SIZE_MODES, type SizeBy } from "../../lib/metrics";
 import { useWorkspace } from "../../graph/WorkspaceProvider";
 import { useTenantSession } from "../../session/SessionProvider";
 import { usePalette } from "../../theme/usePalette";
 import { CanvasStatus } from "./CanvasStatus";
 import { ExploreActions } from "./ExploreActions";
 import classes from "./ExploreView.module.css";
-import { GroupsView } from "./GroupsView";
+import { GroupsMode } from "./GroupsMode";
 import { MapView } from "./MapView";
 import { ModeSwitch } from "./ModeSwitch";
 import { useExpandNode } from "./useExpandNode";
@@ -50,7 +51,7 @@ export function ExploreView() {
   const { t } = useTranslation();
   const { canWrite, api } = useTenantSession();
   const workspace = useWorkspace();
-  const { model, version, selected, select, selectedEdge, selectEdge, colorBy, open, overview, frameOn, mode } =
+  const { model, version, selected, select, selectedEdge, selectEdge, colorBy, sizeBy, open, overview, frameOn, mode } =
     workspace;
   const { load } = useWholeGraph();
   const palette = usePalette();
@@ -83,6 +84,13 @@ export function ExploreView() {
   // `version` changes with the model, so categories and neighbourhoods are recomputed.
   const categories = useMemo(() => categorize(model, colorBy), [model, colorBy, version]);
   const hubs = useMemo(() => new Set(model.hubs(HUB_LABELS)), [model, version]);
+  // The metrics the canvas nodes carry, and the largest value of the one sized by.
+  const metricMax = useMemo(() => canvasMetricMax(model), [model, version]);
+  const sizes = useMemo(() => {
+    if (sizeBy === "connections") return undefined;
+    const max = metricMax.get(sizeBy) ?? 0;
+    return max > 0 ? { property: sizeBy, max } : undefined;
+  }, [sizeBy, metricMax]);
   const emphasis = useMemo(
     () => ({
       selected,
@@ -97,8 +105,9 @@ export function ExploreView() {
       fresh,
       hubs,
       isolate: focusOnly,
+      sizes,
     }),
-    [model, selected, selectedEdge, categories, recent, fresh, hubs, focusOnly, version],
+    [model, selected, selectedEdge, categories, recent, fresh, hubs, focusOnly, sizes, version],
   );
 
   const selectedNode = selected ? model.graph.getNodeAttributes(selected) : null;
@@ -158,7 +167,7 @@ export function ExploreView() {
   );
 
   if (mode === "map") return <MapView onMode={workspace.setMode} />;
-  if (mode === "groups") return <GroupsView onMode={workspace.setMode} />;
+  if (mode === "groups") return <GroupsMode onMode={workspace.setMode} />;
 
   const connect = async (type: string, to: SearchHit) => {
     if (!selected || !selectedNode) return;
@@ -204,11 +213,14 @@ export function ExploreView() {
           isEmpty={model.isEmpty}
           busy={isExpanding}
           colorBy={colorBy}
+          sizeBy={sizeBy}
+          sizeOptions={new Set(metricMax.keys())}
           lastStep={model.lastStep}
           focusOnly={focusOnly}
           onBack={() => model.undo()}
           onFocus={() => setFocusOnly((on) => !on)}
           onColorBy={workspace.setColorBy}
+          onSizeBy={workspace.setSizeBy}
           onNewNode={() => {
             setNewLabel(undefined);
             startCreating("node");
@@ -288,4 +300,19 @@ export function ExploreView() {
       ) : null}
     </div>
   );
+}
+
+/** For each size-by metric some canvas node carries, its largest value there. */
+function canvasMetricMax(model: GraphModel): Map<SizeBy, number> {
+  const max = new Map<SizeBy, number>();
+  model.graph.forEachNode((_, node) => {
+    if (node.more !== undefined) return;
+    for (const mode of SIZE_MODES) {
+      if (mode === "connections") continue;
+      const value = node.properties[mode];
+      if (typeof value === "number" && value > (max.get(mode) ?? 0)) max.set(mode, value);
+      else if (typeof value === "number" && !max.has(mode)) max.set(mode, 0);
+    }
+  });
+  return max;
 }

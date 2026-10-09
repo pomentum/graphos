@@ -6,11 +6,13 @@ import { CountBars } from "../../components/CountBars";
 import { StatTile } from "../../components/StatTile";
 import { useHistogram, useProperties, useStats } from "../../data/queries";
 import { formatBytes, formatCount } from "../../lib/time";
+import { GraphAlgorithms } from "./GraphAlgorithms";
 import classes from "./OverviewView.module.css";
 
 /**
- * Overview: how big the tenant is, which labels and relationships it has,
- * and how the values of one property are spread across a label. The label
+ * Overview: how big the tenant is, its graph algorithms (groups and metrics:
+ * what they last found, and running them), which labels and relationships it
+ * has, and how the values of one property are spread across a label. The label
  * and property live in the address, so they survive moving between views.
  */
 export function OverviewView() {
@@ -66,6 +68,10 @@ export function OverviewView() {
           <StatTile label={t("views.overview.stats.storage")} value={formatBytes(stats.data?.total_bytes ?? 0)} />
         </SimpleGrid>
       )}
+
+      <div className={classes.section}>
+        <GraphAlgorithms />
+      </div>
 
       <SimpleGrid cols={{ base: 1, md: 2 }} mt="xl" spacing="xl">
         <Stack gap="xs">

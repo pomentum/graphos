@@ -85,3 +85,21 @@
     box-shadow: -8px 0 24px rgba(0, 0, 0, 0.18);
   }
 }
+
+/* A metric view's ranking: rank, name, label, value. */
+.rankRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border-radius: var(--mantine-radius-sm);
+}
+
+.rankRow:hover {
+  background: var(--gx-group);
+}
+
+.rankRow[data-selected] {
+  background: var(--mantine-color-accent-light);
+}

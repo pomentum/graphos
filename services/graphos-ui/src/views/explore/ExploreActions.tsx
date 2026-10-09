@@ -7,10 +7,12 @@ import {
   IconLink,
   IconPalette,
   IconTrashX,
+  IconCircles,
 } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { ColorBy } from "../../graph/canvasStyle";
+import { SIZE_MODES, type SizeBy } from "../../lib/metrics";
 import { isApple } from "../../lib/platform";
 import classes from "./ExploreView.module.css";
 
@@ -24,11 +26,15 @@ export interface ExploreActionsProps {
   isEmpty: boolean;
   busy: boolean;
   colorBy: ColorBy;
+  sizeBy: SizeBy;
+  /** The metrics some node on the canvas carries: those can size the nodes. */
+  sizeOptions: Set<SizeBy>;
   /** What Back would undo, or null. */
   lastStep: string | null;
   /** Only the selection's neighbourhood is shown. */
   focusOnly: boolean;
   onColorBy: (colorBy: ColorBy) => void;
+  onSizeBy: (sizeBy: SizeBy) => void;
   onNewNode: () => void;
   onConnect: () => void;
   onBack: () => void;
@@ -36,10 +42,11 @@ export interface ExploreActionsProps {
   onClear: () => void;
 }
 
-/** The buttons over the canvas: Back, Focus, new node, connect, colours, clear. */
+/** The buttons over the canvas: Back, Focus, new node, connect, colours, size, clear. */
 export function ExploreActions(props: ExploreActionsProps) {
   const { t } = useTranslation();
-  const { canWrite, hasSelection, isEmpty, busy, colorBy, lastStep, focusOnly } = props;
+  const { canWrite, hasSelection, isEmpty, busy, colorBy, sizeBy, sizeOptions, lastStep, focusOnly } = props;
+  const noMetrics = sizeOptions.size === 0;
   const undoKey = isApple() ? "⌘Z" : "Ctrl+Z";
   return (
     <Group gap={6} className={classes.actions}>
@@ -107,6 +114,28 @@ export function ExploreActions(props: ExploreActionsProps) {
                 {t(`views.explore.colours.${mode}`)}
               </Menu.Item>
             ))}
+          </Menu.Dropdown>
+        </Menu>
+      ) : null}
+      {!isEmpty ? (
+        <Menu position="bottom-start" width={220}>
+          <Menu.Target>
+            <Button size="compact-xs" variant="default" leftSection={<IconCircles size={14} />}>
+              {t("views.explore.actions.size")}
+            </Button>
+          </Menu.Target>
+          <Menu.Dropdown>
+            {SIZE_MODES.map((mode) => (
+              <Menu.Item
+                key={mode}
+                disabled={mode !== "connections" && !sizeOptions.has(mode)}
+                onClick={() => props.onSizeBy(mode)}
+                rightSection={sizeBy === mode ? <IconCheck size={14} /> : null}
+              >
+                {t(`views.explore.sizes.${mode}`)}
+              </Menu.Item>
+            ))}
+            {noMetrics ? <Menu.Label>{t("views.explore.sizes.noMetrics")}</Menu.Label> : null}
           </Menu.Dropdown>
         </Menu>
       ) : null}
