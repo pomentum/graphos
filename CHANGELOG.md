@@ -4,7 +4,7 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.6.0 — 2026-10-09
 
 A registration no longer carries SQL: indexes and generated columns are declared, and graphos writes
 the DDL, as it already did for search indexes and resolve rules. A **breaking change** for clients
