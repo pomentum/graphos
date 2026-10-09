@@ -30,18 +30,18 @@ A tenant is one AGE graph plus the spec that describes it. There are no
 built-in tenants. An admin, or a user with `create_tenants` on a matching name
 pattern (who then owns it), registers each one with `POST /v1/tenants`:
 `vertex_labels`, `edge_labels` (optionally with a `resolve_rule`, §7),
-`indexes`, `generated_columns`, `label_hierarchy` (child → parent label
-inheritance), and free-form `meta`.
+`property_indexes`, `generated_columns`, `label_hierarchy` (child → parent
+label inheritance), and free-form `meta`.
 
 - **Idempotent.** Re-posting is safe. By default the stored spec is merged
-  (labels and DDL lists unioned); `?force_shrink=true` replaces it. graphos
+  (labels and declarations unioned); `?force_shrink=true` replaces it. graphos
   serves, and the response reports, the merged spec, so a partial
   re-registration never hides earlier labels. A bad `label_hierarchy` → 422.
-- **Registration DDL is validated** (`contracts/ddl.py`): each `indexes` entry
-  must be one `CREATE [UNIQUE] INDEX IF NOT EXISTS … ON <tenant>.<own label> …`,
-  and each `generated_columns` entry must be one
-  `ALTER TABLE <tenant>.<own label> ADD COLUMN … GENERATED ALWAYS AS (…) STORED`.
-  Embedded `;`, comments, and dollar quoting are rejected.
+- **No client SQL.** Indexes and generated columns are declared
+  (`{label, properties, kind, unique}`, `{label, column, property, type}`) and
+  graphos writes the DDL, as for search indexes and resolve rules. SQL
+  statements, accepted before 0.6.0, are refused with 422 (the empty lists
+  older clients send are accepted).
 - **Specs persist** in `graphos_meta.tenants` and are re-applied at startup;
   a tenant whose re-apply fails is logged and skipped, and the service still
   starts.
@@ -553,12 +553,14 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   `(start_id, end_id)`, a btree on `end_id`, and partial btrees on
   `end_community_id` and `start_community_id`. Details in
   [concept §2.3](concept.md#23-indexes-created-at-registration).
-- **Consumer indexes:** declare any other hot property via `indexes`. For
-  `nodes:scan` filters the expression must be
-  `(((properties::text)::jsonb) ->> '<prop>')`.
-- **Generated columns:** promote a JSONB key to a stored column
-  (`generated_columns`). Plan them before a label fills up, since adding one
-  rewrites the table. Because graphos writes rows through SQL, not Cypher,
+- **Property indexes:** declare any other hot property in `property_indexes`
+  (`equality` for `where` filters, optionally `unique`; `trigram` for
+  substring search). graphos builds them on the expression `nodes:scan`
+  filters compile to, without blocking writes.
+- **Generated columns:** promote a property to a stored column for direct SQL
+  readers (`generated_columns`, typed `text`, `numeric`, `boolean` or
+  `jsonb`). Plan them before a label fills up, since adding one rewrites the
+  table. Because graphos writes rows through SQL, not Cypher,
   a generated column on a vertex label is filled correctly and does not
   trigger the AGE crash described in [concept §4](concept.md#4-write-paths).
 - **Caps:** every read has a hard `limit`; scans also stop at a 10 MiB payload;

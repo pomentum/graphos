@@ -337,7 +337,7 @@ def test_register_response_exposes_n_resolver_indexes() -> None:
         tenant="t",
         vertex_labels=["Document"],
         edge_labels=["REFERENCES"],
-        n_indexes=0,
+        n_property_indexes=0,
         n_generated_columns=0,
         n_inheritance_edges=0,
         n_resolve_rules=1,

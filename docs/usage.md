@@ -282,7 +282,8 @@ owner), `maintain` on it (or a matching `create_tenants`) to re-register one. Th
 | `name` | str | `^[A-Za-z][A-Za-z0-9_]{0,62}$`. Becomes the AGE graph and Postgres schema name. |
 | `vertex_labels` | list[str] | each must match `^[A-Z][A-Za-z0-9_]{0,62}$` |
 | `edge_labels` | list[str \| `{name, resolve_rule}`] | same pattern; `resolve_rule` is covered in §9 |
-| `indexes`, `generated_columns` | list[str] | validated DDL (see below) |
+| `property_indexes` | list of `{label, properties, kind, unique, name}` | indexes on vertex-label properties (see below) |
+| `generated_columns` | list of `{label, column, property, type}` | stored columns computed from a property (see below) |
 | `label_hierarchy` | dict child→parent | both labels must be in `vertex_labels`, and a label cannot be its own parent; reads on the parent see the child's rows |
 | `meta` | dict[str, str] | free-form |
 | `search_indexes` | dict name → `{labels, properties, analyzer, language}` | named search indexes for ranked search (§5, *search*); name `^[a-z][a-z0-9_]{0,39}$` |
@@ -322,22 +323,35 @@ predates them cannot drop them when it rewrites a spec.
 `properties`), `<Label>_id_unique` (unique on the `id` property, so ids are unique within a label),
 `<Label>_community_id`, and `<Label>_name_trgm` (trigram GIN on `name`, serves `/graph/search`). Per
 edge label: unique and plain `(start_id, end_id)` indexes, an `end_id` btree, and partial indexes on
-`end_community_id` and `start_community_id`. Any other index has to be declared in `indexes`.
+`end_community_id` and `start_community_id`. Any other property is indexed by declaring it in
+`property_indexes`.
 
-**Allowed DDL** (`contracts/ddl.py`). Each string must be exactly one statement of one of these forms:
+**Property indexes.** A registration declares what to index, not how; graphos writes the SQL, as for
+search indexes and resolve rules, and no SQL is accepted from a client. Each entry:
 
-```text
-CREATE [UNIQUE] INDEX IF NOT EXISTS <name> ON <tenant>.<label> [USING btree|gin|gist|hash|brin|spgist] (...) [INCLUDE (...)] [WHERE ...]
-ALTER TABLE <tenant>.<label> ADD [COLUMN] [IF NOT EXISTS] <col> <type> GENERATED ALWAYS AS (...) STORED
-```
+| Key | Default | Meaning |
+|---|---|---|
+| `label` | | a vertex label of the tenant (registered, or in the same request) |
+| `properties` | | 1 to 4 property names, in index order |
+| `kind` | `equality` | `equality`: a btree serving `where` filters (`=`, `!=`, `in`, `exists`) on those properties, as in `nodes:scan`; best for short values (ids, keys, kinds). `trigram`: a trigram GIN serving the substring match of `/graph/search?property=…` on one text property |
+| `unique` | `false` | no two nodes of the label may share the values (`equality` only): a write that would gets 409, and declaring it over nodes that already share values gets 422 |
+| `name` | `<Label>_<properties>_<kind>_idx` | the Postgres index name; an index of that name that already exists is kept as it is |
 
-The schema must be the tenant being registered, and the table one of its own labels (or
-`_ag_label_vertex` / `_ag_label_edge`). Unquoted names are lower-cased exactly as Postgres does, so
-quote mixed-case tenant and label names (`"Acme"."Doc"`). A generated column's `<type>` must be a
-plain type name (`text`, `integer`, `numeric(10,2)`, `double precision`, `jsonb`, `text[]`, …) with
-nothing else before `GENERATED`: no `CHECK`, `DEFAULT`, `NOT NULL` or `COLLATE`. Rejected anywhere:
-`;` (except one trailing), `--`, `/* */`, `$`, backslashes, prefixed literals (`E'..'`, `U&'..'`,
-`B'..'`, `X'..'`) and non-ASCII characters. Violations return 422.
+graphos builds each index with the expression its reads compile to, so the planner uses it, and
+builds it `CONCURRENTLY`: writes go on while it is built.
+
+**Generated columns.** `{label, column, property, type}` adds a stored column to a vertex label's
+table, for reading it with SQL directly (reports, BI tools); graphos's own reads do not use it. `type`
+is `text` (the value as text, any JSON type), `numeric` or `boolean` (the value when it is a JSON
+number / boolean, otherwise `NULL`) or `jsonb`; a value of another type never fails a write. The
+column name is lower case and may not be one graphos uses (`id`, `properties`, `start_id`, `end_id`,
+`end_community_id`, `start_community_id`, any `graphos_…`). A column cannot change once registered
+(422); adding one to a label that has nodes rewrites its table, so declare it early.
+
+Before 0.6.0 both were SQL statements (`indexes`, and strings in `generated_columns`); a request
+that still sends SQL in them gets 422, while the empty lists older clients send are accepted and
+ignored. Specs stored by an earlier version are converted when the server
+starts: see the [changelog](../CHANGELOG.md).
 
 ```bash
 curl -s -X POST "$G/v1/tenants" \
@@ -347,14 +361,16 @@ curl -s -X POST "$G/v1/tenants" \
   "name": "acme",
   "vertex_labels": ["User", "Document", "Tag"],
   "edge_labels": ["AUTHORED", "FOLLOWS", "TAGGED_WITH"],
-  "indexes": [
-    "CREATE INDEX IF NOT EXISTS document_lang ON acme.\"Document\" ((((properties::text)::jsonb) ->> 'lang'))"
+  "property_indexes": [
+    {"label": "Document", "properties": ["lang"]},
+    {"label": "User", "properties": ["email"], "unique": true}
   ]
 }
 EOF
 ```
 
-The expression matches the one `nodes:scan` filters on, so a `where` clause on `lang` can use it.
+A `where` clause on `lang` in `nodes:scan` then uses the first index; the second refuses a second user
+with the same `email`.
 
 | Call | Effect |
 |---|---|
@@ -366,7 +382,7 @@ The expression matches the one `nodes:scan` filters on, so a `where` clause on `
 Any token on a tenant, read-only included, can read its shape with `GET /v1/{tenant}/schema`:
 `{"name", "vertex_labels", "edge_labels", "label_hierarchy", "search_indexes", "rule_edge_labels",
 "edge_endpoints", "strict_endpoints"}`.
-It leaves out what only admins see (declared DDL, rule bodies, `meta`).
+It leaves out what only maintainers see (property indexes, generated columns, rule bodies, `meta`).
 
 While a tenant is unregistered, data-plane calls to it return 404. To remove the data itself, delete
 it before you unregister: use `DELETE /v1/{tenant}/graph/nodes?property_key=…&property_value=…`, or
@@ -949,7 +965,7 @@ Read access is enough for all four. A record:
 | `edges:resolve` | one `resolve` summary per edge type, `count` edges, no ids: re-read the type |
 | Louvain write-back | one `communities` summary, `count` nodes, no ids |
 | graph metrics write-back | one `metrics` summary, `count` nodes whose values changed, no ids |
-| schema change (registration that changes something, declared pair removed, unregister) | `op: schema`, `kind: tenant`: `detail.added` / `detail.removed` per part (`vertex_labels`, `edge_labels`, `edge_endpoints`, `label_hierarchy`, `search_indexes`, `resolve_rules` by edge type, `indexes` and `generated_columns` by count), `detail.strict_endpoints` as `[before, after]`, `detail.registered` / `detail.unregistered`. A re-registration that changes nothing records nothing |
+| schema change (registration that changes something, declared pair removed, unregister) | `op: schema`, `kind: tenant`: `detail.added` / `detail.removed` per part (`vertex_labels`, `edge_labels`, `edge_endpoints`, `label_hierarchy`, `search_indexes`, `resolve_rules` by edge type, `property_indexes` as `Document(lang)` / `User(email) unique`, `generated_columns` as `Document.lang (text, from lang)`; records from before 0.6.0 hold `indexes` and `generated_columns` by count), `detail.strict_endpoints` as `[before, after]`, `detail.registered` / `detail.unregistered`. A re-registration that changes nothing records nothing |
 
 New ops may be added; a consumer should treat an op it does not know as informational.
 
@@ -1179,11 +1195,11 @@ timeout is the exception: it returns `application/problem+json`.
 | 401 | missing or malformed `Authorization` header, unknown or expired token, or a failed sign-in |
 | 403 | no access to the tenant, a level below what the operation needs (`read` / `write` / `maintain` / `owner`), the endpoint needs admin, or a password that must be changed first |
 | 404 | tenant not registered; node (`GET`, `PATCH`, `POST …/properties`), edge (`GET`, `PATCH`), unregistered edge type in the path, or cache key not found; unknown tenant on `GET`/`DELETE /v1/tenants/{name}` |
-| 409 | removing the last admin; `recompute-communities` already running (or queued as a job) for the tenant; cancelling a finished job; an id or edge that matches in several labels (pass `label` / `src_label` / `dst_label`) |
+| 409 | removing the last admin; `recompute-communities` already running (or queued as a job) for the tenant; cancelling a finished job; an id or edge that matches in several labels (pass `label` / `src_label` / `dst_label`); a write that would give two nodes the values of a unique property index |
 | 410 | a change-feed cursor whose records were pruned (§10) |
 | 412 | `If-Match` did not match: the node or edge changed (or is gone) since it was read |
 | 413 | `snapshot-import` over 50M rows |
-| 422 | body or query validation (patterns, ranges, DDL, `resolve_rule`, `label_hierarchy`), or `order_by: null` sent with a `cursor` |
+| 422 | body or query validation (patterns, ranges, `resolve_rule`, `label_hierarchy`), or `order_by: null` sent with a `cursor`; a registration that sends SQL (`indexes`, or a string in `generated_columns`), declares a property index or generated column on a label that is not a vertex label, changes a registered generated column, or declares a unique index over values nodes already share |
 | 429 | rate limited (when enabled) |
 | 501 | Louvain extra not installed |
 | 503 | `/readyz` not ready |

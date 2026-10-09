@@ -1,9 +1,9 @@
 """Schema changes in the change feed: op ``schema``, kind ``tenant``.
 
 A registration that changes the tenant's schema (labels, edge types,
-declared pairs, label hierarchy, search indexes, resolve rules, indexes,
-``strict_endpoints``) is recorded with what it added, removed or switched;
-one that changes nothing (a consumer re-registering at startup) records
+declared pairs, label hierarchy, search indexes, resolve rules, property
+indexes, generated columns, ``strict_endpoints``) is recorded with what it
+added, removed or switched; one that changes nothing (a consumer re-registering at startup) records
 nothing.  Removing a declared pair and unregistering are recorded too.
 """
 
@@ -15,7 +15,7 @@ from typing import Any
 
 import asyncpg
 
-from graphos import changes
+from graphos import changes, declared
 from graphos.bootstrap import TenantSpec
 
 
@@ -33,24 +33,22 @@ def _sets(spec: TenantSpec | None) -> dict[str, set[Any]]:
             (name, json.dumps(rule, sort_keys=True, default=str))
             for name, rule in spec.resolve_rules
         },
-        "indexes": set(spec.indexes),
-        "generated_columns": set(spec.generated_columns),
+        "property_indexes": {declared.describe_index(x) for x in spec.property_indexes},
+        "generated_columns": {declared.describe_column(x) for x in spec.generated_columns},
     }
 
 
 def _shown(field: str, values: Iterable[Any]) -> list[Any]:
     if field == "resolve_rules":
         return sorted({name for name, _ in values})          # the edge types
-    if field in ("indexes", "generated_columns"):
-        return [len(list(values))]                            # SQL text: just how many
     return sorted(list(v) if isinstance(v, tuple) else v for v in values)
 
 
 def diff(before: TenantSpec | None, after: TenantSpec) -> dict[str, Any] | None:
     """What a registration changed, or ``None`` when it changed nothing.
 
-    ``added`` / ``removed`` per part (resolve rules by edge type, indexes and
-    generated columns by count), ``strict_endpoints`` as ``[old, new]``, and
+    ``added`` / ``removed`` per part (resolve rules by edge type),
+    ``strict_endpoints`` as ``[old, new]``, and
     ``registered: true`` for a new tenant.
     """
     old, new = _sets(before), _sets(after)
@@ -74,8 +72,8 @@ def size(detail: dict[str, Any]) -> int:
     """How many schema items a change touched (the record's ``count``), at least 1."""
     n = 0
     for part in ("added", "removed"):
-        for field, values in detail.get(part, {}).items():
-            n += values[0] if field in ("indexes", "generated_columns") else len(values)
+        for values in detail.get(part, {}).values():
+            n += len(values)
     return max(n + ("strict_endpoints" in detail), 1)
 
 

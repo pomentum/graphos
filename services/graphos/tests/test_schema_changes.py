@@ -11,13 +11,21 @@ def _spec(**fields: object) -> TenantSpec:
 
 
 def test_a_new_tenant_is_recorded_with_everything_it_declares() -> None:
-    after = _spec(vertex_labels=("A",), edge_labels=("R",), indexes=("CREATE INDEX x",))
+    after = _spec(
+        vertex_labels=("A",), edge_labels=("R",),
+        property_indexes=({"label": "A", "properties": ["k"], "kind": "equality",
+                           "unique": True, "name": None},),
+        generated_columns=({"label": "A", "column": "k", "property": "k", "type": "text"},),
+    )
     detail = diff(None, after)
     assert detail == {
-        "added": {"vertex_labels": ["A"], "edge_labels": ["R"], "indexes": [1]},
+        "added": {
+            "vertex_labels": ["A"], "edge_labels": ["R"],
+            "property_indexes": ["A(k) unique"], "generated_columns": ["A.k (text, from k)"],
+        },
         "registered": True,
     }
-    assert size(detail) == 3
+    assert size(detail) == 4
 
 
 def test_an_unchanged_spec_records_nothing() -> None:

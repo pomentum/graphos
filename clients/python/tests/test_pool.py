@@ -21,7 +21,8 @@ from graphos_client import (
 _SCHEMA = TenantSchema(
     vertex_labels=["User", "Document"],
     edge_labels=["AUTHORED"],
-    indexes=['CREATE INDEX IF NOT EXISTS doc_kind ON "{tenant}"."Document" ((properties))'],
+    property_indexes=[{"label": "Document", "properties": ["kind"]}],
+    generated_columns=[{"label": "Document", "column": "kind", "property": "kind"}],
 )
 _NODES_OK = {"tenant": "t", "nodes_upserted": 1, "by_label": {"User": 1}, "elapsed_ms": 1}
 
@@ -65,10 +66,13 @@ async def test_pool_registers_each_tenant_once_even_under_concurrency() -> None:
     assert len({id(c) for c in clients}) == 1
     regs = server.registrations()
     assert [r["name"] for r in regs] == ["acme", "globex"]
-    # {tenant} in DDL is substituted per tenant.
-    assert regs[0]["indexes"] == [
-        'CREATE INDEX IF NOT EXISTS doc_kind ON "acme"."Document" ((properties))'
-    ]
+    # The same declarations for every tenant; no SQL is sent.
+    for reg in regs:
+        assert reg["property_indexes"] == [{"label": "Document", "properties": ["kind"]}]
+        assert reg["generated_columns"] == [
+            {"label": "Document", "column": "kind", "property": "kind"},
+        ]
+        assert "indexes" not in reg
 
 
 @pytest.mark.asyncio

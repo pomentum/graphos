@@ -57,6 +57,23 @@ describe("activity rows", () => {
       "Changed the schema: added labels A, B, C, 2 more, label pair Doc –LINKS→ Tag, 2 indexes; " +
         "removed parent B → A; strict endpoints on",
     );
+    // Declared since 0.6.0: listed by what they are.
+    expect(
+      describeChange(
+        schema({
+          added: {
+            property_indexes: ["Doc(kind)", "User(email) unique"],
+            generated_columns: ["Doc.kind (text, from kind)"],
+          },
+        }),
+      ),
+    ).toBe(
+      "Changed the schema: added property indexes Doc(kind), User(email) unique, " +
+        "generated column Doc.kind (text, from kind)",
+    );
+    expect(describeChange(schema({ added: { generated_columns: [1] } }))).toBe(
+      "Changed the schema: added 1 generated column",
+    );
   });
 
   it("words a summary over every label without a label", () => {

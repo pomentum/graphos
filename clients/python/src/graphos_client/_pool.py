@@ -34,15 +34,15 @@ class TenantSchema:
     """What to register for every tenant the pool serves.
 
     ``edge_labels`` entries are plain names or ``{"name": ..., "resolve_rule": {...}}``
-    dicts; ``indexes`` / ``generated_columns`` are the DDL strings the server
-    validates. Use ``{tenant}`` in DDL where the tenant name belongs; the pool
-    substitutes it (e.g. ``ON "{tenant}"."Document" (...)``).
+    dicts; ``property_indexes`` / ``generated_columns`` are declarations, as for
+    :meth:`GraphosClient.register_tenant` (no SQL, and nothing tenant-specific
+    in them).
     """
 
     vertex_labels: tuple[str, ...] = ()
     edge_labels: tuple[str | Mapping[str, Any], ...] = ()
-    indexes: tuple[str, ...] = ()
-    generated_columns: tuple[str, ...] = ()
+    property_indexes: tuple[Mapping[str, Any], ...] = ()
+    generated_columns: tuple[Mapping[str, Any], ...] = ()
     label_hierarchy: Mapping[str, str] = field(default_factory=dict)
     meta: Mapping[str, str] = field(default_factory=dict)
 
@@ -51,14 +51,14 @@ class TenantSchema:
         *,
         vertex_labels: Iterable[str] = (),
         edge_labels: Iterable[str | Mapping[str, Any]] = (),
-        indexes: Iterable[str] = (),
-        generated_columns: Iterable[str] = (),
+        property_indexes: Iterable[Mapping[str, Any]] = (),
+        generated_columns: Iterable[Mapping[str, Any]] = (),
         label_hierarchy: Mapping[str, str] | None = None,
         meta: Mapping[str, str] | None = None,
     ) -> None:
         object.__setattr__(self, "vertex_labels", tuple(vertex_labels))
         object.__setattr__(self, "edge_labels", tuple(edge_labels))
-        object.__setattr__(self, "indexes", tuple(indexes))
+        object.__setattr__(self, "property_indexes", tuple(property_indexes))
         object.__setattr__(self, "generated_columns", tuple(generated_columns))
         object.__setattr__(self, "label_hierarchy", dict(label_hierarchy or {}))
         object.__setattr__(self, "meta", dict(meta or {}))
@@ -179,8 +179,8 @@ class GraphosPool:
         await cli.register_tenant(
             vertex_labels=s.vertex_labels,
             edge_labels=s.edge_labels,
-            indexes=[ddl.replace("{tenant}", tenant) for ddl in s.indexes],
-            generated_columns=[ddl.replace("{tenant}", tenant) for ddl in s.generated_columns],
+            property_indexes=s.property_indexes,
+            generated_columns=s.generated_columns,
             label_hierarchy=s.label_hierarchy,
             meta=s.meta,
         )

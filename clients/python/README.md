@@ -56,8 +56,7 @@ from graphos_client import GraphosPool, TenantSchema
 schema = TenantSchema(
     vertex_labels=["User", "Document"],
     edge_labels=["AUTHORED"],
-    indexes=['CREATE INDEX IF NOT EXISTS doc_kind ON "{tenant}"."Document" '
-             "(((properties::text)::jsonb ->> 'kind'))"],   # {tenant} is substituted
+    property_indexes=[{"label": "Document", "properties": ["kind"]}],   # serves `where kind = ...`
 )
 
 async with GraphosPool(base_url=URL, auth=PasswordAuth("loader", SECRET), schema=schema) as pool:

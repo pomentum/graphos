@@ -67,10 +67,14 @@ log = logging.getLogger(__name__)
 
 @contextlib.contextmanager
 def _db_errors(message: str, *, query: str, **context: Any) -> Iterator[None]:
-    """Re-raise database errors as :class:`CypherError`, timeouts untouched."""
+    """Re-raise database errors as :class:`CypherError`, timeouts untouched.
+
+    A unique violation is left as it is too: it is a declared unique property
+    index refusing a duplicate (the API answers 409), not a bad request.
+    """
     try:
         yield
-    except asyncpg.exceptions.QueryCanceledError:
+    except (asyncpg.exceptions.QueryCanceledError, asyncpg.exceptions.UniqueViolationError):
         raise
     except asyncpg.exceptions.PostgresError as exc:
         log.warning(message, extra={**context, "sqlstate": exc.sqlstate})

@@ -151,6 +151,11 @@ async def test_delete_by_id_removes_every_label_and_its_edges(db_pool: asyncpg.P
 
 def test_database_errors_become_cypher_errors_timeouts_do_not() -> None:
     with pytest.raises(CypherError), writes._db_errors("failed", query="q"):
+        raise asyncpg.exceptions.InvalidTextRepresentationError("bad input")
+    # A declared unique property index refusing a duplicate: the API answers 409.
+    with pytest.raises(asyncpg.exceptions.UniqueViolationError), writes._db_errors(
+        "failed", query="q",
+    ):
         raise asyncpg.exceptions.UniqueViolationError("duplicate key")
     with pytest.raises(asyncpg.exceptions.QueryCanceledError), writes._db_errors(
         "failed", query="q",

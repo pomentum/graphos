@@ -182,8 +182,8 @@ postmaster then restarts the whole server and every connection drops.
 
 graphos label tables can carry such columns in two ways: bootstrap adds
 `end_community_id` and `start_community_id` columns to every edge table (§9,
-community-scoped traversal), and registration `generated_columns` add columns to any vertex
-or edge label. Verified live on AGE 1.6.0. graphos therefore issues **no
+community-scoped traversal), and declared `generated_columns` add columns to vertex
+labels. Verified live on AGE 1.6.0. graphos therefore issues **no
 Cypher writes**: every node and edge write is the SQL `INSERT … ON CONFLICT
 … DO UPDATE SET properties = properties || EXCLUDED.properties` of §6,
 which never enters AGE's tuple-building code and keeps the same contract

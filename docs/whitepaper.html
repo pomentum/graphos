@@ -529,7 +529,7 @@ html{scroll-behavior:smooth}
     <ul>
       <li>Read endpoints cap their <code>limit</code> parameters and report <code>truncated</code> when a result was cut.</li>
       <li>Every statement runs under a server-side <code>statement_timeout</code> (60 s by default); one that runs too long is cancelled by Postgres and the request returns <code>504</code> as <code>problem+json</code> instead of holding the pool. The few deliberately long operations (index builds, Louvain, rule resolution, vacuum) raise the limit for their own statements only, and Louvain, rule resolution and vacuum can also run as background jobs (section 7). Every endpoint is plain SQL, never Cypher: on a large graph, AGE's Cypher executor was seen ignoring both the timeout and a cancel for over ten minutes.</li>
-      <li>Label and property names are checked against an identifier pattern and the tenant's registered schema, and index or generated-column DDL supplied at registration must be a single <code>CREATE INDEX</code> / <code>ADD COLUMN … GENERATED</code> statement on the tenant's own tables, so neither can carry arbitrary SQL.</li>
+      <li>Label and property names are checked against an identifier pattern and the tenant's registered schema, and indexes and generated columns are declared at registration (a label and its properties), with graphos writing the SQL itself, so no client SQL reaches the database.</li>
       <li>No static tokens. People and service accounts sign in with a password or secret, kept only as a hash, and get an access token valid fifteen minutes that clients renew themselves. Disabling a user, resetting its secret or removing a grant applies at the next request, on every replica. The first administrator's password must be changed at the first sign-in.</li>
       <li>Access is a level per tenant: read, write, maintain (schema, recomputations) or own (who else has access). Every operation declares the level it needs, and the OpenAPI schema shows it; a test fails if an operation declares none, if any tenant operation accepts a caller with no access to that tenant, or one a level too low. A service that creates its own tenants owns them without being an administrator, and a dashboard can hold a user that cannot change anything.</li>
       <li>graphos-api connects to Postgres as an unprivileged role (no superuser, cannot create roles or databases); the superuser is only used to initialise the database.</li>
@@ -738,7 +738,7 @@ html{scroll-behavior:smooth}
         <tr><td>Community id</td><td class="n">2.4 s</td><td class="n good">0.5 ms</td></tr>
       </tbody>
     </table></div>
-    <p>Any other hot property is yours to index: declare it at registration and graphos creates it. graphos also indexes each edge table's graphid, which AGE leaves unindexed (built without blocking writes: 12 s for an 8M-row table), and collects statistics for label tables that have never had any, so the planner does not guess.</p>
+    <p>Any other hot property is yours to index: declare the label and properties at registration, and graphos writes the index itself, on the expression its filters use, without blocking writes; no SQL is taken from a client. graphos also indexes each edge table's graphid, which AGE leaves unindexed (built without blocking writes: 12 s for an 8M-row table), and collects statistics for label tables that have never had any, so the planner does not guess.</p>
     <h3>Search</h3>
     <p>A large tenant with 82 vertex labels, queried with names sampled from its own data: the name as stored, its words split apart, and the name with one typo. "Before" is the substring search on <code>name</code> that was the only search earlier.</p>
     <div class="tbl"><table>
@@ -790,7 +790,7 @@ html{scroll-behavior:smooth}
     <p>Some choices are deliberate in the current design:</p>
     <ul>
       <li><strong>Typed endpoints rather than query passthrough.</strong> graphos does not expose a raw Cypher or SQL endpoint today; that is what keeps limits, timeouts and tenant checks enforceable. Pattern queries are composed from primitives (scan for a node set, then neighbors or induced edges), and new needs are met by adding typed endpoints.</li>
-      <li><strong>No connection strings</strong> for consumers, and no DDL through the API beyond tenant registration.</li>
+      <li><strong>No connection strings</strong> for consumers, and no client SQL: tenant registration declares indexes and columns, and graphos writes their DDL.</li>
       <li><strong>No domain concepts.</strong> Labels and properties are opaque strings to graphos.</li>
     </ul>
     <p>And some limits that are simply where the project stands today:</p>

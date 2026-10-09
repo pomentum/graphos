@@ -4,6 +4,59 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+A registration no longer carries SQL: indexes and generated columns are declared, and graphos writes
+the DDL, as it already did for search indexes and resolve rules. A **breaking change** for clients
+that send SQL in `indexes` or `generated_columns` (see *Upgrading from 0.5.1*); clients that never
+did keep working unchanged.
+
+### Changed
+
+- **Property indexes are declared** (`property_indexes`), replacing `indexes` (SQL statements):
+  `{"label": "Document", "properties": ["kind"]}`, with `"unique": true` to refuse duplicates, or
+  `"kind": "trigram"` for substring search on one property. graphos builds each one on the
+  expression its `where` filters compile to, so the planner uses it (an index written by hand with
+  another spelling of the expression was silently never used), and builds it without blocking
+  writes (the SQL ran as a plain `CREATE INDEX`, which does). Up to 4 properties; named
+  `<Label>_<properties>_<kind>_idx` unless `name` is given.
+- **Generated columns are declared** (`{label, column, property, type}`, `type` one of `text`,
+  `numeric`, `boolean`, `jsonb`), replacing `ALTER TABLE` statements. A value of another JSON type
+  gives `NULL` rather than failing the write; a registered column cannot change (422).
+- Both are vertex-label only (graphos's reads filter vertex properties), may name a label
+  registered earlier, and are reported in full by `GET /v1/tenants/{name}` (`property_indexes`,
+  `generated_columns`) instead of `n_indexes` / `n_generated_columns`; the registration response
+  has `n_property_indexes`. The change feed lists them (`Document(kind)`, `User(email) unique`)
+  instead of counting them.
+- A write that would break a unique property index gets **409** (it was a 400 naming the
+  database error); declaring one over nodes that already share values gets 422.
+- The Python client's `register_tenant` and `TenantSchema` take `property_indexes` and
+  declarative `generated_columns`; `TenantSchema` no longer substitutes `{tenant}` (nothing in a
+  declaration is tenant-specific).
+
+### Removed
+
+- SQL in `indexes` and `generated_columns` in `POST /v1/tenants`: refused with 422 naming the
+  replacement. Empty lists, which clients before 0.6.0 send on every registration, are accepted
+  and ignored, so those clients register as before. The SQL validator (`contracts/ddl.py`) is
+  gone.
+
+### Upgrading from 0.5.1
+
+- **Clients:** nothing to do for a client that sends no SQL (the 0.5 Python client sends empty
+  `indexes` and `generated_columns`, which are accepted); upgrading it gives the new parameters. A
+  client that sends SQL: replace `indexes` with `property_indexes` and each `generated_columns`
+  statement with its declaration. `CREATE INDEX IF NOT EXISTS doc_kind ON "acme"."Document"
+  (((properties::text)::jsonb ->> 'kind'))` becomes
+  `{"label": "Document", "properties": ["kind"], "name": "doc_kind"}` (keep `name` to reuse the
+  existing index rather than build a second one).
+- **Stored specs** are converted when the server first starts: a statement that a declaration
+  expresses (a btree or `gin_trgm_ops` index on `((properties::text)::jsonb ->> '<prop>')`, unique
+  or not, without `WHERE` or `INCLUDE`; a `text` or `jsonb` column of one property) becomes that
+  declaration, keeping the index name. Any other statement is left out of the spec and logged
+  (`tenant spec statement left out`, with the statement); what it created stays in Postgres and
+  keeps working, but graphos no longer re-creates it.
+
 ## 0.5.1 — 2026-10-09
 
 This release brings the graph algorithms into the web UI (run them from Overview, look at the graph

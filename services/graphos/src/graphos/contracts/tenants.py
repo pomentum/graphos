@@ -5,9 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
-
-from graphos.contracts.ddl import validate_ddl
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # Tenant name = AGE graph name = postgres schema name. AGE preserves
 # case (the schema is created as a quoted identifier), so mixed case
@@ -288,6 +286,139 @@ class EdgeLabelSpec(BaseModel):
 # A registration may declare at most this many label pairs in one request.
 MAX_EDGE_ENDPOINTS = 5000
 
+_INDEX_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+_COLUMN_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
+# Columns graphos adds to label tables itself; a generated column may not take
+# these names (or any other ``graphos_`` name).
+_RESERVED_COLUMNS = frozenset(
+    {"id", "properties", "start_id", "end_id", "end_community_id", "start_community_id"},
+)
+_RESERVED_COLUMN_PREFIX = "graphos_"
+# Before 0.6.0 ``indexes`` and ``generated_columns`` were SQL statements.
+_SQL_REPLACED = (
+    "SQL statements are no longer accepted (since 0.6.0): declare {what} instead, "
+    "and graphos writes the SQL"
+)
+
+
+def _property_name(v: str) -> str:
+    if not _SEARCH_PROPERTY.fullmatch(v):
+        raise ValueError(f"property {v!r} must match {_SEARCH_PROPERTY.pattern}")
+    return v
+
+
+class PropertyIndexSpec(BaseModel):
+    """An index on one or more properties of a vertex label.
+
+    graphos writes the index with the expression its own reads use, so it
+    serves them: ``equality`` (a btree) the ``where`` filters of
+    ``nodes:scan`` and the other reads that take them (``=``, ``!=``, ``in``,
+    ``exists``), ``trigram`` the substring match of ``/graph/search`` without
+    an ``index``. Built without blocking writes.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(description="A vertex label of the tenant.")
+    properties: list[str] = Field(
+        min_length=1, max_length=4,
+        description="The properties indexed, in this order (one for `trigram`).",
+    )
+    kind: Literal["equality", "trigram"] = Field(
+        "equality",
+        description=(
+            "`equality`: `where` filters (=, !=, in, exists); best for short values such as "
+            "ids, keys and kinds. `trigram`: substring search on one text property."
+        ),
+    )
+    unique: bool = Field(
+        False,
+        description=(
+            "No two nodes of the label may share the values (`equality` only). A write that "
+            "would is refused with 409; registering fails with 422 if nodes already do."
+        ),
+    )
+    name: str | None = Field(
+        None,
+        description=(
+            "Postgres index name; omitted, graphos names it `<Label>_<properties>_<kind>_idx`. "
+            "An index of that name that already exists is kept as it is."
+        ),
+    )
+
+    @field_validator("label")
+    @classmethod
+    def _label(cls, v: str) -> str:
+        if not _LABEL_PATTERN.fullmatch(v):
+            raise ValueError(f"label {v!r} must match {_LABEL_PATTERN.pattern}")
+        return v
+
+    @field_validator("properties")
+    @classmethod
+    def _properties(cls, v: list[str]) -> list[str]:
+        for p in v:
+            _property_name(p)
+        if len(set(v)) != len(v):
+            raise ValueError("properties must not repeat")
+        return v
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str | None) -> str | None:
+        if v is not None and not _INDEX_NAME.fullmatch(v):
+            raise ValueError(f"index name {v!r} must match {_INDEX_NAME.pattern}")
+        return v
+
+    @model_validator(mode="after")
+    def _kind_rules(self) -> PropertyIndexSpec:
+        if self.kind == "trigram" and (len(self.properties) != 1 or self.unique):
+            raise ValueError("a trigram index covers exactly one property and is not unique")
+        return self
+
+
+class GeneratedColumnSpec(BaseModel):
+    """A stored column on a vertex label, computed from one property.
+
+    For reading the label table with SQL directly (reports, BI tools);
+    graphos's own reads do not use it. graphos writes the expression, which
+    never fails a write: a value of another JSON type gives ``NULL``. Adding
+    one to a label that already has nodes rewrites its table.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(description="A vertex label of the tenant.")
+    column: str = Field(description="The column name (lower case).")
+    property: str = Field(description="The property it holds.")
+    type: Literal["text", "numeric", "boolean", "jsonb"] = Field(
+        "text",
+        description=(
+            "`text`: the value as text (any type); `numeric`, `boolean`: the value when it is "
+            "a JSON number / boolean, else NULL; `jsonb`: the value as JSON."
+        ),
+    )
+
+    @field_validator("label")
+    @classmethod
+    def _label(cls, v: str) -> str:
+        if not _LABEL_PATTERN.fullmatch(v):
+            raise ValueError(f"label {v!r} must match {_LABEL_PATTERN.pattern}")
+        return v
+
+    @field_validator("column")
+    @classmethod
+    def _column(cls, v: str) -> str:
+        if not _COLUMN_NAME.fullmatch(v):
+            raise ValueError(f"column {v!r} must match {_COLUMN_NAME.pattern}")
+        if v in _RESERVED_COLUMNS or v.startswith(_RESERVED_COLUMN_PREFIX):
+            raise ValueError(f"column name {v!r} is reserved by graphos")
+        return v
+
+    @field_validator("property")
+    @classmethod
+    def _property(cls, v: str) -> str:
+        return _property_name(v)
+
 
 class EdgeEndpointSpec(BaseModel):
     """One label pair an edge type may join: ``src`` -> ``dst``.
@@ -328,11 +459,11 @@ class TenantSpecBody(BaseModel):
       ``resolve_rule`` is set the entry becomes a schema-driven property-
       match edge resolver (see ``graphos/resolver/`` and ``POST
       /v1/{tenant}/graph/edges:resolve``).
-    - ``indexes`` and ``generated_columns`` are executed as DDL during
-      bootstrap, so each is validated (see ``graphos.contracts.ddl``): one
-      ``CREATE [UNIQUE] INDEX IF NOT EXISTS`` or ``ALTER TABLE ... ADD
-      COLUMN ... GENERATED ALWAYS AS (...) STORED`` statement on this
-      tenant's own label tables, with no ``;``, comments or dollar-quoting.
+    - ``property_indexes`` and ``generated_columns`` are declarations, not
+      SQL: graphos writes the DDL itself (``graphos.declared``). A request
+      that still sends SQL (a non-empty ``indexes``, or a string in
+      ``generated_columns``) is refused; the empty lists older clients send
+      are accepted.
     - ``edge_endpoints`` declares, per edge type, the label pairs it may
       join (``{"CALLS": [{"src": "Function", "dst": "Function"}]}``): the
       schema's associations. Merged by union; checked against the tenant's
@@ -353,8 +484,14 @@ class TenantSpecBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=63)
     vertex_labels: list[str] = Field(default_factory=list)
     edge_labels: list[EdgeLabelSpec] = Field(default_factory=list)
-    indexes: list[str] = Field(default_factory=list)
-    generated_columns: list[str] = Field(default_factory=list)
+    property_indexes: list[PropertyIndexSpec] = Field(
+        default_factory=list,
+        description="Indexes on vertex-label properties; added to the registered ones.",
+    )
+    generated_columns: list[GeneratedColumnSpec] = Field(
+        default_factory=list,
+        description="Stored columns computed from a property; added to the registered ones.",
+    )
     label_hierarchy: dict[str, str] = Field(
         default_factory=dict,
         description=(
@@ -480,19 +617,35 @@ class TenantSpecBody(BaseModel):
                 )
         return v
 
+    @model_validator(mode="before")
+    @classmethod
+    def _no_sql(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # Clients before 0.6.0 always send ``"indexes": []``: an empty list
+            # carries no SQL, so it is accepted (and ignored).
+            if data.get("indexes"):
+                raise ValueError(
+                    "`indexes`: " + _SQL_REPLACED.format(
+                        what='`property_indexes` ([{"label": ..., "properties": [...]}])',
+                    ),
+                )
+            if any(isinstance(c, str) for c in data.get("generated_columns") or ()):
+                raise ValueError(
+                    "`generated_columns`: " + _SQL_REPLACED.format(
+                        what='each as {"label", "column", "property", "type"}',
+                    ),
+                )
+        return data
+
     @model_validator(mode="after")
-    def _ddl_safe(self) -> TenantSpecBody:
-        # ``indexes`` / ``generated_columns`` are executed during bootstrap,
-        # so each must be one allowed statement on this tenant's own tables.
-        tables = [*self.vertex_labels, *(e.name for e in self.edge_labels)]
-        self.indexes = [
-            validate_ddl(s, kind="index", tenant=self.name, tables=tables)
-            for s in self.indexes
-        ]
-        self.generated_columns = [
-            validate_ddl(s, kind="generated_column", tenant=self.name, tables=tables)
-            for s in self.generated_columns
-        ]
+    def _one_definition_per_column(self) -> TenantSpecBody:
+        seen: dict[tuple[str, str], GeneratedColumnSpec] = {}
+        for col in self.generated_columns:
+            other = seen.setdefault((col.label, col.column), col)
+            if other != col:
+                raise ValueError(
+                    f"generated column {col.label}.{col.column} is declared twice, differently"
+                )
         return self
 
 
@@ -502,8 +655,8 @@ class TenantInfo(BaseModel):
     name: str
     vertex_labels: list[str] = Field(default_factory=list)
     edge_labels: list[str] = Field(default_factory=list)
-    n_indexes: int = 0
-    n_generated_columns: int = 0
+    property_indexes: list[PropertyIndexSpec] = Field(default_factory=list)
+    generated_columns: list[GeneratedColumnSpec] = Field(default_factory=list)
     n_resolve_rules: int = 0
     label_hierarchy: dict[str, str] = Field(default_factory=dict)
     meta: dict[str, str] = Field(default_factory=dict)
@@ -613,7 +766,7 @@ class RegisterResponse(BaseModel):
     tenant: str
     vertex_labels: list[str]
     edge_labels: list[str]
-    n_indexes: int
+    n_property_indexes: int
     n_generated_columns: int
     n_inheritance_edges: int = 0
     n_resolve_rules: int = 0

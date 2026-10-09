@@ -63,8 +63,9 @@ type SchemaField =
   | "label_hierarchy"
   | "search_indexes"
   | "resolve_rules"
-  | "indexes"
-  | "generated_columns";
+  | "property_indexes"
+  | "generated_columns"
+  | "indexes";
 
 const SCHEMA_FIELDS: SchemaField[] = [
   "vertex_labels",
@@ -73,16 +74,18 @@ const SCHEMA_FIELDS: SchemaField[] = [
   "label_hierarchy",
   "search_indexes",
   "resolve_rules",
-  "indexes",
+  "property_indexes",
   "generated_columns",
+  "indexes",
 ];
 
 /** How many names a schema change lists before "N more". */
 const NAMES_SHOWN = 3;
 
-/** "labels Tag, Doc", "label pair Doc –LINKS→ Tag", "2 indexes". */
+/** "labels Tag, Doc", "label pair Doc –LINKS→ Tag", "property index Doc(kind)". */
 function schemaItems(field: SchemaField, values: unknown[]): string {
-  if (field === "indexes" || field === "generated_columns") {
+  // Records from before 0.6.0, when these were SQL statements, hold only how many.
+  if (field === "indexes" || (field === "generated_columns" && typeof values[0] === "number")) {
     const count = Number(values[0] ?? 0);
     return `${count} ${t(`common.changes.schema.fields.${field}`, { count })}`;
   }

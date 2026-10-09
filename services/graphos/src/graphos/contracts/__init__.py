@@ -1,9 +1,9 @@
 """Pydantic request/response models for the API surface.
 
-One module per area: ``tenants`` (registration), ``ddl`` (registration DDL
-validation), ``graph`` (data plane reads and writes), ``communities``,
-``louvain``, ``paths`` (shortest paths), ``changes`` (the change feed),
-``snapshot``, ``jobs``, ``db`` (operations) and ``export``.
+One module per area: ``tenants`` (registration), ``graph`` (data plane reads
+and writes), ``communities``, ``louvain``, ``paths`` (shortest paths),
+``changes`` (the change feed), ``snapshot``, ``jobs``, ``db`` (operations) and
+``export``.
 
 This package is the wire contract: any change here is a public-API change,
 governed by the OpenAPI schema published at ``/openapi.json``.

@@ -20,11 +20,8 @@ URL = os.environ.get("GRAPHOS_URL", "http://127.0.0.1:8080")
 SCHEMA = TenantSchema(
     vertex_labels=["User", "Document"],
     edge_labels=["AUTHORED"],
-    # {tenant} is replaced with each tenant's name.
-    indexes=[
-        'CREATE INDEX IF NOT EXISTS doc_kind ON "{tenant}"."Document" '
-        "(((properties::text)::jsonb ->> 'kind'))",
-    ],
+    # An index for `where kind = ...` filters; graphos writes the SQL.
+    property_indexes=[{"label": "Document", "properties": ["kind"]}],
     meta={"app": "examples"},
 )
 

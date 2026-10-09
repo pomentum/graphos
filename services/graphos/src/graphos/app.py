@@ -289,6 +289,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_exception_handler(asyncpg.exceptions.QueryCanceledError, _statement_timeout)
     app.add_exception_handler(TimeoutError, _statement_timeout)
 
+    async def _unique_violation(request: Request, exc: Exception) -> JSONResponse:
+        # A write that would give two nodes the values of a unique property
+        # index (graphos.declared).  The constraint name is the index name.
+        index = getattr(exc, "constraint_name", None) or "a unique index"
+        log.info("unique violation path=%s index=%s", request.url.path, index)
+        return JSONResponse(
+            status_code=409,
+            media_type="application/problem+json",
+            content={
+                "type": "about:blank",
+                "title": "Unique property values taken",
+                "status": 409,
+                "detail": (
+                    f"The write would give two nodes the same values of the unique index "
+                    f"{index}. Rows of the request flushed before it stay written."
+                ),
+            },
+        )
+
+    app.add_exception_handler(asyncpg.exceptions.UniqueViolationError, _unique_violation)
+
     # Observability middleware stack. Outermost runs first on the
     # request path, last on response — FastAPI applies them in
     # reverse-registration order. Registration order here gives the

@@ -42,7 +42,7 @@ def test_tenant_spec_defaults() -> None:
     spec = TenantSpec(name="t1")
     assert spec.vertex_labels == ()
     assert spec.edge_labels == ()
-    assert spec.indexes == ()
+    assert spec.property_indexes == ()
     assert spec.generated_columns == ()
     assert spec.label_hierarchy == ()
     assert spec.meta == {}
@@ -100,7 +100,7 @@ def test_spec_from_jsonable_accepts_dict_shape() -> None:
         "name": "t",
         "vertex_labels": ["Document", "Article"],
         "edge_labels": [],
-        "indexes": [],
+        "property_indexes": [],
         "generated_columns": [],
         "label_hierarchy": {"Article": "Document"},
         "meta": {},

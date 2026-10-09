@@ -39,7 +39,7 @@ plus the workaround a per-row Cypher write would need:
   inherited child.
 - **All rows are written only through SQL.** When an AGE label table has
   any column beyond AGE's own (bootstrap's `end_community_id` and
-  `start_community_id` on every edge table, or any registration `generated_columns` on a vertex or edge
+  `start_community_id` on every edge table, or a declared generated column on a vertex
   label), AGE 1.6 segfaults the Postgres backend on a Cypher `SET` /
   `MERGE … SET` that writes a row into that table (verified live; the
   server restarts and every connection drops). `graphos.writes`

@@ -305,8 +305,8 @@ class GraphosClient:
         name: str | None = None,
         vertex_labels: Iterable[str] = (),
         edge_labels: Iterable[str | Mapping[str, Any]] = (),
-        indexes: Iterable[str] = (),
-        generated_columns: Iterable[str] = (),
+        property_indexes: Iterable[Mapping[str, Any]] = (),
+        generated_columns: Iterable[Mapping[str, Any]] = (),
         label_hierarchy: Mapping[str, str] | None = None,
         meta: Mapping[str, str] | None = None,
         search_indexes: Mapping[str, Mapping[str, Any]] | None = None,
@@ -322,6 +322,15 @@ class GraphosClient:
         ``strict_endpoints=True`` makes graphos refuse writes of a declared type
         outside its pairs; ``None`` leaves the setting as it is.  See
         :meth:`remove_edge_endpoint`.
+
+        ``property_indexes`` declares indexes on vertex-label properties, which
+        serve ``where`` filters: ``[{"label": "Document", "properties": ["kind"]}]``,
+        with ``"unique": True`` to refuse duplicates (409) or ``"kind": "trigram"``
+        for substring search on one property.  ``generated_columns`` declares
+        stored columns for direct SQL readers:
+        ``[{"label": "Document", "column": "kind", "property": "kind", "type": "text"}]``
+        (``text``, ``numeric``, ``boolean`` or ``jsonb``).  graphos writes the SQL
+        for both; both are added to what is registered.
 
         ``search_indexes`` declares named search indexes for :meth:`search`:
         ``{"names": {"labels": ["*"], "properties": ["name"], "analyzer": "identifier"}}``;
@@ -339,8 +348,8 @@ class GraphosClient:
             "name": name or self._tenant,
             "vertex_labels": list(vertex_labels),
             "edge_labels": list(edge_labels),
-            "indexes": list(indexes),
-            "generated_columns": list(generated_columns),
+            "property_indexes": [dict(x) for x in property_indexes],
+            "generated_columns": [dict(x) for x in generated_columns],
             "label_hierarchy": dict(label_hierarchy or {}),
             "meta": dict(meta or {}),
         }

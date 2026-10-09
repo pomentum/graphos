@@ -3,8 +3,8 @@
 graphos is **tenant-agnostic**. There are no hardcoded tenant specs; consumers
 register their own context at runtime via ``POST /v1/tenants``. The
 registration payload carries the full schema (vertex labels, edge labels,
-indexes, generated columns), which this module turns into idempotent SQL
-against the AGE-extended postgres.
+declared property indexes and generated columns, …), which this module turns
+into idempotent SQL against the AGE-extended postgres.
 
 Two reasons graphos doesn't own tenant schemas:
 
@@ -32,7 +32,7 @@ from typing import Any
 
 import asyncpg
 
-from graphos import node_properties, search
+from graphos import declared, node_properties, search
 from graphos.db import DDL_TIMEOUT_S, allow_long_statements
 from graphos.lookup import REV
 
@@ -56,13 +56,11 @@ class TenantSpec:
         name:               AGE graph name (also the URL path segment).
         vertex_labels:      Each becomes ``create_vlabel(name, label)``.
         edge_labels:        Each becomes ``create_elabel(name, label)``.
-        indexes:            Each is a full ``CREATE INDEX IF NOT EXISTS ...``
-                            statement. Lets consumers pick any pg index form
-                            (functional, partial, GIN, …) targeting the AGE
-                            per-label storage tables.
-        generated_columns:  Each is a full ``ALTER TABLE ... ADD COLUMN ...
-                            GENERATED ALWAYS AS (...) STORED;`` statement.
-                            Guarded by ``duplicate_column`` exception swallow.
+        property_indexes:   Declared indexes on vertex-label properties
+                            (``PropertyIndexSpec`` dumps); graphos writes the
+                            DDL (``graphos.declared``).
+        generated_columns:  Declared stored columns computed from a property
+                            (``GeneratedColumnSpec`` dumps).
         meta:               Free-form consumer-supplied metadata; surfaced on
                             ``GET /v1/tenants``.
         edge_endpoints:     ``(edge_type, src_label, dst_label)`` pairs an edge
@@ -77,8 +75,8 @@ class TenantSpec:
     name: str
     vertex_labels: tuple[str, ...] = ()
     edge_labels: tuple[str, ...] = ()
-    indexes: tuple[str, ...] = ()
-    generated_columns: tuple[str, ...] = ()
+    property_indexes: tuple[dict[str, object], ...] = ()
+    generated_columns: tuple[dict[str, object], ...] = ()
     # Per-edge-label resolve rules, mapping edge_type → resolve_rule
     # JSONB body.  Drives the schema-driven property-match edge
     # resolver (``POST /v1/{tenant}/graph/edges:resolve``).  Empty when
@@ -173,6 +171,7 @@ async def _safe(
 
 async def _ensure_index_concurrently(
     conn: asyncpg.Connection, schema: str, table: str, name: str, definition: str,
+    *, unique: bool = False,
 ) -> None:
     """``CREATE INDEX CONCURRENTLY IF NOT EXISTS``, redoing an interrupted build.
 
@@ -193,8 +192,10 @@ async def _ensure_index_concurrently(
     if valid is False:
         await conn.execute(f'DROP INDEX CONCURRENTLY IF EXISTS "{schema}"."{name}";')
     started = time.perf_counter()
+    unique_sql = "UNIQUE " if unique else ""
     await conn.execute(
-        f'CREATE INDEX CONCURRENTLY IF NOT EXISTS "{name}" ON "{schema}"."{table}" {definition};'
+        f'CREATE {unique_sql}INDEX CONCURRENTLY IF NOT EXISTS "{name}" '
+        f'ON "{schema}"."{table}" {definition};'
     )
     took = time.perf_counter() - started
     if took > 1.0:  # noqa: PLR2004 — only builds over existing data are worth a line
@@ -215,6 +216,68 @@ async def ensure_search_indexes(pool: asyncpg.Pool, spec: TenantSpec) -> None:
         await search.ensure_indexes(
             conn, spec.name, spec.search_indexes, _ensure_index_concurrently,
         )
+
+
+async def _vertex_label_tables(conn: asyncpg.Connection, tenant: str) -> set[str]:
+    rows = await conn.fetch(
+        "SELECT c.relname FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "JOIN pg_inherits i ON i.inhrelid = c.oid "
+        "JOIN pg_class p ON p.oid = i.inhparent "
+        "WHERE n.nspname = $1 AND p.relname = '_ag_label_vertex';",
+        tenant,
+    )
+    return {str(r["relname"]) for r in rows}
+
+
+async def _ensure_generated_columns(conn: asyncpg.Connection, spec: TenantSpec) -> None:
+    """Add each declared generated column its label table lacks.
+
+    Raises:
+        ValueError: a label that is not a vertex label of the tenant.
+    """
+    if not spec.generated_columns:
+        return
+    labels = await _vertex_label_tables(conn, spec.name)
+    for col in spec.generated_columns:
+        label = str(col["label"])
+        if label not in labels:
+            raise ValueError(f"generated column {col['column']!r}: {label!r} is not a vertex label")
+        await _add_column_if_missing(
+            conn, spec.name, label, str(col["column"]), declared.column_definition(col),
+        )
+
+
+async def _ensure_property_indexes(conn: asyncpg.Connection, spec: TenantSpec) -> None:
+    """Build each declared property index the tenant lacks, concurrently.
+
+    Raises:
+        ValueError: a label that is not a vertex label of the tenant, nodes
+            that already share the values of a unique index, or a value too
+            long for a btree.
+    """
+    if not spec.property_indexes:
+        return
+    labels = await _vertex_label_tables(conn, spec.name)
+    for idx in spec.property_indexes:
+        label, name = str(idx["label"]), declared.index_name(idx)
+        what = f"property index {declared.describe_index(idx)}"
+        if label not in labels:
+            raise ValueError(f"{what}: {label!r} is not a vertex label")
+        try:
+            await _ensure_index_concurrently(
+                conn, spec.name, label, name, declared.index_definition(idx),
+                unique=bool(idx.get("unique")),
+            )
+        except (asyncpg.UniqueViolationError, asyncpg.ProgramLimitExceededError) as exc:
+            # The failed concurrent build leaves an invalid index behind.
+            await conn.execute(f'DROP INDEX CONCURRENTLY IF EXISTS "{spec.name}"."{name}";')
+            if isinstance(exc, asyncpg.UniqueViolationError):
+                raise ValueError(f"{what}: nodes of {label!r} already share these values") from exc
+            raise ValueError(
+                f"{what}: a value is too long for an equality index "
+                "(use kind 'trigram' for long text)"
+            ) from exc
 
 
 async def _add_column_if_missing(
@@ -338,7 +401,7 @@ async def bootstrap_tenant(
             "tenant": spec.name,
             "vlabels": len(spec.vertex_labels),
             "elabels": len(spec.edge_labels),
-            "indexes": len(spec.indexes),
+            "property_indexes": len(spec.property_indexes),
             "generated_cols": len(spec.generated_columns),
             "inheritance_edges": len(spec.label_hierarchy),
         },
@@ -424,8 +487,8 @@ async def bootstrap_tenant(
                 #   (``name ILIKE '%q%'``), which a btree cannot do for a
                 #   leading ``%``.  Measured ~1.2 s -> ~1 ms on the same label.
                 #
-                # Any other hot property is the consumer's to declare via the
-                # ``indexes`` field of the registration (see contracts/ddl.py).
+                # Any other hot property is the consumer's to declare in the
+                # registration's ``property_indexes`` (see graphos.declared).
                 # ``pg_trgm`` ships with Postgres; creating it is idempotent.
                 await conn.execute(
                     f'CREATE INDEX IF NOT EXISTS "{label}_community_id" '
@@ -577,13 +640,9 @@ async def bootstrap_tenant(
             for child, parent in spec.label_hierarchy:
                 await _inherit_if_missing(conn, spec.name, child, parent)
 
-            # 5. Indexes (use native IF NOT EXISTS — caller is responsible)
-            for ddl in spec.indexes:
-                await conn.execute(ddl)
-
-            # 6. Generated columns (no native IF NOT EXISTS; swallow duplicate_column)
-            for ddl in spec.generated_columns:
-                await _safe(conn, ddl, swallow=_SWALLOW_DUPLICATE_COLUMN)
+            # 5. Declared generated columns, added only when missing (adding
+            # one to a label that has rows rewrites its table).
+            await _ensure_generated_columns(conn, spec)
 
             # 7. A btree on ``id`` (the graphid), which AGE does not create.
             # Edge tables always: paging edges in graphid order
@@ -608,6 +667,9 @@ async def bootstrap_tenant(
             await search.ensure_indexes(
                 conn, spec.name, spec.search_indexes, _ensure_index_concurrently,
             )
+
+            # 7c. Declared property indexes, built the same way.
+            await _ensure_property_indexes(conn, spec)
 
             # 8. Statistics for label tables never analyzed.  Autovacuum only
             # analyzes a table after 50+ changed rows, so small and empty
@@ -649,6 +711,9 @@ def _spec_to_jsonable(spec: TenantSpec) -> dict[str, object]:
 
 
 def _spec_from_jsonable(payload: dict[str, object]) -> TenantSpec:
+    if declared.has_legacy(payload):
+        # Stored before 0.6.0; load_registered_tenants also rewrites the row.
+        payload, _ = declared.convert_legacy(payload)
     # ``label_hierarchy`` round-trips as a list of [child, parent]
     # pairs because asdict() on a tuple-of-tuples produces nested
     # lists in JSON.  Tolerate both shapes (dict or list-of-pairs)
@@ -678,8 +743,8 @@ def _spec_from_jsonable(payload: dict[str, object]) -> TenantSpec:
         name=str(payload["name"]),
         vertex_labels=tuple(payload.get("vertex_labels") or []),
         edge_labels=tuple(payload.get("edge_labels") or []),
-        indexes=tuple(payload.get("indexes") or []),
-        generated_columns=tuple(payload.get("generated_columns") or []),
+        property_indexes=tuple(dict(x) for x in payload.get("property_indexes") or []),
+        generated_columns=tuple(dict(x) for x in payload.get("generated_columns") or []),
         label_hierarchy=hierarchy_pairs,
         resolve_rules=rules_pairs,
         meta=dict(payload.get("meta") or {}),
@@ -760,7 +825,7 @@ async def persist_spec(
 
     Merge semantics (additive-by-default).  When a row already exists,
     the persisted spec is unioned with the incoming spec rather than
-    blindly replaced — vertex_labels, edge_labels, indexes,
+    blindly replaced — vertex_labels, edge_labels, property_indexes,
     generated_columns, label_hierarchy and resolve_rules become the
     set-union of existing and incoming; ``meta`` is merged dict-wise
     (incoming keys overwrite existing keys for the same name).
@@ -803,23 +868,26 @@ async def persist_spec(
                                 || COALESCE(EXCLUDED.spec->'edge_labels', '[]'::jsonb)
                             ) AS x
                         ),
-                    'indexes',
+                    'property_indexes',
                         (
                             SELECT COALESCE(to_jsonb(array_agg(DISTINCT x)), '[]'::jsonb)
-                            FROM jsonb_array_elements_text(
-                                COALESCE(graphos_meta.tenants.spec->'indexes', '[]'::jsonb)
-                                || COALESCE(EXCLUDED.spec->'indexes', '[]'::jsonb)
+                            FROM jsonb_array_elements(
+                                COALESCE(graphos_meta.tenants.spec->'property_indexes', '[]'::jsonb)
+                                || COALESCE(EXCLUDED.spec->'property_indexes', '[]'::jsonb)
                             ) AS x
                         ),
+                    -- Declarations only: statements from before 0.6.0 are
+                    -- converted when the server starts (declared.convert_legacy).
                     'generated_columns',
                         (
                             SELECT COALESCE(to_jsonb(array_agg(DISTINCT x)), '[]'::jsonb)
-                            FROM jsonb_array_elements_text(
+                            FROM jsonb_array_elements(
                                 COALESCE(
                                     graphos_meta.tenants.spec->'generated_columns', '[]'::jsonb
                                 )
                                 || COALESCE(EXCLUDED.spec->'generated_columns', '[]'::jsonb)
                             ) AS x
+                            WHERE jsonb_typeof(x) = 'object'
                         ),
                     'label_hierarchy',
                         (
@@ -909,6 +977,45 @@ def spec_from_row(row: Mapping[str, Any]) -> TenantSpec:
     return replace(spec, edge_endpoints=endpoints, strict_endpoints=bool(row["strict_endpoints"]))
 
 
+async def _convert_legacy_specs(
+    conn: asyncpg.Connection, rows: list[asyncpg.Record],
+) -> None:
+    """Rewrite specs stored before 0.6.0, whose indexes and generated columns
+    were SQL statements, with declarations instead (``declared.convert_legacy``).
+
+    What the statements created stays in Postgres; a statement no declaration
+    expresses is left out of the spec and logged, so an operator can see it.
+    """
+    for row in rows:
+        try:
+            payload = json.loads(row["spec"])
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict) or not declared.has_legacy(payload):
+            continue
+        converted, dropped = declared.convert_legacy(payload)
+        await conn.execute(
+            "UPDATE graphos_meta.tenants SET spec = $2::jsonb, updated_at = now() "
+            "WHERE name = $1;",
+            row["name"], json.dumps(converted),
+        )
+        log.info(
+            "tenant spec converted to declared indexes and columns",
+            extra={
+                "tenant": row["name"],
+                "property_indexes": len(converted["property_indexes"]),
+                "generated_columns": len(converted["generated_columns"]),
+                "left_out": len(dropped),
+            },
+        )
+        for stmt in dropped:
+            log.warning(
+                "tenant spec statement left out: no declaration says the same; what it "
+                "created stays in Postgres",
+                extra={"tenant": row["name"], "statement": stmt},
+            )
+
+
 async def load_registered_tenants(pool: asyncpg.Pool) -> int:
     """Populate the in-process registry from graphos_meta.tenants.
 
@@ -918,6 +1025,8 @@ async def load_registered_tenants(pool: asyncpg.Pool) -> int:
     """
     async with pool.acquire() as conn:
         await allow_long_statements(conn, DDL_TIMEOUT_S)
+        rows = await conn.fetch(TENANT_ROWS_SQL + ";")
+        await _convert_legacy_specs(conn, rows)
         rows = await conn.fetch(TENANT_ROWS_SQL + ";")
     _REGISTERED.clear()
     for row in rows:

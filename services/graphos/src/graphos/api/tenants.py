@@ -30,7 +30,7 @@ from typing import Any
 import asyncpg
 from fastapi import APIRouter, HTTPException, Request, status
 
-from graphos import schema_changes
+from graphos import declared, schema_changes
 from graphos.auth import (
     MaintainPrincipal,
     OwnerPrincipal,
@@ -52,6 +52,8 @@ from graphos.bootstrap import (
     validate_edge_endpoints,
 )
 from graphos.contracts.tenants import (
+    GeneratedColumnSpec,
+    PropertyIndexSpec,
     RegisterResponse,
     TenantInfo,
     TenantSpecBody,
@@ -77,13 +79,39 @@ def _spec_to_info(spec: TenantSpec) -> TenantInfo:
         name=spec.name,
         vertex_labels=list(spec.vertex_labels),
         edge_labels=list(spec.edge_labels),
-        n_indexes=len(spec.indexes),
-        n_generated_columns=len(spec.generated_columns),
+        property_indexes=[PropertyIndexSpec.model_validate(x) for x in spec.property_indexes],
+        generated_columns=[GeneratedColumnSpec.model_validate(x) for x in spec.generated_columns],
         n_resolve_rules=len(spec.resolve_rules),
         label_hierarchy={c: p for (c, p) in spec.label_hierarchy},
         meta=dict(spec.meta),
         search_indexes=dict(spec.search_indexes),
     )
+
+
+def _validate_declared(
+    body: TenantSpecBody, known: TenantSpec | None, vertex_labels: set[str],
+) -> None:
+    """Property indexes and generated columns name vertex labels, and a
+    column keeps the definition it was registered with."""
+    for idx in body.property_indexes:
+        if idx.label not in vertex_labels:
+            raise ValueError(f"property index on {idx.label!r}: not a vertex label of the tenant")
+    stored = {
+        (str(c["label"]), str(c["column"])): c
+        for c in (known.generated_columns if known else ())
+    }
+    for col in body.generated_columns:
+        if col.label not in vertex_labels:
+            raise ValueError(
+                f"generated column {col.column!r} on {col.label!r}: "
+                "not a vertex label of the tenant"
+            )
+        before = stored.get((col.label, col.column))
+        if before is not None and before != col.model_dump():
+            raise ValueError(
+                f"generated column {col.label}.{col.column} is registered as "
+                f"{declared.describe_column(before)}; a column cannot change"
+            )
 
 
 def _may_maintain(principal: Principal, name: str) -> bool:
@@ -172,14 +200,17 @@ async def register(
         for edge_type, pairs in body.edge_endpoints.items()
         for pair in pairs
     )
-    # Declared pairs may name labels and types registered earlier, or added now.
+    # Declared pairs, indexes and columns may name labels and types registered
+    # earlier, or added now.
     known = registered_tenants().get(body.name)
     try:
+        vertex_labels = {*body.vertex_labels, *(known.vertex_labels if known else ())}
         validate_edge_endpoints(
             edge_endpoints,
             edge_labels={*edge_label_names, *(known.edge_labels if known else ())},
-            vertex_labels={*body.vertex_labels, *(known.vertex_labels if known else ())},
+            vertex_labels=vertex_labels,
         )
+        _validate_declared(body, known, vertex_labels)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc),
@@ -189,8 +220,8 @@ async def register(
         name=body.name,
         vertex_labels=tuple(body.vertex_labels),
         edge_labels=edge_label_names_t,
-        indexes=tuple(body.indexes),
-        generated_columns=tuple(body.generated_columns),
+        property_indexes=tuple(x.model_dump() for x in body.property_indexes),
+        generated_columns=tuple(x.model_dump() for x in body.generated_columns),
         label_hierarchy=tuple(
             (child, parent) for child, parent in body.label_hierarchy.items()
         ),
@@ -276,7 +307,7 @@ async def register(
         tenant=spec.name,
         vertex_labels=list(spec.vertex_labels),
         edge_labels=list(spec.edge_labels),
-        n_indexes=len(spec.indexes),
+        n_property_indexes=len(spec.property_indexes),
         n_generated_columns=len(spec.generated_columns),
         n_inheritance_edges=len(spec.label_hierarchy),
         n_resolve_rules=len(spec.resolve_rules),

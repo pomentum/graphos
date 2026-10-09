@@ -18,15 +18,11 @@ from graphos.louvain import _build_node_filter_sql
 
 
 def test_valid_spec() -> None:
-    idx = (
-        'CREATE INDEX IF NOT EXISTS x '
-        'ON "demo"."Document" ((properties::jsonb->>\'name\'));'
-    )
     body = TenantSpecBody(
         name="demo",
         vertex_labels=["Document", "Collection", "Team"],
         edge_labels=["CITES", "REFERENCES", "TAGGED_WITH"],
-        indexes=[idx],
+        property_indexes=[{"label": "Document", "properties": ["name"]}],
         generated_columns=[],
         meta={"owner": "demo"},
     )

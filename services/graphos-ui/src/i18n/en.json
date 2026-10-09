@@ -83,10 +83,12 @@
           "search_indexes_other": "search indexes",
           "resolve_rules_one": "edge rule for",
           "resolve_rules_other": "edge rules for",
-          "indexes_one": "index",
-          "indexes_other": "indexes",
+          "property_indexes_one": "property index",
+          "property_indexes_other": "property indexes",
           "generated_columns_one": "generated column",
-          "generated_columns_other": "generated columns"
+          "generated_columns_other": "generated columns",
+          "indexes_one": "index",
+          "indexes_other": "indexes"
         }
       }
     },

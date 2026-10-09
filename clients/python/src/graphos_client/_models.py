@@ -44,8 +44,10 @@ class TenantInfo(BaseModel):
     name: str
     vertex_labels: list[str] = Field(default_factory=list)
     edge_labels: list[str] = Field(default_factory=list)
-    n_indexes: int = 0
-    n_generated_columns: int = 0
+    # Declared ``{label, properties, kind, unique, name}`` and
+    # ``{label, column, property, type}``; empty from a server before 0.6.0.
+    property_indexes: list[dict[str, Any]] = Field(default_factory=list)
+    generated_columns: list[dict[str, Any]] = Field(default_factory=list)
     meta: dict[str, str] = Field(default_factory=dict)
     search_indexes: dict[str, dict[str, Any]] = Field(default_factory=dict)
 

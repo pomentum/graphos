@@ -27,7 +27,8 @@ ACME = TenantSpec(
     name="acme",
     vertex_labels=("Person", "Employee", "Doc"),
     edge_labels=("WROTE", "SAME_TEAM"),
-    indexes=('CREATE INDEX IF NOT EXISTS "Doc_x" ON acme."Doc" (id)',),
+    property_indexes=({"label": "Doc", "properties": ["x"], "kind": "equality",
+                       "unique": False, "name": None},),
     label_hierarchy=(("Employee", "Person"),),
     resolve_rules=(("SAME_TEAM", {"src_label": "Person", "dst_label": "Person"}),),
     meta={"owner": "team-a"},
@@ -85,7 +86,7 @@ def test_schema_gives_labels_and_search_indexes_but_not_the_admin_spec(
     assert body["search_indexes"]["names"]["analyzer"] == "identifier"
     assert body["rule_edge_labels"] == ["SAME_TEAM"]
     # DDL, rule bodies and metadata stay with the admin-only tenant endpoints.
-    assert not {"indexes", "generated_columns", "meta", "resolve_rules"} & set(body)
+    assert not {"property_indexes", "generated_columns", "meta", "resolve_rules"} & set(body)
 
 
 def test_schema_needs_the_tenant_and_a_registration(client: TestClient) -> None:

@@ -114,7 +114,7 @@ an existing volume picks up new internal tables without re-initialisation.
   "vertex_labels": ["User", "Document", "Tag"],
   "edge_labels": ["AUTHORED", "FOLLOWS",
                   {"name": "TAGGED", "resolve_rule": { ... }}],
-  "indexes": [],
+  "property_indexes": [{"label": "Document", "properties": ["kind"]}],
   "generated_columns": [],
   "label_hierarchy": {},
   "meta": {}
@@ -128,18 +128,17 @@ an existing volume picks up new internal tables without re-initialisation.
   `ALTER TABLE child INHERIT parent`, so rows written under the child are
   visible when querying the parent table. Both must be in `vertex_labels`
   and a label cannot be its own parent; otherwise registration returns 422.
-- `indexes` / `generated_columns` are raw DDL statements validated by
-  `contracts/ddl.py`. Each must be exactly one
-  `CREATE [UNIQUE] INDEX IF NOT EXISTS <name> ON <tenant>.<table> ...` or
-  `ALTER TABLE <tenant>.<table> ADD COLUMN [IF NOT EXISTS] <col> <type> GENERATED ALWAYS AS (...) STORED`,
-  where `<tenant>` is the tenant being registered and `<table>` is one of its
-  own labels (or `_ag_label_vertex` / `_ag_label_edge`). `;` (other than one
-  trailing), SQL comments, and `$` (dollar quoting) are rejected anywhere. A
-  generated column may not take a name graphos uses itself (`id`,
-  `properties`, `start_id`, `end_id`, `end_community_id`, `start_community_id`, any
-  `graphos_…`).
-  Expressions inside parentheses are not inspected; Postgres enforces their
-  immutability.
+- `property_indexes` (`{label, properties, kind, unique, name}`) and
+  `generated_columns` (`{label, column, property, type}`) are declarations;
+  graphos writes their DDL (`declared.py`) from names the contract validated,
+  so no client SQL is run. An index uses the expression the reads it serves
+  compile to (§2.3). A generated column may not take a name graphos uses
+  itself (`id`, `properties`, `start_id`, `end_id`, `end_community_id`,
+  `start_community_id`, any `graphos_…`), and cannot change once registered.
+  Before 0.6.0 both were SQL statements; specs stored then are converted at
+  startup (`declared.convert_legacy`: statements a declaration expresses
+  become one, keeping the index name; the rest are logged and left out of the
+  spec, while what they created stays in Postgres).
 
 `bootstrap.py::bootstrap_tenant` then applies the spec under a per-tenant
 `pg_advisory_lock`, so concurrent registrations of the same tenant serialise:
@@ -156,12 +155,13 @@ an existing volume picks up new internal tables without re-initialisation.
    `_ag_label_edge`; `create_elabel` per edge label plus the per-label edge
    indexes and columns in §2.3.
 4. `label_hierarchy` inheritance links (checked in `pg_inherits` first).
-5. The consumer's `indexes`, then `generated_columns` (duplicate-column errors
-   swallowed).
+5. Declared `generated_columns` missing from their label table (checked in
+   the catalog first). Declared `property_indexes` are built later, after the
+   search indexes, with `CREATE INDEX CONCURRENTLY`.
 
 After bootstrap the spec is persisted to `graphos_meta.tenants` and cached in
-process. Persistence **merges** by default: label lists, indexes, generated
-columns, hierarchy, and resolve rules are unioned with the stored spec, and
+process. Persistence **merges** by default: label lists, property indexes,
+generated columns, hierarchy, and resolve rules are unioned with the stored spec, and
 `meta` keys are overwritten per key. `?force_shrink=true` replaces the stored
 spec instead (labels removed from the spec are not dropped from AGE). In both
 modes the process then reloads the stored spec (`bootstrap.py::load_spec`)
@@ -254,11 +254,12 @@ Consequences:
   50+ changed rows, so small and empty label tables could stay without
   statistics; the planner then assumed ~10 pages for each, and a query across
   80 of them was costed as millions of rows.
-- Per-property indexes beyond these are the consumer's choice via `indexes`.
+- Per-property indexes beyond these are declared in `property_indexes`.
   `/nodes:scan` filters use the expression
-  `(((properties::text)::jsonb) ->> '<prop>')`, so a declared index must use
-  that exact expression to be usable, e.g.
-  `CREATE INDEX IF NOT EXISTS "Document_category" ON acme."Document" ((((properties::text)::jsonb) ->> 'category'))`.
+  `(((properties::text)::jsonb) ->> '<prop>')`, and graphos builds a declared
+  `equality` index on exactly that expression (one per property, in order;
+  `trigram` wraps it in `gin_trgm_ops`), named `<Label>_<props>_<kind>_idx`
+  and built `CONCURRENTLY`. A unique one turns a duplicate write into 409.
 - Resolve rules derive further indexes automatically
   ([features.md §7](features.md#7-schema-driven-edge-derivation)).
 - Search indexes (`search_indexes`) derive one GIN index per covered label
@@ -441,8 +442,8 @@ graph, its tables, indexes, or data, and does not delete the tenant's
 re-posting the spec restores access to the existing data.
 
 Not in the surface: raw Cypher or SQL execution, connection-string
-passthrough, and any `DROP`. The only consumer-supplied DDL accepted is the
-validated `indexes` / `generated_columns` forms at registration.
+passthrough, any `DROP`, and any consumer-supplied DDL: indexes and generated
+columns are declared, and graphos writes their SQL.
 
 #### 2.5.2 Requests, responses, errors
 
@@ -871,7 +872,7 @@ flowchart LR
     subgraph api["graphos/api/*.py (routers)"]
         R["tenants · graph · bulk · snapshot ·<br/>communities · louvain · cache · db · info · health"]
     end
-    CON["contracts/*<br/>Pydantic models, DDL validator"]
+    CON["contracts/*<br/>Pydantic models"]
     AUTH["auth.py · identity.py<br/>sign-in, users, grants"]
     OBS["observability/*<br/>metrics · logging · audit · rate_limit"]
     BOOT["bootstrap.py<br/>tenant DDL + registry"]
@@ -970,8 +971,8 @@ reasons:
   1,153–4,840 edges/s against 31 edges/s for per-row Cypher `MERGE`
   ([apache-age.md](apache-age.md)).
 - **Stability.** When an AGE label table has any column beyond AGE's own
-  (bootstrap's `end_community_id` on edge tables, §2.3, or any registration
-  `generated_columns` on a vertex or edge label), AGE 1.6 segfaults the
+  (bootstrap's `end_community_id` on edge tables, §2.3, or a declared
+  generated column on a vertex label), AGE 1.6 segfaults the
   Postgres backend on a Cypher `SET` / `MERGE … SET` that writes a row into
   that table, which restarts the server and drops every connection. Plain SQL
   never enters AGE's tuple-building code, so generated columns on vertex
