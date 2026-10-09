@@ -83,9 +83,9 @@ structure, the demo scores 0.74.
   communities.
 - **Summaries.** "Which part of the system is this in", "what does this part consist of",
   "which parts talk to each other most".
-- **Scoped traversal.** `GET …/graph/expand?communities=4&communities=9` walks only inside those
-  communities; each edge carries its end's community in an indexed column, so this is an index
-  lookup.
+- **Scoped traversal.** `GET …/graph/expand?communities=4&communities=9` reaches only nodes in
+  those communities, in every direction; each edge carries the communities of both its ends in
+  indexed columns, so each hop is an index lookup.
 - **Pictures.** Colour by community (the UI's *Colours → By group*).
 
 **How graphos runs it.** Louvain with python-igraph, an [optional extra](../README.md#louvain-is-an-optional-extra)
@@ -173,6 +173,85 @@ in total, `graphos_in_degree` and `graphos_out_degree` each way.
 
 **What it is for.** The cheapest view of importance and shape: hubs, nodes with an unusual fan-out,
 nodes with nothing coming in.
+
+## Using the results in a client
+
+The algorithms turn the graph's structure into values on each node, and every read returns them:
+search hits and node reads carry `community_id` and the `graphos_*` metrics in their properties,
+neighbours in `neighbor_properties`, `/expand` in each reached node's `end_properties`. Using them
+costs no extra request. Five ways a client gets better answers with them:
+
+| Need | Use | How |
+|---|---|---|
+| The important matches first | PageRank | combine the search score with `graphos_pagerank` |
+| Less noise around a node | communities | `/expand?communities=…`: the walk stays in the node's community |
+| A varied answer | communities | keep the best hit of each `community_id` |
+| How two areas connect | betweenness | the highest `graphos_betweenness` among the nodes in between |
+| Hubs that drown everything | degree | weigh down a very high `graphos_degree` |
+
+**Rank by importance.** Text search finds what matches the words, not what matters. With a search
+index every hit has a score; weigh it by PageRank against the best PageRank among the hits:
+`score × (1 + pagerank / max pagerank)`. On the demo, searching `flow` gives 28 packages whose
+names all score about the same; weighted, the ones the ecosystem depends on come first:
+
+```text
+by text score alone          ranked by importance (PageRank)
+formflow     0.001054        pipelineflow   0.01204
+shipflow     0.002407        trainflow      0.009249
+batchflow    0.001233        vaultflow      0.003836
+```
+
+The same weighting orders neighbours, or picks entry points: `nodes:scan` with
+`"order_by": [{"property": "graphos_pagerank", "desc": true}]` returns a label's most central nodes.
+
+**Focus the walk.** Two hops from a hub can reach far into the graph. Pass the community of the
+node (or of the best few hits) to `/expand?communities=…`: the walk reaches only nodes in those
+communities, in every direction, and stays an index lookup per hop. From the demo's `pipelineflow`,
+two hops reach 83 nodes in all six ecosystems; scoped to its own community, the 64 of them in its
+ecosystem. A scoped walk does not follow edges added since the last community recompute.
+
+**Diversify and summarise.** Group results by `community_id` and keep the best of each, so the
+answer covers several areas rather than one. The community map names each community after its
+best-connected member: "this touches *http* and *dataframes*" is a summary a reader, or a language
+model given one paragraph per community, can use.
+
+**Explain links and impact.** When results span communities, the nodes with the highest
+`graphos_betweenness` among those reached are the bridges between them; for "what is affected if
+this changes", they are the nodes to look at first. On a graph larger than
+`GRAPHOS_BETWEENNESS_MAX_NODES` betweenness is skipped: compute it on a subgraph (`rel_types`,
+`node_filter`), or use PageRank and degree.
+
+**Keep hubs in check.** Utility nodes (a logging library, a shared base class) connect to
+everything. When expanding, weigh a very high `graphos_degree` down unless PageRank or betweenness
+says the node matters too. Nodes outside component `0` are islands: leave them out of an answer,
+or report them.
+
+**Keep the values meaningful.** Compute the metrics over the relationship types that fit the
+question (PageRank over dependencies is "what everything relies on", over every relationship "what
+is most connected"); run the metrics and the community recompute again after large loads; and key
+caches by `community_id`, which stays the same from run to run.
+
+[`09_better_answers.py`](../clients/python/examples/09_better_answers.py) runs all of this on the
+demo tenant: search by text score next to search ranked by importance, a walk unscoped and scoped,
+the best hit per community, and the bridges among the nodes reached.
+
+### On a large graph
+
+The same steps on a code graph of about 570,000 nodes and 10 million edges:
+
+- **Communities.** The recompute kept 258 communities, modularity 0.85. Two hops from the hubs of
+  the eight largest reached 7,999 nodes, 1,154 of them (14%) outside the starting community;
+  scoped, none. The first recompute after upgrading to a version with `start_community_id` fills
+  that column on every edge and took about 16 minutes; later ones write only what moved.
+- **PageRank needs the right relationships.** Computed over every relationship type, the name hits
+  of a search (mostly folders and files) all had the same base value, so weighting by it changed
+  nothing. Computed over the code relationships only (calls, imports, inheritance, type
+  references, dependencies), it covered 302,989 nodes in 1,891 components and took about 16
+  minutes. Nodes outside those relationships get no PageRank, so leave their score as it is.
+- **Generic hubs dominate functions.** The most central functions were `equals`, `toString`,
+  `add` and the like, with a degree up to 26,099. Weigh a very high `graphos_degree` down, or
+  compute on a subgraph that leaves them out.
+- **Diversify works.** Keeping the best hit per community put 4 to 7 communities in each top 10.
 
 ## Reserved properties
 

@@ -8,6 +8,10 @@ under one version.
 
 ### Added
 
+- **Docs: using the results in a client** ([graph algorithms](docs/algorithms.md#using-the-results-in-a-client)):
+  ranking search hits by PageRank, focusing a walk on a community, one hit per community,
+  bridges by betweenness, keeping hubs in check; with
+  `clients/python/examples/09_better_answers.py` running each on the demo tenant.
 - **UI: graph algorithms in Overview.** A "Graph algorithms" card shows what the last groups
   recompute (Louvain) and the last metrics run found, and lets whoever maintains the tenant run
   them: the metrics (degree, PageRank, components, and betweenness on request) had no trigger in
