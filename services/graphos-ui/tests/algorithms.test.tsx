@@ -6,6 +6,7 @@ import { isComputedProperty } from "../src/lib/properties";
 import { formatMetric, hasMetrics, largestValue, metricSize } from "../src/lib/metrics";
 import { SessionProvider } from "../src/session/SessionProvider";
 import { theme } from "../src/theme/mantineTheme";
+import { LensHelp } from "../src/views/explore/LensSwitch";
 import { GraphAlgorithms } from "../src/views/overview/GraphAlgorithms";
 
 describe("metric helpers", () => {
@@ -143,5 +144,19 @@ describe("Graph algorithms", () => {
     expect(await screen.findByText("Graph algorithms")).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText("Not computed yet.").length).toBeGreaterThan(0));
     expect(screen.queryByRole("button", { name: /Compute/ })).toBeNull();
+  });
+});
+
+describe("view help", () => {
+  it("says what a metric view shows and how to read it", async () => {
+    render(
+      <MantineProvider theme={theme}>
+        <LensHelp lens="graphos_betweenness" />
+      </MantineProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "What this view shows" }));
+    expect(await screen.findByText("Betweenness")).toBeInTheDocument();
+    expect(screen.getByText(/bridge or a bottleneck/)).toBeInTheDocument();
+    expect(screen.getByText("How to read it")).toBeInTheDocument();
   });
 });

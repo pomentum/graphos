@@ -16,6 +16,8 @@ under one version.
   PageRank, Betweenness, Degree and Components. A score view draws the tenant's top 25 to 200
   nodes by that score, across every label, with the relationships among them, sized and coloured
   by the score and ranked beside the canvas; Components lists the islands by size and draws one.
+- **UI: what a view shows.** An ⓘ beside the Groups mode's views explains each one: what the
+  algorithm finds and how to read the picture (size, colour, lines, what a click does).
 - **UI: size by a metric.** Explore's graph can size nodes by PageRank, betweenness or degree, as
   well as by their connections on the canvas.
 - **UI: computed values apart.** A node's panel shows its group (named after its hub) and its graph

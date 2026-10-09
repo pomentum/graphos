@@ -336,6 +336,58 @@
         "componentOption_other": "Component {{id}} · {{count}} nodes",
         "componentNote_one": "{{shown}} of {{count}} node in this component · {{islands}} components in all",
         "componentNote_other": "{{shown}} of {{count}} nodes in this component (at most {{limit}} drawn) · {{islands}} components in all"
+      },
+      "lensHelp": {
+        "label": "What this view shows",
+        "howToRead": "How to read it",
+        "groups": {
+          "title": "Groups (Louvain communities)",
+          "what": "Louvain splits the graph into groups of nodes more connected to each other than to the rest: the parts the graph falls into, found from its relationships alone.",
+          "read": [
+            "Each bubble is a group, sized by its members and named after its best-connected member.",
+            "A line joins two groups with relationships between them; thicker means more.",
+            "Click a group to see what it is made of and what it connects to; double-click to open its best-connected member in Graph.",
+            "The groups are those of the last recompute (Overview); ids stay the same from run to run."
+          ]
+        },
+        "graphos_pagerank": {
+          "title": "PageRank",
+          "what": "How much a node is pointed at, by nodes that are themselves pointed at. A high score means much depends on it: core libraries, key documents, the most called services.",
+          "read": [
+            "You see the tenant's top nodes by PageRank, across every label, and the relationships among them.",
+            "Bigger and hotter (blue → yellow) means a higher score; the list beside ranks them.",
+            "Direction matters: A → B raises B. It was computed over the relationship types chosen in Overview.",
+            "Click a node to select it; double-click (or Open in Graph) to explore around it."
+          ]
+        },
+        "graphos_betweenness": {
+          "title": "Betweenness",
+          "what": "How often a node lies on the shortest paths between other nodes. A high score marks a bridge or a bottleneck: without it, parts of the graph would drift apart.",
+          "read": [
+            "You see the tenant's top nodes by betweenness and the relationships among them.",
+            "Bigger and hotter means more paths go through the node; the list ranks them.",
+            "A high betweenness with few relationships is a quiet single point of failure.",
+            "Computed only when asked for in Overview (it is the slow one), over the relationship types chosen there."
+          ]
+        },
+        "graphos_degree": {
+          "title": "Degree",
+          "what": "How many relationships a node has, in and out. A high degree marks a hub.",
+          "read": [
+            "You see the tenant's best-connected nodes and the relationships among them.",
+            "Bigger and hotter means more relationships; the list ranks them.",
+            "Degree counts neighbours, not their importance: compare with PageRank to tell busy nodes from central ones."
+          ]
+        },
+        "components": {
+          "title": "Connected components",
+          "what": "The separate islands of the graph: nodes linked to each other, in either direction, and not at all to the rest.",
+          "read": [
+            "Pick an island in the list: the largest is usually the main graph; small ones are often orphans or data that did not link up.",
+            "The island picked is drawn with its relationships; nodes are sized by how many they have.",
+            "A large island is drawn by its best-connected nodes only, and the note below says so."
+          ]
+        }
       }
     },
     "path": {
