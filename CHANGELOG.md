@@ -49,8 +49,23 @@ under one version.
 
 ### Fixed
 
+- **`/expand` scoped to communities stays inside them in every direction.** A hop walking an edge
+  backwards (`direction=in`, and the default `both`) checked the community of the node already
+  reached, so a scoped walk could step out through incoming edges (on the demo, 15 of 79 nodes
+  reached were from other communities; now none). Each edge now also carries its start's
+  community (`start_community_id`, filled by the community recompute, with its own partial index),
+  and backward hops check it. `start_community_id` is a reserved column name.
+- **The community write-back works in chunks.** The communities of each edge's ends are written in
+  UPDATEs of 50,000 vertices each, each committed on its own, rather than one statement per edge
+  label: a first fill on millions of edges no longer runs past the 300 s statement limit.
 - UI: with fewer groups than the default number shown, the Groups view's "largest" selector was
   blank.
+
+### Upgrading
+
+Run a community recompute once on each tenant that uses `/expand?communities=…`: until then the
+new `start_community_id` is empty, and a scoped walk does not follow incoming edges. The first
+recompute writes it on every edge, so it takes longer than usual; later ones write only what moved.
 
 ## 0.5.0 — 2026-10-08
 

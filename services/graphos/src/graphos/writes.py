@@ -810,20 +810,28 @@ async def set_node_metrics(
     return written
 
 
+# Vertices per edge-community UPDATE (see :func:`set_edge_end_communities`).
+EDGE_COMMUNITY_CHUNK = 50_000
+
+
 async def set_edge_end_communities(
     pool: asyncpg.Pool,
     *,
     tenant: str,
     assignments: Iterable[tuple[int, str]],
 ) -> int:
-    """Backfill ``end_community_id`` onto every edge of *tenant*.
+    """Backfill ``end_community_id`` and ``start_community_id`` (the
+    communities of each edge's two ends) onto every edge of *tenant*.
 
     The ``(graphid, community_id)`` pairs are COPYed once into a staging
     table, streamed from ``assignments`` (a generator is fine), then each
-    edge label table gets one UPDATE joined to it.  ``IS DISTINCT FROM``
-    skips rows whose value is unchanged.  Unlike the other writes, each
-    per-label UPDATE commits on its own, so a failure on one label keeps
-    the others.
+    edge label table gets UPDATEs joined to it, per end and per chunk of
+    ``EDGE_COMMUNITY_CHUNK`` vertices: a first fill of a column on millions of
+    edges (an existing tenant after an upgrade) is then many short statements,
+    each well within its time limit, rather than one per label.  ``IS
+    DISTINCT FROM`` skips rows whose value is unchanged, so later runs write
+    only what moved.  Unlike the other writes, each UPDATE commits on its own,
+    so a failure keeps what was written.
 
     Returns:
         Edge rows updated across all labels.
@@ -841,8 +849,17 @@ async def set_edge_end_communities(
                 await conn.copy_records_to_table(
                     "_stg_edge_communities", records=assignments, columns=("gid", "cid"),
                 )
+                await conn.execute("CREATE INDEX ON _stg_edge_communities (gid);")
                 # So each per-label plan sees the staging cardinality.
                 await conn.execute("ANALYZE _stg_edge_communities;")
+                # Chunk boundaries: every EDGE_COMMUNITY_CHUNK-th vertex id.
+                starts = [int(r["gid"]) for r in await conn.fetch(
+                    "SELECT gid FROM (SELECT gid, row_number() OVER (ORDER BY gid) AS rn "
+                    "                 FROM _stg_edge_communities) t "
+                    "WHERE (rn - 1) % $1 = 0 ORDER BY gid;",
+                    EDGE_COMMUNITY_CHUNK,
+                )]
+                chunks = list(zip(starts, [*starts[1:], None], strict=True))
                 label_rows = await conn.fetch(
                     "SELECT c.relname "
                     "FROM pg_class c "
@@ -857,15 +874,19 @@ async def set_edge_end_communities(
                 )
                 for label in (str(r["relname"]) for r in label_rows):
                     await allow_long_statements(conn, 300.0)
-                    updated = await conn.execute(
-                        f'UPDATE "{tenant}"."{label}" e '
-                        f"SET end_community_id = s.cid "
-                        f"FROM _stg_edge_communities s "
-                        f"WHERE e.end_id = (s.gid::text)::graphid "
-                        f"  AND e.end_community_id IS DISTINCT FROM s.cid;",
-                        timeout=300.0,
-                    )
-                    total += _rows_written(updated, default=0)
+                    for column, end in (("end_community_id", "end_id"),
+                                        ("start_community_id", "start_id")):
+                        for low, high in chunks:
+                            updated = await conn.execute(
+                                f'UPDATE "{tenant}"."{label}" e '
+                                f"SET {column} = s.cid "
+                                f"FROM _stg_edge_communities s "
+                                f"WHERE e.{end} = (s.gid::text)::graphid "
+                                f"  AND s.gid >= $1 AND ($2::bigint IS NULL OR s.gid < $2) "
+                                f"  AND e.{column} IS DISTINCT FROM s.cid;",
+                                low, high, timeout=300.0,
+                            )
+                            total += _rows_written(updated, default=0)
                     log.info(
                         "louvain.edge_writeback_label_done",
                         extra={"tenant": tenant, "label": label, "total_updated_so_far": total},

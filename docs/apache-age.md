@@ -98,7 +98,7 @@ for every registered label:
 | `UNIQUE (start_id, end_id)` per edge label | Arbiter for the `ON CONFLICT` of every edge write |
 | `btree (start_id, end_id)` per edge label | Outgoing-edge lookups on read paths (kept alongside the unique one) |
 | `btree (end_id)` per edge label | Incoming-edge lookups (`WHERE end_id IN (…)`) |
-| partial `btree (end_community_id)` per edge label | Community-scoped BFS |
+| partial `btree (end_community_id)`, `btree (start_community_id)` per edge label | Community-scoped BFS (forward and backward hops) |
 | `btree (id)` per edge label (`CONCURRENTLY`) | Paging edges in graphid order; AGE does not index the graphid |
 | `btree (id)` per vertex label (opt-in, `GRAPHOS_VERTEX_GRAPHID_INDEXES`) | Resolving edge endpoints by graphid; costs 20–30% on bulk vertex writes |
 
@@ -180,9 +180,9 @@ not create, AGE 1.6.0 segfaults the Postgres backend on any Cypher `SET` or
 `MERGE … SET` that writes a row of that label, new or existing. The
 postmaster then restarts the whole server and every connection drops.
 
-graphos label tables can carry such columns in two ways: bootstrap adds an
-`end_community_id` column to every edge table (§9, community-scoped
-traversal), and registration `generated_columns` add columns to any vertex
+graphos label tables can carry such columns in two ways: bootstrap adds
+`end_community_id` and `start_community_id` columns to every edge table (§9,
+community-scoped traversal), and registration `generated_columns` add columns to any vertex
 or edge label. Verified live on AGE 1.6.0. graphos therefore issues **no
 Cypher writes**: every node and edge write is the SQL `INSERT … ON CONFLICT
 … DO UPDATE SET properties = properties || EXCLUDED.properties` of §6,
@@ -386,8 +386,9 @@ reports each phase's duration (`edge_stream_ms`, `writeback_ms`, …).
 3. **Writeback** → `community_id` on each vertex, written only for
    vertices whose id actually changed, via a COPY-staged UPDATE against
    the inheritance parent `"<tenant>"._ag_label_vertex` (Postgres routes
-   each row to its child label table). Then `end_community_id` is
-   back-filled on every edge label table, one UPDATE per label.
+   each row to its child label table). Then `end_community_id` and
+   `start_community_id` are back-filled on every edge label table, in UPDATEs
+   of 50,000 vertices each.
 
 For comparison, a per-row `cypher() SET` writeback manages ~42 nodes/s
 (215 s for 9k vertices).

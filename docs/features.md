@@ -103,8 +103,8 @@ one id (or one src/dst pair) in a batch collapse into one row.
   edges). graphos writes no rows through Cypher, for two reasons: the
   COPY-staged upsert is far faster than per-row Cypher `MERGE` in our
   benchmark, and AGE 1.6 crashes the Postgres backend on a Cypher `SET` into a
-  label table that carries extra columns (graphos's `end_community_id` on
-  edges, or any registered generated column)
+  label table that carries extra columns (graphos's `end_community_id` and
+  `start_community_id` on edges, or any registered generated column)
   ([concept §4](concept.md#4-write-paths)).
 - **Small batch** (`POST …/graph/nodes`, `…/graph/edges`): JSON, up to 1000
   rows.
@@ -176,8 +176,9 @@ reported in the response.
   or from several `seeds`.
   - Options: `direction` (`out|in|both`), `rel_types`, `max_hops` (default 2,
     max 5), `limit` (max 1000).
-  - `communities` restricts traversal to edges whose end vertex is in the
-    listed Louvain communities, via the denormalised `end_community_id` column.
+  - `communities` restricts the walk to nodes in the listed Louvain
+    communities, in every direction, via the communities of each edge's ends
+    denormalised onto it (`end_community_id`, `start_community_id`).
   - Returns each reached node (external id in `end_id`) with its hop count
     and edge-type path.
   - Runs as direct SQL, one query per direction per hop.
@@ -186,7 +187,7 @@ reported in the response.
   flowchart LR
       H["Request<br/>node_id / seeds, max_hops,<br/>rel_types, communities"]
       S["Resolve seed ids<br/>to graphids"]
-      Q["Per hop: SQL on _ag_label_edge<br/>start_id / end_id IN frontier<br/>+ optional end_community_id filter"]
+      Q["Per hop: SQL on _ag_label_edge<br/>start_id / end_id IN frontier<br/>+ optional community filter"]
       P["Resolve reached nodes<br/>label + properties"]
       H --> S --> Q --> P
   ```
@@ -250,7 +251,7 @@ flowchart LR
     D["Drop small communities,<br/>relabel by size"]
     E["Match vs prior ids<br/>(Jaccard ≥ 0.5)"]
     F["COPY + UPDATE<br/>changed community_id"]
-    G["Denormalise<br/>end_community_id onto edges"]
+    G["Denormalise<br/>both ends' communities onto edges"]
     A --> B --> C --> D --> E --> F --> G
 ```
 
@@ -274,7 +275,8 @@ flowchart LR
     most 500 ids, with a `truncated` flag.
 
 Vertices outside any kept community keep their previous `community_id`. Edges
-added after a run have no `end_community_id` until the next run.
+added after a run have no `end_community_id` / `start_community_id` until the
+next run.
 
 **Graph metrics.** `POST …/graph/metrics:compute` (`maintain`) computes degree,
 PageRank, weakly connected components and betweenness with rustworkx (a default
@@ -548,8 +550,8 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   on `properties`, an expression index on `community_id`, and a trigram GIN on
   `name`.
 - **Built-in indexes per edge label:** unique and plain btrees on
-  `(start_id, end_id)`, a btree on `end_id`, and a partial btree on
-  `end_community_id`. Details in
+  `(start_id, end_id)`, a btree on `end_id`, and partial btrees on
+  `end_community_id` and `start_community_id`. Details in
   [concept §2.3](concept.md#23-indexes-created-at-registration).
 - **Consumer indexes:** declare any other hot property via `indexes`. For
   `nodes:scan` filters the expression must be

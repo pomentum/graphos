@@ -465,6 +465,14 @@ async def bootstrap_tenant(
                 f'ADD COLUMN IF NOT EXISTS end_community_id text;',
                 swallow=_SWALLOW_DUPLICATE_COLUMN,
             )
+            # And the start vertex's: a scoped walk crossing an edge
+            # backwards (``direction=in`` / ``both``) reaches its start.
+            await _safe(
+                conn,
+                f'ALTER TABLE "{spec.name}"."_ag_label_edge" '
+                f'ADD COLUMN IF NOT EXISTS start_community_id text;',
+                swallow=_SWALLOW_DUPLICATE_COLUMN,
+            )
 
             for label in spec.edge_labels:
                 await _safe(
@@ -546,6 +554,20 @@ async def bootstrap_tenant(
                     f'CREATE INDEX IF NOT EXISTS "{label}_end_comm_id" '
                     f'ON "{spec.name}"."{label}" USING btree '
                     f'(end_community_id) WHERE end_community_id IS NOT NULL;'
+                )
+                # The start vertex's community likewise: a walk crossing the
+                # edge backwards reaches its start, so a scoped walk checks
+                # this column on those hops (see /expand).
+                await _safe(
+                    conn,
+                    f'ALTER TABLE "{spec.name}"."{label}" '
+                    f'ADD COLUMN IF NOT EXISTS start_community_id text;',
+                    swallow=_SWALLOW_DUPLICATE_COLUMN,
+                )
+                await conn.execute(
+                    f'CREATE INDEX IF NOT EXISTS "{label}_start_comm_id" '
+                    f'ON "{spec.name}"."{label}" USING btree '
+                    f'(start_community_id) WHERE start_community_id IS NOT NULL;'
                 )
 
             # 4. Label hierarchy (postgres-inheritance multi-label

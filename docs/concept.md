@@ -136,7 +136,8 @@ an existing volume picks up new internal tables without re-initialisation.
   own labels (or `_ag_label_vertex` / `_ag_label_edge`). `;` (other than one
   trailing), SQL comments, and `$` (dollar quoting) are rejected anywhere. A
   generated column may not take a name graphos uses itself (`id`,
-  `properties`, `start_id`, `end_id`, `end_community_id`, any `graphos_…`).
+  `properties`, `start_id`, `end_id`, `end_community_id`, `start_community_id`, any
+  `graphos_…`).
   Expressions inside parentheses are not inspected; Postgres enforces their
   immutability.
 
@@ -151,8 +152,9 @@ an existing volume picks up new internal tables without re-initialisation.
    is rewritten (on a copy with an 8M-row edge table, all 149 label tables got
    it in under 0.1 s); existing rows read as revision 1.
 2. `create_vlabel` per vertex label plus the per-label indexes in §2.3.
-3. `end_community_id text` column on `_ag_label_edge`; `create_elabel` per
-   edge label plus the per-label edge indexes and column in §2.3.
+3. `end_community_id` and `start_community_id` (`text`) columns on
+   `_ag_label_edge`; `create_elabel` per edge label plus the per-label edge
+   indexes and columns in §2.3.
 4. `label_hierarchy` inheritance links (checked in `pg_inherits` first).
 5. The consumer's `indexes`, then `generated_columns` (duplicate-column errors
    swallowed).
@@ -212,6 +214,9 @@ CREATE INDEX "<E>_end_id" ON "<tenant>"."<E>" USING btree (end_id);
 ALTER TABLE "<tenant>"."<E>" ADD COLUMN IF NOT EXISTS end_community_id text;
 CREATE INDEX "<E>_end_comm_id" ON "<tenant>"."<E>" USING btree (end_community_id)
   WHERE end_community_id IS NOT NULL;
+ALTER TABLE "<tenant>"."<E>" ADD COLUMN IF NOT EXISTS start_community_id text;
+CREATE INDEX "<E>_start_comm_id" ON "<tenant>"."<E>" USING btree (start_community_id)
+  WHERE start_community_id IS NOT NULL;
 CREATE INDEX CONCURRENTLY "<E>_graphid" ON "<tenant>"."<E>" (id);
 ```
 
@@ -229,9 +234,12 @@ Consequences:
   `ON CONFLICT` arbiter for every edge write (§4). Because stored tenants are
   re-bootstrapped at startup (§2.2), a tenant created before these unique
   indexes existed gets them on the next restart.
-- `end_community_id` is filled by Louvain (§5) and read by community-scoped
-  `/expand`. Edges written after the last recompute have `NULL` there and are
-  invisible to scoped traversals until the next recompute.
+- `end_community_id` and `start_community_id` (the communities of an edge's
+  two ends) are filled by Louvain (§5) and read by community-scoped `/expand`:
+  a hop that walks an edge forwards checks its end, one that walks it backwards
+  its start, so the walk reaches only nodes in the listed communities. Edges
+  written after the last recompute have `NULL` there and are invisible to
+  scoped traversals until the next recompute.
 - `<E>_graphid`: AGE does not index the graphid. Paging edges in graphid
   order (`/edges:scan`) reads it instead of sorting the table. It is built
   `CONCURRENTLY`, so on the first start after an upgrade it is added to large
@@ -595,7 +603,7 @@ the default):
 |---|---|
 | Tenant bootstrap, internal schema setup, startup reload of stored tenants | 1800 s (`DDL_TIMEOUT_S`) |
 | Louvain edge stream / vertex writeback | 600 s each |
-| Louvain edge `end_community_id` update | 300 s per edge label |
+| Louvain edge `end_community_id` / `start_community_id` update | 300 s per statement (a chunk of 50,000 vertices per edge label) |
 | `edges:resolve` INSERT | 1800 s per edge type |
 | `POST /v1/db/vacuum` | 3600 s |
 
@@ -1155,7 +1163,7 @@ flowchart LR
     D["Drop small communities,<br/>relabel by size"]
     E["Match vs prior<br/>community_id (Jaccard ≥ 0.5)"]
     F["COPY delta + UPDATE<br/>vertex community_id"]
-    G["UPDATE end_community_id<br/>per edge label"]
+    G["UPDATE end_ / start_community_id<br/>per edge label, in chunks"]
     A --> B --> C --> D -->|"write"| E --> F --> G
 ```
 
@@ -1180,8 +1188,11 @@ Steps (`louvain.py`):
    into a temp table, then one `UPDATE … FROM` on `_ag_label_vertex` merging
    `{"community_id": <int>}` into `properties`. Skipped when nothing changed.
 7. **Edge denormalisation.** All assignments are copied into a temp table and
-   each edge-label table gets `end_community_id = <end vertex's id>` where it
-   differs. Each label's update commits separately.
+   each edge-label table gets `end_community_id` and `start_community_id` (the
+   communities of its end and start vertices) where they differ, in UPDATEs of
+   50,000 vertices each, each committed on its own. A first fill (a tenant
+   upgraded from a version without one of the columns) writes every edge, so
+   that recompute takes longer; later ones write only what moved.
 
 Vertices that receive no assignment (in a dropped community, or with no edges
 in the stream) keep whatever `community_id` they had before.
@@ -1278,8 +1289,8 @@ Postgres instance.
 3. **One edge per type per ordered node pair** (§2.3).
 4. **`edges:resolve` only inserts.** Edges whose rule no longer matches are not
    removed; delete them explicitly.
-5. **Community freshness.** `end_community_id` and `community_id` change only
-   when Louvain writes; new edges are invisible to community-scoped `expand`
+5. **Community freshness.** `end_community_id`, `start_community_id` and
+   `community_id` change only when Louvain writes; new edges are invisible to community-scoped `expand`
    until then, and unassigned vertices keep old ids.
 6. **`DELETE /v1/tenants/{name}` keeps data** (§2.5.1).
 7. **Generated columns on tables that already hold rows** rewrite the table;

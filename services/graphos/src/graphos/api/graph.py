@@ -1631,12 +1631,11 @@ async def expand(
     communities: Annotated[
         list[str] | None,
         Query(description=(
-            "Community-id scope.  When set, the BFS only crosses an edge "
-            "if the END-vertex's ``community_id`` is in this list — "
-            "tight-radius traversal bounded to the seed's Louvain "
-            "partition(s).  Empty / unset = no scope (full BFS).  Uses "
-            "the per-label ``<Label>_community_id`` btree as a "
-            "selective semi-join on ``_ag_label_vertex``."
+            "Community-id scope.  When set, the walk only reaches nodes "
+            "whose ``community_id`` (from the last community recompute) is "
+            "in this list, in every direction: bounded to the seed's "
+            "Louvain partition(s).  Edges added since the last recompute "
+            "are not followed by a scoped walk.  Empty / unset = no scope."
         )),
     ] = None,
 ) -> ExpandResponse:
@@ -1756,14 +1755,16 @@ async def expand(
         # ``IN (NULL)`` matches nothing: an empty rel list must not render ``IN ()``.
         rel_in = ", ".join(f"'{r}'" for r in safe_rels) or "NULL"
 
-        # Community-scope filter: direct column predicate against
-        # ``end_community_id``, denormalised onto every edge row by
-        # the Louvain writeback (see :func:`graphos.louvain.
-        # _writeback_assignments`).  The per-label partial btree
-        # built at bootstrap (``<label>_end_comm_id``) combines via
-        # BitmapAnd with the existing ``(start_id, end_id)`` index
-        # so the per-hop fetch stays index-driven without any
-        # vertex-side join, temp-table, or array-param hash build.
+        # Community-scope filter: a column predicate on the community of
+        # the node a hop reaches, denormalised onto every edge row by the
+        # Louvain writeback (see :func:`graphos.writes.
+        # set_edge_end_communities`): ``end_community_id`` when walking an
+        # edge forwards, ``start_community_id`` when walking it backwards.
+        # The per-label partial btrees built at bootstrap
+        # (``<label>_end_comm_id`` / ``<label>_start_comm_id``) combine via
+        # BitmapAnd with the endpoint indexes, so the per-hop fetch stays
+        # index-driven without any vertex-side join, temp-table, or
+        # array-param hash build.
         #
         # Trade-off: edges added between Louvain reruns have
         # ``end_community_id IS NULL`` and are invisible to scoped
@@ -1773,7 +1774,8 @@ async def expand(
         # Unscoped callers see new edges immediately because they
         # don't pass ``communities``.
         scope_active = bool(communities)
-        scope_clause = " AND e.end_community_id = ANY ($2::text[])" if scope_active else ""
+        out_scope = " AND e.end_community_id = ANY ($2::text[])" if scope_active else ""
+        in_scope = " AND e.start_community_id = ANY ($2::text[])" if scope_active else ""
         for hop in range(1, max_hops + 1):
             if not frontier or len(results_gids) >= limit:
                 break
@@ -1804,7 +1806,7 @@ async def expand(
                 f'JOIN pg_class c ON c.oid = e.tableoid '
                 f'WHERE e.start_id IN ({id_csv}) '
                 f'  AND c.relname IN ({rel_in}) '
-                f'{scope_clause} '
+                f'{out_scope} '
                 f'LIMIT $1;'
             ) if out_dir else None
             in_sql = (
@@ -1815,13 +1817,11 @@ async def expand(
                 f'JOIN pg_class c ON c.oid = e.tableoid '
                 f'WHERE e.end_id IN ({id_csv}) '
                 f'  AND c.relname IN ({rel_in}) '
-                f'{scope_clause} '
+                f'{in_scope} '
                 f'LIMIT $1;'
             ) if in_dir else None
-            # When scope is active, $2 = community_id strings as text[].
-            # The per-edge-label partial btree ``<label>_end_comm_id``
-            # serves the ``end_community_id = ANY ($2)`` predicate
-            # directly — no join, no temp table, no per-hop materialisation.
+            # When scope is active, $2 = community_id strings as text[],
+            # served by the per-edge-label partial btrees directly.
             args = (out_limit, list(communities)) if scope_active else (out_limit,)
             try:
                 if out_sql and in_sql:

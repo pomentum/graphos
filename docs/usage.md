@@ -321,8 +321,8 @@ predates them cannot drop them when it rewrites a spec.
 **Indexes created automatically.** Per vertex label: `<Label>_properties_gin` (GIN on
 `properties`), `<Label>_id_unique` (unique on the `id` property, so ids are unique within a label),
 `<Label>_community_id`, and `<Label>_name_trgm` (trigram GIN on `name`, serves `/graph/search`). Per
-edge label: unique and plain `(start_id, end_id)` indexes, an `end_id` btree, and a partial index on
-`end_community_id`. Any other index has to be declared in `indexes`.
+edge label: unique and plain `(start_id, end_id)` indexes, an `end_id` btree, and partial indexes on
+`end_community_id` and `start_community_id`. Any other index has to be declared in `indexes`.
 
 **Allowed DDL** (`contracts/ddl.py`). Each string must be exactly one statement of one of these forms:
 

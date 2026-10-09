@@ -75,7 +75,9 @@ AGE_PARENT_TABLES = frozenset({"_ag_label_vertex", "_ag_label_edge"})
 
 # Columns graphos adds to label tables itself; a generated column may not
 # take these names (or any other ``graphos_`` name).
-_RESERVED_COLUMNS = frozenset({"id", "properties", "start_id", "end_id", "end_community_id"})
+_RESERVED_COLUMNS = frozenset(
+    {"id", "properties", "start_id", "end_id", "end_community_id", "start_community_id"},
+)
 _RESERVED_COLUMN_PREFIX = "graphos_"
 
 
