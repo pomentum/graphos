@@ -811,10 +811,12 @@ html{scroll-behavior:smooth}
     <p>graphos adds what a shared service needs on top: the HTTP contract, tenancy and tokens, bulk paths, index management, community detection, rule-based edges and observability. Apache AGE is a project of the Apache Software Foundation under the Apache 2.0 licence; graphos is an independent project and is not affiliated with or endorsed by the ASF.</p>
 
     <h2 id="start"><span class="sec"><span class="num">12</span></span>Getting started</h2>
-    <div class="record">bash scripts/init-secrets.sh
+    <p>With Docker and Compose v2, and about 4 GB of memory for Docker:</p>
+    <div class="record">git clone https://github.com/pomentum/graphos.git &amp;&amp; cd graphos
+bash scripts/init-secrets.sh        # random database passwords (Windows: pwsh scripts/init-secrets.ps1)
 docker compose -f docker-compose.graphos.yml --profile ui up -d
-curl -s http://127.0.0.1:8080/readyz</div>
-    <p>Sign in as <code>graphos</code> / <code>graphos</code> and choose a new password, which the first sign-in requires. Then register a tenant and start writing, or load the demo tenant (<code>clients/python/examples/08_demo_ecosystem.py</code>) and open the UI. The <a href="https://github.com/pomentum/graphos/blob/main/docs/installation.md">installation guide</a> covers production settings and single sign-on, the <a href="https://github.com/pomentum/graphos/blob/main/README.md">README</a> has the full quickstart, the <a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md">usage guide</a> covers integration patterns, and the running service publishes its OpenAPI contract at <code>/docs</code>.</p>
+curl -s http://127.0.0.1:8080/readyz  # {"status":"ready","registered_tenants":0}</div>
+    <p>The API is then at <code>http://127.0.0.1:8080</code> and the web UI at <code>http://127.0.0.1:8081</code>. Sign in as <code>graphos</code> / <code>graphos</code> and choose a new password, which the first sign-in requires. Then register a tenant and start writing, or load the demo tenant (an invented software ecosystem, section 5) with the Python client and open it in the UI. The <a href="https://github.com/pomentum/graphos/blob/main/docs/installation.md">installation guide</a> covers production settings and single sign-on, the <a href="https://github.com/pomentum/graphos/blob/main/README.md">README</a> has the full quickstart, the <a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md">usage guide</a> covers integration patterns, and the running service publishes its OpenAPI contract at <code>/docs</code>.</p>
 
     <footer>
       <p>graphos is open source under the <a href="https://github.com/pomentum/graphos/blob/main/LICENSE">Apache License 2.0</a>. “Apache”, “Apache AGE” and the feather logo are trademarks of The Apache Software Foundation.</p>

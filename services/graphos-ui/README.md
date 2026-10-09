@@ -53,10 +53,12 @@ docker compose -f docker-compose.graphos.yml --profile ui up -d
 ```
 
 The UI is then at <http://127.0.0.1:8081> (`GRAPHOS_UI_PORT` changes the port). On its own,
-point it at any graphos:
+point it at any graphos it can reach; next to the compose stack, join its `graphos-net` network so
+the name `graphos-api` resolves:
 
 ```bash
-docker run -p 8081:8080 -e GRAPHOS_API_UPSTREAM=http://graphos-api:8080 ghcr.io/pomentum/graphos-ui
+docker run --network graphos-net -p 127.0.0.1:8081:8080 \
+  -e GRAPHOS_API_UPSTREAM=http://graphos-api:8080 ghcr.io/pomentum/graphos-ui
 ```
 
 For development, with graphos running on port 8080:

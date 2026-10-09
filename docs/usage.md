@@ -72,7 +72,8 @@ curl -s -X POST "$G/v1/acme/graph/edges" \
 # → {"tenant":"acme","edges_upserted":2,"edges_skipped":0,"by_type":{...},"elapsed_ms":…}
 
 curl -s "$G/v1/acme/graph/nodes/u1" -H "Authorization: Bearer $TOKEN"
-# → {"tenant":"acme","external_id":"u1","label":"User","properties":{"id":"u1","name":"Ada",...},"elapsed_ms":…}
+# → {"tenant":"acme","external_id":"u1","label":"User","properties":{"id":"u1","name":"Ada",...},
+#    "rev":1,"etag":"\"844424930131969.1\"","elapsed_ms":…}
 curl -s "$G/v1/acme/graph/neighbors?node_id=u1" -H "Authorization: Bearer $TOKEN"
 curl -s "$G/v1/acme/graph/search?q=design&label=Document" -H "Authorization: Bearer $TOKEN"
 ```

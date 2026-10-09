@@ -45,6 +45,8 @@ The [installation guide](docs/installation.md) covers the same steps in more det
 Requires Docker with Compose v2 and about 4 GB of memory available to Docker (the defaults are laptop-sized; [tuning](docs/apache-age.md) covers larger graphs).
 
 ```bash
+git clone https://github.com/pomentum/graphos.git && cd graphos
+
 # 1. Create local secrets: random database passwords
 bash scripts/init-secrets.sh          # or: pwsh scripts/init-secrets.ps1
 
