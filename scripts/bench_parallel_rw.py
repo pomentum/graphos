@@ -14,9 +14,13 @@ starve concurrent reads, and to measure read-side impact of a
 high-volume populate.
 
 Usage:
-    GRAPHOS_TOKEN=<token> python bench_parallel_rw.py http://localhost:8080 BENCH \\
+    GRAPHOS_USER=<user> GRAPHOS_PASSWORD=<password> \\
+        python bench_parallel_rw.py http://localhost:8080 BENCH \\
         --nodes 13000 --edges 44000 \\
         --batch 5000 --readers 8 --read-duration 60
+
+Signs in as GRAPHOS_USER (write on the tenant) and signs in again before
+the 15-minute access token runs out.
 
 If --read-duration outlives the writer (typical), readers continue
 solo so we can compare "writer-active" vs "writer-done" latency.
@@ -257,10 +261,36 @@ async def reader_task(
 # ── Entrypoint ────────────────────────────────────────────────────────
 
 
+class _SignIn(httpx.Auth):
+    """Bearer token for GRAPHOS_USER / GRAPHOS_PASSWORD, renewed after 10 minutes
+    (access tokens last 15)."""
+
+    renew_s = 600.0
+
+    def __init__(self, base: str) -> None:
+        self._base = base
+        self._token = ""
+        self._at = 0.0
+        self._lock = asyncio.Lock()
+
+    async def async_auth_flow(self, request: httpx.Request):
+        async with self._lock:
+            if not self._token or time.monotonic() - self._at > self.renew_s:
+                login = yield httpx.Request(
+                    "POST", f"{self._base}/v1/auth/login",
+                    json={"user": os.environ["GRAPHOS_USER"],
+                          "password": os.environ["GRAPHOS_PASSWORD"]},
+                )
+                await login.aread()
+                login.raise_for_status()
+                self._token, self._at = login.json()["access_token"], time.monotonic()
+        request.headers["Authorization"] = f"Bearer {self._token}"
+        yield request
+
+
 async def main_async(args: argparse.Namespace) -> None:
     metrics: dict[str, Any] = {}
-    token = os.environ.get("GRAPHOS_TOKEN", "")
-    async with httpx.AsyncClient(headers={"Authorization": f"Bearer {token}"}) as client:
+    async with httpx.AsyncClient(auth=_SignIn(args.base)) as client:
         tasks = [
             asyncio.create_task(
                 writer_task(

@@ -41,6 +41,12 @@ did keep working unchanged.
   and ignored, so those clients register as before. The SQL validator (`contracts/ddl.py`) is
   gone.
 
+### Fixed
+
+- `scripts/bench_bulk_write.py` and `scripts/bench_parallel_rw.py` sign in as `GRAPHOS_USER` /
+  `GRAPHOS_PASSWORD` and renew the token; they still read `GRAPHOS_TOKEN`, a static token that
+  0.5.0 removed.
+
 ### Upgrading from 0.5.1
 
 - **Clients:** nothing to do for a client that sends no SQL (the 0.5 Python client sends empty
