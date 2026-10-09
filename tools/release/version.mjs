@@ -10,8 +10,9 @@
  * graphos-api, graphos-ui and graphos-client are released together under one version, which
  * lives in six places (both pyproject.toml files, both __version__ strings, the UI's package.json
  * and package-lock.json). Setting it also turns the changelog's "## Unreleased" heading into
- * "## <version> — <date>", dates the whitepaper and updates the README's release example. CI runs
- * --check on every push, and the release workflows run it against the tag they publish.
+ * "## <version> — <date>", dates the whitepaper and updates the README's release example and the
+ * installation guide's published-image tags. CI runs --check on every push, and the release
+ * workflows run it against the tag they publish.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -110,12 +111,14 @@ function set(version, date) {
     changed.push('CHANGELOG.md');
   }
 
-  // The whitepaper's date, and the README's release example (X.Y.Z and its X.Y image tag).
+  // The whitepaper's date, the README's release example (X.Y.Z and its X.Y image tag), and the
+  // published images the installation guide's compose override names.
   const minor = version.split('.').slice(0, 2).join('.');
   const docs = [
     ['docs/whitepaper.html', /(Whitepaper · version )\d{4}-\d{2}-\d{2}/, `$1${date}`],
     ['README.md', /(Push a version tag such as `)\d+\.\d+\.\d+(`)/, `$1${version}$2`],
     ['README.md', /(graphos-api:)\d+\.\d+\.\d+(` and `:)\d+\.\d+(`)/, `$1${version}$2${minor}$3`],
+    ['docs/installation.md', /(image: ghcr\.io\/pomentum\/graphos-(?:api|ui):)\d+\.\d+\.\d+/g, `$1${version}`],
   ];
   for (const [file, pattern, replacement] of docs) {
     const before = read(file);

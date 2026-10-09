@@ -1,7 +1,7 @@
 {
   "name": "graphos-ui",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Web UI for graphos: explore, edit and follow a tenant graph.",
   "license": "Apache-2.0",
   "type": "module",

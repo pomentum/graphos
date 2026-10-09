@@ -4,7 +4,12 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.5.1 — 2026-10-09
+
+This release brings the graph algorithms into the web UI (run them from Overview, look at the graph
+through each one, read the results in a node's panel), keeps the UI signed in and on the same page
+across a reload, and fixes community-scoped `/expand`, which could leave its communities through
+incoming edges. Run a community recompute once after upgrading (see *Upgrading from 0.5.0*).
 
 ### Added
 
@@ -65,7 +70,7 @@ under one version.
 - UI: with fewer groups than the default number shown, the Groups view's "largest" selector was
   blank.
 
-### Upgrading
+### Upgrading from 0.5.0
 
 Run a community recompute once on each tenant that uses `/expand?communities=…`: until then the
 new `start_community_id` is empty, and a scoped walk does not follow incoming edges. The first
