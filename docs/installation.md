@@ -182,11 +182,41 @@ Community detection uses python-igraph, which is GPL-2.0-or-later, so it is an o
 | How you run graphos | Louvain |
 |---|---|
 | this compose file, built locally | included (leave it out with `GRAPHOS_EXTRAS= docker compose ...`) |
-| the published image | not included; add `-f docker-compose.louvain.yml`, which installs it into the container on first start (PyPI must be reachable then) |
+| the published image | not included; add `-f docker-compose.louvain.yml`, which installs it into the container on first start (PyPI must be reachable then): [example below](#louvain-with-the-published-images) |
 | `pip install "./services/graphos[louvain]"` | included |
 
 Everything else, the graph metrics included, works without it; `GET /v1/info` reports
 `features.louvain`. What the algorithms give you is in [Graph algorithms](algorithms.md).
+
+### Louvain with the published images
+
+The compose file builds graphos-api and graphos-ui from your checkout. To run the published images
+instead, add an override file that names them and drops the build (`!reset` needs Compose 2.24 or
+later); set the version you want:
+
+```yaml
+# docker-compose.published.yml
+services:
+  graphos-api:
+    image: ghcr.io/pomentum/graphos-api:0.5.0
+    build: !reset null
+  graphos-ui:
+    image: ghcr.io/pomentum/graphos-ui:0.5.0
+    build: !reset null
+```
+
+Then start with the Louvain overlay and the override:
+
+```bash
+docker compose -f docker-compose.graphos.yml -f docker-compose.louvain.yml \
+  -f docker-compose.published.yml --profile ui up -d
+curl -s http://127.0.0.1:8080/v1/info    # "features": {"louvain": true, ...}
+```
+
+On its first start graphos-api installs python-igraph into its container; restarts reuse it, and a
+recreated container (a new image or changed settings) installs it again. Without
+`-f docker-compose.louvain.yml`, the same override runs the published images without Louvain. If
+the packages on ghcr.io are not public, sign in first with `docker login ghcr.io`.
 
 ## 7. Try it with the demo tenant
 
@@ -260,7 +290,8 @@ lists every one; the README the most common). Those for sign-in, besides the OID
   by version, take the same settings. The API needs PostgreSQL 16 with Apache AGE 1.6, loaded with
   `shared_preload_libraries=age,pg_stat_statements`, and a database role for itself: the compose
   file and `services/graphos/deploy/db-init/` show the set-up to copy. The published API image has
-  no Louvain (§6).
+  no Louvain; with the compose file, run the published images and add Louvain as in
+  [§6](#louvain-with-the-published-images).
 - **Without containers.** `pip install "./services/graphos[louvain]"`, point `GRAPHOS_DB_*` at the
   database, and run `python -m graphos` (see [services/graphos](../services/graphos/README.md)).
 
