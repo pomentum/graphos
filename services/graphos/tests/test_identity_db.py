@@ -197,7 +197,9 @@ async def test_wrong_passwords_lock_the_account_with_one_message(api: httpx.Asyn
 
 @requires_db
 @pytest.mark.asyncio
-async def test_refresh_rotates_and_a_reused_token_ends_the_session(api: httpx.AsyncClient) -> None:
+async def test_refresh_rotates_and_a_reused_token_ends_the_session(
+    api: httpx.AsyncClient, db_pool: asyncpg.Pool,
+) -> None:
     admin = await _admin(api)
     await _create(api, admin, "ada")
     resp = await api.post("/v1/users/ada:reset-secret", headers=_auth(admin))
@@ -207,11 +209,87 @@ async def test_refresh_rotates_and_a_reused_token_ends_the_session(api: httpx.As
     assert one.status_code == HTTPStatus.OK
     two = one.json()
     assert two["refresh_token"] != first["refresh_token"] and two["access_token"]
-    # The first refresh token used again: theft, the whole session ends.
+    # Past the grace for a second tab: the first refresh token used again is theft,
+    # and the whole session ends.
+    await db_pool.execute(
+        "UPDATE graphos_meta.sessions SET rotated_at = now() - interval '1 minute' "
+        "WHERE rotated_at IS NOT NULL;",
+    )
     reused = await api.post("/v1/auth/refresh", json={"refresh_token": first["refresh_token"]})
     assert reused.status_code == HTTPStatus.UNAUTHORIZED
     later = await api.post("/v1/auth/refresh", json={"refresh_token": two["refresh_token"]})
     assert later.status_code == HTTPStatus.UNAUTHORIZED
+
+
+COOKIE = "graphos_session"
+
+
+def _cookie_of(resp: httpx.Response) -> str:
+    """The session cookie a response sets, checked for its attributes."""
+    header = next(h for h in resp.headers.get_list("set-cookie") if h.startswith(f"{COOKIE}="))
+    attrs = {part.strip().split("=")[0].lower() for part in header.split(";")[1:]}
+    assert {"httponly", "secure", "samesite", "path", "max-age"} <= attrs, header
+    assert "samesite=strict" in header.lower() and "path=/" in header.lower()
+    return header.split(";")[0].split("=", 1)[1]
+
+
+async def _with_cookie(
+    api: httpx.AsyncClient, path: str, cookie: str, body: Any = None,
+) -> httpx.Response:
+    return await api.post(path, json=body or {}, headers={"Cookie": f"{COOKIE}={cookie}"})
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_browser_session_lives_in_an_httponly_cookie(
+    api: httpx.AsyncClient, db_pool: asyncpg.Pool,
+) -> None:
+    await _admin(api)
+    resp = await api.post(
+        "/v1/auth/login", json={"user": "graphos", "password": SECOND, "session_cookie": True},
+    )
+    assert resp.status_code == HTTPStatus.OK
+    signed = resp.json()
+    # The refresh token is in the cookie only: the page never holds it.
+    assert signed["refresh_token"] is None and signed["session"] is True
+    first = _cookie_of(resp)
+    # A reload: no token in the page, the cookie renews the session.
+    one = await _with_cookie(api, "/v1/auth/refresh", first)
+    assert one.status_code == HTTPStatus.OK, one.text
+    assert one.json()["refresh_token"] is None and one.json()["access_token"]
+    second = _cookie_of(one)
+    assert second != first
+    # Another tab sends the previous cookie a moment later: an access token, no rotation.
+    tab = await _with_cookie(api, "/v1/auth/refresh", first)
+    assert tab.status_code == HTTPStatus.OK and tab.json()["access_token"]
+    assert not any(h.startswith(f"{COOKIE}=") for h in tab.headers.get_list("set-cookie"))
+    # Past that grace the old cookie is theft: the session ends.
+    await db_pool.execute(
+        "UPDATE graphos_meta.sessions SET rotated_at = now() - interval '1 minute' "
+        "WHERE rotated_at IS NOT NULL;",
+    )
+    stolen = await _with_cookie(api, "/v1/auth/refresh", first)
+    assert stolen.status_code == HTTPStatus.UNAUTHORIZED
+    after = await _with_cookie(api, "/v1/auth/refresh", second)
+    assert after.status_code == HTTPStatus.UNAUTHORIZED
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_signing_out_clears_the_session_cookie(api: httpx.AsyncClient) -> None:
+    await _admin(api)
+    resp = await api.post(
+        "/v1/auth/login", json={"user": "graphos", "password": SECOND, "session_cookie": True},
+    )
+    cookie = _cookie_of(resp)
+    out = await _with_cookie(api, "/v1/auth/logout", cookie)
+    assert out.status_code == HTTPStatus.OK
+    cleared = next(h for h in out.headers.get_list("set-cookie") if h.startswith(f"{COOKIE}="))
+    assert "max-age=0" in cleared.lower()
+    after = await _with_cookie(api, "/v1/auth/refresh", cookie)
+    assert after.status_code == HTTPStatus.UNAUTHORIZED
+    # Without a cookie or a token there is nothing to renew.
+    assert (await api.post("/v1/auth/refresh", json={})).status_code == HTTPStatus.UNAUTHORIZED
 
 
 @requires_db

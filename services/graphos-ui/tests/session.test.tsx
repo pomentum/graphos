@@ -19,10 +19,11 @@ const SSO_CONFIG = {
   oidc: { issuer: "https://idp.test", client_id: "graphos", scopes: "openid", display_name: "Acme" },
 };
 
-const tokens = (access: string, refresh: string | null = "r1", expires = 900): TokenResponse => ({
+const tokens = (access: string, refresh: string | null = "r1", expires = 900, session = false): TokenResponse => ({
   access_token: access,
   expires_in: expires,
   refresh_token: refresh,
+  session: session || refresh !== null,
   must_change: false,
 });
 
@@ -64,10 +65,11 @@ function Probe() {
 afterEach(() => window.history.replaceState(null, "", "/"));
 
 describe("signing in", () => {
-  it("signs in, keeps the tokens in memory only and opens the only tenant", async () => {
+  it("signs in, keeps the session in graphos's cookie (no browser storage) and opens the only tenant", async () => {
     const { calls, fetchImpl } = server({
       "/api/v1/auth/config": () => json({ password: true, oidc: null }),
-      "/api/v1/auth/login": () => json(tokens("a1")),
+      "/api/v1/auth/refresh": () => json({ detail: "no session" }, 401),
+      "/api/v1/auth/login": () => json(tokens("a1", null, 900, true)),
       "/api/v1/me": () => json(ME),
     });
     const before = { local: localStorage.length, session: sessionStorage.length, cookie: document.cookie };
@@ -80,12 +82,34 @@ describe("signing in", () => {
     act(() => screen.getByText("in").click());
     await waitFor(() => expect(screen.getByTestId("who").textContent).toBe("ada@acme:maintain"));
     expect(screen.getByTestId("maintain").textContent).toBe("true");
-    expect(calls.slice(1, 3)).toEqual([
-      'POST /api/v1/auth/login {"user":"ada","password":"pw-pw-pw-pw-1"}',
+    expect(calls.slice(1, 4)).toEqual([
+      'POST /api/v1/auth/refresh {"session_cookie":true}',
+      'POST /api/v1/auth/login {"user":"ada","password":"pw-pw-pw-pw-1","session_cookie":true}',
       "GET /api/v1/me Bearer a1",
     ]);
-    // Nothing kept in the browser.
+    // Nothing kept by the page (the session cookie is HttpOnly: set by graphos, unreadable here).
     expect({ local: localStorage.length, session: sessionStorage.length, cookie: document.cookie }).toEqual(before);
+  });
+});
+
+describe("a reload", () => {
+  it("carries on the session of graphos's cookie, without signing in again", async () => {
+    window.history.replaceState(null, "", "/schema");
+    const navigateTo = vi.fn();
+    const { calls, fetchImpl } = server({
+      "/api/v1/auth/config": () => json(SSO_CONFIG),
+      "/api/v1/auth/refresh": () => json(tokens("a5", null, 900, true)),
+      "/api/v1/me": () => json(ME),
+    });
+    render(
+      <SessionProvider fetchImpl={fetchImpl} navigateTo={navigateTo}>
+        <Probe />
+      </SessionProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("who").textContent).toBe("ada@acme:maintain"));
+    expect(calls[1]).toBe('POST /api/v1/auth/refresh {"session_cookie":true}');
+    expect(navigateTo).not.toHaveBeenCalled(); // no detour through the identity provider
+    expect(window.location.pathname).toBe("/schema"); // on the page that was open
   });
 });
 
@@ -95,6 +119,7 @@ describe("single sign-on", () => {
     const navigateTo = vi.fn();
     const { calls, fetchImpl } = server({
       "/api/v1/auth/config": () => json(SSO_CONFIG),
+      "/api/v1/auth/refresh": () => json({ detail: "no session" }, 401),
       "/api/v1/auth/oidc/start": () => json({ authorization_url: "https://idp.test/auth?state=s" }),
     });
     render(
@@ -103,7 +128,7 @@ describe("single sign-on", () => {
       </SessionProvider>,
     );
     await waitFor(() => expect(navigateTo).toHaveBeenCalledWith("https://idp.test/auth?state=s"));
-    const start = JSON.parse(calls[1]!.replace("POST /api/v1/auth/oidc/start ", ""));
+    const start = JSON.parse(calls[2]!.replace("POST /api/v1/auth/oidc/start ", ""));
     expect(start).toEqual({
       redirect_uri: `${window.location.origin}/auth/callback`,
       return_to: "/schema?x=1",
@@ -125,7 +150,7 @@ describe("single sign-on", () => {
       </SessionProvider>,
     );
     await waitFor(() => expect(screen.getByTestId("who").textContent).toBe("ada@acme:maintain"));
-    expect(calls[1]).toBe('POST /api/v1/auth/oidc/callback {"code":"c1","state":"s1"}');
+    expect(calls[1]).toBe('POST /api/v1/auth/oidc/callback {"code":"c1","state":"s1","session_cookie":true}');
     expect(window.location.pathname + window.location.search).toBe("/"); // the code is not kept
   });
 
@@ -184,6 +209,28 @@ describe("Credentials", () => {
     expect(ended).toHaveBeenCalledTimes(1);
     expect(await credentials.renew()).toBe(false);
     expect(ended).toHaveBeenCalledTimes(1);
+  });
+
+  it("renews through the session cookie when it holds no refresh token", async () => {
+    let now = 0;
+    const fetchImpl = vi.fn(async () => json(tokens("a2", null, 100, true))) as unknown as typeof fetch;
+    const credentials = new Credentials(
+      tokens("a1", null, 100, true),
+      "/api",
+      () => undefined,
+      fetchImpl,
+      () => now,
+    );
+    now = 81_000;
+    expect(await credentials.token()).toBe("a2");
+    const calls = (fetchImpl as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls;
+    expect(JSON.parse(String(calls[0]![1].body))).toEqual({ session_cookie: true });
+    // Signing out asks graphos to end that session and clear the cookie.
+    await credentials.signOut("http://ui/");
+    expect(JSON.parse(String(calls[1]![1].body))).toEqual({
+      session_cookie: true,
+      post_logout_redirect_uri: "http://ui/",
+    });
   });
 
   it("shares one renewal between concurrent callers", async () => {

@@ -28,8 +28,11 @@ export interface Me {
 export interface TokenResponse {
   access_token: string;
   expires_in: number;
-  /** People only: renews the access token; kept in memory, rotated on each use. */
+  /** People only: renews the access token, rotated on each use. Null for the UI: its
+   *  session asks graphos to keep it in an HttpOnly cookie the page cannot read. */
   refresh_token: string | null;
+  /** A session can renew this token: `refresh_token`, or the session cookie. */
+  session?: boolean;
   must_change: boolean;
 }
 

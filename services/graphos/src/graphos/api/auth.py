@@ -2,9 +2,10 @@
 
 A user signs in with a name and password and receives a short-lived access
 token; a person also gets a refresh token for their browser session, which
-the UI keeps in page memory and which rotates on each use.  A service
-account has no session: its client signs in again before the token expires.
-See :mod:`graphos.identity`.
+rotates on each use.  The web UI asks for it in the ``graphos_session``
+cookie (``session_cookie``): HttpOnly, so page scripts never see it, and it
+survives a reload.  A service account has no session: its client signs in
+again before the token expires.  See :mod:`graphos.identity`.
 
 With single sign-on configured, ``/v1/auth/oidc/start`` and ``/callback``
 run the Authorization Code flow with PKCE for the UI, graphos holding the
@@ -18,10 +19,11 @@ import logging
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import TypeVar
 from urllib.parse import urlsplit
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 
 from graphos import identity, oidc
 from graphos.auth import ReadPrincipal
@@ -44,6 +46,9 @@ from graphos.contracts.auth import (
 log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["auth"])
+
+# The browser session: the refresh token, where page scripts cannot read it.
+SESSION_COOKIE = "graphos_session"
 
 
 @dataclass(frozen=True)
@@ -88,7 +93,29 @@ async def _tokens(d: AuthDeps, user: identity.User, *, session: bool) -> TokenRe
             d.pool, user.name, idle_s=d.settings.session_idle_s, max_s=d.settings.session_max_s,
         )
     return TokenResponse(
-        access_token=access, expires_in=ttl, refresh_token=refresh, must_change=user.must_change,
+        access_token=access, expires_in=ttl, refresh_token=refresh, session=refresh is not None,
+        must_change=user.must_change,
+    )
+
+
+Tokens = TypeVar("Tokens", bound=TokenResponse)
+
+
+def _in_cookie(response: Response, d: AuthDeps, tokens: Tokens) -> Tokens:
+    """Moves the refresh token into the session cookie (a browser asked with
+    ``session_cookie``): HttpOnly, so the page never holds it."""
+    if tokens.refresh_token:
+        response.set_cookie(
+            SESSION_COOKIE, tokens.refresh_token, max_age=d.settings.session_max_s, path="/",
+            secure=d.settings.auth_cookie_secure, httponly=True, samesite="strict",
+        )
+    return tokens.model_copy(update={"refresh_token": None})
+
+
+def _clear_cookie(response: Response, d: AuthDeps) -> None:
+    response.delete_cookie(
+        SESSION_COOKIE, path="/", secure=d.settings.auth_cookie_secure, httponly=True,
+        samesite="strict",
     )
 
 
@@ -98,12 +125,13 @@ async def _tokens(d: AuthDeps, user: identity.User, *, session: bool) -> TokenRe
     summary="Sign in with a user name and password",
     description=(
         "Returns an access token (`Authorization: Bearer …`, valid `expires_in` seconds) and, "
-        "for a person, a refresh token. Failures answer 401 with one message whatever the "
-        "cause; repeated failures lock the account for a while, and too many attempts from "
-        "one address answer 429."
+        "for a person, a refresh token (in the `graphos_session` cookie instead with "
+        "`session_cookie`). Failures answer 401 with one message whatever the cause; repeated "
+        "failures lock the account for a while, and too many attempts from one address "
+        "answer 429."
     ),
 )
-async def login(body: LoginRequest, request: Request) -> TokenResponse:
+async def login(body: LoginRequest, request: Request, response: Response) -> TokenResponse:
     d = deps(request)
     client = request.client.host if request.client else "unknown"
     if not d.throttle.admit(client):
@@ -124,7 +152,8 @@ async def login(body: LoginRequest, request: Request) -> TokenResponse:
     except identity.AuthError as exc:
         raise _refused(exc) from None
     log.info("signed in", extra={"user": user.name, "kind": user.kind})
-    return await _tokens(d, user, session=True)
+    tokens = await _tokens(d, user, session=True)
+    return _in_cookie(response, d, tokens) if body.session_cookie else tokens
 
 
 @router.post(
@@ -132,32 +161,38 @@ async def login(body: LoginRequest, request: Request) -> TokenResponse:
     response_model=TokenResponse,
     summary="Renew a person's access token",
     description=(
-        "Exchanges a refresh token for a new access token and a new refresh token; the old "
-        "one stops working. A refresh token used twice revokes the whole session."
+        "Exchanges a refresh token (from the body, or the `graphos_session` cookie) for a new "
+        "access token and a new refresh token; the old one stops working. A refresh token used "
+        "again more than a few seconds after it was rotated revokes the whole session; within "
+        "them (another browser tab renewing at the same moment) it gives an access token only."
     ),
 )
-async def refresh(body: RefreshRequest, request: Request) -> TokenResponse:
+async def refresh(body: RefreshRequest, request: Request, response: Response) -> TokenResponse:
     d = deps(request)
+    token = body.refresh_token or request.cookies.get(SESSION_COOKIE)
+    if not token:
+        raise _refused(identity.SessionError("no session"))
     try:
-        renewed = await identity.rotate_session(
-            d.pool, body.refresh_token, idle_s=d.settings.session_idle_s,
-        )
+        renewed = await identity.rotate_session(d.pool, token, idle_s=d.settings.session_idle_s)
     except identity.SessionError as exc:
         raise _refused(exc) from None
     if renewed.identity is not None:
         # Signed in at the identity provider: issued again from its claims.
         access, ttl = d.signer.issue_for(renewed.identity)
-        return TokenResponse(
-            access_token=access, expires_in=ttl, refresh_token=renewed.refresh_token,
+        tokens = TokenResponse(
+            access_token=access, expires_in=ttl, refresh_token=renewed.refresh_token, session=True,
         )
-    user = d.store.user(renewed.user)
-    if user is None or user.disabled:
-        raise _refused(identity.SessionError("session ended"))
-    access, ttl = d.signer.issue(user)
-    return TokenResponse(
-        access_token=access, expires_in=ttl, refresh_token=renewed.refresh_token,
-        must_change=user.must_change,
-    )
+    else:
+        user = d.store.user(renewed.user)
+        if user is None or user.disabled:
+            raise _refused(identity.SessionError("session ended"))
+        access, ttl = d.signer.issue(user)
+        tokens = TokenResponse(
+            access_token=access, expires_in=ttl, refresh_token=renewed.refresh_token, session=True,
+            must_change=user.must_change,
+        )
+    from_cookie = body.refresh_token is None
+    return _in_cookie(response, d, tokens) if body.session_cookie or from_cookie else tokens
 
 
 @router.post(
@@ -165,14 +200,19 @@ async def refresh(body: RefreshRequest, request: Request) -> TokenResponse:
     response_model=LogoutResponse,
     summary="End a person's session",
     description=(
-        "Revokes the session of this refresh token; the access token expires on its own. For "
-        "a session signed in at the identity provider the answer carries `end_session_url`: "
-        "opening it ends the session there too."
+        "Revokes the session of this refresh token (or of the `graphos_session` cookie, which "
+        "is cleared); the access token expires on its own. For a session signed in at the "
+        "identity provider the answer carries `end_session_url`: opening it ends the session "
+        "there too."
     ),
 )
-async def logout(body: LogoutRequest, request: Request) -> LogoutResponse:
+async def logout(body: LogoutRequest, request: Request, response: Response) -> LogoutResponse:
     d = deps(request)
-    ended = await identity.close_session(d.pool, body.refresh_token)
+    token = body.refresh_token or request.cookies.get(SESSION_COOKIE)
+    _clear_cookie(response, d)
+    if not token:
+        return LogoutResponse()
+    ended = await identity.close_session(d.pool, token)
     if ended is None or ended.kind != "oidc" or d.provider is None:
         return LogoutResponse()
     try:
@@ -283,7 +323,7 @@ async def oidc_start(body: OidcStart, request: Request) -> OidcStartResponse:
         "silent attempt) answers 401."
     ),
 )
-async def oidc_callback(body: OidcCallback, request: Request) -> OidcSignedIn:
+async def oidc_callback(body: OidcCallback, request: Request, response: Response) -> OidcSignedIn:
     d = deps(request)
     provider = _provider(d)
     _throttle(d, request)
@@ -313,10 +353,11 @@ async def oidc_callback(body: OidcCallback, request: Request) -> OidcSignedIn:
         id_token=id_token,
     )
     log.info("signed in through the identity provider", extra={"user": who.consumer})
-    return OidcSignedIn(
-        access_token=access, expires_in=ttl, refresh_token=refresh,
+    signed = OidcSignedIn(
+        access_token=access, expires_in=ttl, refresh_token=refresh, session=True,
         return_to=pending["return_to"],
     )
+    return _in_cookie(response, d, signed) if body.session_cookie else signed
 
 
 @router.post(
@@ -330,7 +371,7 @@ async def oidc_callback(body: OidcCallback, request: Request) -> OidcSignedIn:
     ),
 )
 async def change_password(
-    body: PasswordChange, request: Request, principal: ReadPrincipal,
+    body: PasswordChange, request: Request, response: Response, principal: ReadPrincipal,
 ) -> TokenResponse:
     d = deps(request)
     if principal.subject is None or principal.via != "password":
@@ -360,4 +401,5 @@ async def change_password(
     log.info("password changed", extra={"user": name})
     user = d.store.user(name)
     assert user is not None
-    return await _tokens(d, user, session=True)
+    tokens = await _tokens(d, user, session=True)
+    return _in_cookie(response, d, tokens) if body.session_cookie else tokens

@@ -26,6 +26,15 @@ under one version.
 
 ### Changed
 
+- **UI: a reload stays signed in.** The web UI keeps the session in one cookie, `graphos_session`:
+  HttpOnly (no page script can read it), Secure, SameSite=Strict, rotated at each renewal and cleared
+  at sign-out. The access token still lives in page memory, and nothing is kept in local or session
+  storage. Sign-in, the single sign-on callback, password change and refresh take
+  `session_cookie: true` to use it (the answer then carries no `refresh_token`, and `session: true`);
+  refresh and logout read the token from the cookie when the body has none. Programs and the Python
+  client are unchanged. A refresh token used again within 10 seconds of its rotation (two tabs
+  renewing at once) gets an access token instead of ending the session. New setting
+  `GRAPHOS_AUTH_COOKIE_SECURE` (default `true`).
 - **UI: Compute groups only where Louvain is installed.** The button reads `GET /v1/info`; on a
   server without the extra the Groups view and Overview say why instead of offering a button that
   answered 501.

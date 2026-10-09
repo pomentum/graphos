@@ -748,8 +748,16 @@ async def open_session(  # noqa: PLR0913 — a session's fields
 @dataclass(frozen=True)
 class Renewed:
     user: str
-    refresh_token: str
+    # None when a token rotated a moment ago was presented again (see
+    # REUSE_GRACE_S): a new access token, no new refresh token.
+    refresh_token: str | None
     identity: Identity | None          # set for a session signed in at the provider
+
+
+# Seconds during which a just-rotated refresh token still renews the access
+# token (without rotating again) instead of revoking the session: two browser
+# tabs sharing the session cookie may renew at the same moment.
+REUSE_GRACE_S = 10
 
 
 async def rotate_session(pool: asyncpg.Pool, token: str, *, idle_s: int) -> Renewed:
@@ -766,12 +774,25 @@ async def rotate_session(pool: asyncpg.Pool, token: str, *, idle_s: int) -> Rene
             "SELECT id, family, user_name, rotated_at, revoked_at, kind, claims::text AS claims, "
             "  id_token, "
             "  idle_expires_at < now() OR absolute_expires_at < now() AS expired, "
-            "  absolute_expires_at "
+            "  absolute_expires_at, "
+            "  rotated_at > now() - make_interval(secs => $2) AS just_rotated "
             "FROM graphos_meta.sessions WHERE refresh_hash = $1 FOR UPDATE;",
-            _hash_refresh(token),
+            _hash_refresh(token), float(REUSE_GRACE_S),
         )
         if row is None:
             raise SessionError("unknown session")
+        family_live = row["just_rotated"] and await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM graphos_meta.sessions WHERE family = $1 "
+            "  AND rotated_at IS NULL AND revoked_at IS NULL "
+            "  AND idle_expires_at >= now() AND absolute_expires_at >= now());",
+            row["family"],
+        )
+        if family_live and row["revoked_at"] is None:
+            # Another tab renewed a moment ago: an access token, no rotation.
+            identity = (
+                Identity.from_claims(json.loads(row["claims"])) if row["kind"] == "oidc" else None
+            )
+            return Renewed(user=row["user_name"], refresh_token=None, identity=identity)
         if row["rotated_at"] is not None:
             # Committed before refusing: the revocation must outlive this call.
             await conn.execute(

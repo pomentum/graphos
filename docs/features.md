@@ -469,8 +469,9 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   maintainers can extend (labels, relationship types, declared label pairs);
   an Access page for owners and admins (users, service accounts, grants). An
   nginx image with no backend of its own; people sign in with their graphos
-  user name and password, so permissions and attribution are graphos's; it
-  keeps nothing in the browser (no cookie, no storage), so a reload signs out.
+  user name and password, so permissions and attribution are graphos's; the
+  session is one HttpOnly cookie no page script can read (nothing in browser
+  storage), so a reload or a new tab stays signed in until the session ends.
   It reads labels and search indexes from `GET /v1/{tenant}/schema`, which
   anyone on the tenant may call, and `GET /v1/me` lists the user's tenants and
   levels. All its text is in one i18n JSON file.

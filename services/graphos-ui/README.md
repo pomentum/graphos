@@ -7,10 +7,12 @@ schema, and follow changes live.
 It has no backend of its own. The image is static files served by nginx, which also forwards
 `/api/` to graphos on the same origin, so graphos needs no CORS setup. Every person signs in with
 their graphos user name and password (and changes it first when it must change), or through the
-organisation's single sign-on when graphos is set up for it ([installation](../../docs/installation.md#5-single-sign-on-openid-connect)). The UI stores
-nothing in the browser, no cookie and no local or session storage, not even the light/dark choice
-or a diagram's layout: tokens live in page memory, the access token is renewed with the rotating
-refresh token while the page is open, and a reload or a closed tab signs out. graphos checks the
+organisation's single sign-on when graphos is set up for it ([installation](../../docs/installation.md#5-single-sign-on-openid-connect)). The access token
+lives in page memory; the session that renews it is graphos's `graphos_session` cookie (HttpOnly, so
+no script on the page can read it; Secure; SameSite=Strict), rotated at each renewal. A reload or a
+new tab stays signed in until the session ends (an hour unused, twelve hours at most) or the person
+signs out. Nothing is kept in local or session storage, not even the light/dark choice or a
+diagram's layout. graphos checks the
 user's level on every call, so the UI shows what that level allows (a `read` user gets a read-only
 UI, schema editing needs `maintain`, the Access page is for owners and admins) and every edit is
 recorded under the user's name in the audit log and the change feed.

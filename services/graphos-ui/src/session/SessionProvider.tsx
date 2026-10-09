@@ -63,15 +63,16 @@ interface State {
 
 /**
  * Owns the session. Signs in with a user name and password
- * (`POST /v1/auth/login`) or through the identity provider; keeps the tokens
- * in page memory only (no cookie, no browser storage), renews them while the
- * page is open, and builds the selected tenant's `GraphosApi`.
+ * (`POST /v1/auth/login`) or through the identity provider; keeps the access
+ * token in page memory and the session in graphos's HttpOnly cookie (no
+ * script can read it; nothing in browser storage), renews the token while
+ * the page is open, and builds the selected tenant's `GraphosApi`.
  *
- * With single sign-on, every page load first tries a silent sign-in
- * (`prompt=none`): someone already signed in at the provider comes straight
- * back signed in, and only someone who is not sees the sign-in page. graphos
- * holds the PKCE verifier and exchanges the code, so nothing about the
- * sign-in is kept in the browser either.
+ * Every page load first carries on the session of that cookie, so a reload
+ * or a new tab stays signed in. Without one, and with single sign-on, it
+ * tries a silent sign-in (`prompt=none`): someone already signed in at the
+ * provider comes straight back signed in, and only someone who is not sees
+ * the sign-in page. graphos holds the PKCE verifier and exchanges the code.
  */
 export function SessionProvider({
   children,
@@ -148,7 +149,11 @@ export function SessionProvider({
         const state = url.searchParams.get("state");
         if (code && state) {
           try {
-            const signed = await anonymous.post<OidcSignedIn>("/v1/auth/oidc/callback", { code, state });
+            const signed = await anonymous.post<OidcSignedIn>("/v1/auth/oidc/callback", {
+              code,
+              state,
+              session_cookie: true,
+            });
             await enter(signed);
             setReturnTo(signed.return_to);
           } catch {
@@ -162,6 +167,14 @@ export function SessionProvider({
         }
         setChecking(false);
         return;
+      }
+      // A reload or a new tab: the session cookie (HttpOnly) carries on, if there is one.
+      try {
+        await enter(await anonymous.post<TokenResponse>("/v1/auth/refresh", { session_cookie: true }));
+        setChecking(false);
+        return;
+      } catch {
+        /* no session here: single sign-on, or the sign-in page */
       }
       if (auth.oidc) {
         try {
@@ -177,7 +190,7 @@ export function SessionProvider({
 
   const signIn = useCallback(
     async (user: string, password: string) => {
-      await enter(await anonymous.post<TokenResponse>("/v1/auth/login", { user, password }));
+      await enter(await anonymous.post<TokenResponse>("/v1/auth/login", { user, password, session_cookie: true }));
     },
     [anonymous, enter],
   );
@@ -188,7 +201,11 @@ export function SessionProvider({
     async (current: string, next: string) => {
       if (!state) return;
       const http = new HttpClient(API_BASE, state.credentials, fetchImpl);
-      const tokens = await http.post<TokenResponse>("/v1/me/password", { current, new: next });
+      const tokens = await http.post<TokenResponse>("/v1/me/password", {
+        current,
+        new: next,
+        session_cookie: true,
+      });
       // Every older token stopped working: carry on with the new ones.
       state.credentials.apply(tokens);
       const me = await fetchMe(http);

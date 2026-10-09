@@ -127,6 +127,10 @@ class Settings(BaseSettings):
     # generates and keeps in graphos_meta.signing_keys.
     auth_signing_key_file: Path | None = None
     access_token_ttl_s: int = Field(default=900, ge=60, le=86_400)
+    # The web UI's session cookie (the refresh token, HttpOnly, SameSite=Strict)
+    # is Secure: sent over HTTPS only (browsers also accept it on http://localhost).
+    # False only for a plain-HTTP deployment on another host.
+    auth_cookie_secure: bool = True
     # Browser sessions (refresh tokens, people only): idle and absolute limits.
     session_idle_s: int = Field(default=3_600, ge=60)
     session_max_s: int = Field(default=43_200, ge=300)

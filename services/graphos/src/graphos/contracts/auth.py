@@ -14,6 +14,13 @@ GrantLevel = Literal["read", "write", "maintain", "owner", "create_tenants", "ad
 class LoginRequest(BaseModel):
     user: str = Field(..., min_length=1, max_length=63)
     password: str = Field(..., min_length=1, max_length=1024)
+    session_cookie: bool = Field(
+        default=False,
+        description=(
+            "For a browser: keep the refresh token in the `graphos_session` cookie (HttpOnly, "
+            "SameSite=Strict) instead of the answer, so page scripts never see it."
+        ),
+    )
 
 
 class TokenResponse(BaseModel):
@@ -24,8 +31,13 @@ class TokenResponse(BaseModel):
         None,
         description=(
             "People only: renews the access token (`POST /v1/auth/refresh`) and rotates. "
-            "Keep it in memory; a service account signs in again instead."
+            "Keep it in memory; a service account signs in again instead. Absent when the "
+            "request asked for `session_cookie`: the cookie holds it."
         ),
+    )
+    session: bool = Field(
+        default=False,
+        description="A session can renew this token: `refresh_token`, or the session cookie.",
     )
     must_change: bool = Field(
         default=False, description="The password must be changed before anything else.",
@@ -33,7 +45,17 @@ class TokenResponse(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str = Field(..., min_length=1, max_length=256)
+    refresh_token: str | None = Field(
+        default=None, min_length=1, max_length=256,
+        description="The refresh token; when absent, the one in the session cookie.",
+    )
+    session_cookie: bool = Field(
+        default=False,
+        description=(
+            "For a browser: keep the refresh token in the `graphos_session` cookie (HttpOnly, "
+            "SameSite=Strict) instead of the answer, so page scripts never see it."
+        ),
+    )
 
 
 class LogoutRequest(RefreshRequest):
@@ -84,6 +106,13 @@ class OidcCallback(BaseModel):
     state: str = Field(..., min_length=1, max_length=256)
     code: str | None = Field(None, max_length=4096)
     error: str | None = Field(None, max_length=256)
+    session_cookie: bool = Field(
+        default=False,
+        description=(
+            "For a browser: keep the refresh token in the `graphos_session` cookie (HttpOnly, "
+            "SameSite=Strict) instead of the answer, so page scripts never see it."
+        ),
+    )
 
 
 class OidcSignedIn(TokenResponse):
@@ -93,6 +122,13 @@ class OidcSignedIn(TokenResponse):
 class PasswordChange(BaseModel):
     current: str = Field(..., min_length=1, max_length=1024)
     new: str = Field(..., min_length=1, max_length=1024)
+    session_cookie: bool = Field(
+        default=False,
+        description=(
+            "For a browser: keep the refresh token in the `graphos_session` cookie (HttpOnly, "
+            "SameSite=Strict) instead of the answer, so page scripts never see it."
+        ),
+    )
 
 
 class UserInfo(BaseModel):

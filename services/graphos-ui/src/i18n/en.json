@@ -120,8 +120,8 @@
   "shell": {
     "signIn": {
       "title": "Sign in to graphos",
-      "hint": "Use your graphos user name and password. Nothing is kept in the browser, so reloading the page asks for them again.",
-      "hintSso": "Use your organisation's single sign-on, or a graphos user name and password. Nothing is kept in the browser.",
+      "hint": "Use your graphos user name and password. You stay signed in on this browser, a reload included, until you sign out or the session ends.",
+      "hintSso": "Use your organisation's single sign-on, or a graphos user name and password.",
       "user": "User name",
       "password": "Password",
       "continue": "Sign in",

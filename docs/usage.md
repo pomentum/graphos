@@ -229,8 +229,8 @@ asked for; only someone without a provider session sees the sign-in page, which 
 "Sign in with SSO" and the graphos password form. graphos keeps the PKCE verifier and nonce
 (`graphos_meta.oidc_pending`, 5 minutes, single use), exchanges the code itself and validates the
 ID token (signature against the provider's published keys, issuer, audience, nonce, expiry); the
-provider's tokens never reach the browser, which receives graphos's own access and refresh tokens
-in page memory. Signing out also ends the provider session (`end_session_endpoint`), with the ID
+provider's tokens never reach the browser, which receives graphos's own access token (in page
+memory) and session (the HttpOnly `graphos_session` cookie). Signing out also ends the provider session (`end_session_endpoint`), with the ID
 token as `id_token_hint` (kept server-side with the session) so the provider does not ask to
 confirm. The UI needs
 no setting of its own: it reads `GET /v1/auth/config`.
@@ -1030,9 +1030,11 @@ It is an nginx image with no backend of its own: it serves the app and forwards 
 graphos on the same origin, so graphos needs no CORS setup. Each person signs in as themselves,
 with a graphos password or through single sign-on, so the UI shows only what their level allows (a `read` user gets a
 read-only UI; schema editing needs `maintain`; the Access page is for owners and admins) and edits
-are attributed to the person who made them. The UI stores nothing in the browser (no cookie, no
-local or session storage): tokens live in page memory and are renewed while the page is open, and a
-reload signs the person out. Start it with the rest of the stack:
+are attributed to the person who made them. The access token lives in page memory; the session that
+renews it is one cookie, `graphos_session` (HttpOnly, so no page script can read it; Secure;
+SameSite=Strict), and nothing is kept in local or session storage. A reload or a new tab stays signed
+in until the session ends (an hour unused, twelve hours at most) or the person signs out, which clears
+the cookie. Start it with the rest of the stack:
 
 ```bash
 docker compose -f docker-compose.graphos.yml --profile ui up -d    # http://127.0.0.1:8081

@@ -6,17 +6,22 @@ import type { TokenResponse } from "../api/types";
 const RENEW_AFTER = 0.8;
 
 /**
- * A signed-in person's tokens, held in page memory only: nothing is written
- * to cookies or browser storage, so a reload or a closed tab ends the
- * session and the person signs in again. While the page is open the access
- * token is renewed with the refresh token (which graphos rotates on each
- * use) before it expires, and once more when graphos answers 401. When it
- * cannot be renewed (the session ended, was revoked, or the password
- * changed elsewhere) `onEnded` is called once.
+ * A signed-in person's tokens. The access token lives in page memory only.
+ * The session that renews it is graphos's `graphos_session` cookie (HttpOnly:
+ * no script on the page can read it), so a reload or a new tab carries on
+ * without signing in again, until the session ends (an hour unused, twelve
+ * hours at most) or the person signs out. The access token is renewed before
+ * it expires, and once more when graphos answers 401; graphos rotates the
+ * cookie each time. A refresh token held in memory (from elsewhere than the
+ * UI's sign-in) is used instead when there is one. When the token cannot be
+ * renewed (the session ended, was revoked, or the password changed
+ * elsewhere) `onEnded` is called once.
  */
 export class Credentials implements TokenSource {
   private access = "";
   private refresh: string | null = null;
+  /** A session renews the access token: the refresh token, or the cookie. */
+  private renewable = false;
   private renewAt = 0;
   private pending: Promise<boolean> | null = null;
   private ended = false;
@@ -34,22 +39,25 @@ export class Credentials implements TokenSource {
   /** Uses new tokens (after a renewal or a password change). */
   apply(tokens: TokenResponse): void {
     this.access = tokens.access_token;
-    this.refresh = tokens.refresh_token;
+    // A renewal inside the grace for another tab carries no new refresh token: keep the one held.
+    this.refresh = tokens.refresh_token ?? (tokens.session ? this.refresh : null);
+    this.renewable = Boolean(tokens.refresh_token) || Boolean(tokens.session);
     this.renewAt = this.now() + tokens.expires_in * 1000 * RENEW_AFTER;
   }
 
   async token(): Promise<string> {
-    if (this.now() >= this.renewAt && this.refresh && !this.ended) await this.renew();
+    if (this.now() >= this.renewAt && this.renewable && !this.ended) await this.renew();
     return this.access;
   }
 
   /** Renews the access token; concurrent callers share one renewal. */
   renew(): Promise<boolean> {
-    if (this.ended || !this.refresh) {
+    if (this.ended || !this.renewable) {
       this.end();
       return Promise.resolve(false);
     }
-    this.pending ??= this.post("/v1/auth/refresh", { refresh_token: this.refresh })
+    const body = this.refresh ? { refresh_token: this.refresh } : { session_cookie: true };
+    this.pending ??= this.post("/v1/auth/refresh", body)
       .then((tokens) => {
         this.apply(tokens);
         return true;
@@ -71,12 +79,15 @@ export class Credentials implements TokenSource {
    */
   async signOut(postLogoutRedirectUri?: string): Promise<string | null> {
     const refresh = this.refresh;
+    const renewable = this.renewable;
     this.ended = true;
     this.access = "";
     this.refresh = null;
-    if (!refresh) return null;
+    this.renewable = false;
+    if (!renewable) return null;
+    // graphos clears the session cookie; the token in memory, if any, names the session.
     const answer = await this.post<{ end_session_url?: string | null }>("/v1/auth/logout", {
-      refresh_token: refresh,
+      ...(refresh ? { refresh_token: refresh } : { session_cookie: true }),
       post_logout_redirect_uri: postLogoutRedirectUri,
     }).catch(() => null);
     return answer?.end_session_url ?? null;
@@ -87,6 +98,7 @@ export class Credentials implements TokenSource {
     this.ended = true;
     this.access = "";
     this.refresh = null;
+    this.renewable = false;
     this.onEnded();
   }
 

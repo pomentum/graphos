@@ -273,6 +273,7 @@ lists every one; the README the most common). Those for sign-in, besides the OID
 | `GRAPHOS_LOCAL_ADMIN` | `true` | `false`: the admin `graphos` cannot sign in (other admins sign in as usual). |
 | `GRAPHOS_AUTH_DISABLED` | `false` | `true`: every request is an anonymous admin. Local development only. |
 | `GRAPHOS_ACCESS_TOKEN_TTL_S` | `900` | Lifetime of the access tokens graphos issues (60 s to 24 h). |
+| `GRAPHOS_AUTH_COOKIE_SECURE` | `true` | The web UI's session cookie is sent over HTTPS only (browsers also accept it on `http://localhost`). `false` only for a plain-HTTP deployment on another host. |
 | `GRAPHOS_SESSION_IDLE_S` | `3600` | A browser session ends after this long without use. |
 | `GRAPHOS_SESSION_MAX_S` | `43200` | ... and after this long in any case (12 h). |
 | `GRAPHOS_LOGIN_MAX_FAILURES` | `5` | Failed sign-ins before an account is locked. |
