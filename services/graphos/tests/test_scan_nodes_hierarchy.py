@@ -20,7 +20,7 @@ import pytest
 
 from graphos import writes
 from graphos.api.graph import (
-    _build_cursor_predicate,
+    _cursor_branches,
     _decode_scan_cursor,
     _encode_scan_cursor,
     _normalize_order_by,
@@ -48,17 +48,22 @@ def test_cursor_without_graphid_still_decodes() -> None:
     assert _decode_scan_cursor(token, ["Person"], "id") == ("Person", ["p1"], None)
 
 
-def test_multi_key_cursor_predicate_keeps_a_range_bound_on_the_first_key() -> None:
-    _, keys = _normalize_order_by("id")
+def test_the_cursor_resumes_with_the_ties_first_and_never_uses_ge() -> None:
+    _, keys = _normalize_order_by([{"property": "team"}, {"property": "id", "desc": True}])
     _, node_keys = _normalize_order_by("_node")
-    frag, params, idx = _build_cursor_predicate(
-        [*keys, *node_keys], ["p1", 7], next_param_idx=1,
-    )
-    id_expr = keys[0]["order_expr"]
-    assert frag.startswith(f"({id_expr} >= ($1::text::agtype) AND (")
-    assert "v.id > agtype_to_graphid($2::text::agtype)" in frag
-    assert params == ['"p1"', "7"]
-    assert idx == 3
+    branches = _cursor_branches([*keys, *node_keys], ["a", "p1", 7], next_param_idx=1)
+    team, id_ = keys[0]["order_expr"], keys[1]["order_expr"]
+    # Deepest first: rows tied on every key, then on the first, then after it.
+    assert [frag for frag, _, _ in branches] == [
+        f"{team} = ($1::text::agtype) AND {id_} = ($2::text::agtype) "
+        "AND v.id > agtype_to_graphid($3::text::agtype)",
+        f"{team} = ($1::text::agtype) AND {id_} < ($2::text::agtype)",
+        f"{team} > ($1::text::agtype)",
+    ]
+    assert [params for _, params, _ in branches] == [['"a"', '"p1"', "7"], ['"a"', '"p1"'], ['"a"']]
+    assert [idx for _, _, idx in branches] == [4, 3, 2]
+    # Apache AGE 1.6 index scans lose the rows equal to the bound of ``>=``.
+    assert not any(">=" in frag or "<=" in frag for frag, _, _ in branches)
 
 
 async def _seed(pool: asyncpg.Pool) -> None:
@@ -76,14 +81,14 @@ async def _seed(pool: asyncpg.Pool) -> None:
         await conn.execute(f'DELETE FROM ONLY "{TEST_TENANT}"."Person";')
     await writes.upsert_nodes(
         pool, tenant=TEST_TENANT, label="Person",
-        rows=[{"id": "p1", "props": {}}, {"id": "x", "props": {}},
-              {"id": "z", "props": {}}],
+        rows=[{"id": "p1", "props": {"team": "a"}}, {"id": "x", "props": {"team": "b"}},
+              {"id": "z", "props": {"team": "a"}}],
     )
     # "x" exists in both tables: the per-table unique index allows it, and it
     # ties with the Person "x" on the default ``id`` sort.
     await writes.upsert_nodes(
         pool, tenant=TEST_TENANT, label="Employee",
-        rows=[{"id": "e1", "props": {}}, {"id": "x", "props": {}}],
+        rows=[{"id": "e1", "props": {"team": "b"}}, {"id": "x", "props": {"team": "a"}}],
     )
 
 
@@ -126,7 +131,9 @@ async def test_parent_scan_reports_child_rows_under_their_own_label(
 @pytest.mark.parametrize("limit", [1, 2, 500])
 @pytest.mark.parametrize(
     "order_by",
-    ["id", "_node", [{"property": "id", "desc": True}]],
+    ["id", "_node", [{"property": "id", "desc": True}],
+     [{"property": "team"}, {"property": "id"}],                     # ties on both
+     [{"property": "team", "desc": True}, {"property": "id"}]],
 )
 async def test_paging_returns_each_row_once_across_ties(
     db_pool: asyncpg.Pool, limit: int, order_by: Any,

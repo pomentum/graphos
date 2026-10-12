@@ -100,6 +100,23 @@ creates these indexes automatically; see `graphos.bootstrap.bootstrap_tenant`.
 Because the unique index is per label table and Postgres unique indexes
 are not inherited, the same id may exist once per label.
 
+**Never range-scan an agtype index with `>=`.** AGE 1.6.0's btree operator
+class (`agtype_ops_btree`) registers `>` under strategy 4 and `>=` under
+strategy 5, the other way round from Postgres's btree convention (4 is
+`>=`, 5 is `>`). An index scan for `key >= v` therefore starts *after* the
+entries equal to `v` and silently returns fewer rows; a sequential scan, or
+the same predicate without `LIMIT`, can hide it. `>`, `<`, `<=` and `=` are
+unaffected in practice: the start position may be off by one, but the row
+check uses the right operator. graphos's scan cursors resume with an
+equality on the tied keys followed by a strict `>` / `<`, one query each,
+never `>=` (`api/graph.py`, `_cursor_branches`). Check it with:
+
+```sql
+SELECT a.amopstrategy, a.amopopr::regoperator
+FROM pg_amop a JOIN pg_opfamily f ON f.oid = a.amopfamily
+WHERE f.opfname = 'agtype_ops_btree' ORDER BY 1;
+```
+
 ## 3. Bulk-write patterns and anti-patterns
 
 ### Per-row MERGE inside one transaction — not used

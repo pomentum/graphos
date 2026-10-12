@@ -2880,27 +2880,37 @@ def _decode_scan_cursor(
     return label, anchor_values, gid
 
 
-def _build_cursor_predicate(
+def _cursor_branches(
     keys: list[dict[str, Any]],
     anchor_values: list[Any],
     *,
     next_param_idx: int,
-) -> tuple[str, list[Any], int]:
-    """Build the SQL predicate that selects rows strictly AFTER the cursor.
+) -> list[tuple[str, list[Any], int]]:
+    """The rows strictly AFTER the cursor, as predicates to query in turn.
 
-    Lexicographic comparison with possibly mixed per-key directions.
-    For N keys we emit N OR-ed branches:
+    Lexicographic "after" over N keys (each ascending or descending) is the
+    disjoint union of N branches:
 
-        (k1 cmp1 v1)
-        OR (k1 = v1 AND k2 cmp2 v2)
-        OR (k1 = v1 AND k2 = v2 AND k3 cmp3 v3)
-        OR ...
+        k1 = v1 AND … AND k(N-1) = v(N-1) AND kN cmpN vN
+        …
+        k1 = v1 AND k2 cmp2 v2
+        k1 cmp1 v1
 
-    where ``cmpᵢ`` is ``>`` for ascending or ``<`` for descending.
-    With more than one key the OR-tree is prefixed with ``k1 >= v1``
-    (``<=`` descending), which it implies, so the planner can still
-    start an index range scan on the first key.
-    Returns ``(fragment, params, next_param_idx)``.
+    where ``cmpᵢ`` is ``>`` ascending or ``<`` descending.  Listed in this
+    order, every row of a branch sorts before every row of the next, so
+    querying them one after another (each ``ORDER BY`` the keys, ``LIMIT``
+    what the page still needs) returns the rows in order, and each query is
+    an equality lookup plus one strict range: an index scan that starts at
+    the cursor.
+
+    One ``OR`` of the branches would be the same rows but no index range,
+    and a ``k1 >= v1`` bound to restore one is wrong on agtype: Apache AGE
+    1.6 registers ``>=`` and ``>`` under each other's btree strategy
+    numbers, so an index scan for ``>=`` starts after the rows equal to
+    ``v1`` and loses them.  ``>``, ``<``, ``<=`` and ``=`` are unaffected.
+
+    Each branch is ``(fragment, params, next_param_idx)``, its parameters
+    numbered from ``next_param_idx``.
     """
     if len(keys) != len(anchor_values):
         raise HTTPException(
@@ -2911,38 +2921,26 @@ def _build_cursor_predicate(
                 "different request shape"
             ),
         )
-    params: list[Any] = []
-    idx = next_param_idx
-    first_bound = ""
-    branches: list[str] = []
-    # eq_chain[i] is the SQL fragment "k1 = $p1 AND k2 = $p2 AND ... = $pi".
-    eq_chain: list[str] = []
-    for k, value in zip(keys, anchor_values, strict=True):
-        cmp_op = "<" if k["desc"] else ">"
-        # The cursor-comparison value gets the same cast/wrap as the
-        # expression it's compared against — graphid through
-        # ``agtype_to_graphid``, properties via direct agtype cast.
-        if k["cursor_fn"] is not None:
-            rhs = f"{k['cursor_fn']}(${idx}{k['cursor_cast']})"
-        else:
-            rhs = f"(${idx}{k['cursor_cast']})"
-        gt_clause = f"{k['order_expr']} {cmp_op} {rhs}"
-        if not eq_chain and len(keys) > 1:
-            first_bound = f"{k['order_expr']} {cmp_op}= {rhs} AND "
-        if eq_chain:
-            branches.append(f"({' AND '.join(eq_chain)} AND {gt_clause})")
-        else:
-            branches.append(gt_clause)
-        # Encode the parameter value matching its SQL cast.
-        if k["is_node"]:
-            params.append(str(int(value)))
-        else:
-            params.append(_json.dumps(value))
-        # The eq_chain entry for this key references the same parameter
-        # we just appended — ``rhs`` already encodes ``$idx`` correctly.
-        eq_chain.append(f"{k['order_expr']} = {rhs}")
-        idx += 1
-    return f"({first_bound}(" + " OR ".join(branches) + "))", params, idx
+    branches: list[tuple[str, list[Any], int]] = []
+    for depth in range(len(keys), 0, -1):
+        params: list[Any] = []
+        idx = next_param_idx
+        terms: list[str] = []
+        for i, (k, value) in enumerate(zip(keys[:depth], anchor_values[:depth], strict=True)):
+            # The cursor value gets the same cast/wrap as the expression it
+            # is compared against: graphid through ``agtype_to_graphid``,
+            # properties as agtype.
+            if k["cursor_fn"] is not None:
+                rhs = f"{k['cursor_fn']}(${idx}{k['cursor_cast']})"
+            else:
+                rhs = f"(${idx}{k['cursor_cast']})"
+            last = i == depth - 1
+            op = ("<" if k["desc"] else ">") if last else "="
+            terms.append(f"{k['order_expr']} {op} {rhs}")
+            params.append(str(int(value)) if k["is_node"] else _json.dumps(value))
+            idx += 1
+        branches.append((" AND ".join(terms), params, idx))
+    return branches
 
 
 def _jsonb_text(value: Any) -> str:
@@ -3171,33 +3169,19 @@ async def scan_nodes(
     )
     not_null_sql = " AND ".join(k["not_null"] for k in sort_keys)
 
-    remaining = body.limit
-    for li, label in enumerate(labels_to_scan):
-        if remaining <= 0 or truncated:
-            break
+    async def _scan_part(
+        cursor_frag: str, cursor_params: list[Any], first_idx: int, label: str,
+    ) -> bool:
+        """Read one label (one cursor branch of it) into the page.
 
-        params: list[Any] = []
-        param_idx = 1
-        clauses: list[str] = []
-
-        if li == 0 and cursor_values:
-            # Lexicographic "row strictly after cursor" predicate.
-            # ``_build_cursor_predicate`` expands the multi-key, mixed-
-            # direction comparison into an OR-tree of (eq-chain AND
-            # gt/lt-clause) branches.  For single-key sorts this
-            # collapses to one simple ``expr > $1`` clause.  A cursor
-            # without a graphid (issued before the tiebreaker) resumes
-            # on the sort keys alone.
-            if tiebreak and cursor_gid is not None:
-                pred_keys = page_keys
-                pred_values = [*cursor_values, cursor_gid]
-            else:
-                pred_keys, pred_values = sort_keys, cursor_values
-            cursor_frag, cursor_params, param_idx = _build_cursor_predicate(
-                pred_keys, pred_values, next_param_idx=param_idx,
-            )
-            clauses.append(cursor_frag)
-            params.extend(cursor_params)
+        Appends to ``items``, lowers ``remaining``, sets ``next_cursor``
+        when the page fills; returns whether the payload cap was hit.
+        """
+        nonlocal remaining, accumulated_bytes, next_cursor
+        nonlocal last_included_anchors, last_included_gid
+        params: list[Any] = list(cursor_params)
+        param_idx = first_idx
+        clauses: list[str] = [cursor_frag] if cursor_frag else []
 
         where_frags, where_params, param_idx = _compile_scan_where(
             body.where, next_param_idx=param_idx,
@@ -3259,11 +3243,6 @@ async def scan_nodes(
                 ),
             ) from exc
 
-        # Track the most recently included row's anchor values — a
-        # list parallel to ``sort_keys``, one entry per sort key.
-        # Single-key sorts collapse to a one-element list.
-        last_included_anchors: list[Any] = []
-        last_included_gid: int | None = None
         for row in rows:
             props = _safe_decode_props(row["props_text"])
             projected = _project_properties(props, body.project)
@@ -3282,8 +3261,7 @@ async def scan_nodes(
                         label, order_by_wire, last_included_anchors,
                         last_included_gid,
                     )
-                truncated = True
-                break
+                return True
             # Decode each anchor value back to a native Python type so
             # cursor encoding stays faithful across pages.
             # * ``_node`` (is_node) keys: column is bigint (graphid::text).
@@ -3322,6 +3300,38 @@ async def scan_nodes(
                         last_included_gid,
                     )
                 break
+
+        return False
+
+    remaining = body.limit
+    # The most recently included row's sort-key values (one per key) and
+    # graphid, for the cursor; kept across the cursor branches of a label.
+    last_included_anchors: list[Any] = []
+    last_included_gid: int | None = None
+    for li, label in enumerate(labels_to_scan):
+        if remaining <= 0 or truncated:
+            break
+        last_included_anchors, last_included_gid = [], None
+
+        # The first label resumes after the cursor: rows tied with the
+        # cursor's row first, then the rest, one query each
+        # (``_cursor_branches``); any other label is read from its start.
+        # A cursor without a graphid (issued before the tiebreaker)
+        # resumes on the sort keys alone.
+        cursor_parts: list[tuple[str, list[Any], int]] = [("", [], 1)]
+        if li == 0 and cursor_values:
+            if tiebreak and cursor_gid is not None:
+                pred_keys = page_keys
+                pred_values = [*cursor_values, cursor_gid]
+            else:
+                pred_keys, pred_values = sort_keys, cursor_values
+            cursor_parts = _cursor_branches(pred_keys, pred_values, next_param_idx=1)
+        for cursor_frag, cursor_params, first_idx in cursor_parts:
+            if remaining <= 0 or truncated:
+                break
+            truncated = await _scan_part(
+                cursor_frag, cursor_params, first_idx, label,
+            )
 
         if remaining <= 0 or truncated:
             break
