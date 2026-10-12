@@ -233,8 +233,12 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
         await _flush_edges()
         merge_ms = int((time.perf_counter() - merge_started) * 1000)
 
-    except (HTTPException, asyncpg.exceptions.QueryCanceledError):
-        raise   # QueryCanceledError → 504 via the app's timeout handler
+    except (
+        HTTPException,
+        asyncpg.exceptions.QueryCanceledError,
+        asyncpg.exceptions.UniqueViolationError,
+    ):
+        raise   # → 504 / 409 via the app's timeout / unique-violation handlers
     except Exception as exc:  # noqa: BLE001
         log.warning("snapshot-import stream error", exc_info=exc)
         raise HTTPException(

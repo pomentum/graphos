@@ -161,6 +161,30 @@ async def test_a_unique_index_refuses_a_duplicate_with_409(
 
 @requires_db
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("path", "extra"), [
+    ("nodes:bulk", {}),
+    ("snapshot-import", {"_kind": "node"}),
+])
+async def test_a_streamed_duplicate_is_refused_with_409(
+    api: httpx.AsyncClient, path: str, extra: dict[str, Any],
+) -> None:
+    # The streaming endpoints answer it as the single-batch one does, not 400.
+    assert (await api.post("/v1/tenants", json=SPEC)).status_code == HTTPStatus.OK
+    body = "".join(
+        json.dumps({**extra, "id": uid, "label": "User",
+                    "properties": {"email": "a@example.org"}}) + "\n"
+        for uid in ("u1", "u2")
+    )
+    resp = await api.post(
+        f"/v1/{TENANT}/graph/{path}", content=body,
+        headers={"content-type": "application/x-ndjson"},
+    )
+    assert resp.status_code == HTTPStatus.CONFLICT, resp.text
+    assert "User_email_unique_idx" in resp.json()["detail"]
+
+
+@requires_db
+@pytest.mark.asyncio
 async def test_a_unique_index_over_shared_values_is_refused_with_422(
     api: httpx.AsyncClient, db_pool: asyncpg.Pool,
 ) -> None:

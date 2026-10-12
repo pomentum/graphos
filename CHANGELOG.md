@@ -8,6 +8,8 @@ under one version.
 
 ### Fixed
 
+- `nodes:bulk`, `edges:bulk` and `snapshot-import` answer a write that would break a unique
+  property index with 409, as `POST /v1/{tenant}/graph/nodes` does; they answered 400.
 - `nodes:scan` of a parent label in `label_hierarchy` reports each child node under its own label;
   it reported it under the parent's, so a scan of every label returned child nodes a second time
   under the parent, and re-importing it duplicated them in the parent. Rows equal on every

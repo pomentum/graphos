@@ -173,8 +173,12 @@ async def upsert_nodes_bulk(
         for label in list(buffers.keys()):
             await _flush(label)
 
-    except (HTTPException, asyncpg.exceptions.QueryCanceledError):
-        raise   # QueryCanceledError → 504 via the app's timeout handler
+    except (
+        HTTPException,
+        asyncpg.exceptions.QueryCanceledError,
+        asyncpg.exceptions.UniqueViolationError,
+    ):
+        raise   # → 504 / 409 via the app's timeout / unique-violation handlers
     except Exception as exc:  # noqa: BLE001 — surface as 400
         log.warning("nodes:bulk stream error", exc_info=exc)
         raise HTTPException(
@@ -310,8 +314,12 @@ async def upsert_edges_bulk(  # noqa: PLR0915 — streaming loop, splitting furt
         for key in list(buffers.keys()):
             await _flush(key)
 
-    except (HTTPException, asyncpg.exceptions.QueryCanceledError):
-        raise   # QueryCanceledError → 504 via the app's timeout handler
+    except (
+        HTTPException,
+        asyncpg.exceptions.QueryCanceledError,
+        asyncpg.exceptions.UniqueViolationError,
+    ):
+        raise   # → 504 / 409 via the app's timeout / unique-violation handlers
     except Exception as exc:  # noqa: BLE001 — surface as 400
         log.warning("edges:bulk stream error", exc_info=exc)
         raise HTTPException(
