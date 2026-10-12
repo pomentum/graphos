@@ -15,7 +15,8 @@ under one version.
   (server-side cursors, the edges' ends resolved through a temporary table built once).
   `labels` / `types` narrow it, `computed=false` leaves out `graphos_*` and `community_id`,
   `gzip=true` compresses it. `read`, and recorded in the audit log. A dev copy of about 570,000
-  nodes and 10 million edges exported in about 8 minutes with gzip (276 MB), 13 without (2.8 GB).
+  nodes and 10 million edges exported in 6 to 8 minutes with gzip (276 MB), 13 without (2.8 GB),
+  with the exporting process peaking at 144 MB.
 - **`snapshot-import` reads the dataset file:** it checks the header (another format or a newer
   version: 422) and reports it, says whether the end line arrived (`complete`), decompresses a
   gzip body, and with `?mode=empty` imports only into a tenant without nodes (409 otherwise). When

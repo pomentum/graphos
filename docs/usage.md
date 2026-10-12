@@ -576,8 +576,9 @@ audit middleware hashes it chunk by chunk as they read.
   the same lines; compare their edges as sets.
 - Read in one consistent snapshot (`REPEATABLE READ`), with flat memory: each table through a
   server-side cursor, each edge's ends through a temporary table of every vertex built once per
-  export. A dev copy of about 570,000 nodes and 10 million edges exported in about 8 minutes with
-  gzip (276 MB) and 13 minutes without (2.8 GB). The transaction stays open for the whole export,
+  export. A dev copy of about 570,000 nodes and 10 million edges exported in 6 to 8 minutes with
+  gzip (276 MB) and 13 minutes without (2.8 GB); the exporting process went from 45 MB to a peak of
+  144 MB. The transaction stays open for the whole export,
   which holds back vacuum on the tenant's tables meanwhile; export large tenants off-peak.
 - `labels` / `types` narrow it (an edge is exported only when both its ends are); `computed=false`
   leaves out `graphos_*` and `community_id`; `gzip=true` compresses it (`<tenant>.ndjson.gz`).

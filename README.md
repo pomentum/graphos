@@ -22,6 +22,7 @@ Your services send JSON over HTTP. graphos owns the database, writes the SQL aga
 - **Edit in place, safely:** read, patch (JSON Merge Patch) or delete one node or edge; each carries a revision and an `ETag`, and `If-Match` turns a concurrent edit into a `412` instead of a lost update.
 - **Graph analytics:** a graph map (every label with its node count and the edge counts between labels, plus a label's best-connected nodes: about a second on ten million edges), label histograms, top-K by degree, node/edge aggregates.
 - **Graph algorithms, next to the data** ([what each one gives you](docs/algorithms.md)): Louvain communities (optional extra) with ids that stay stable across runs, plus a community map (sizes, members per label, hubs, edges between communities); PageRank (what everything depends on), betweenness (bridges and bottlenecks), connected components (islands, orphans) and degree, written onto the nodes as `graphos_*` properties, a name space consumers cannot write. Each runs in a separate process so the API keeps serving, gives the same result on the same graph, and writes only what changed.
+- **Copy, back up and restore a tenant:** export its schema as a file that is itself a registration (with a dry run of what importing it changes), and its data as one NDJSON file (nodes, edges, the schema in the first line; gzip optional) that imports back, into an empty tenant for an exact restore. From the API, the Python client or the web UI.
 - **Rule-based edge derivation:** declare a property-match rule once at registration; `edges:resolve` writes the edges server-side in one SQL statement.
 - **Change feed:** every write is recorded in the same transaction; read what changed after a cursor, or follow it live (Server-Sent Events, resumable), with no committed change ever skipped.
 - **Background jobs:** long operations (community recompute, graph metrics, edge resolution, vacuum) run as jobs with `Prefer: respond-async`: answered `202` at once, polled at `/v1/jobs/{id}`, cancellable.
@@ -176,6 +177,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | `GRAPHOS_OIDC_GROUPS_CLAIM`, `GRAPHOS_OIDC_ROLES_CLAIM` | `groups`, `roles` | Single sign-on: the claims grants match on (a dotted path works: `realm_access.roles`); every OIDC setting is in the [installation guide](docs/installation.md#5-single-sign-on-openid-connect) |
 | `GRAPHOS_AUTH_DISABLED` | `false` | `true` makes every request an anonymous admin: local development only |
 | `GRAPHOS_STATEMENT_TIMEOUT_S` | `60` | Per-statement limit; exceeded → `504` problem+json |
+| `GRAPHOS_IMPORT_MAX_BYTES` | `17179869184` (16 GiB) | Most bytes `snapshot-import` reads from one body, after gzip decompression; beyond → `413` |
 | `GRAPHOS_RATE_LIMIT_ENABLED` | `false` | Per-user sliding-window rate limit |
 | `GRAPHOS_DB_USER` | `graphos` (compose: `graphos_app`) | Database role; compose uses an unprivileged role created at init |
 | `GRAPHOS_FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxies whose `X-Forwarded-*` headers are trusted |
