@@ -4,6 +4,16 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Fixed
+
+- `nodes:scan` of a parent label in `label_hierarchy` reports each child node under its own label;
+  it reported it under the parent's, so a scan of every label returned child nodes a second time
+  under the parent, and re-importing it duplicated them in the parent. Rows equal on every
+  `order_by` key (a non-unique property, or the same `id` in a parent and a child) are ordered by
+  graphid, so paging no longer skips the ones after a page boundary.
+
 ## 0.6.0 — 2026-10-09
 
 A registration no longer carries SQL: indexes and generated columns are declared, and graphos writes

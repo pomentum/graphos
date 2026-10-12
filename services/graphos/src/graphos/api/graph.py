@@ -2694,9 +2694,20 @@ async def export_graph(
 # for batch consumers (external edge resolvers, export / dump tools,
 # operator scripts).
 #
-# Cursor encoding: base64-encoded JSON ``{"label": "<L>", "id": "<id>"}``.
-# Opaque to clients — they round-trip the string unchanged — but
-# inspectable for ops when debugging a stuck scan.
+# Cursor encoding: base64-encoded JSON ``{"label", "order_by", "values",
+# "gid"}`` — the requested label being scanned, the sort spec, the last
+# row's sort-key values and its graphid.  Opaque to clients — they
+# round-trip the string unchanged — but inspectable for ops when
+# debugging a stuck scan.
+#
+# Label hierarchies: a label's table is the parent of its child labels'
+# tables (``label_hierarchy``, Postgres inheritance), so a scan of the
+# parent reads the children's rows too, as every read on a parent does.
+# Each item reports the label of the table its row lives in (the leaf
+# label), never the requested one.  Rows from several tables can tie on
+# the sort keys (a unique ``id`` index is per table), so the graphid,
+# unique across the graph, breaks ties: the order is total and a cursor
+# resumes exactly after the last row it returned.
 #
 # SQL shape: AGE stores ``properties`` as ``agtype`` (binary-tagged JSON),
 # not native ``jsonb`` — its ``->``/``->>`` operators take agtype-encoded
@@ -2705,6 +2716,20 @@ async def export_graph(
 # ``properties::text::jsonb`` once per row; from there all predicates and
 # the projection use standard jsonb operators.  The text-form of agtype
 # is JSON, so the round-trip is lossless.
+
+
+# The graphid sort key: ``order_by="_node"``, and the tiebreaker appended
+# after any other sort keys.
+_NODE_SORT_KEY: dict[str, Any] = {
+    "order_expr": "v.id",
+    "anchor_select": "v.id::text",
+    "not_null": "v.id IS NOT NULL",
+    "cursor_cast": "::text::agtype",
+    "cursor_fn": "agtype_to_graphid",
+    "desc": False,
+    "is_node": True,
+    "property": "_node",
+}
 
 
 def _normalize_order_by(
@@ -2729,16 +2754,7 @@ def _normalize_order_by(
     if isinstance(order_by, str):
         wire = order_by
         if order_by == "_node":
-            return wire, [{
-                "order_expr": "v.id",
-                "anchor_select": "v.id::text",
-                "not_null": "v.id IS NOT NULL",
-                "cursor_cast": "::text::agtype",
-                "cursor_fn": "agtype_to_graphid",
-                "desc": False,
-                "is_node": True,
-                "property": "_node",
-            }]
+            return wire, [dict(_NODE_SORT_KEY)]
         expr = f"(v.properties -> '\"{order_by}\"'::agtype)"
         return wire, [{
             "order_expr": expr,
@@ -2781,6 +2797,7 @@ def _normalize_order_by(
 
 def _encode_scan_cursor(
     label: str, order_by_wire: Any, anchor_values: list[Any],
+    gid: int | None = None,
 ) -> str:
     """Build an opaque-but-debuggable cursor token.
 
@@ -2789,22 +2806,28 @@ def _encode_scan_cursor(
     you can't compare page-N's name-sorted position to page-N+1's
     date-sorted intent.  ``anchor_values`` is a list parallel to the
     sort keys (one anchor value per key); single-key cursors carry a
-    one-element list.
+    one-element list.  ``gid`` is the last row's graphid, the tiebreaker
+    between rows equal on every sort key (``None`` when the sort is
+    already by graphid).
     """
-    payload = _json.dumps(
-        {
-            "label": label,
-            "order_by": order_by_wire,
-            "values": anchor_values,
-        },
-    ).encode("utf-8")
+    obj: dict[str, Any] = {
+        "label": label,
+        "order_by": order_by_wire,
+        "values": anchor_values,
+    }
+    if gid is not None:
+        obj["gid"] = gid
+    payload = _json.dumps(obj).encode("utf-8")
     return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
 
 
 def _decode_scan_cursor(
     token: str, allowed_labels: list[str], order_by_wire: Any,
-) -> tuple[str, list[Any]]:
-    """Decode + validate a cursor.  Returns ``(label, anchor_values)``.
+) -> tuple[str, list[Any], int | None]:
+    """Decode + validate a cursor.  Returns ``(label, anchor_values, gid)``.
+
+    ``gid`` is ``None`` for a cursor issued before the graphid tiebreaker
+    existed; such a cursor resumes strictly after its sort-key values.
 
     Rejects cursors whose ``label`` is outside the request's labels,
     or whose ``order_by`` shape (string OR list-of-clauses) differs
@@ -2819,6 +2842,9 @@ def _decode_scan_cursor(
         label = obj["label"]
         cursor_order_by = obj["order_by"]
         anchor_values = obj["values"]
+        gid = obj.get("gid")
+        if gid is not None:
+            gid = int(gid)
     except Exception as exc:  # noqa: BLE001 — any decode failure is a 400
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2851,7 +2877,7 @@ def _decode_scan_cursor(
                 "exactly across pages of one scan"
             ),
         )
-    return label, anchor_values
+    return label, anchor_values, gid
 
 
 def _build_cursor_predicate(
@@ -2871,6 +2897,9 @@ def _build_cursor_predicate(
         OR ...
 
     where ``cmpᵢ`` is ``>`` for ascending or ``<`` for descending.
+    With more than one key the OR-tree is prefixed with ``k1 >= v1``
+    (``<=`` descending), which it implies, so the planner can still
+    start an index range scan on the first key.
     Returns ``(fragment, params, next_param_idx)``.
     """
     if len(keys) != len(anchor_values):
@@ -2884,6 +2913,7 @@ def _build_cursor_predicate(
         )
     params: list[Any] = []
     idx = next_param_idx
+    first_bound = ""
     branches: list[str] = []
     # eq_chain[i] is the SQL fragment "k1 = $p1 AND k2 = $p2 AND ... = $pi".
     eq_chain: list[str] = []
@@ -2897,6 +2927,8 @@ def _build_cursor_predicate(
         else:
             rhs = f"(${idx}{k['cursor_cast']})"
         gt_clause = f"{k['order_expr']} {cmp_op} {rhs}"
+        if not eq_chain and len(keys) > 1:
+            first_bound = f"{k['order_expr']} {cmp_op}= {rhs} AND "
         if eq_chain:
             branches.append(f"({' AND '.join(eq_chain)} AND {gt_clause})")
         else:
@@ -2910,7 +2942,7 @@ def _build_cursor_predicate(
         # we just appended — ``rhs`` already encodes ``$idx`` correctly.
         eq_chain.append(f"{k['order_expr']} = {rhs}")
         idx += 1
-    return "(" + " OR ".join(branches) + ")", params, idx
+    return f"({first_bound}(" + " OR ".join(branches) + "))", params, idx
 
 
 def _jsonb_text(value: Any) -> str:
@@ -3046,9 +3078,11 @@ def _project_properties(
         "Schema-agnostic batch read.  Returns every node matching "
         "`labels` (1+, OR-combined) AND every `where` clause (AND-"
         "combined), with optional property projection and opaque "
-        "cursor pagination.  Stable order: `(label, external_id)` "
-        "lexicographic; each label is fully exhausted before moving "
-        "to the next.  Use ``/search`` for substring matching — "
+        "cursor pagination.  Each label is fully exhausted before "
+        "moving to the next, in `order_by` order with the graphid "
+        "breaking ties.  A label with child labels (`label_hierarchy`) "
+        "includes the children's nodes, each reported under its own "
+        "leaf label.  Use ``/search`` for substring matching — "
         "``/nodes:scan`` is structural enumeration only."
     ),
 )
@@ -3090,10 +3124,18 @@ async def scan_nodes(
 
     cursor_label: str | None = None
     cursor_values: list[Any] = []
+    cursor_gid: int | None = None
     if body.cursor is not None:
-        cursor_label, cursor_values = _decode_scan_cursor(
+        cursor_label, cursor_values, cursor_gid = _decode_scan_cursor(
             body.cursor, body.labels, order_by_wire,
         )
+
+    # The graphid breaks ties between rows equal on every sort key: a
+    # non-unique sort property, or the same ``id`` in a parent label and
+    # one of its children (the unique ``id`` index is per table).  Not
+    # needed when the sort is already by graphid.
+    tiebreak = bool(sort_keys) and not any(k["is_node"] for k in sort_keys)
+    page_keys = [*sort_keys, _NODE_SORT_KEY] if tiebreak else sort_keys
 
     items: list[NodesScanItem] = []
     next_cursor: str | None = None
@@ -3121,11 +3163,11 @@ async def scan_nodes(
     # clauses — see ``sql`` template.
     order_by_sql = ", ".join(
         f"{k['order_expr']}{' DESC' if k['desc'] else ''}"
-        for k in sort_keys
+        for k in page_keys
     )
     anchor_selects = ", ".join(
         f"{k['anchor_select']} AS anchor_value_{i}_text"
-        for i, k in enumerate(sort_keys)
+        for i, k in enumerate(page_keys)
     )
     not_null_sql = " AND ".join(k["not_null"] for k in sort_keys)
 
@@ -3143,9 +3185,16 @@ async def scan_nodes(
             # ``_build_cursor_predicate`` expands the multi-key, mixed-
             # direction comparison into an OR-tree of (eq-chain AND
             # gt/lt-clause) branches.  For single-key sorts this
-            # collapses to one simple ``expr > $1`` clause.
+            # collapses to one simple ``expr > $1`` clause.  A cursor
+            # without a graphid (issued before the tiebreaker) resumes
+            # on the sort keys alone.
+            if tiebreak and cursor_gid is not None:
+                pred_keys = page_keys
+                pred_values = [*cursor_values, cursor_gid]
+            else:
+                pred_keys, pred_values = sort_keys, cursor_values
             cursor_frag, cursor_params, param_idx = _build_cursor_predicate(
-                sort_keys, cursor_values, next_param_idx=param_idx,
+                pred_keys, pred_values, next_param_idx=param_idx,
             )
             clauses.append(cursor_frag)
             params.extend(cursor_params)
@@ -3169,6 +3218,12 @@ async def scan_nodes(
         # selective WHERE-side index (e.g. our functional btree on
         # ``properties->>'name_lower'``) instead of being railroaded into
         # the ``id_unique`` btree by the ORDER BY-driven plan.
+        #
+        # ``leaf_label`` is the label of the table the row lives in,
+        # which differs from ``label`` for a child label's row read
+        # through its parent.  A scalar subquery rather than a join, so
+        # it runs only for the rows returned and cannot change the plan
+        # of the ordered, LIMITed scan.
         if skip_order_by:
             select_extras = ""
             order_by_clause = ""
@@ -3181,6 +3236,8 @@ async def scan_nodes(
             SELECT
                 trim(both '"' from (v.properties -> '"id"'::agtype)::text)
                                               AS external_id,
+                (SELECT c.relname FROM pg_class c WHERE c.oid = v.tableoid)
+                                              AS leaf_label,
                 {select_extras}
                 v.properties::text            AS props_text
             FROM "{tenant}"."{label}" v
@@ -3206,6 +3263,7 @@ async def scan_nodes(
         # list parallel to ``sort_keys``, one entry per sort key.
         # Single-key sorts collapse to a one-element list.
         last_included_anchors: list[Any] = []
+        last_included_gid: int | None = None
         for row in rows:
             props = _safe_decode_props(row["props_text"])
             projected = _project_properties(props, body.project)
@@ -3222,6 +3280,7 @@ async def scan_nodes(
                 if not skip_order_by:
                     next_cursor = _encode_scan_cursor(
                         label, order_by_wire, last_included_anchors,
+                        last_included_gid,
                     )
                 truncated = True
                 break
@@ -3231,7 +3290,7 @@ async def scan_nodes(
             # * Property keys: column is agtype text — JSON-shaped, so
             #   ``json.loads`` recovers str / int / float / bool.
             row_anchors: list[Any] = []
-            for i, k in enumerate(sort_keys):
+            for i, k in enumerate(page_keys):
                 raw = row[f"anchor_value_{i}_text"]
                 try:
                     if k["is_node"]:
@@ -3242,10 +3301,14 @@ async def scan_nodes(
                     row_anchors.append(str(raw).strip('"'))
             items.append(NodesScanItem(
                 id=str(row["external_id"]),
-                label=label,
+                label=str(row["leaf_label"]),
                 properties=projected,
             ))
-            last_included_anchors = row_anchors
+            if tiebreak:
+                last_included_anchors = row_anchors[:-1]
+                last_included_gid = row_anchors[-1]
+            else:
+                last_included_anchors = row_anchors
             accumulated_bytes += row_bytes
             remaining -= 1
             if remaining <= 0:
@@ -3256,6 +3319,7 @@ async def scan_nodes(
                 if not skip_order_by:
                     next_cursor = _encode_scan_cursor(
                         label, order_by_wire, last_included_anchors,
+                        last_included_gid,
                     )
                 break
 

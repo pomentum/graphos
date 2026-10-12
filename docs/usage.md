@@ -660,6 +660,11 @@ is one scan per label on the paths unless `GRAPHOS_VERTEX_GRAPHID_INDEXES=true`.
 - `project`: defaults to `["id"]`; `["*"]` returns the full property bag.
 - `order_by`: `"id"` (default) or another property name, `"_node"` (graphid order, always indexed),
   a list of `{"property", "desc"}` clauses, or `null` for no ordering (422 if combined with `cursor`).
+  Rows equal on every key are ordered by graphid, so paging never skips or repeats one.
+- Each item's `label` is the label the node was written under. Scanning a parent label in
+  `label_hierarchy` also returns its children's nodes, each under its child label; scanning both
+  a parent and its child returns the child's nodes twice under the same `(id, label)`, so
+  de-duplicate on that pair.
 
 ```bash
 curl -s -X POST "$G/v1/acme/graph/nodes:scan" \

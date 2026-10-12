@@ -838,9 +838,17 @@ class NodesScanRequest(BaseModel):
     their own concepts (e.g. ``project_id``) as plain
     ``where`` clauses.
 
-    Ordering is stable: ``(label, external_id)`` lexicographic.  When
-    scanning multiple labels, label[0] is fully exhausted before
-    moving to label[1].  Predictable + cheap to checkpoint.
+    Ordering is stable: by ``order_by`` within a label, with the node's
+    graphid breaking ties.  When scanning multiple labels, label[0] is
+    fully exhausted before moving to label[1].  Predictable + cheap to
+    checkpoint.
+
+    A label that is the parent of others in ``label_hierarchy`` includes
+    its children's nodes, as every read on a parent does; each item
+    carries its own leaf label.  A request (or a series of requests)
+    naming both a parent and its child therefore returns the child's
+    nodes twice, under the same ``(id, label)`` — de-duplicate on that
+    pair.
 
     Page semantics: the response's ``next_cursor`` is opaque — round-
     trip it back in the next request without modification.  ``null``
@@ -994,9 +1002,11 @@ class NodesScanRequest(BaseModel):
 class NodesScanItem(BaseModel):
     """One node row in a /nodes:scan response.
 
-    ``label`` is the resolved leaf label of the node — useful when
-    the request scanned >1 label so callers don't need to track
-    which label produced which row externally.
+    ``label`` is the resolved leaf label of the node: the label it was
+    written under, which is a child label when the scan of a parent
+    label reached it through ``label_hierarchy``.  Never the requested
+    label for such a node — feeding the item back into ``nodes:bulk``
+    writes it to its own label.
     """
 
     id: str = Field(..., description="Consumer-assigned external id.")

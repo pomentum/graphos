@@ -213,7 +213,9 @@ reported in the response.
   - `project` (default `id` only, `["*"]` for everything).
   - `order_by`: a property (default `id`), `_node` (graphid), a multi-key list
     with per-key `desc`, or `null` for no ordering and no cursor. Rows missing
-    an ordering key are not returned.
+    an ordering key are not returned; ties are ordered by graphid.
+  - A parent label in `label_hierarchy` includes its children's nodes; each
+    item carries the label the node was written under.
   - Opaque `cursor`; `limit` ≤2000; 10 MiB payload cap.
   - No relationship patterns: compose with `neighbors` / `induced_edges`.
 - **Edge scan** (`POST …/graph/edges:scan`): same idea over edge `types`,
