@@ -24,6 +24,14 @@ The endpoint accepts the existing per-row shape with one new key:
 
 Lines without `_kind` are treated as nodes (back-compat with the bulk
 NDJSON shape).
+
+`GET /v1/{tenant}/graph/snapshot` exports the tenant as such a file
+(``graphos.dataset``), framed by a ``header`` line (format, version, counts,
+the schema) and an ``end`` line (what was written).  The import reads them:
+it refuses a header of another format or a newer version, and reports
+whether the ``end`` line arrived (``complete``).  A gzip body is
+decompressed, up to ``GRAPHOS_IMPORT_MAX_BYTES``.  ``?mode=empty`` imports
+only into a tenant without nodes, the exact-restore path.
 """
 
 from __future__ import annotations
@@ -32,17 +40,19 @@ import json
 import logging
 import time
 from collections import defaultdict
-from typing import Any
+from collections.abc import AsyncIterator
+from typing import Annotated, Any, Literal
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
-from graphos import writes
-from graphos.api.bulk import _iter_ndjson_lines
+from graphos import dataset, writes
+from graphos.api.bulk import iter_lines
 from graphos.api.graph import _check_tenant
-from graphos.auth import WritePrincipal
-from graphos.bootstrap import registered_tenants
+from graphos.auth import ReadPrincipal, WritePrincipal
+from graphos.bootstrap import load_spec, registered_tenants
 from graphos.contracts.graph import EdgeUpsert, NodeUpsert
 from graphos.contracts.snapshot import (
     DEFAULT_SNAPSHOT_MERGE_CHUNK,
@@ -50,11 +60,89 @@ from graphos.contracts.snapshot import (
     SnapshotImportResponse,
 )
 from graphos.cypher import CypherError
+from graphos.observability.audit import audit_this
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["graph"], prefix="/{tenant}/graph")
 
 _MAX_ERROR_LINES = 50
+
+
+@router.get(
+    "/snapshot",
+    summary="Export the tenant's data as one NDJSON file",
+    description=(
+        "Streams the tenant as the file `snapshot-import` reads (`graphos.snapshot`, "
+        "version 1): a `header` line (format, version, counts, the schema), every node "
+        "(`_kind: node`, each with its own label, label by label in id order), every edge "
+        "(`_kind: edge`, type by type), and an `end` line with what was written; a file "
+        "without it was cut off. Read in one consistent snapshot, with flat memory. "
+        "`labels` / `types` narrow it (an edge only when both its ends are exported); "
+        "`computed=false` leaves out `graphos_*` and `community_id`; `gzip=true` "
+        "compresses it. `read`; recorded in the audit log."
+    ),
+    responses={200: {"content": {"application/x-ndjson": {}, "application/gzip": {}}}},
+)
+async def snapshot_export(
+    tenant: str,
+    request: Request,
+    principal: ReadPrincipal,
+    labels: Annotated[list[str] | None, Query(description="Vertex labels to export.")] = None,
+    types: Annotated[list[str] | None, Query(description="Edge types to export.")] = None,
+    computed: bool = True,
+    gzip: bool = False,
+) -> StreamingResponse:
+    _check_tenant(tenant, principal)
+    pool = request.app.state.pool
+    spec = await load_spec(pool, tenant)
+    if spec is None:   # unregistered meanwhile
+        _check_tenant(tenant, principal)
+        raise AssertionError("unreachable")
+    for kind, asked, known in (("vertex label", labels, spec.vertex_labels),
+                               ("edge type", types, spec.edge_labels)):
+        unknown = sorted(set(asked or ()) - set(known))
+        if unknown:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{kind}s not registered for tenant '{tenant}': {unknown}",
+            )
+    audit_this(request)
+    lines = dataset.lines(pool, spec, labels=labels, types=types, computed=computed)
+    name = f"{tenant}.ndjson" + (".gz" if gzip else "")
+    return StreamingResponse(
+        dataset.chunks(lines, gzip=gzip),
+        media_type="application/gzip" if gzip else "application/x-ndjson",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+async def _body(request: Request, gunzip: dataset.Gunzip) -> AsyncIterator[bytes]:
+    """The request body, decompressed when it is gzip, counted against the cap."""
+    async for chunk in request.stream():
+        for piece in gunzip.feed(chunk):
+            yield piece
+    for piece in gunzip.finish():
+        yield piece
+
+
+async def _is_empty(pool: asyncpg.Pool, tenant: str) -> bool:
+    return not await pool.fetchval(
+        f'SELECT EXISTS (SELECT 1 FROM "{tenant}"."_ag_label_vertex");',
+    )
+
+
+async def _restore_edge_communities(pool: asyncpg.Pool, tenant: str) -> int:
+    """Set each edge's ``end_community_id`` / ``start_community_id`` from its
+    ends' ``community_id``, as the community recompute's write-back does."""
+    rows = await pool.fetch(
+        "SELECT (v.id::text)::bigint AS gid, "
+        "((v.properties)::text)::jsonb ->> 'community_id' AS cid "
+        f'FROM "{tenant}"."_ag_label_vertex" v '
+        "WHERE ((v.properties)::text)::jsonb ? 'community_id';",
+    )
+    return await writes.set_edge_end_communities(
+        pool, tenant=tenant, assignments=((int(r["gid"]), str(r["cid"])) for r in rows),
+    )
 
 
 @router.post(
@@ -75,8 +163,22 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
     tenant: str,
     request: Request,
     principal: WritePrincipal,
+    mode: Annotated[Literal["merge", "empty"], Query(
+        description=(
+            "`merge`: add and merge into what the tenant holds. `empty`: refused (409) "
+            "unless the tenant has no nodes, for an exact restore."
+        ),
+    )] = "merge",
 ) -> SnapshotImportResponse:
     _check_tenant(tenant, principal)
+    if mode == "empty" and not await _is_empty(request.app.state.pool, tenant):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"tenant '{tenant}' holds nodes; mode=empty imports only into a tenant "
+                "without any (use mode=merge to add to it)"
+            ),
+        )
 
     spec = registered_tenants()[tenant]
     allowed_v = set(spec.vertex_labels)
@@ -144,9 +246,13 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
             by_edge_type[et] += merged
             edges_by_key[(src_lbl, dst_lbl, et)] = []
 
+    header: dict[str, Any] | None = None
+    complete = False
+    communities_in_file = False
+    gunzip = dataset.Gunzip(request.app.state.settings.import_max_bytes)
     total_rows = 0
     try:
-        async for line_no, text in _iter_ndjson_lines(request):
+        async for line_no, text in iter_lines(_body(request, gunzip)):
             total_rows += 1
             if total_rows > MAX_SNAPSHOT_ROWS:
                 raise HTTPException(
@@ -166,6 +272,19 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
 
             kind = str(payload.pop("_kind", "node")).lower()
 
+            if kind == "header":
+                try:
+                    dataset.check_header(payload)
+                except ValueError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc),
+                    ) from exc
+                header = {k: v for k, v in payload.items() if k != "schema"}
+                continue
+            if kind == "end":
+                complete = True
+                continue
+
             if kind == "node":
                 nodes_received += 1
                 try:
@@ -182,6 +301,7 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
                         )
                     continue
                 props = {k: v for k, v in node.properties.items() if k != "id"}
+                communities_in_file = communities_in_file or "community_id" in props
                 nodes_by_label[node.label].append({"id": node.id, "props": props})
                 if len(nodes_by_label[node.label]) >= DEFAULT_SNAPSHOT_MERGE_CHUNK:
                     await _flush_nodes()
@@ -221,7 +341,8 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
             else:
                 if len(errors) < _MAX_ERROR_LINES:
                     errors.append(
-                        f"line {line_no}: unknown `_kind`: {kind!r}; expected 'node' or 'edge'"
+                        f"line {line_no}: unknown `_kind`: {kind!r}; expected 'node', 'edge', "
+                        "'header' or 'end'"
                     )
                 continue
 
@@ -233,6 +354,11 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
         await _flush_edges()
         merge_ms = int((time.perf_counter() - merge_started) * 1000)
 
+    except dataset.BodyTooLarge as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"{exc} (GRAPHOS_IMPORT_MAX_BYTES); rows read before it stay written",
+        ) from exc
     except (
         HTTPException,
         asyncpg.exceptions.QueryCanceledError,
@@ -245,6 +371,12 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"snapshot import failed ({type(exc).__name__}); see server log",
         ) from exc
+
+    # The edges' copies of their ends' communities (what community-scoped
+    # walks read) are not in the file: restore them from the nodes'.
+    edge_communities_set = 0
+    if communities_in_file:
+        edge_communities_set = await _restore_edge_communities(pool, tenant)
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     log.info(
@@ -271,4 +403,8 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
         merge_ms=merge_ms,
         elapsed_ms=elapsed_ms,
         errors=errors,
+        mode=mode,
+        header=header,
+        complete=complete if header is not None else None,
+        edge_communities_set=edge_communities_set,
     )

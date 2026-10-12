@@ -14,6 +14,7 @@ import type {
   JobStatus,
   UserCreated,
   UserInfo,
+  DatasetImportResult,
   SchemaAddition,
   SchemaDocument,
   SchemaDryRun,
@@ -323,6 +324,31 @@ export class GraphosApi {
    */
   addToSchema(addition: SchemaAddition): Promise<unknown> {
     return this.http.post("/v1/tenants", { name: this.tenant, ...addition });
+  }
+
+  /**
+   * The tenant's data as one file, as a response to stream: a header line,
+   * every node, every edge, an end line (`read`; recorded in the audit log).
+   */
+  exportDataset(options: { gzip?: boolean; computed?: boolean } = {}): Promise<Response> {
+    return this.http.open(`/v1/${enc(this.tenant)}/graph/snapshot`, {
+      query: { gzip: options.gzip ?? false, computed: options.computed ?? true },
+      headers: { Accept: "*/*" },
+    });
+  }
+
+  /**
+   * Imports a dataset file (gzip or not), sent as it is. `empty` imports only
+   * into a tenant without nodes (409 otherwise); `merge` adds to what is there.
+   */
+  async importDataset(file: Blob, mode: "merge" | "empty" = "merge"): Promise<DatasetImportResult> {
+    return (
+      await this.http.request<DatasetImportResult>("POST", `/v1/${enc(this.tenant)}/graph/snapshot-import`, {
+        body: file,
+        contentType: "application/x-ndjson",
+        query: { mode },
+      })
+    ).data;
   }
 
   /** The tenant's whole schema as a file (`maintain`). */

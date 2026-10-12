@@ -58,14 +58,20 @@ _MAX_ERROR_LINES = 50
 
 
 async def _iter_ndjson_lines(request: Request) -> AsyncIterator[tuple[int, str]]:
-    """Yield ``(line_number, line)`` from the request body, skipping blanks.
+    """Yield ``(line_number, line)`` from the request body, skipping blanks."""
+    async for item in iter_lines(request.stream()):
+        yield item
+
+
+async def iter_lines(chunks: AsyncIterator[bytes]) -> AsyncIterator[tuple[int, str]]:
+    """Yield ``(line_number, line)`` from a byte stream, skipping blanks.
 
     Buffers a partial line across chunk boundaries — NDJSON lines aren't
     guaranteed to align with HTTP chunk boundaries.
     """
     buffer = b""
     line_no = 0
-    async for chunk in request.stream():
+    async for chunk in chunks:
         buffer += chunk
         while True:
             nl = buffer.find(b"\n")

@@ -549,9 +549,67 @@ misses an endpoint that appeared earlier in the same stream. Each 5000-row batch
 the stream is not atomic, and a failure partway leaves the earlier batches written (re-sending the
 stream is safe). A stream of more than 50,000,000 rows returns 413.
 
-**Memory.** The audit middleware is on by default (`GRAPHOS_AUDIT_ENABLED=true`, writes only). It
-reads each write request's whole body into memory to hash it, so the server does not stream `:bulk`
-and `snapshot-import` bodies. Size requests with that in mind.
+**Memory.** Bodies are streamed: `:bulk` and `snapshot-import` read the body line by line, and the
+audit middleware hashes it chunk by chunk as they read.
+
+### Dataset export and import
+
+`GET /v1/{tenant}/graph/snapshot` exports the tenant as one file that `snapshot-import` reads back
+(`graphos.snapshot`, version 1):
+
+```text
+{"_kind":"header","format":"graphos.snapshot","version":1,"graphos":"0.8.0","tenant":"acme",
+ "exported_at":"…","computed":true,"counts":{"nodes":3,"edges":2},"schema":{…}}
+{"_kind":"node","id":"u1","label":"User","properties":{"id":"u1","name":"Ada"}}
+…
+{"_kind":"edge","src_id":"u1","src_label":"User","dst_id":"d1","dst_label":"Document","type":"AUTHORED","properties":{}}
+…
+{"_kind":"end","counts":{"nodes":3,"edges":2}}
+```
+
+- The header carries the tenant's schema (the document of *Export and import a schema*, without its
+  `_export` header) and counts; the end line, what was written. A file without its end line was cut
+  off.
+- Nodes come first, label by label in id order, each **once, with its own label** (a child label's
+  nodes are not repeated under its parent); edges follow, type by type, in no set order within a
+  type. An import therefore never meets an edge before its ends. Two exports of the same data hold
+  the same lines; compare their edges as sets.
+- Read in one consistent snapshot (`REPEATABLE READ`), with flat memory: each table through a
+  server-side cursor, each edge's ends through a temporary table of every vertex built once per
+  export. A dev copy of about 570,000 nodes and 10 million edges exported in about 8 minutes with
+  gzip (276 MB) and 13 minutes without (2.8 GB). The transaction stays open for the whole export,
+  which holds back vacuum on the tenant's tables meanwhile; export large tenants off-peak.
+- `labels` / `types` narrow it (an edge is exported only when both its ends are); `computed=false`
+  leaves out `graphos_*` and `community_id`; `gzip=true` compresses it (`<tenant>.ndjson.gz`).
+- Not in the file: graphids (reassigned on import; ids are the key), revisions, the community map
+  (recompute after a restore), grants. `read`; each export is recorded in the audit log (message
+  `read`) with who made it.
+
+```bash
+curl -s "$G/v1/acme/graph/snapshot?gzip=true" -H "Authorization: Bearer $TOKEN" -o acme.ndjson.gz
+```
+
+`snapshot-import` reads such a file:
+
+- the header is checked (another format, or a newer version: 422) and reported back without its
+  schema (`header`), with `complete` saying whether the end line arrived;
+- a gzip body (it starts with the gzip magic bytes) is decompressed; a body that grows past
+  `GRAPHOS_IMPORT_MAX_BYTES` (default 16 GiB, after decompression) stops with 413;
+- `?mode=empty` imports only into a tenant without nodes (409 otherwise), for an exact restore;
+  `mode=merge`, the default, adds to what is there;
+- when the file's nodes carry `community_id`, each edge's copy of its ends' communities is restored
+  from them (`edge_communities_set`), so community-scoped walks work without a recompute.
+
+To restore into a new tenant, register the header's schema first (rename `name`), then import with
+`mode=empty`; the Python client's `import_dataset(path, schema="apply", mode="empty", name=…)` and
+the web UI's Overview page do both.
+
+```bash
+curl -s -X POST "$G/v1/acme_copy/graph/snapshot-import?mode=empty" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/x-ndjson" \
+  --data-binary @acme.ndjson.gz
+# → {"nodes_upserted":3,"edges_upserted":2,"complete":true,"header":{…},"mode":"empty",…}
+```
 
 ### Deletes
 
@@ -923,8 +981,8 @@ without the value are left out).
 
 **`graphos_*` is reserved.** graphos writes these properties itself, so writes that use one
 (node or edge, single, batch or bulk, a merge-patch removing one included) are refused with `400`.
-Snapshot import is the exception: it writes them as the file has them, to restore what a scan read
-out.
+Snapshot import is the exception: it writes them as the file has them, so a dataset export
+restores with its computed values.
 
 ---
 
@@ -1189,7 +1247,8 @@ the pool sets no client-side command timeout. When it fires, the response is **5
 Writes behave the same way: `/nodes`, `/edges`, `:bulk` and `snapshot-import` also answer 504.
 Narrow the request and retry. Long operations raise the limit for their own statements: tenant
 registration, internal schema setup and the startup reload of stored tenants (1800 s),
-`edges:resolve` (1800 s), Louvain stages (600 s, and 300 s per edge label) and vacuum (3600 s).
+`edges:resolve` (1800 s), Louvain stages (600 s, and 300 s per edge label), vacuum (3600 s) and
+the dataset export (900 s per statement; it reads through cursors, each fetch a short statement).
 
 **Rate limiting.** Off by default. Set `GRAPHOS_RATE_LIMIT_ENABLED=true` to allow each signed-in
 user `GRAPHOS_RATE_LIMIT_RPS` requests per sliding window of `GRAPHOS_RATE_LIMIT_WINDOW_S` seconds

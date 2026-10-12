@@ -64,6 +64,16 @@ async with GraphosPool(base_url=URL, auth=PasswordAuth("loader", SECRET), schema
     cli = await pool.client("team_red")                              # the same client
 ```
 
+## Copying a tenant
+
+```python
+await cli.export_dataset("acme.ndjson.gz")                   # every node and edge, and the schema
+await cli.import_dataset("acme.ndjson.gz", name="acme_copy",  # a new tenant, restored exactly:
+                         schema="apply", mode="empty")        # schema from the file, then the data
+```
+
+Both stream: the file is never held in memory. The result says whether the file was complete.
+
 ## Copying a schema
 
 ```python
@@ -103,6 +113,7 @@ Runnable scripts in [`examples/`](examples/). Each reads `GRAPHOS_URL` (default 
 | Area | Methods |
 |---|---|
 | Tenants | `register_tenant` (with `edge_endpoints`, `strict_endpoints`, `force_shrink`, `dry_run`), `export_schema`, `import_schema`, `remove_edge_endpoint`, `list_tenants`, `get_tenant`, `unregister_tenant`, `me`, `schema` |
+| Dataset | `export_dataset` (streamed to a file, gzip by suffix), `import_dataset` (streamed from one; `mode="empty"` to restore, `schema="apply"` to register the file's schema first), `read_dataset_header` |
 | Writes | `upsert_nodes`, `upsert_edges`, `bulk_upsert_nodes`, `bulk_upsert_edges`, `snapshot_import`, `upsert_node_properties`, `patch_node`, `patch_edge`, `delete_node`, `delete_edge`, `delete_by_property` |
 | Reads | `search`, `get_node`, `get_edge`, `find_paths`, `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `scan_nodes` / `scan_nodes_iter`, `scan_edges` / `scan_edges_iter`, `export_graph` |
 | Aggregates | `graph_map`, `map_hubs`, `label_histogram`, `label_top_by_edge`, `aggregate_nodes`, `aggregate_edges`, `tenant_stats` |

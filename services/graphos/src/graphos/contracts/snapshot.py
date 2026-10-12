@@ -7,6 +7,8 @@ as the other write endpoints (see ``api/snapshot.py``).
 
 from __future__ import annotations
 
+from typing import Any, Literal
+
 from pydantic import BaseModel, Field
 
 # Rows merged per chunk.  Each chunk commits on its own: smaller chunks mean
@@ -28,3 +30,22 @@ class SnapshotImportResponse(BaseModel):
     merge_ms: int = 0
     elapsed_ms: int = 0
     errors: list[str] = Field(default_factory=list)
+    mode: Literal["merge", "empty"] = "merge"
+    header: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "The file's header line (format, version, source tenant, when, counts), without "
+            "its schema; null for a file without one."
+        ),
+    )
+    complete: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the file ended with its `end` line: false means it was cut off. "
+            "Null for a file without a header."
+        ),
+    )
+    edge_communities_set: int = Field(
+        default=0,
+        description="Edge rows whose ends' communities were restored from the nodes'.",
+    )

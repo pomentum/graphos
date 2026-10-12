@@ -110,8 +110,13 @@ export class HttpClient {
   private async sendOnce(method: string, path: string, options: RequestOptions): Promise<Response> {
     const headers: Record<string, string> = { Accept: "application/json", ...options.headers };
     if (this.source) headers.Authorization = `Bearer ${await this.source.token()}`;
-    let body: string | undefined;
-    if (options.body !== undefined) {
+    let body: string | Blob | undefined;
+    if (options.body instanceof Blob) {
+      // A file sent as it is (a dataset upload): the browser streams it from
+      // disk, and it can be sent again after a 401.
+      headers["Content-Type"] = options.contentType ?? "application/octet-stream";
+      body = options.body;
+    } else if (options.body !== undefined) {
       headers["Content-Type"] = options.contentType ?? "application/json";
       body = JSON.stringify(options.body);
     }

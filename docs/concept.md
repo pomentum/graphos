@@ -408,7 +408,8 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `PATCH …/graph/edges/{type}?src=&dst=&src_label=&dst_label=` | JSON Merge Patch of one edge's properties (§4) | tenant |
 | `POST …/graph/nodes:bulk` (NDJSON) | Streamed node upsert (§4) | tenant |
 | `POST …/graph/edges:bulk` (NDJSON) | Streamed edge upsert (§4) | tenant |
-| `POST …/graph/snapshot-import` (NDJSON) | Mixed node + edge import (§4) | tenant |
+| `POST …/graph/snapshot-import` (NDJSON) | Mixed node + edge import (§4); reads a dataset export's header and end lines, gzip, `?mode=empty` | tenant |
+| `GET …/graph/snapshot` | Dataset export: header, nodes, edges, end, as NDJSON (gzip optional), one consistent snapshot | tenant (`read`, audited) |
 | `POST …/graph/edges:resolve` `{edge_types?}` | Run registered resolve rules | tenant |
 | `DELETE …/graph/nodes/{node_id}?label=` | Delete one node and its edges | tenant |
 | `DELETE …/graph/edges/{type}?src=&dst=&src_label=&dst_label=` | Delete one edge | tenant |
@@ -461,7 +462,7 @@ Error shapes:
 | 403 | No access to the tenant, a level below what the operation needs, admin required, or a password to change first | `{"detail": "..."}` |
 | 404 | Tenant not registered, node or cache key not found | `{"detail": "..."}` |
 | 409 | Louvain already running for the tenant | `{"detail": "..."}` |
-| 413 | `snapshot-import` over 50,000,000 lines | `{"detail": "..."}` |
+| 413 | `snapshot-import` over 50,000,000 lines, or past `GRAPHOS_IMPORT_MAX_BYTES` after decompression | `{"detail": "..."}` |
 | 422 | Request validation; bad `label_hierarchy` at registration | `{"detail": [...]}` (FastAPI) or `{"detail": "..."}` |
 | 429 | Rate limit (when enabled) | `{"detail": ..., "retry_after_s": ...}` + `Retry-After` |
 | 501 | Louvain extra not installed | `{"detail": "..."}` |
@@ -583,7 +584,8 @@ most endpoints. Behaviour (`_client.py`):
 - `bulk_upsert_nodes` / `bulk_upsert_edges` serialise the whole iterable into
   one NDJSON request body; there is no client-side batching or streaming.
 - `scan_nodes_iter` / `scan_edges_iter` follow `next_cursor` automatically.
-- No methods for `snapshot-import` or `catalogue`.
+- `export_dataset` / `import_dataset` stream a dataset file to and from disk
+  (no whole body in memory); `snapshot_import` builds its body in memory.
 
 #### 2.5.5 Timeouts
 

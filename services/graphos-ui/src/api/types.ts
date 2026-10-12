@@ -335,6 +335,36 @@ export interface SchemaDocument {
   [part: string]: unknown;
 }
 
+/** The first line of a dataset file (`GET …/graph/snapshot`): what the file is. */
+export interface DatasetHeader {
+  _kind: "header";
+  format: string;
+  version: number;
+  graphos?: string;
+  tenant?: string;
+  exported_at?: string;
+  computed?: boolean;
+  counts?: { nodes: number; edges: number };
+  schema?: SchemaDocument;
+}
+
+/** `POST …/graph/snapshot-import`: what a dataset import wrote. */
+export interface DatasetImportResult {
+  tenant: string;
+  mode: "merge" | "empty";
+  nodes_received: number;
+  edges_received: number;
+  nodes_upserted: number;
+  edges_upserted: number;
+  edges_skipped: number;
+  /** The file's header without its schema; null for a file without one. */
+  header: Omit<DatasetHeader, "schema"> | null;
+  /** False when the file ended before its end line (it was cut off). */
+  complete: boolean | null;
+  errors: string[];
+  elapsed_ms: number;
+}
+
 /** `POST /v1/tenants?dry_run=true`: what importing a schema would change. */
 export interface SchemaDryRun {
   tenant: string;

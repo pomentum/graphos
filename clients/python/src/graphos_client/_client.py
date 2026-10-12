@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import gzip as gzip_module
 import json
 import logging
+import os
 from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from http import HTTPStatus
-from typing import Any
+from pathlib import Path
+from typing import IO, Any
 from urllib.parse import quote
 from uuid import UUID
 
@@ -78,6 +81,43 @@ def _if_match_header(if_match: str | None) -> dict[str, str] | None:
 # ``None`` (which has a documented meaning of "opt out of ORDER BY"
 # on ``scan_nodes``).  See ``scan_nodes`` docstring.
 _UNSET: Any = object()
+
+
+def read_dataset_header(source: str | os.PathLike[str] | IO[bytes]) -> dict[str, Any] | None:
+    """The header line of a dataset file (gzip or not), or ``None`` without one.
+
+    A file object is read from where it is and put back there.
+    """
+    with _opened(source, "rb") as raw:
+        start = raw.tell() if raw.seekable() else None
+        magic = raw.read(2)
+        raw.seek(start or 0)
+        stream: IO[bytes] = gzip_module.GzipFile(fileobj=raw) if magic == b"\x1f\x8b" else raw
+        first = stream.readline()
+        if start is not None:
+            raw.seek(start)
+    try:
+        line = json.loads(first)
+    except ValueError:
+        return None
+    return line if isinstance(line, dict) and line.get("_kind") == "header" else None
+
+
+class _opened:  # noqa: N801 — used like ``open``
+    """``open(path)`` for a path; a file object passes through, left open."""
+
+    def __init__(self, target: str | os.PathLike[str] | IO[bytes], mode: str) -> None:
+        self._target, self._mode, self._file = target, mode, None
+
+    def __enter__(self) -> IO[bytes]:
+        if isinstance(self._target, (str, os.PathLike)):
+            self._file = Path(self._target).open(self._mode)  # noqa: SIM115
+            return self._file
+        return self._target
+
+    def __exit__(self, *exc: object) -> None:
+        if self._file is not None:
+            self._file.close()
 
 
 # Declared label pairs one registration may carry (the server's limit).
@@ -559,6 +599,87 @@ class GraphosClient:
             content_type="application/x-ndjson",
             idempotent=False,
         )
+        return resp.json()
+
+    async def export_dataset(
+        self,
+        destination: str | os.PathLike[str] | IO[bytes],
+        *,
+        labels: Sequence[str] | None = None,
+        types: Sequence[str] | None = None,
+        computed: bool = True,
+        gzip: bool | None = None,
+    ) -> dict[str, Any]:
+        """``GET .../graph/snapshot``: the tenant's data, streamed to a file.
+
+        ``destination`` is a path or a binary file object.  The file is the
+        NDJSON :meth:`import_dataset` reads: a header line (format, counts, the
+        schema), every node, every edge, and an end line.  ``gzip`` defaults to
+        whether the path ends in ``.gz``; ``labels`` / ``types`` narrow it;
+        ``computed=False`` leaves out ``graphos_*`` and ``community_id``.
+        Memory stays flat.  Returns ``{"bytes": …}``.
+        """
+        if gzip is None:
+            gzip = isinstance(destination, (str, os.PathLike)) and str(destination).endswith(".gz")
+        params: dict[str, Any] = {"computed": str(computed).lower(), "gzip": str(gzip).lower()}
+        if labels is not None:
+            params["labels"] = list(labels)
+        if types is not None:
+            params["types"] = list(types)
+        url = f"/v1/{self._tenant}/graph/snapshot"
+        written = 0
+        with _opened(destination, "wb") as out:
+            async with self._http.stream("GET", url, params=params, timeout=None) as resp:
+                if resp.status_code >= httpx.codes.BAD_REQUEST:
+                    await resp.aread()
+                    raise GraphosError(resp.status_code, _extract_detail(resp), "GET", url)
+                async for chunk in resp.aiter_bytes():
+                    out.write(chunk)
+                    written += len(chunk)
+        return {"bytes": written}
+
+    async def import_dataset(
+        self,
+        source: str | os.PathLike[str] | IO[bytes],
+        *,
+        mode: str = "merge",
+        schema: str = "check",
+        name: str | None = None,
+    ) -> dict[str, Any]:
+        """``POST .../graph/snapshot-import``: a file from :meth:`export_dataset`.
+
+        Streamed from ``source`` (a path or a binary file object; gzip or
+        not), never held in memory.  ``mode="empty"`` restores into a tenant
+        without nodes (409 otherwise); ``"merge"`` adds to what is there.
+        ``schema="apply"`` first imports the schema from the file's header
+        (:meth:`import_schema`, creating the tenant when new), so one file
+        restores a tenant from nothing; ``"check"`` expects the labels to be
+        registered.  ``name`` imports into another tenant than this client's.
+
+        Returns the import's result: counts, ``complete`` (false when the file
+        was cut off before its end line), ``errors``.  Not retried.
+        """
+        target = name or self._tenant
+        if schema == "apply":
+            header = read_dataset_header(source)
+            if header is None:
+                raise ValueError("schema='apply' needs a file with a header line")
+            await self.import_schema(header["schema"], name=target)
+        # Renew the token now: a streamed body cannot be sent again after a 401.
+        await self.me()
+        url = f"/v1/{target}/graph/snapshot-import"
+
+        async def body() -> AsyncIterator[bytes]:
+            with _opened(source, "rb") as data:
+                while chunk := data.read(1 << 20):
+                    yield chunk
+
+        resp = await self._http.post(
+            url, params={"mode": mode}, content=body(), timeout=None,
+            headers={"content-type": "application/x-ndjson"},
+        )
+        if resp.status_code >= httpx.codes.BAD_REQUEST:
+            raise GraphosError(resp.status_code, _extract_detail(resp), "POST", url)
         return resp.json()
 
     async def scan_nodes(

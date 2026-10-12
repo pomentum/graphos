@@ -133,6 +133,12 @@ one id (or one src/dst pair) in a batch collapse into one row.
   per line, flushed in 500-row batches per label / edge key, each batch in its
   own transaction. Invalid lines are skipped and reported (`rows_invalid`, up
   to 50 messages in `errors`).
+- **Dataset export** (`GET …/graph/snapshot`): the whole tenant as one NDJSON
+  file (gzip optional), framed by a header (format, counts, the schema) and an
+  end line; each node once with its own label, nodes before edges; one
+  consistent snapshot, flat memory. `snapshot-import` reads it back, into an
+  empty tenant (`mode=empty`) for an exact restore, gzip or not, and says
+  whether the file was complete.
 - **Snapshot import** (`POST …/graph/snapshot-import`): one NDJSON stream
   mixing nodes and edges (`"_kind": "node" | "edge"`). Buffers up to 5,000
   rows per group, written through the same COPY-staged upsert as the `:bulk`

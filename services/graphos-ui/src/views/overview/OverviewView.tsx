@@ -4,15 +4,17 @@ import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { CountBars } from "../../components/CountBars";
 import { StatTile } from "../../components/StatTile";
-import { useHistogram, useProperties, useStats } from "../../data/queries";
+import { useHistogram, useImportDataset, useProperties, useStats } from "../../data/queries";
 import { formatBytes, formatCount } from "../../lib/time";
+import { DatasetPanel } from "./DatasetPanel";
 import { GraphAlgorithms } from "./GraphAlgorithms";
 import classes from "./OverviewView.module.css";
 
 /**
  * Overview: how big the tenant is, its graph algorithms (groups and metrics:
  * what they last found, and running them), which labels and relationships it
- * has, and how the values of one property are spread across a label. The label
+ * has, the whole dataset as a file (download, upload), and how the values of
+ * one property are spread across a label. The label
  * and property live in the address, so they survive moving between views.
  */
 export function OverviewView() {
@@ -30,6 +32,7 @@ export function OverviewView() {
   };
   const properties = useProperties(label);
   const histogram = useHistogram(label, property);
+  const importDataset = useImportDataset();
 
   const labels = (stats.data?.labels ?? []).filter((l) => l.kind === "v");
   const edges = (stats.data?.labels ?? []).filter((l) => l.kind === "e");
@@ -71,6 +74,10 @@ export function OverviewView() {
 
       <div className={classes.section}>
         <GraphAlgorithms />
+      </div>
+
+      <div className={classes.section}>
+        <DatasetPanel onImport={importDataset} />
       </div>
 
       <SimpleGrid cols={{ base: 1, md: 2 }} mt="xl" spacing="xl">

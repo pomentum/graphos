@@ -4,6 +4,37 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Added
+
+- **Dataset export.** `GET /v1/{tenant}/graph/snapshot` streams the tenant as one NDJSON file
+  (`graphos.snapshot`, version 1) that `snapshot-import` reads back: a header line (format,
+  counts, the schema), every node (each once, with its own label, label by label), every edge, and
+  an end line with what was written. One consistent snapshot (`REPEATABLE READ`); flat memory
+  (server-side cursors, the edges' ends resolved through a temporary table built once).
+  `labels` / `types` narrow it, `computed=false` leaves out `graphos_*` and `community_id`,
+  `gzip=true` compresses it. `read`, and recorded in the audit log. A dev copy of about 570,000
+  nodes and 10 million edges exported in about 8 minutes with gzip (276 MB), 13 without (2.8 GB).
+- **`snapshot-import` reads the dataset file:** it checks the header (another format or a newer
+  version: 422) and reports it, says whether the end line arrived (`complete`), decompresses a
+  gzip body, and with `?mode=empty` imports only into a tenant without nodes (409 otherwise). When
+  the file's nodes carry `community_id`, the edges' copies of their ends' communities are restored
+  from them, so community-scoped walks work without a recompute. New setting
+  `GRAPHOS_IMPORT_MAX_BYTES` (default 16 GiB, after decompression; 413 beyond).
+- **UI: Dataset** on the Overview page: download (straight into a file where the browser allows it,
+  gzip and computed values optional) for readers; upload, adding or restoring into an empty tenant,
+  with the file's schema registered first for maintainers.
+- Python client: `export_dataset` and `import_dataset` (streamed to and from disk; `schema="apply"`
+  registers the file's schema first, `mode="empty"` restores), `read_dataset_header`.
+
+### Changed
+
+- **Uploads are streamed.** The audit middleware hashed a request body by reading it whole before
+  the endpoint ran, so `:bulk` and `snapshot-import` bodies were held in memory. It now hashes the
+  chunks as the endpoint reads them (the same hash). A read can ask to be audited (`audit_this`);
+  the dataset export does, logged as `read`.
+
 ## 0.7.0 — 2026-10-12
 
 This release lets a tenant's whole schema be exported as a file and imported (here, or into another

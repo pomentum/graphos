@@ -1000,3 +1000,62 @@ async def test_import_splits_more_than_5000_pairs_over_several_calls() -> None:
     preview = await cli.import_schema(doc, dry_run=True)
     assert len(bodies) == 1 and "7001 more declared label pairs" in preview["warnings"][0]
     await cli.close()
+
+
+_HEADER = {"_kind": "header", "format": "graphos.snapshot", "version": 1, "tenant": "demo",
+           "schema": {"name": "demo", "vertex_labels": ["Doc"]}}
+_FILE = "".join(json.dumps(line) + "\n" for line in (
+    _HEADER,
+    {"_kind": "node", "id": "d1", "label": "Doc", "properties": {}},
+    {"_kind": "end", "counts": {"nodes": 1, "edges": 0}},
+)).encode()
+
+
+@pytest.mark.asyncio
+async def test_export_dataset_streams_to_a_file(tmp_path) -> None:  # noqa: ANN001
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, content=_FILE, headers={"content-type": "application/gzip"})
+
+    cli = GraphosClient(base_url="http://x", token="tok", tenant="demo")
+    cli._http = httpx.AsyncClient(base_url="http://x", transport=_mock_transport(handler))
+    out = tmp_path / "demo.ndjson.gz"
+    assert await cli.export_dataset(out, labels=["Doc"]) == {"bytes": len(_FILE)}
+    assert out.read_bytes() == _FILE                      # written as received
+    assert seen[0].url.path == "/v1/demo/graph/snapshot"
+    assert dict(seen[0].url.params) == {"computed": "true", "gzip": "true", "labels": "Doc"}
+    await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_import_dataset_applies_the_schema_then_streams_the_file(tmp_path) -> None:  # noqa: ANN001
+    import gzip  # noqa: PLC0415
+
+    seen: list[tuple[str, str, bytes]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, str(request.url), request.read()))
+        if request.url.path == "/v1/me":
+            return httpx.Response(200, json={"consumer": "ada"})
+        if request.url.path == "/v1/tenants":
+            return httpx.Response(200, json={"tenant": "copy"})
+        return httpx.Response(200, json={"nodes_upserted": 1, "complete": True})
+
+    cli = GraphosClient(base_url="http://x", token="tok", tenant="demo")
+    cli._http = httpx.AsyncClient(base_url="http://x", transport=_mock_transport(handler))
+    path = tmp_path / "demo.ndjson.gz"
+    path.write_bytes(gzip.compress(_FILE))
+    from graphos_client import read_dataset_header  # noqa: PLC0415
+    assert read_dataset_header(path) == _HEADER
+    result = await cli.import_dataset(path, mode="empty", schema="apply", name="copy")
+    assert result == {"nodes_upserted": 1, "complete": True}
+    schema_call, me_call, upload = seen
+    assert schema_call[1] == "http://x/v1/tenants"
+    assert json.loads(schema_call[2]) == {"name": "copy", "vertex_labels": ["Doc"]}
+    assert me_call[1] == "http://x/v1/me"
+    assert upload[1] == "http://x/v1/copy/graph/snapshot-import?mode=empty"
+    assert upload[2] == path.read_bytes()                 # the file as it is, gzip included
+    await cli.close()
+

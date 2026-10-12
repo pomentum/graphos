@@ -10,6 +10,8 @@ import type {
   NodeUpsert,
   PathsRequest,
   Properties,
+  DatasetHeader,
+  DatasetImportResult,
   SchemaAddition,
   SchemaDocument,
 } from "../api/types";
@@ -406,6 +408,32 @@ export function useAddToSchema() {
         client.invalidateQueries({ queryKey: keys.catalogue(tenant) }),
       ]),
   });
+}
+
+/**
+ * Imports a dataset file into this tenant, registering the schema in its
+ * header first when asked; the tenant's counts, schema, map and catalogue are
+ * read again afterwards.
+ */
+export function useImportDataset() {
+  const { api, tenant } = useTenantSession();
+  const client = useQueryClient();
+  return async (
+    file: File,
+    mode: "merge" | "empty",
+    applySchema: boolean,
+    header: DatasetHeader | null,
+  ): Promise<DatasetImportResult> => {
+    if (applySchema && header?.schema) await api.importSchema(header.schema);
+    const result = await api.importDataset(file, mode);
+    await Promise.all([
+      client.invalidateQueries({ queryKey: keys.stats(tenant) }),
+      client.invalidateQueries({ queryKey: keys.schema(tenant) }),
+      client.invalidateQueries({ queryKey: ["map", tenant] }),
+      client.invalidateQueries({ queryKey: keys.catalogue(tenant) }),
+    ]);
+    return result;
+  };
 }
 
 /** Downloads the tenant's whole schema as `<tenant>.schema.json`. */
