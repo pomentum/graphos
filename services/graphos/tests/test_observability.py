@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from http import HTTPStatus
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
+from starlette.routing import Route
 
 from graphos.app import create_app
 from graphos.config import Settings
-from graphos.observability.audit import _extract_tenant_from_path, _hash_body
+from graphos.observability.audit import AuditMiddleware, _extract_tenant_from_path
 from graphos.observability.logging import _parse_traceparent
 
 
@@ -72,18 +77,35 @@ def test_invalid_traceparent_does_not_echo() -> None:
 # ── audit helpers ─────────────────────────────────────────────────────────
 
 
-def test_hash_body_empty_is_empty() -> None:
-    assert _hash_body(b"") == ""
+def _audited_app() -> Starlette:
+    """A route that reads its body as a stream, behind the audit middleware."""
+
+    async def upload(request: Request) -> PlainTextResponse:
+        size = 0
+        async for chunk in request.stream():
+            size += len(chunk)
+        return PlainTextResponse(str(size))
+
+    app = Starlette(routes=[Route("/v1/demo/graph/nodes:bulk", upload, methods=["POST"])])
+    app.add_middleware(AuditMiddleware, enabled=True, writes_only=False)
+    return app
 
 
-def test_hash_body_is_16_hex_chars() -> None:
-    h = _hash_body(b'{"a": 1}')
-    assert len(h) == 16
-    assert all(c in "0123456789abcdef" for c in h)
+def test_a_streamed_body_is_hashed_as_the_endpoint_reads_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    body = b"".join(b'{"id": "n%d", "label": "Doc"}\n' % i for i in range(5000))
 
+    def chunks():  # noqa: ANN202 — sent chunked, as a streamed upload is
+        for i in range(0, len(body), 4096):
+            yield body[i:i + 4096]
 
-def test_hash_body_stable_across_calls() -> None:
-    assert _hash_body(b"abc") == _hash_body(b"abc")
+    audit = caplog.at_level(logging.INFO, logger="graphos.audit")
+    with audit, TestClient(_audited_app()) as client:
+        assert client.post("/v1/demo/graph/nodes:bulk", content=chunks()).text == str(len(body))
+        client.post("/v1/demo/graph/nodes:bulk", content=b"")
+    hashes = [r.args_hash for r in caplog.records if r.name == "graphos.audit"]
+    assert hashes == [hashlib.sha256(body).hexdigest()[:16], ""]
 
 
 @pytest.mark.parametrize(

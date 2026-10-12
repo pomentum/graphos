@@ -3,7 +3,9 @@
 Emits one structured log line per state-changing request: one whose route
 declares ``write`` access (``graphos.auth``), whatever its HTTP method, so a
 read sent as ``POST`` (``nodes:scan``, ``edges/aggregate``) is not logged.
-A request that reached no route's auth falls back to its method.  Reads:
+A request that reached no route's auth falls back to its method.  A read
+that hands out a lot at once (a whole dataset export) asks to be logged too,
+with :func:`audit_this` (message ``read``).  Reads:
 
   - method, path, route template (from request scope)
   - tenant (when the path includes ``/v1/{tenant}/...``)
@@ -11,7 +13,10 @@ A request that reached no route's auth falls back to its method.  Reads:
     reads it from the request scope without re-validating the token)
   - args_hash: sha256 of the request body, truncated to 16 hex chars.
     Bounded log size; lets you correlate "same payload" without
-    storing the payload itself.
+    storing the payload itself.  Hashed chunk by chunk as the endpoint
+    reads the body, so a streamed upload (``nodes:bulk``,
+    ``snapshot-import``) is never held in memory here; it covers the
+    bytes the endpoint read.
   - status_code + elapsed_ms
 
 The middleware is layered AFTER the auth dependency runs, so it can
@@ -36,6 +41,9 @@ from graphos.auth import ACCESS_SCOPE_KEY, Access
 
 _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
+# Set in a request's scope by :func:`audit_this`.
+AUDIT_READ_KEY = "graphos.audit_read"
+
 # Number of path segments required before a tenant name appears:
 # ``/v1/<tenant>/...`` → after lstrip+split → ["v1", "<tenant>", ...]
 _MIN_PARTS_FOR_TENANT = 2
@@ -46,10 +54,9 @@ _MIN_PARTS_FOR_TENANT = 2
 log = logging.getLogger("graphos.audit")
 
 
-def _hash_body(body: bytes) -> str:
-    if not body:
-        return ""
-    return hashlib.sha256(body).hexdigest()[:16]
+def audit_this(request: Request) -> None:
+    """Log this request although it is a read (a whole dataset export)."""
+    request.scope[AUDIT_READ_KEY] = True
 
 
 def _extract_tenant_from_path(path: str) -> str | None:
@@ -79,20 +86,28 @@ class AuditMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         if not self._enabled:
             return await call_next(request)
-        if self._writes_only and request.method == "GET":
-            return await call_next(request)   # no GET route writes
 
-        # Buffer the body once so the downstream handler can re-read it.
-        # FastAPI buffers JSON bodies in memory anyway; this is the same
-        # cost in a different place.  Whether the request is a write is only
-        # known once its route's auth has run, after the call.
-        body = await request.body()
-        args_hash = _hash_body(body)
+        # Hash the body as the endpoint reads it, chunk by chunk: a streamed
+        # upload passes through without being held here.  Whether the
+        # request is a write is only known once its route's auth has run,
+        # after the call.
+        digest = hashlib.sha256()
+        read_any = False
+        receive = request.receive
 
         async def _receive() -> dict:
-            return {"type": "http.request", "body": body, "more_body": False}
+            nonlocal read_any
+            message = await receive()
+            chunk = message.get("body", b"") if message.get("type") == "http.request" else b""
+            if chunk:
+                digest.update(chunk)
+                read_any = True
+            return message
 
         request._receive = _receive   # type: ignore[assignment]  # starlette private API
+
+        def args_hash() -> str:
+            return digest.hexdigest()[:16] if read_any else ""
 
         started = time.perf_counter()
         try:
@@ -100,12 +115,19 @@ class AuditMiddleware(BaseHTTPMiddleware):
         except Exception:
             # A write that crashed is the one an audit trail most needs:
             # record it as a 500 before the error propagates.
-            if not self._writes_only or _is_write(request):
-                _emit(request, args_hash, _INTERNAL_ERROR, started)
+            if self._logged(request):
+                _emit(request, args_hash(), _INTERNAL_ERROR, started)
             raise
-        if not self._writes_only or _is_write(request):
-            _emit(request, args_hash, response.status_code, started)
+        if self._logged(request):
+            _emit(request, args_hash(), response.status_code, started)
         return response
+
+    def _logged(self, request: Request) -> bool:
+        return (
+            not self._writes_only
+            or _is_write(request)
+            or bool(request.scope.get(AUDIT_READ_KEY))
+        )
 
 
 _INTERNAL_ERROR = 500
@@ -127,7 +149,7 @@ def _emit(request: Request, args_hash: str, status: int, started: float) -> None
     # stdlib logging takes a message + extra; structlog's processor
     # chain picks `extra` up as fields and renders the JSON line.
     log.info(
-        "write",
+        "read" if request.scope.get(AUDIT_READ_KEY) else "write",
         extra={
             "method": request.method,
             "path": request.url.path,
