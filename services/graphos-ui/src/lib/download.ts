@@ -50,9 +50,3 @@ export async function pickSaveTarget(filename: string): Promise<SaveTarget | und
     throw error;
   }
 }
-
-/** Saves a streamed response: into the picked file, or (none picked) as a Blob download. */
-export async function saveResponse(filename: string, response: Response, target: SaveTarget): Promise<void> {
-  if (target) await target.write(response);
-  else saveBlob(filename, await response.blob());
-}

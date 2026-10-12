@@ -330,10 +330,11 @@ export class GraphosApi {
    * The tenant's data as one file, as a response to stream: a header line,
    * every node, every edge, an end line (`read`; recorded in the audit log).
    */
-  exportDataset(options: { gzip?: boolean; computed?: boolean } = {}): Promise<Response> {
+  exportDataset(options: { gzip?: boolean; computed?: boolean; signal?: AbortSignal } = {}): Promise<Response> {
     return this.http.open(`/v1/${enc(this.tenant)}/graph/snapshot`, {
       query: { gzip: options.gzip ?? false, computed: options.computed ?? true },
       headers: { Accept: "*/*" },
+      signal: options.signal,
     });
   }
 
@@ -341,14 +342,16 @@ export class GraphosApi {
    * Imports a dataset file (gzip or not), sent as it is. `empty` imports only
    * into a tenant without nodes (409 otherwise); `merge` adds to what is there.
    */
-  async importDataset(file: Blob, mode: "merge" | "empty" = "merge"): Promise<DatasetImportResult> {
-    return (
-      await this.http.request<DatasetImportResult>("POST", `/v1/${enc(this.tenant)}/graph/snapshot-import`, {
-        body: file,
-        contentType: "application/x-ndjson",
-        query: { mode },
-      })
-    ).data;
+  importDataset(
+    file: Blob,
+    mode: "merge" | "empty" = "merge",
+    progress: { onSent?: (bytes: number, total: number) => void; signal?: AbortSignal } = {},
+  ): Promise<DatasetImportResult> {
+    return this.http.upload<DatasetImportResult>(`/v1/${enc(this.tenant)}/graph/snapshot-import`, file, {
+      contentType: "application/x-ndjson",
+      query: { mode },
+      ...progress,
+    });
   }
 
   /** The tenant's whole schema as a file (`maintain`). */

@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { SearchHit } from "../api/types";
 import { useWorkspace } from "../graph/WorkspaceProvider";
+import { guardLeavingWhileTransferring } from "../lib/transfers";
 import { useTenantSession } from "../session/SessionProvider";
 import { visibleViews } from "../views/registry";
 import classes from "./AppLayout.module.css";
@@ -13,6 +14,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { NodeSearch, type PickMode } from "./NodeSearch";
 import { Sidebar } from "./Sidebar";
 import { RunningIndicator } from "./RunningJobs";
+import { TransfersIndicator } from "./Transfers";
 import { AccountMenu, ActivityBell, TenantSwitcher } from "./ToolbarMenus";
 
 /**
@@ -32,6 +34,8 @@ export function AppLayout() {
   // beside it: closed by default, and closed again after choosing a view.
   const narrow = useMediaQuery(NARROW, false, { getInitialValueInEffect: false });
   const [sidebarOpen, sidebar] = useDisclosure(!narrow);
+  // A dataset download or upload stops if the page is left: ask first.
+  useEffect(() => guardLeavingWhileTransferring(), []);
   useEffect(() => {
     if (narrow) sidebar.close();
     // On moving to another view, or the window becoming narrow.
@@ -65,6 +69,7 @@ export function AppLayout() {
           {current ? t(current.title) : ""}
         </Text>
         <Group gap="sm" justify="flex-end" wrap="nowrap" className={classes.toolbarEnd}>
+          <TransfersIndicator />
           <RunningIndicator />
           <ActivityBell />
           <NodeSearch hotkey allowAdd onPick={openHit} width={narrow ? 150 : 220} />

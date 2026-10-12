@@ -3,59 +3,51 @@ import { IconDownload, IconFileUpload, IconUpload } from "@tabler/icons-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DatasetHeader, DatasetImportResult } from "../../api/types";
+import { TransferProgress } from "../../components/Transfers";
+import { useRefreshAfterImport, useStats } from "../../data/queries";
 import { headerProblem, readDatasetHeader } from "../../lib/datasetFile";
-import { pickSaveTarget, saveResponse } from "../../lib/download";
+import { pickSaveTarget } from "../../lib/download";
 import { formatCount } from "../../lib/time";
+import { isActive, startDownload, startUpload, useTransfers } from "../../lib/transfers";
 import { useTenantSession } from "../../session/SessionProvider";
 import classes from "./OverviewView.module.css";
-
-export interface DatasetPanelProps {
-  /** Imports a file into this tenant; resolves with what it wrote. */
-  onImport: (
-    file: File,
-    mode: "merge" | "empty",
-    applySchema: boolean,
-    header: DatasetHeader | null,
-  ) => Promise<DatasetImportResult>;
-}
 
 /**
  * The tenant's data as one file. Anyone who can read the tenant downloads it
  * (every node and edge, with the schema in the first line); whoever can write
  * to it uploads such a file, added to what is there or, into an empty tenant,
  * as an exact restore. Maintainers can have the file's schema registered
- * first. A download is written straight to the file where the browser allows
- * it; nothing is kept in browser storage.
+ * first. Each transfer shows how far it is and can be cancelled; it goes on,
+ * and its progress stays (here and in the toolbar), when the user moves to
+ * another page. A download is written straight to the file where the
+ * browser allows it; nothing is kept in browser storage.
  */
-export function DatasetPanel({ onImport }: DatasetPanelProps) {
+export function DatasetPanel() {
   const { t } = useTranslation();
   const { api, tenant, canWrite, canMaintain } = useTenantSession();
+  const stats = useStats();
+  const refresh = useRefreshAfterImport();
+  const mine = useTransfers().filter((transfer) => transfer.tenant === tenant);
+  const download = mine.filter((x) => x.kind === "download").at(-1);
+  const upload = mine.filter((x) => x.kind === "upload").at(-1);
   const [gzip, setGzip] = useState(true);
   const [computed, setComputed] = useState(true);
-  const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [header, setHeader] = useState<DatasetHeader | null>(null);
   const [fileProblem, setFileProblem] = useState<string | null>(null);
   const [mode, setMode] = useState<"merge" | "empty">("merge");
   const [applySchema, setApplySchema] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [result, setResult] = useState<DatasetImportResult | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const download = async () => {
+  const startDownloading = async () => {
     setDownloadError(null);
-    const filename = `${tenant}.ndjson${gzip ? ".gz" : ""}`;
     try {
-      // Asked first, in the click: a picked file is written as the data arrives.
-      const target = await pickSaveTarget(filename);
+      // Asked in the click itself: a picked file is written as the data arrives.
+      const target = await pickSaveTarget(`${tenant}.ndjson${gzip ? ".gz" : ""}`);
       if (target === undefined) return;
-      setDownloading(true);
-      await saveResponse(filename, await api.exportDataset({ gzip, computed }), target);
+      startDownload(api, tenant, { gzip, computed }, target);
     } catch (error) {
       setDownloadError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setDownloading(false);
     }
   };
 
@@ -63,8 +55,6 @@ export function DatasetPanel({ onImport }: DatasetPanelProps) {
     setFile(next);
     setHeader(null);
     setFileProblem(null);
-    setResult(null);
-    setUploadError(null);
     if (!next) return;
     const read = await readDatasetHeader(next);
     const problem = read ? headerProblem(read) : null;
@@ -72,19 +62,18 @@ export function DatasetPanel({ onImport }: DatasetPanelProps) {
     else setHeader(read);
   };
 
-  const upload = async () => {
+  const startUploading = () => {
     if (!file) return;
-    setUploading(true);
-    setResult(null);
-    setUploadError(null);
-    try {
-      setResult(await onImport(file, mode, applySchema && Boolean(header?.schema), header));
-    } catch (error) {
-      setUploadError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setUploading(false);
-    }
+    startUpload(api, tenant, file, { mode, applySchema: applySchema && Boolean(header?.schema), header }, refresh);
   };
+
+  const size =
+    typeof stats.data?.n_vertices === "number" && typeof stats.data.n_edges === "number"
+      ? t("views.overview.dataset.size", {
+          nodes: formatCount(stats.data.n_vertices),
+          edges: formatCount(stats.data.n_edges),
+        })
+      : "";
 
   return (
     <Stack gap="xs">
@@ -95,32 +84,41 @@ export function DatasetPanel({ onImport }: DatasetPanelProps) {
         {t("views.overview.dataset.hint")}
       </Text>
       <div className={classes.algorithms}>
-        <Stack gap={6}>
-          <Group gap="md">
-            <Checkbox
-              size="xs"
-              label={t("views.overview.dataset.gzip")}
-              checked={gzip}
-              onChange={(e) => setGzip(e.currentTarget.checked)}
-            />
-            <Checkbox
-              size="xs"
-              label={t("views.overview.dataset.computed")}
-              checked={computed}
-              onChange={(e) => setComputed(e.currentTarget.checked)}
-            />
-          </Group>
-          <Group>
+        <Stack gap="xs" className={classes.algorithm}>
+          <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm">
+            <div>
+              <Text size="sm" fw={600}>
+                {t("views.overview.dataset.downloadTitle")}
+              </Text>
+              <Text size="xs" c="dimmed">
+                {t("views.overview.dataset.downloadWhat", { size })}
+              </Text>
+              <Group gap="md" mt={8}>
+                <Checkbox
+                  size="xs"
+                  label={t("views.overview.dataset.gzip")}
+                  checked={gzip}
+                  onChange={(e) => setGzip(e.currentTarget.checked)}
+                />
+                <Checkbox
+                  size="xs"
+                  label={t("views.overview.dataset.computed")}
+                  checked={computed}
+                  onChange={(e) => setComputed(e.currentTarget.checked)}
+                />
+              </Group>
+            </div>
             <Button
               size="xs"
               variant="default"
               leftSection={<IconDownload size={14} />}
-              loading={downloading}
-              onClick={() => void download()}
+              disabled={download ? isActive(download) : false}
+              onClick={() => void startDownloading()}
             >
               {t("views.overview.dataset.download")}
             </Button>
           </Group>
+          {download ? <TransferProgress transfer={download} /> : null}
           {downloadError ? (
             <Text size="xs" c="red">
               {downloadError}
@@ -129,11 +127,19 @@ export function DatasetPanel({ onImport }: DatasetPanelProps) {
         </Stack>
 
         {canWrite ? (
-          <Stack gap={6}>
+          <Stack gap="xs" className={classes.algorithm}>
+            <div>
+              <Text size="sm" fw={600}>
+                {t("views.overview.dataset.uploadTitle")}
+              </Text>
+              <Text size="xs" c="dimmed">
+                {t("views.overview.dataset.uploadWhat")}
+              </Text>
+            </div>
             <FileInput
               size="xs"
-              label={t("views.overview.dataset.file")}
-              description={t("views.overview.dataset.fileHint")}
+              aria-label={t("views.overview.dataset.file")}
+              placeholder={t("views.overview.dataset.filePlaceholder")}
               accept=".ndjson,.gz,.jsonl,application/x-ndjson,application/gzip"
               leftSection={<IconFileUpload size={14} />}
               value={file}
@@ -155,38 +161,34 @@ export function DatasetPanel({ onImport }: DatasetPanelProps) {
                 {t("views.overview.dataset.noHeader")}
               </Text>
             ) : null}
-            <Radio.Group size="xs" value={mode} onChange={(next) => setMode(next as "merge" | "empty")}>
-              <Group gap="md">
-                <Radio size="xs" value="merge" label={t("views.overview.dataset.merge")} />
-                <Radio size="xs" value="empty" label={t("views.overview.dataset.empty")} />
-              </Group>
-            </Radio.Group>
-            {canMaintain && header?.schema ? (
-              <Checkbox
-                size="xs"
-                label={t("views.overview.dataset.applySchema")}
-                checked={applySchema}
-                onChange={(e) => setApplySchema(e.currentTarget.checked)}
-              />
-            ) : null}
-            <Group>
+            <Group justify="space-between" align="flex-end" wrap="wrap" gap="sm">
+              <Stack gap={6}>
+                <Radio.Group size="xs" value={mode} onChange={(next) => setMode(next as "merge" | "empty")}>
+                  <Group gap="md">
+                    <Radio size="xs" value="merge" label={t("views.overview.dataset.merge")} />
+                    <Radio size="xs" value="empty" label={t("views.overview.dataset.empty")} />
+                  </Group>
+                </Radio.Group>
+                {canMaintain && header?.schema ? (
+                  <Checkbox
+                    size="xs"
+                    label={t("views.overview.dataset.applySchema")}
+                    checked={applySchema}
+                    onChange={(e) => setApplySchema(e.currentTarget.checked)}
+                  />
+                ) : null}
+              </Stack>
               <Button
                 size="xs"
-                variant="default"
                 leftSection={<IconUpload size={14} />}
-                disabled={!file || Boolean(fileProblem)}
-                loading={uploading}
-                onClick={() => void upload()}
+                disabled={!file || Boolean(fileProblem) || (upload ? isActive(upload) : false)}
+                onClick={startUploading}
               >
                 {t("views.overview.dataset.upload")}
               </Button>
             </Group>
-            {result ? <ImportSummary result={result} /> : null}
-            {uploadError ? (
-              <Alert variant="light" color="red" radius="md">
-                <Text size="xs">{uploadError}</Text>
-              </Alert>
-            ) : null}
+            {upload ? <TransferProgress transfer={upload} /> : null}
+            {upload?.result ? <ImportSummary result={upload.result} /> : null}
           </Stack>
         ) : null}
       </div>

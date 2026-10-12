@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { CountBars } from "../../components/CountBars";
 import { StatTile } from "../../components/StatTile";
-import { useHistogram, useImportDataset, useProperties, useStats } from "../../data/queries";
+import { useHistogram, useProperties, useStats } from "../../data/queries";
 import { formatBytes, formatCount } from "../../lib/time";
 import { DatasetPanel } from "./DatasetPanel";
 import { GraphAlgorithms } from "./GraphAlgorithms";
@@ -32,7 +32,6 @@ export function OverviewView() {
   };
   const properties = useProperties(label);
   const histogram = useHistogram(label, property);
-  const importDataset = useImportDataset();
 
   const labels = (stats.data?.labels ?? []).filter((l) => l.kind === "v");
   const edges = (stats.data?.labels ?? []).filter((l) => l.kind === "e");
@@ -77,7 +76,7 @@ export function OverviewView() {
       </div>
 
       <div className={classes.section}>
-        <DatasetPanel onImport={importDataset} />
+        <DatasetPanel />
       </div>
 
       <SimpleGrid cols={{ base: 1, md: 2 }} mt="xl" spacing="xl">

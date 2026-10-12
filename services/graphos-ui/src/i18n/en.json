@@ -1,5 +1,22 @@
 {
   "common": {
+    "transfers": {
+      "phase": {
+        "receiving": "Downloading",
+        "sending": "Uploading",
+        "writing": "graphos is writing",
+        "done": "Done",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      },
+      "bytesOf": "{{bytes}} of {{total}}",
+      "rows": "{{rows}} rows",
+      "rowsOf": "{{rows}} of {{total}} rows",
+      "cancel": "Cancel",
+      "dismiss": "Dismiss",
+      "indicator_one": "{{count}} dataset transfer running",
+      "indicator_other": "{{count}} dataset transfers running"
+    },
     "actions": {
       "cancel": "Cancel",
       "save": "Save",
@@ -442,12 +459,17 @@
       "distinctValues_other": "{{formatted}} distinct values",
       "dataset": {
         "title": "Dataset",
-        "hint": "The tenant's data as one file: every node and relationship, with the schema in its first line. Download it to keep or move it; upload such a file to add it here, or into an empty tenant to restore it exactly.",
+        "hint": "The tenant's data as one file: every node and relationship, with the schema in its first line. A transfer goes on while you use other pages; the toolbar shows how far it is.",
+        "downloadTitle": "Download",
+        "downloadWhat": "The whole tenant{{size}}, to keep, move or restore elsewhere.",
+        "size": ": {{nodes}} nodes and {{edges}} relationships",
+        "uploadTitle": "Upload",
+        "uploadWhat": "A file downloaded here or from another graphos: added to this tenant, or restored into it when it is empty.",
+        "filePlaceholder": "Choose a .ndjson or .ndjson.gz file (very large ones are better sent with the Python client)",
         "gzip": "Compressed (.gz)",
         "computed": "With computed values (groups, metrics)",
         "download": "Download",
         "file": "Dataset file",
-        "fileHint": "A .ndjson or .ndjson.gz file exported by graphos; very large files are better sent with the Python client",
         "source": "Exported from {{tenant}}, {{date}}: {{nodes}} nodes, {{edges}} relationships",
         "noHeader": "No header line: read as plain nodes and relationships",
         "notDataset": "Not a graphos dataset file",

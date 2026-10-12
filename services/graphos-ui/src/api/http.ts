@@ -100,6 +100,50 @@ export class HttpClient {
     return response;
   }
 
+  /**
+   * Sends a file as the body of a `POST`, reporting how much of it has gone
+   * (`fetch` cannot): `onSent(bytes, total)` while sending, `onSent(total,
+   * total)` once all of it is out and the server is working on it. Renews the
+   * token once on 401, as every request does. `signal` aborts it.
+   */
+  async upload<T>(path: string, file: Blob, options: UploadOptions = {}): Promise<T> {
+    let answer = await this.uploadOnce(path, file, options);
+    if (answer.status === 401 && this.source && (await this.source.renew())) {
+      answer = await this.uploadOnce(path, file, options);
+    }
+    if (answer.status < 200 || answer.status >= 300) {
+      throw new ApiError(answer.status, describeError(answer.status, parseJson(answer.body)));
+    }
+    return parseJson(answer.body) as T;
+  }
+
+  private async uploadOnce(
+    path: string,
+    file: Blob,
+    options: UploadOptions,
+  ): Promise<{ status: number; body: string }> {
+    const token = this.source ? await this.source.token() : null;
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${this.baseUrl}${path}${toQueryString(options.query)}`);
+      xhr.setRequestHeader("Accept", "application/json");
+      xhr.setRequestHeader("Content-Type", options.contentType ?? "application/octet-stream");
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      xhr.upload.onprogress = (event) =>
+        options.onSent?.(event.loaded, event.lengthComputable ? event.total : file.size);
+      xhr.upload.onload = () => options.onSent?.(file.size, file.size);
+      xhr.onload = () => resolve({ status: xhr.status, body: xhr.responseText });
+      xhr.onerror = () => reject(new Error(t("errors.unreachable")));
+      xhr.onabort = () => reject(new DOMException("aborted", "AbortError"));
+      if (options.signal?.aborted) {
+        reject(new DOMException("aborted", "AbortError"));
+        return;
+      }
+      options.signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+      xhr.send(file);
+    });
+  }
+
   /** Sends the request; on 401, renews the token once and sends it again. */
   private async send(method: string, path: string, options: RequestOptions): Promise<Response> {
     const response = await this.sendOnce(method, path, options);
@@ -142,11 +186,22 @@ export function toQueryString(query: Query | undefined): string {
 }
 
 async function readJson(response: Response): Promise<unknown> {
-  const text = await response.text();
+  return parseJson(await response.text());
+}
+
+function parseJson(text: string): unknown {
   if (!text) return null;
   try {
     return JSON.parse(text);
   } catch {
     return { detail: text };
   }
+}
+
+export interface UploadOptions {
+  query?: Query;
+  contentType?: string;
+  /** How much of the body has gone, and how much there is. */
+  onSent?: (bytes: number, total: number) => void;
+  signal?: AbortSignal;
 }
