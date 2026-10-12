@@ -4,7 +4,12 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.7.0 — 2026-10-12
+
+This release lets a tenant's whole schema be exported as a file and imported (here, or into another
+tenant) after a dry run of what it would change, from the API, the Python client and the web UI. It
+also fixes `nodes:scan` over a label hierarchy and the streamed writes' answer to a unique-index
+clash. No breaking changes.
 
 ### Added
 
