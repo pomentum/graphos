@@ -619,6 +619,18 @@ class TenantSpecBody(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
+    def _schema_file(cls, data: Any) -> Any:
+        # An exported schema (graphos.schema_document) is a registration body
+        # with an ``_export`` header: checked here, otherwise ignored.
+        if isinstance(data, dict) and "_export" in data:
+            from graphos.schema_document import check_header  # noqa: PLC0415 — no cycle at import
+
+            check_header(data["_export"])
+            data = {k: v for k, v in data.items() if k != "_export"}
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
     def _no_sql(cls, data: Any) -> Any:
         if isinstance(data, dict):
             # Clients before 0.6.0 always send ``"indexes": []``: an empty list
@@ -760,6 +772,28 @@ class ResolveEdgesResponse(BaseModel):
     results: list[ResolveEdgesResult]
     total_edges_written: int
     total_duration_ms: int
+
+
+class RegisterDryRunResponse(BaseModel):
+    """``POST /v1/tenants?dry_run=true``: what the registration would change."""
+
+    tenant: str
+    exists: bool = Field(description="The tenant is registered already.")
+    mode: Literal["merge", "replace"]
+    changes: dict[str, Any] | None = Field(
+        description=(
+            "What the change feed would record: `added` / `removed` per part, "
+            "`strict_endpoints` as [before, after], `registered` for a new tenant; "
+            "null when nothing would change."
+        ),
+    )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "What applying it would cost (a table rewrite, a long build) or could still fail on."
+        ),
+    )
+    status: str = "dry_run"
 
 
 class RegisterResponse(BaseModel):

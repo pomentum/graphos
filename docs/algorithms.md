@@ -258,7 +258,8 @@ The same steps on a code graph of about 570,000 nodes and 10 million edges:
 graphos writes `graphos_*` properties itself, so any write that uses one (node or edge, single,
 batch or bulk, a merge-patch removing one included) is refused with `400`: computed values never
 collide with a consumer's own data. `community_id` is written by the community recompute only.
-Snapshot export and import keep both as they are.
+Snapshot import is the exception: it writes both as the file has them, to restore what a scan read
+out.
 
 ## Sizing
 

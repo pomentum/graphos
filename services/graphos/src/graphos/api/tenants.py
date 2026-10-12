@@ -24,13 +24,16 @@ is idempotent and cheap. See ``bootstrap.py`` module docstring for context.
 
 from __future__ import annotations
 
+import json
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 import asyncpg
 from fastapi import APIRouter, HTTPException, Request, status
+from fastapi.responses import Response
 
-from graphos import declared, schema_changes
+from graphos import declared, schema_changes, schema_document
 from graphos.auth import (
     MaintainPrincipal,
     OwnerPrincipal,
@@ -40,6 +43,7 @@ from graphos.auth import (
 )
 from graphos.bootstrap import (
     TenantSpec,
+    _validate_label_hierarchy,
     bootstrap_tenant,
     ensure_search_indexes,
     load_spec,
@@ -54,6 +58,7 @@ from graphos.bootstrap import (
 from graphos.contracts.tenants import (
     GeneratedColumnSpec,
     PropertyIndexSpec,
+    RegisterDryRunResponse,
     RegisterResponse,
     TenantInfo,
     TenantSpecBody,
@@ -114,6 +119,41 @@ def _validate_declared(
             )
 
 
+async def _dry_run(
+    pool: asyncpg.Pool, previous: TenantSpec | None, spec: TenantSpec,
+    *, replace: bool, endpoints_stated: bool,
+) -> RegisterDryRunResponse:
+    """What registering ``spec`` would change, checked as bootstrap would."""
+    after = schema_document.merged(
+        previous, spec, replace=replace, endpoints_stated=endpoints_stated,
+    )
+    try:
+        _validate_label_hierarchy(spec.label_hierarchy, spec.vertex_labels)
+        async with pool.acquire() as conn:
+            for name, body in spec.search_indexes.items():
+                for label in body.get("labels") or ():
+                    if label != "*" and label not in after.vertex_labels:
+                        raise ValueError(f"search index {name!r}: {label!r} is not a vertex label")
+                if body.get("analyzer") == "text" and not await conn.fetchval(
+                    "SELECT 1 FROM pg_ts_config WHERE cfgname = $1;", body.get("language"),
+                ):
+                    raise ValueError(
+                        f"search index {name!r}: unknown text-search language "
+                        f"{body.get('language')!r}"
+                    )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc),
+        ) from exc
+    return RegisterDryRunResponse(
+        tenant=spec.name,
+        exists=previous is not None,
+        mode="replace" if replace else "merge",
+        changes=schema_changes.diff(previous, after),
+        warnings=await schema_document.warnings(pool, previous, after, replace=replace),
+    )
+
+
 def _may_maintain(principal: Principal, name: str) -> bool:
     return principal.has(name, Level.MAINTAIN) or principal.can_create(name)
 
@@ -141,13 +181,46 @@ async def get_tenant(name: str, principal: MaintainPrincipal) -> TenantInfo:
     return _spec_to_info(specs[name])
 
 
-@router.post("", summary="Register a tenant (idempotent)", response_model=RegisterResponse)
+@router.get(
+    "/{name}/spec",
+    summary="Export a tenant's schema",
+    description=(
+        "The whole schema as a file (`graphos.schema`, version 1): a registration body, so "
+        "posting it to `POST /v1/tenants` registers that schema (rename `name` to copy it), "
+        "plus an `_export` header that registration checks and ignores. Lossless (resolve "
+        "rules, declared pairs and `strict_endpoints` included) and deterministic: two "
+        "exports of the same schema differ only in `_export.exported_at`. No data, grants or "
+        "computed values. `maintain`, as `GET /v1/tenants/{name}`."
+    ),
+    responses={200: {"content": {"application/json": {}}}, 404: {"description": "Not registered."}},
+)
+async def export_spec(name: str, request: Request, principal: MaintainPrincipal) -> Response:
+    if not _may_maintain(principal, name):
+        require_level(principal, name, Level.MAINTAIN)
+    spec = await load_spec(request.app.state.pool, name)
+    if spec is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"tenant '{name}' is not registered",
+        )
+    doc = schema_document.document(spec, now=datetime.now(UTC))
+    return Response(
+        content=json.dumps(doc, indent=2, ensure_ascii=False) + "\n",
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{name}.schema.json"'},
+    )
+
+
+@router.post(
+    "", summary="Register a tenant (idempotent)",
+    response_model=RegisterResponse | RegisterDryRunResponse,
+)
 async def register(
     body: TenantSpecBody,
     request: Request,
     principal: WritePrincipal,
     force_shrink: bool = False,
-) -> RegisterResponse:
+    dry_run: bool = False,
+) -> RegisterResponse | RegisterDryRunResponse:
     """Register or re-apply a tenant spec.
 
     By default ``persist_spec`` runs in **merge mode** — the persisted
@@ -166,6 +239,10 @@ async def register(
     A new tenant needs ``create_tenants`` on a matching pattern and makes the
     caller its owner; an existing one needs ``maintain`` on it (or
     ``create_tenants`` on a matching pattern).
+
+    ``?dry_run=true`` checks the request as a registration would and answers
+    what it would change (the change feed's record of it) and what applying
+    it would cost, writing nothing.
     """
     if not principal.can_create(body.name) and not principal.has(body.name, Level.MAINTAIN):
         raise HTTPException(
@@ -238,6 +315,11 @@ async def register(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"tenant '{spec.name}' does not exist; creating it needs 'create_tenants'",
+        )
+    if dry_run:
+        return await _dry_run(
+            pool, previous, spec, replace=force_shrink,
+            endpoints_stated="edge_endpoints" in body.model_fields_set,
         )
     try:
         await bootstrap_tenant(

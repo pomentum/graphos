@@ -321,6 +321,31 @@ export interface Job {
 }
 
 /** What an admin may add to a tenant's schema: re-registration merges it with what exists. */
+/**
+ * `GET /v1/tenants/{name}/spec`: the tenant's whole schema as a file. It is a
+ * registration body (posting it registers that schema) with an `_export`
+ * header saying what it is.
+ */
+export interface SchemaDocument {
+  _export?: { format?: string; version?: number; graphos?: string; tenant?: string; exported_at?: string };
+  name: string;
+  vertex_labels?: string[];
+  /** Per edge type, its declared label pairs (`{src, dst}` or `[src, dst]`). */
+  edge_endpoints?: Record<string, unknown[]>;
+  [part: string]: unknown;
+}
+
+/** `POST /v1/tenants?dry_run=true`: what importing a schema would change. */
+export interface SchemaDryRun {
+  tenant: string;
+  exists: boolean;
+  mode: "merge" | "replace";
+  /** What the change feed would record; null when nothing would change. */
+  changes: SchemaChangeDetail | null;
+  /** What applying it would cost (a table rewrite, a long build) or could still fail on. */
+  warnings: string[];
+}
+
 export interface SchemaAddition {
   vertex_labels?: string[];
   edge_labels?: string[];

@@ -12,16 +12,25 @@ import {
   Tooltip,
   UnstyledButton,
 } from "@mantine/core";
-import { IconChevronDown, IconPlus } from "@tabler/icons-react";
+import { IconChevronDown, IconDownload, IconPlus, IconUpload } from "@tabler/icons-react";
 import { lazy, Suspense, useMemo, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
-import { useAddToSchema, useCatalogue, useGraphMap, useSchema } from "../../data/queries";
+import {
+  useAddToSchema,
+  useCatalogue,
+  useExportSchema,
+  useGraphMap,
+  useImportSchema,
+  useSchema,
+} from "../../data/queries";
+import { mayCreate } from "../../lib/schemaFile";
 import { formatCount } from "../../lib/time";
 import { useTenantSession } from "../../session/SessionProvider";
 import { browseParams } from "../browse/browseState";
 import { AddToSchemaDialog, type AdditionKind } from "./AddToSchemaDialog";
+import { ImportSchemaDialog } from "./ImportSchemaDialog";
 import { labelTree, propertiesByLabel, relationshipRows } from "./schemaModel";
 import { StrictEndpoints } from "./StrictEndpoints";
 import classes from "./SchemaView.module.css";
@@ -42,15 +51,20 @@ const SHOWN_PAIRS = 3;
  * diagram (`?view=diagram`), where labels are added and a relationship
  * type's label pairs declared by drawing from one label to another. Declared
  * pairs are the schema's associations; administrators can have graphos
- * refuse writes outside them (strict).
+ * refuse writes outside them (strict). Maintainers can export the whole
+ * schema as a file and import one (here or into another tenant), after a
+ * preview of what it changes.
  */
 export function SchemaView() {
   const { t } = useTranslation();
-  const { tenant, canMaintain } = useTenantSession();
+  const { tenant, canMaintain, api, me } = useTenantSession();
   const schema = useSchema();
   const map = useGraphMap();
   const catalogue = useCatalogue();
   const add = useAddToSchema();
+  const exportSchema = useExportSchema();
+  const importSchema = useImportSchema();
+  const [importing, setImporting] = useState(false);
   const [adding, setAdding] = useState<AdditionKind | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [params, setParams] = useSearchParams();
@@ -111,6 +125,31 @@ export function SchemaView() {
             value={view}
             onChange={setView}
           />
+          {canMaintain && schema.data ? (
+            <Group gap={6}>
+              <Tooltip label={t("views.schema.file.exportTooltip")} withArrow multiline w={240}>
+                <Button
+                  size="xs"
+                  variant="default"
+                  leftSection={<IconDownload size={14} />}
+                  loading={exportSchema.isPending}
+                  onClick={() => exportSchema.mutate()}
+                >
+                  {t("views.schema.file.export")}
+                </Button>
+              </Tooltip>
+              <Tooltip label={t("views.schema.file.importTooltip")} withArrow multiline w={240}>
+                <Button
+                  size="xs"
+                  variant="default"
+                  leftSection={<IconUpload size={14} />}
+                  onClick={() => setImporting(true)}
+                >
+                  {t("views.schema.file.import")}
+                </Button>
+              </Tooltip>
+            </Group>
+          ) : null}
           {canMaintain && schema.data ? (
             <Menu position="bottom-end" width={200}>
               <Menu.Target>
@@ -291,6 +330,17 @@ export function SchemaView() {
           pair={adding === "relationship" ? (pair ?? undefined) : undefined}
           onCancel={closeDialog}
           onAdd={(addition) => add.mutate(addition, { onSuccess: closeDialog })}
+        />
+      ) : null}
+
+      {importing ? (
+        <ImportSchemaDialog
+          tenant={tenant}
+          mayCreate={(name) => mayCreate(me.create_tenants, me.admin, name)}
+          onPreview={(doc, options) => api.previewSchema(doc, options)}
+          onImport={(doc, options) => importSchema.mutate({ doc, options }, { onSuccess: () => setImporting(false) })}
+          importing={importSchema.isPending}
+          onCancel={() => setImporting(false)}
         />
       ) : null}
     </div>

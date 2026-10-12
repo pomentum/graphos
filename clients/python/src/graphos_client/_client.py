@@ -80,6 +80,17 @@ def _if_match_header(if_match: str | None) -> dict[str, str] | None:
 _UNSET: Any = object()
 
 
+# Declared label pairs one registration may carry (the server's limit).
+_MAX_PAIRS_PER_CALL = 5000
+
+
+def _by_type(pairs: list[tuple[str, Any]]) -> dict[str, list[Any]]:
+    out: dict[str, list[Any]] = {}
+    for edge_type, pair in pairs:
+        out.setdefault(edge_type, []).append(pair)
+    return out
+
+
 class GraphosClient:
     """Async HTTP client for the graphos service.
 
@@ -312,8 +323,16 @@ class GraphosClient:
         search_indexes: Mapping[str, Mapping[str, Any]] | None = None,
         edge_endpoints: Mapping[str, Iterable[tuple[str, str] | Mapping[str, str]]] | None = None,
         strict_endpoints: bool | None = None,
+        force_shrink: bool = False,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         """Register / re-register a tenant.
+
+        What is declared is added to what is registered; ``force_shrink=True``
+        replaces the stored schema instead (labels left out keep their tables
+        and data).  ``dry_run=True`` registers nothing and answers what the call
+        would change (``changes``, as the change feed would record it) and what
+        applying it would cost (``warnings``).
 
         ``edge_endpoints`` declares, per edge type, the label pairs it may join:
         ``{"CALLS": [("Function", "Function")], "DEFINES": [("File", "Symbol")]}``
@@ -362,8 +381,70 @@ class GraphosClient:
             }
         if strict_endpoints is not None:
             body["strict_endpoints"] = strict_endpoints
-        resp = await self._request("POST", "/v1/tenants", json_body=body)
+        return await self._register(body, force_shrink=force_shrink, dry_run=dry_run)
+
+    async def _register(
+        self, body: Mapping[str, Any], *, force_shrink: bool, dry_run: bool,
+    ) -> dict[str, Any]:
+        flags = (("force_shrink", force_shrink), ("dry_run", dry_run))
+        params = {k: "true" for k, on in flags if on}
+        resp = await self._request("POST", "/v1/tenants", params=params or None, json_body=body)
         return resp.json()
+
+    async def export_schema(self, name: str | None = None) -> dict[str, Any]:
+        """``GET /v1/tenants/{name}/spec``: the tenant's whole schema as a document
+        (``graphos.schema``) that :meth:`import_schema` reads back (``maintain``)."""
+        resp = await self._request("GET", f"/v1/tenants/{name or self._tenant}/spec")
+        return resp.json()
+
+    async def import_schema(
+        self,
+        document: Mapping[str, Any],
+        *,
+        name: str | None = None,
+        replace: bool = False,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Register the schema in ``document`` (from :meth:`export_schema`).
+
+        ``name`` imports it under another tenant name (a new tenant needs
+        ``create_tenants``); ``replace`` replaces the stored schema instead of
+        adding to it; ``dry_run`` answers what it would change, writing nothing.
+
+        A registration takes at most 5,000 declared label pairs; a document with
+        more is sent in several calls, the first with everything else (and
+        ``replace``), the rest adding pairs.  A dry run previews the first 5,000
+        and says how many it left out.
+        """
+        body = {k: v for k, v in document.items() if k != "edge_endpoints"}
+        if name is not None:
+            body["name"] = name
+        target = str(body.get("name") or self._tenant)
+        body["name"] = target
+        pairs = [
+            (edge_type, pair)
+            for edge_type, type_pairs in (document.get("edge_endpoints") or {}).items()
+            for pair in type_pairs
+        ]
+        chunks = [pairs[i:i + _MAX_PAIRS_PER_CALL]
+                  for i in range(0, len(pairs), _MAX_PAIRS_PER_CALL)] or [[]]
+        if "edge_endpoints" in document:
+            body["edge_endpoints"] = _by_type(chunks[0])
+        result = await self._register(body, force_shrink=replace, dry_run=dry_run)
+        if dry_run:
+            rest = len(pairs) - len(chunks[0])
+            if rest:
+                result.setdefault("warnings", []).append(
+                    f"{rest} more declared label pairs are not in this preview "
+                    "(at most 5000 per call); the import adds them"
+                )
+            return result
+        for chunk in chunks[1:]:
+            result = await self._register(
+                {"name": target, "edge_endpoints": _by_type(chunk)},
+                force_shrink=False, dry_run=False,
+            )
+        return result
 
     async def remove_edge_endpoint(
         self, edge_type: str, src_label: str, dst_label: str, *, name: str | None = None,

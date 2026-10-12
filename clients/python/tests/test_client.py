@@ -941,3 +941,62 @@ async def test_bearer_auth_gets_its_tokens_from_the_program() -> None:
     await cli.me()                                              # 401: asks for a new one
     assert issued == ["idp1", "idp2"] and server.seen[-1][1] == "Bearer idp2"
     await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_export_and_import_a_schema() -> None:
+    captured: list[httpx.Request] = []
+    doc = {
+        "_export": {"format": "graphos.schema", "version": 1},
+        "name": "demo", "vertex_labels": ["A", "B"],
+        "edge_endpoints": {"R": [{"src": "A", "dst": "B"}]},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if request.method == "GET":
+            assert request.url.path == "/v1/tenants/demo/spec"
+            return httpx.Response(200, json=doc)
+        return httpx.Response(200, json={"tenant": "x", "status": "bootstrapped"})
+
+    cli = GraphosClient(base_url="http://x", token="tok", tenant="demo")
+    cli._http = httpx.AsyncClient(base_url="http://x", transport=_mock_transport(handler))
+    assert await cli.export_schema() == doc
+    await cli.import_schema(doc, name="copy", replace=True)
+    sent = json.loads(captured[1].content)
+    assert sent["name"] == "copy" and sent["_export"] == doc["_export"]
+    assert sent["edge_endpoints"] == doc["edge_endpoints"]
+    assert dict(captured[1].url.params) == {"force_shrink": "true"}
+    await cli.import_schema(doc, dry_run=True)
+    assert dict(captured[2].url.params) == {"dry_run": "true"}
+    assert json.loads(captured[2].content)["name"] == "demo"
+    await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_import_splits_more_than_5000_pairs_over_several_calls() -> None:
+    bodies: list[tuple[dict, dict]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append((json.loads(request.content), dict(request.url.params)))
+        return httpx.Response(200, json={"tenant": "demo", "warnings": []})
+
+    pairs = [{"src": f"L{i}", "dst": "B"} for i in range(12_001)]
+    doc = {"name": "demo", "vertex_labels": ["B"], "edge_endpoints": {"R": pairs[:7000],
+                                                                       "S": pairs[7000:]}}
+    cli = GraphosClient(base_url="http://x", token="tok", tenant="demo")
+    cli._http = httpx.AsyncClient(base_url="http://x", transport=_mock_transport(handler))
+    await cli.import_schema(doc, replace=True)
+    assert [sum(len(v) for v in b["edge_endpoints"].values()) for b, _ in bodies] == [
+        5000, 5000, 2001,
+    ]
+    # The first call carries the rest of the schema and replaces; the others add pairs.
+    assert bodies[0][0]["vertex_labels"] == ["B"] and bodies[0][1] == {"force_shrink": "true"}
+    assert all(set(b) == {"name", "edge_endpoints"} and p == {} for b, p in bodies[1:])
+    sent = [p for b, _ in bodies for ps in b["edge_endpoints"].values() for p in ps]
+    assert sent == pairs
+
+    bodies.clear()
+    preview = await cli.import_schema(doc, dry_run=True)
+    assert len(bodies) == 1 and "7001 more declared label pairs" in preview["warnings"][0]
+    await cli.close()

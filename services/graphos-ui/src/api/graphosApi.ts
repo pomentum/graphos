@@ -15,6 +15,8 @@ import type {
   UserCreated,
   UserInfo,
   SchemaAddition,
+  SchemaDocument,
+  SchemaDryRun,
   HubsResponse,
   InducedEdgesResponse,
   EdgesUpsertResponse,
@@ -67,6 +69,27 @@ export function fetchMe(http: HttpClient): Promise<Me> {
  * The graphos endpoints of one tenant, one typed method each.
  * Holds no state beyond the tenant; caching belongs to the data hooks.
  */
+/** Declared label pairs one registration may carry (graphos's limit). */
+const MAX_PAIRS_PER_CALL = 5000;
+
+export interface ImportOptions {
+  /** Another tenant to import into (created when new); this one by default. */
+  name?: string;
+  /** Replace the registered schema instead of adding to it. */
+  replace?: boolean;
+}
+
+function byType(pairs: (readonly [string, unknown])[]): Record<string, unknown[]> {
+  const out: Record<string, unknown[]> = {};
+  for (const [type, pair] of pairs) (out[type] ??= []).push(pair);
+  return out;
+}
+
+/** Said in the preview when it could not include every pair (the import does). */
+export function morePairsWarning(count: number): string {
+  return `${count} more declared label pairs are not in this preview (at most 5000 per call); the import adds them`;
+}
+
 export class GraphosApi {
   constructor(
     private readonly http: HttpClient,
@@ -300,6 +323,48 @@ export class GraphosApi {
    */
   addToSchema(addition: SchemaAddition): Promise<unknown> {
     return this.http.post("/v1/tenants", { name: this.tenant, ...addition });
+  }
+
+  /** The tenant's whole schema as a file (`maintain`). */
+  exportSchema(): Promise<SchemaDocument> {
+    return this.http.get(`/v1/tenants/${enc(this.tenant)}/spec`);
+  }
+
+  /** What importing `doc` would change, writing nothing (see {@link importSchema}). */
+  async previewSchema(doc: SchemaDocument, options: ImportOptions = {}): Promise<SchemaDryRun> {
+    return (await this.importSchemaCalls(doc, options, true)) as SchemaDryRun;
+  }
+
+  /**
+   * Registers the schema in `doc`: into this tenant, or `options.name`
+   * (created when new); added to the registered schema, or replacing it with
+   * `options.replace`. A registration carries at most 5,000 declared label
+   * pairs, so a document with more is sent in several calls: the first with
+   * everything else, the rest adding pairs.
+   */
+  async importSchema(doc: SchemaDocument, options: ImportOptions = {}): Promise<unknown> {
+    return this.importSchemaCalls(doc, options, false);
+  }
+
+  private async importSchemaCalls(doc: SchemaDocument, options: ImportOptions, dryRun: boolean) {
+    const name = options.name ?? this.tenant;
+    const pairs = Object.entries(doc.edge_endpoints ?? {}).flatMap(([type, list]) =>
+      list.map((pair) => [type, pair] as const),
+    );
+    const chunks: (readonly [string, unknown])[][] = [];
+    for (let i = 0; i < pairs.length; i += MAX_PAIRS_PER_CALL) chunks.push(pairs.slice(i, i + MAX_PAIRS_PER_CALL));
+    const query = { ...(options.replace ? { force_shrink: true } : {}), ...(dryRun ? { dry_run: true } : {}) };
+    const first = { ...doc, name, ...(doc.edge_endpoints ? { edge_endpoints: byType(chunks[0] ?? []) } : {}) };
+    let result = await this.http.post<unknown>("/v1/tenants", first, query);
+    if (dryRun) {
+      const rest = pairs.length - (chunks[0]?.length ?? 0);
+      const preview = result as SchemaDryRun;
+      return rest > 0 ? { ...preview, warnings: [...preview.warnings, morePairsWarning(rest)] } : preview;
+    }
+    for (const chunk of chunks.slice(1)) {
+      result = await this.http.post<unknown>("/v1/tenants", { name, edge_endpoints: byType(chunk) });
+    }
+    return result;
   }
 
   /** Removes one declared label pair of an edge type (admin); no data is touched. */

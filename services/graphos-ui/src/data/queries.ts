@@ -1,6 +1,6 @@
 import type { ParseKeys } from "i18next";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { EdgeKey, SearchParams } from "../api/graphosApi";
+import type { EdgeKey, ImportOptions, SearchParams } from "../api/graphosApi";
 import type {
   EdgeUpsert,
   Grant,
@@ -11,8 +11,10 @@ import type {
   PathsRequest,
   Properties,
   SchemaAddition,
+  SchemaDocument,
 } from "../api/types";
 import { CATEGORY_OPS, type ActivityCategory } from "../lib/changes";
+import { saveFile } from "../lib/download";
 import { isActiveJob } from "../lib/jobs";
 import { profileProperties } from "../lib/properties";
 import { useTenantSession } from "../session/SessionProvider";
@@ -397,6 +399,37 @@ export function useAddToSchema() {
   return useMutation({
     meta: { success: "notices.schemaUpdated", errorTitle: "errors.schemaNotUpdated" },
     mutationFn: (addition: SchemaAddition) => api.addToSchema(addition),
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: keys.schema(tenant) }),
+        client.invalidateQueries({ queryKey: ["map", tenant] }),
+        client.invalidateQueries({ queryKey: keys.catalogue(tenant) }),
+      ]),
+  });
+}
+
+/** Downloads the tenant's whole schema as `<tenant>.schema.json`. */
+export function useExportSchema() {
+  const { api, tenant } = useTenantSession();
+  return useMutation({
+    meta: { errorTitle: "errors.schemaNotExported" },
+    mutationFn: async () => {
+      const doc = await api.exportSchema();
+      saveFile(`${tenant}.schema.json`, `${JSON.stringify(doc, null, 2)}\n`);
+    },
+  });
+}
+
+/**
+ * Imports a schema file (into this tenant or another); this tenant's schema,
+ * map and property catalogue are read again afterwards.
+ */
+export function useImportSchema() {
+  const { api, tenant } = useTenantSession();
+  const client = useQueryClient();
+  return useMutation({
+    meta: { success: "notices.schemaImported", errorTitle: "errors.schemaNotImported" },
+    mutationFn: ({ doc, options }: { doc: SchemaDocument; options: ImportOptions }) => api.importSchema(doc, options),
     onSuccess: () =>
       Promise.all([
         client.invalidateQueries({ queryKey: keys.schema(tenant) }),

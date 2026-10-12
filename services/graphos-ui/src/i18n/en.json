@@ -536,6 +536,38 @@
       "addLabel": "Label",
       "addRelationship": "Relationship type",
       "addIndex": "Search index",
+      "file": {
+        "export": "Export",
+        "exportTooltip": "Download the whole schema as a file, to import here or into another tenant",
+        "import": "Import",
+        "importTooltip": "Register a schema from a file exported by graphos",
+        "title": "Import a schema",
+        "file": "Schema file",
+        "fileHint": "A .schema.json file exported by graphos",
+        "notJson": "Not a JSON file",
+        "notSchema": "Not a graphos schema file",
+        "newerVersion": "Exported by a newer graphos (format version {{version}}); this one reads version 1",
+        "source": "Exported from {{tenant}} by graphos {{graphos}}, {{date}}",
+        "sourceUnknown": "No export header: read as a registration body",
+        "target": "Into",
+        "targetThis": "This tenant ({{tenant}})",
+        "targetNew": "Another tenant",
+        "newName": "Tenant name",
+        "newNameHint": "Created when it does not exist",
+        "invalidName": "Not a valid tenant name",
+        "mayNotCreate": "You may not create a tenant named {{name}}",
+        "mode": "Mode",
+        "merge": "Merge",
+        "mergeHint": "Adds what the file declares; removes nothing",
+        "replace": "Replace",
+        "replaceHint": "The schema becomes the file's; labels left out keep their tables and data",
+        "preview": "Preview",
+        "apply": "Import",
+        "willCreate": "Creates the tenant {{name}}.",
+        "nothingChanges": "Nothing would change.",
+        "warnings": "Before you import",
+        "previewFirst": "Preview the import to see what it changes."
+      },
       "sections": {
         "labels": "Labels",
         "relationships": "Relationship types",
@@ -905,7 +937,8 @@
     "noNeighbours": "No neighbours",
     "neighboursAllShown": "Its neighbours are all on the canvas already",
     "noHubs": "No {{label}} node has any edges",
-    "schemaUpdated": "Added to the schema"
+    "schemaUpdated": "Added to the schema",
+    "schemaImported": "Schema imported"
   },
   "errors": {
     "notSaved": "Not saved",
@@ -921,6 +954,8 @@
     "otherNodeGone": "The other node no longer exists.",
     "openLabelFailed": "Couldn't open {{label}}",
     "countsNotLoaded": "Couldn't load the tenant's counts",
-    "schemaNotUpdated": "Not added to the schema"
+    "schemaNotUpdated": "Not added to the schema",
+    "schemaNotImported": "Schema not imported",
+    "schemaNotExported": "Couldn't export the schema"
   }
 }

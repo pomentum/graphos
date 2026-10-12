@@ -37,6 +37,12 @@ label inheritance), and free-form `meta`.
   (labels and declarations unioned); `?force_shrink=true` replaces it. graphos
   serves, and the response reports, the merged spec, so a partial
   re-registration never hides earlier labels. A bad `label_hierarchy` → 422.
+- **Schema as a file.** `GET /v1/tenants/{name}/spec` exports the whole schema
+  (rules, pairs, indexes, columns and `meta` included) as a registration body;
+  posting it imports it, into the same tenant or, renamed, another one.
+  `?dry_run=true` on a registration answers what it would change and what
+  applying it would cost, writing nothing. The web UI's Schema page has
+  Export and Import (with that preview).
 - **No client SQL.** Indexes and generated columns are declared
   (`{label, properties, kind, unique}`, `{label, column, property, type}`) and
   graphos writes the DDL, as for search indexes and resolve rules. SQL

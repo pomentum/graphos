@@ -376,6 +376,8 @@ with the same `email`.
 |---|---|
 | `GET /v1/tenants` | `{"tenants": [TenantInfo…]}`: the tenants the caller may maintain (all for an admin) |
 | `GET /v1/tenants/{name}` | one `TenantInfo` (404 if unknown); `maintain` |
+| `GET /v1/tenants/{name}/spec` | the whole schema as a file (see *Export and import a schema*); `maintain` |
+| `POST /v1/tenants?dry_run=true` | what a registration would change, writing nothing (same levels as registering) |
 | `DELETE /v1/tenants/{name}` | **Forgets the registration only.** It deletes the `graphos_meta.tenants` row, the tenant's declared endpoints and settings, and the in-memory entry. The AGE graph and its data are kept, and re-POSTing the spec brings the tenant back. Returns `{"tenant", "status": "unregistered"}` (404 if unknown). |
 | `DELETE /v1/tenants/{name}/edge_endpoints?type=&src=&dst=` | Removes one declared label pair; 404 if it is not declared. |
 
@@ -383,6 +385,50 @@ Any token on a tenant, read-only included, can read its shape with `GET /v1/{ten
 `{"name", "vertex_labels", "edge_labels", "label_hierarchy", "search_indexes", "rule_edge_labels",
 "edge_endpoints", "strict_endpoints"}`.
 It leaves out what only maintainers see (property indexes, generated columns, rule bodies, `meta`).
+
+**Export and import a schema.** `GET /v1/tenants/{name}/spec` answers the tenant's whole schema as
+a file (`<name>.schema.json`, format `graphos.schema`, version 1). The file **is a registration
+body**: posting it to `POST /v1/tenants` registers that schema, and changing `name` imports it into
+another tenant (created when new, with `create_tenants`). It is lossless: labels, edge labels with
+their resolve rules (one `{name, resolve_rule}` entry per rule), `label_hierarchy`,
+`edge_endpoints`, `strict_endpoints`, search and property indexes, generated columns and `meta`. It
+holds no data, grants or computed values. Lists are sorted and keys in a fixed order, so two exports
+of the same schema differ only in their `_export` header, and a diff in git shows only what changed.
+
+```json
+{
+  "_export": {"format": "graphos.schema", "version": 1, "graphos": "0.7.0",
+              "tenant": "acme", "exported_at": "2026-10-12T09:30:00Z"},
+  "name": "acme",
+  "vertex_labels": ["Document", "User"],
+  "edge_labels": ["AUTHORED"],
+  "…": "…"
+}
+```
+
+Registration checks the `_export` header and ignores it otherwise: a file of another format, or of
+a newer version than the server reads, is refused with 422; a body without one is a plain
+registration. Import merges by default and replaces with `?force_shrink=true`, as any registration.
+
+`?dry_run=true` checks the request as a registration would (names, label references, the label
+hierarchy, a generated column that would change, a search index's labels and text-search language)
+and answers what it would change, writing nothing:
+
+```json
+{"tenant": "acme", "exists": true, "mode": "merge", "status": "dry_run",
+ "changes": {"added": {"vertex_labels": ["Invoice"], "property_indexes": ["Invoice(number) unique"]}},
+ "warnings": ["generated column Document.kind is added to a label with about 120,000 nodes: its table is rewritten, writes to it wait meanwhile"]}
+```
+
+`changes` is what the change feed records when the registration is applied (`null` if nothing
+would change; `registered: true` for a new tenant). `warnings` name what applying would cost or
+could still fail on: a generated column on a label that has nodes, a unique property index over
+values nodes already share (the dry run checks), a search index over more than 100,000 nodes, and,
+when replacing, labels left out (their tables and data stay).
+
+A registration carries at most 5,000 declared label pairs. A schema with more is imported in
+several calls: the first with everything else (and `force_shrink` when replacing), the rest adding
+pairs; the Python client's `import_schema` and the web UI do this.
 
 While a tenant is unregistered, data-plane calls to it return 404. To remove the data itself, delete
 it before you unregister: use `DELETE /v1/{tenant}/graph/nodes?property_key=…&property_value=…`, or
@@ -877,7 +923,8 @@ without the value are left out).
 
 **`graphos_*` is reserved.** graphos writes these properties itself, so writes that use one
 (node or edge, single, batch or bulk, a merge-patch removing one included) are refused with `400`.
-Snapshot import restores them as exported.
+Snapshot import is the exception: it writes them as the file has them, to restore what a scan read
+out.
 
 ---
 

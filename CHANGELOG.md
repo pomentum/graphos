@@ -6,6 +6,26 @@ under one version.
 
 ## Unreleased
 
+### Added
+
+- **Schema export and import.** `GET /v1/tenants/{name}/spec` answers a tenant's whole schema as a
+  file (`graphos.schema`, version 1): labels, edge labels with their resolve rules, the label
+  hierarchy, declared pairs and `strict_endpoints`, search and property indexes, generated columns
+  and `meta`. The file is a registration body, so posting it to `POST /v1/tenants` imports it
+  (renamed, into another tenant); an `_export` header says what it is, and a newer version is
+  refused with 422. Sorted and in a fixed order, so it diffs cleanly in git. `maintain`.
+- **Dry run of a registration.** `POST /v1/tenants?dry_run=true` checks the request as a
+  registration would and answers what it would change (exactly what the change feed then records)
+  and what applying it would cost or fail on: a table rewrite for a generated column on a label
+  with nodes, a unique index over values nodes already share, a long search-index build, labels a
+  replace leaves out. Nothing is written.
+- **UI: Export and Import** on the Schema page (maintainers). Import reads the file in the page,
+  imports into this tenant or another one (created when new, with `create_tenants`), merges or
+  replaces, and shows the dry run before anything is applied.
+- Python client: `export_schema`, `import_schema(doc, name=, replace=, dry_run=)` (sending more
+  than 5,000 declared label pairs over several calls), and `force_shrink` / `dry_run` on
+  `register_tenant`. `TenantInfo` keeps `label_hierarchy` and `n_resolve_rules`.
+
 ### Fixed
 
 - `nodes:bulk`, `edges:bulk` and `snapshot-import` answer a write that would break a unique
@@ -15,6 +35,7 @@ under one version.
   under the parent, and re-importing it duplicated them in the parent. Rows equal on every
   `order_by` key (a non-unique property, or the same `id` in a parent and a child) are ordered by
   graphid, so paging no longer skips the ones after a page boundary.
+- Docs: two passages described a snapshot export that does not exist.
 
 ## 0.6.0 — 2026-10-09
 

@@ -64,6 +64,19 @@ async with GraphosPool(base_url=URL, auth=PasswordAuth("loader", SECRET), schema
     cli = await pool.client("team_red")                              # the same client
 ```
 
+## Copying a schema
+
+```python
+doc = await cli.export_schema()                              # the whole schema, a dict
+preview = await cli.import_schema(doc, name="acme_copy", dry_run=True)
+print(preview["changes"], preview["warnings"])               # what it would change, and cost
+await cli.import_schema(doc, name="acme_copy")               # merge into (or create) acme_copy
+await cli.import_schema(doc, replace=True)                   # replace this tenant's schema
+```
+
+The document is what `GET /v1/tenants/{name}/spec` answers: a registration body, so it can be kept
+in git and reviewed as a diff. More than 5,000 declared label pairs are sent over several calls.
+
 ## Examples
 
 **Signing in.** `auth=PasswordAuth(user, secret)` (or `GRAPHOS_USER` / `GRAPHOS_PASSWORD`) signs in
@@ -89,7 +102,7 @@ Runnable scripts in [`examples/`](examples/). Each reads `GRAPHOS_URL` (default 
 
 | Area | Methods |
 |---|---|
-| Tenants | `register_tenant` (with `edge_endpoints`, `strict_endpoints`), `remove_edge_endpoint`, `list_tenants`, `get_tenant`, `unregister_tenant`, `me`, `schema` |
+| Tenants | `register_tenant` (with `edge_endpoints`, `strict_endpoints`, `force_shrink`, `dry_run`), `export_schema`, `import_schema`, `remove_edge_endpoint`, `list_tenants`, `get_tenant`, `unregister_tenant`, `me`, `schema` |
 | Writes | `upsert_nodes`, `upsert_edges`, `bulk_upsert_nodes`, `bulk_upsert_edges`, `snapshot_import`, `upsert_node_properties`, `patch_node`, `patch_edge`, `delete_node`, `delete_edge`, `delete_by_property` |
 | Reads | `search`, `get_node`, `get_edge`, `find_paths`, `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `scan_nodes` / `scan_nodes_iter`, `scan_edges` / `scan_edges_iter`, `export_graph` |
 | Aggregates | `graph_map`, `map_hubs`, `label_histogram`, `label_top_by_edge`, `aggregate_nodes`, `aggregate_edges`, `tenant_stats` |

@@ -48,6 +48,8 @@ class TenantInfo(BaseModel):
     # ``{label, column, property, type}``; empty from a server before 0.6.0.
     property_indexes: list[dict[str, Any]] = Field(default_factory=list)
     generated_columns: list[dict[str, Any]] = Field(default_factory=list)
+    n_resolve_rules: int = 0
+    label_hierarchy: dict[str, str] = Field(default_factory=dict)
     meta: dict[str, str] = Field(default_factory=dict)
     search_indexes: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
