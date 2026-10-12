@@ -4,7 +4,12 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.8.0 — 2026-10-12
+
+This release lets a tenant's data be exported as one file and imported back, into an empty tenant
+for an exact restore: from the API, the Python client and the web UI. Together with 0.7.0's schema
+export, a tenant can now be copied, backed up and restored. Uploads are streamed end to end. No
+breaking changes.
 
 ### Added
 
