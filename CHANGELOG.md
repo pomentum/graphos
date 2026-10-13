@@ -4,6 +4,26 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## 0.8.1 — 2026-10-13
+
+A web UI release: dataset downloads and uploads show their progress and go on while the user moves
+to another page. The server, the API and the client are unchanged (released at this version
+because the three are versioned together). No breaking changes.
+
+### Changed
+
+- **Dataset download progress (UI).** Bytes received, rows against the file header's counts,
+  percentage, elapsed time and a progress bar; Cancel stops it. Where the browser allows it
+  (Chromium's File System Access API) the data is written straight to the picked file; elsewhere it
+  is kept in memory and saved at the end.
+- **Dataset upload progress (UI).** Bytes sent against the file's size, then "graphos is writing"
+  until the import answers, then its summary; Cancel stops it (what was already written stays, as
+  with any interrupted import).
+- **Transfers outside the page (UI).** A running download or upload goes on, and its progress stays,
+  when the user moves to another page; a toolbar indicator shows it everywhere, with Cancel, and the
+  app asks before the tab is closed while one runs. Nothing is kept in browser storage.
+- The Overview's Dataset section has a Download row and an Upload row, and shows the tenant's size.
+
 ## 0.8.0 — 2026-10-12
 
 This release lets a tenant's data be exported as one file and imported back, into an empty tenant
