@@ -209,6 +209,12 @@ async def test_writes_admin_functions_and_other_tenants_are_refused(
     assert own.json()["rows"] == [["ONE", 3]]
     syntax = await _query(api, "MATCH (d:Doc RETURN d")
     assert syntax.status_code == HTTPStatus.BAD_REQUEST
+    # Variable-length patterns: AGE cannot stop one once it runs.
+    vle = await _query(api, "MATCH p = (a:Author)-[:WROTE*1..2]->(d) RETURN p")
+    assert vle.status_code == HTTPStatus.BAD_REQUEST
+    assert "variable-length patterns" in vle.json()["detail"]
+    hops = await _query(api, "MATCH (a:Author)-[:WROTE]->(d:Doc) RETURN count(d)")
+    assert hops.status_code == HTTPStatus.OK
 
 
 @requires_db

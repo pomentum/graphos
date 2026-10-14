@@ -3,7 +3,9 @@ result makes, tenant roles, and the routes while the console is off."""
 
 from __future__ import annotations
 
+import asyncio
 from http import HTTPStatus
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,6 +15,7 @@ from graphos.auth import StaticAuthenticator
 from graphos.config import Settings
 from graphos.console import (
     MAX_COLUMNS,
+    Console,
     _cell,
     _column_counts,
     _Graph,
@@ -20,6 +23,7 @@ from graphos.console import (
     agtype_value,
     qualified_calls,
     return_columns,
+    variable_length,
 )
 from graphos.identity import Principal
 
@@ -125,6 +129,55 @@ def test_a_result_becomes_cells_and_a_graph_of_its_nodes_and_their_edges() -> No
 )
 def test_qualified_calls_are_found_however_written(query: str, calls: list[str]) -> None:
     assert qualified_calls(query) == calls
+
+
+@pytest.mark.parametrize(
+    ("query", "found"),
+    [
+        ("MATCH p = (a)-[:R*1..3]->(b) RETURN p", True),
+        ("MATCH (a)<-[*]-(b) RETURN b", True),
+        ("MATCH (a)-[r:R *2]-(b) RETURN b", True),
+        ("MATCH (a)-[:R]->()-[:R]->(b) RETURN b", False),
+        ("MATCH (a) RETURN count(*), [x IN [1, 2] | x * 2]", False),
+        ("MATCH (a) RETURN *", False),
+        ("MATCH (a {k: '-[*]-'}) RETURN a // -[*]-", False),
+    ],
+)
+def test_variable_length_patterns_are_found(query: str, found: bool) -> None:  # noqa: FBT001
+    assert variable_length(query) is found
+
+
+@pytest.mark.asyncio
+async def test_the_watchdog_closes_a_connection_whose_backend_does_not_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AGE's variable-length search sees neither a cancel nor a terminate:
+    # the watchdog then closes the connection, so the caller is answered.
+    monkeypatch.setattr("graphos.console.WATCHDOG_TERMINATE_AFTER_S", 0.01)
+    sent: list[str] = []
+
+    class Owner:
+        async def execute(self, sql: str, pid: int) -> None:
+            sent.append(sql.split("(", maxsplit=1)[0].removeprefix("SELECT "))
+
+    class Conn:
+        closed = False
+
+        def get_server_pid(self) -> int:
+            return 42
+
+        def terminate(self) -> None:
+            self.closed = True
+
+    async def gone() -> bool:
+        return True
+
+    conn = Conn()
+    console = Console(pool=None, owner=Owner(), settings=Settings(db_password="x"))  # type: ignore[arg-type]
+    stopped: dict[str, Any] = {}
+    await asyncio.wait_for(console._watch(conn, gone, stopped), 5)  # type: ignore[arg-type]
+    assert sent == ["pg_cancel_backend", "pg_terminate_backend"]
+    assert conn.closed and stopped == {"why": "gone"}
 
 
 def test_every_console_route_answers_404_while_it_is_off() -> None:

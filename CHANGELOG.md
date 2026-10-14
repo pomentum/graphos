@@ -11,7 +11,9 @@ under one version.
 - **Cypher console (opt-in).** `GRAPHOS_CYPHER=true` lets people who know Cypher run read-only
   Cypher on one tenant's graph: `POST /v1/{tenant}/cypher` with `$name` parameters answers a table
   (vertices, edges and paths as graphos nodes and edges) and the graph they make. graphos refuses
-  calls of database functions (schema-qualified names) before the query reaches the database, runs
+  calls of database functions (schema-qualified names) and variable-length patterns (AGE cannot
+  stop those once they run; `GRAPHOS_CYPHER_VARIABLE_LENGTH` allows them) before the query reaches
+  the database, runs
   it in a read-only transaction on a small pool of its own, caps rows
   (`GRAPHOS_CYPHER_MAX_ROWS`) and time (`GRAPHOS_CYPHER_TIMEOUT_S`; a watchdog terminates a query
   AGE is slow to stop, and a cancelled request stops its query), and allows one query per user.

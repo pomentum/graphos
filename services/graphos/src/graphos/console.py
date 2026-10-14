@@ -16,8 +16,14 @@ exports", §6):
 - **Bounded and stoppable.**  ``LIMIT n + 1`` (to say a result was cut);
   ``statement_timeout``; a watchdog that cancels, then terminates, the
   backend if a query outlives the timeout or the caller goes away (AGE
-  sees a cancel late while it builds large lists); one query per user, on
-  a small pool of its own.
+  sees a cancel late while it builds large lists), and, should the backend
+  still not stop, closes the connection so the caller is answered and the
+  slot freed; one query per user, on a small pool of its own.
+- **No variable-length patterns** (``-[*1..3]->``) unless
+  ``GRAPHOS_CYPHER_VARIABLE_LENGTH`` allows them (:func:`variable_length`):
+  AGE's search for them does not check for a cancel, so neither the
+  statement timeout nor the watchdog stops one until it is done; it can hold
+  a database process for many minutes.
 
 AGE needs the result columns declared: they are read from the query's last
 top-level ``RETURN`` (:func:`return_columns`); when that count is wrong, AGE
@@ -131,6 +137,29 @@ def qualified_calls(query: str) -> list[str]:
         if k1 in ("word", "tick") and t2 == "." and k3 in ("word", "tick") and t4 == "(":
             found.append(f"{t1.strip('`')}.{t3.strip('`')}")
     return found
+
+
+def variable_length(query: str) -> bool:
+    """Whether ``query`` has a variable-length relationship pattern
+    (``-[:R*1..3]->``, ``<-[*]-``): a ``*`` inside brackets that follow a
+    dash, outside strings and comments."""
+    tokens = [
+        (m.lastgroup or "", m.group())
+        for m in _TOKEN.finditer(query)
+        if m.lastgroup not in ("ws", "comment")
+    ]
+    depth = 0          # bracket depth inside a relationship pattern, 0 outside one
+    for i, (kind, text) in enumerate(tokens):
+        if depth:
+            if kind == "open":
+                depth += 1
+            elif kind == "close":
+                depth -= 1
+            elif text == "*":
+                return True
+        elif text == "[" and i > 0 and tokens[i - 1][1] == "-":
+            depth = 1
+    return False
 
 
 def _column_counts(names: list[str] | None) -> list[int]:
@@ -274,6 +303,13 @@ class Console:
                 "the console runs Cypher's own functions only, not database functions: "
                 + ", ".join(sorted(set(calls))),
             )
+        if not self.settings.cypher_variable_length and variable_length(text):
+            raise ConsoleError(
+                400,
+                "the console does not run variable-length patterns (-[*1..3]->): AGE cannot "
+                "stop one once it runs. Write the hops out (-[:R]->()-[:R]->()), or use "
+                "graphos's paths (POST /v1/{tenant}/graph/paths, the Path page)",
+            )
         cap = min(limit or self.settings.cypher_max_rows, self.settings.cypher_max_rows)
         if self._running.get(consumer, 0) >= self.settings.cypher_per_user:
             raise ConsoleError(429, "you are running a query already; wait for it or cancel it")
@@ -304,7 +340,7 @@ class Console:
     ) -> dict[str, Any]:
         timeout_ms = int(self.settings.cypher_timeout_s * 1000)
         stopped: dict[str, str] = {}
-        watchdog = asyncio.create_task(self._watch(conn.get_server_pid(), gone, stopped))
+        watchdog = asyncio.create_task(self._watch(conn, gone, stopped))
         started = time.monotonic()
         rows: list[asyncpg.Record] = []
         count = 0
@@ -361,10 +397,12 @@ class Console:
         }
 
     async def _watch(
-        self, pid: int, gone: Callable[[], Awaitable[bool]], stopped: dict[str, str],
+        self, conn: asyncpg.Connection, gone: Callable[[], Awaitable[bool]],
+        stopped: dict[str, str],
     ) -> None:
         """Cancel, then terminate, the backend when the caller goes away or the
         query outlives its timeout (the statement timeout should stop it first)."""
+        pid = conn.get_server_pid()
         deadline = time.monotonic() + self.settings.cypher_timeout_s + WATCHDOG_GRACE_S
         while True:
             await asyncio.sleep(0.5)
@@ -378,6 +416,15 @@ class Console:
             await self.owner.execute("SELECT pg_cancel_backend($1);", pid)
             await asyncio.sleep(WATCHDOG_TERMINATE_AFTER_S)
             await self.owner.execute("SELECT pg_terminate_backend($1);", pid)
+            await asyncio.sleep(WATCHDOG_TERMINATE_AFTER_S)
+            # Still here: the backend has not seen either (AGE checks for them
+            # only now and then). Close the connection, so the caller is answered
+            # and the slot is freed; the backend ends when it next checks.
+            log.warning(
+                "cypher console: a backend did not stop; its connection is closed",
+                extra={"pid": pid},
+            )
+            conn.terminate()
             return
 
 
