@@ -129,6 +129,21 @@ Plan shape for `MATCH (n:Person {id: …})`:
             Index Cond: (properties @> '{"id": "..."}'::agtype)
 ```
 
+**Do not use `>=` against a btree index on an agtype expression.** AGE
+1.6 registers `>=` and `>` under each other's btree strategy numbers in
+`agtype_ops_btree` (4 is `>`, 5 is `>=`; PostgreSQL's are the other way
+round), so an index scan for `expr >= v` starts after the entries equal to
+`v` and silently loses them; a sequential scan of the same query returns
+them. `>`, `<`, `<=` and `=` are right. graphos's keyset pagination
+(`nodes:scan` cursors) therefore never sends `>=`: it queries an equality
+branch and a strict `>` branch one after the other. Check it with:
+
+```sql
+SELECT a.amopstrategy, a.amopopr::regoperator
+FROM pg_amop a JOIN pg_opfamily f ON f.oid = a.amopfamily
+WHERE f.opfname = 'agtype_ops_btree' ORDER BY 1;   -- 4 | >   5 | >=
+```
+
 **Do not answer "which rows have key K" through this GIN index.** The
 key-exists operator `properties ? '"K"'::agtype` can use `gin_agtype_ops`
 (its `text` overload cannot), but on AGE 1.6 the index scan misses rows:
@@ -194,6 +209,36 @@ them correctly (verified).
 The SQL path also sidesteps an AGE 1.6 quirk: `SET r += {…}` on an
 already-merged edge intermittently raised `Entity failed to be updated: N`
 even though the MERGE succeeded.
+
+### Pitfall: extra columns + variable-length patterns → a backend that never returns
+
+Variable-length patterns (`MATCH p = (a)-[:R*1..3]->(b)`) and
+`vertex_stats()` do not read the label tables directly: AGE first loads an
+in-memory copy of the whole graph (`manage_GRAPH_global_contexts` →
+`load_GRAPH_global_hashtables`, `age_global_graph.c`), holding a
+process-wide pthread mutex while it does. The loader refuses a vertex table
+that does not have exactly 2 columns, or an edge table that does not have
+exactly 4 (`natts` counts dropped columns too). graphos's label tables
+carry more (`graphos_rev` on every table, the community columns on edges),
+so on a graphos tenant the load always fails: `Invalid number of attributes
+for <tenant>._ag_label_vertex`.
+
+The error unwinds past the unlock, so the mutex stays locked in that
+backend. The next such query **in the same backend** waits on it forever:
+no wait event, no CPU, deaf to `pg_cancel_backend`, `pg_terminate_backend`,
+`statement_timeout` and a fast shutdown; only `SIGKILL` (a restart with
+crash recovery) ends it. A different backend just gets the error again.
+Verified on AGE 1.6.0 with a native stack in `pthread_mutex_lock`
+(`age_global_graph.c:847`). Neither `age_global_graph.c` nor `age_vle.c`
+calls `CHECK_FOR_INTERRUPTS()`, so even a successful load of a large graph
+cannot be cancelled.
+
+graphos runs neither: its paths, expand and other reads are plain SQL. The
+Cypher console refuses variable-length patterns and `vertex_stats()` before
+they reach the database, and closes, rather than reuses, a connection on
+which a query failed. Write the hops out instead
+(`-[:R]->()-[:R]->()`, `OPTIONAL MATCH` for the optional ones), or use
+`POST /v1/{tenant}/graph/paths`.
 
 ---
 

@@ -10,6 +10,10 @@ made up.  The graph is built so the algorithms have something to find:
 - **betweenness** finds the packages that bridge two ecosystems;
 - **components** finds the few packages nothing connects to the rest.
 
+It also declares how the web UI draws each label (colours, icons, sizes) and,
+when the server's Cypher console is on, saves a few Cypher queries for the
+Query page.
+
 It is the data behind the screenshots in the docs, and a good tenant to try
 the web UI on.  Re-running it rewrites the same graph (upserts are keyed on
 ids), and the metrics re-run writes nothing when nothing changed.
@@ -192,6 +196,60 @@ class _Builder:
                 self.edge(person, "Person", "MAINTAINS", pkg, self.kind_of[pkg])
 
 
+# How the web UI draws the demo: a colour and an icon per label, packages sized
+# by PageRank (once metrics ran).  Every reader of the tenant sees the same.
+DISPLAY = {
+    "vertex": {
+        "Library": {"color": "#6F8FC2", "icon": "code", "size_by": "graphos_pagerank"},
+        "Framework": {"color": "#A98AD0", "icon": "box", "size_by": "graphos_pagerank"},
+        "Tool": {"color": "#5BA9BF", "icon": "settings", "size_by": "graphos_pagerank"},
+        "Person": {"color": "#C9825B", "icon": "person"},
+        "Team": {"color": "#C7AE55", "icon": "people"},
+        "Organisation": {"color": "#B98D63", "icon": "building"},
+        "Topic": {"color": "#8DA85A", "icon": "tag"},
+    },
+    "edge": {
+        "MAINTAINS": {"color": "#C9825B"},
+        "TAGGED": {"color": "#8DA85A"},
+    },
+}
+
+# Saved Cypher queries for the Query page (read-only; hops written out, as the
+# console runs no variable-length patterns).
+QUERIES: dict[str, dict[str, object]] = {
+    "most_depended_on": {
+        "description": "The packages most others depend on",
+        "query": "MATCH (d:Package)-[:DEPENDS_ON]->(p:Package) "
+                 "RETURN p.name AS package, count(d) AS dependents ORDER BY count(d) DESC LIMIT 15",
+    },
+    "maintainers_of": {
+        "description": "Who maintains a package, and their teams",
+        "query": "MATCH (m:Person)-[r:MAINTAINS]->(p:Package {name: $package}) "
+                 "OPTIONAL MATCH (m)-[t:MEMBER_OF]->(team:Team) RETURN m, r, p, t, team",
+        "params": {"package": {"type": "string", "label": "Package name"}},
+        "show": "graph",
+    },
+    "dependencies_of": {
+        "description": "A package's dependencies, two levels deep",
+        "query": "MATCH (p:Package {name: $package})-[r1:DEPENDS_ON]->(d:Package) "
+                 "OPTIONAL MATCH (d)-[r2:DEPENDS_ON]->(e:Package) RETURN p, r1, d, r2, e LIMIT 200",
+        "params": {"package": {"type": "string", "label": "Package name"}},
+        "show": "graph",
+    },
+    "licences_by_language": {
+        "description": "Licences in use, by language",
+        "query": "MATCH (p:Package) RETURN p.language AS language, p.license AS license, "
+                 "count(*) AS packages ORDER BY count(*) DESC LIMIT 20",
+    },
+    "bridges": {
+        "description": "Packages that bridge ecosystems (betweenness)",
+        "query": "MATCH (p:Package) WHERE p.graphos_betweenness > 0 RETURN p.name AS package, "
+                 "label(p) AS kind, p.graphos_betweenness AS betweenness "
+                 "ORDER BY p.graphos_betweenness DESC LIMIT 10",
+    },
+}
+
+
 def build(seed: int = 2026) -> tuple[list[NodeUpsert], list[EdgeUpsert]]:
     """The demo graph: the same nodes and edges for the same seed."""
     b = _Builder(seed)
@@ -225,6 +283,7 @@ async def main() -> None:
             search_indexes={"names": {"labels": ["*"], "properties": ["name", "handle"],
                                       "analyzer": "identifier"}},
             meta={"description": "demo: an invented open-source software ecosystem"},
+            display=DISPLAY,
         )
         for batch in chunks(nodes):
             await g.upsert_nodes(batch)
@@ -244,6 +303,12 @@ async def main() -> None:
             top = await g.scan_nodes(labels=["Package"], project=["name", prop], limit=5,
                                      order_by=[{"property": prop, "desc": True}])
             print(f"{what}:", ", ".join(n.properties["name"] for n in top.items))
+
+        # Saved queries: only where the server's Cypher console is on.
+        if (await g.info()).get("features", {}).get("cypher"):
+            for name, saved in QUERIES.items():
+                await g.save_query(name, **saved)  # type: ignore[arg-type]
+            print(f"saved queries: {', '.join(QUERIES)}")
 
         # Communities: needs the Louvain extra.
         if not (await g.info()).get("features", {}).get("louvain"):

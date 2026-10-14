@@ -1241,8 +1241,10 @@ The endpoints without auth report tenant counts, never names; admins list tenant
 
 `services/graphos-ui` is a web UI for exploring, editing and following a tenant. Explore opens a
 large tenant on its graph map (or its communities, under Groups) and a small one on its whole
-graph; the canvas adds neighbours a page at a time with undo. It also has shortest paths, counts
-per label, live activity, a table view of a label, and the schema, which admins can extend.
+graph; the canvas adds neighbours a page at a time with undo, is laid out by force, on a circle or
+in layers, and saves as PNG, SVG or JSON. It also has shortest paths, counts per label, live
+activity, a table view of a label (and CSV), a Query page where the Cypher console is on, and the
+schema, which admins can extend and whose label styles maintainers set.
 It is an nginx image with no backend of its own: it serves the app and forwards `/api/` to
 graphos on the same origin, so graphos needs no CORS setup. Each person signs in as themselves,
 with a graphos password or through single sign-on, so the UI shows only what their level allows (a `read` user gets a
@@ -1263,6 +1265,8 @@ or run `ghcr.io/pomentum/graphos-ui` with `GRAPHOS_API_UPSTREAM` pointing at gra
 ![Explore's Map: one bubble per label of the demo tenant, a line per linked pair](images/ui-explore-map-dark.png)
 
 ![Explore's Graph: the demo tenant coloured by community, a library selected](images/ui-explore-graph-dark.png)
+
+![The Query page: a saved query's Cypher, coloured, and its result with label icons](images/ui-query-dark.png)
 
 ### Several replicas
 

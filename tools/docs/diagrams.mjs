@@ -270,6 +270,9 @@ const SHOTS = {
   'ui-explore-groups-dark': 'The Groups mode of Explore: one bubble per community of the last Louvain recompute, named after its best-connected member, with lines for the relationships between communities.',
   'ui-explore-map-dark': 'The Map mode of Explore: one bubble per label, sized by its nodes, and a line per pair of labels that are linked.',
   'ui-schema-editor-dark': 'The schema diagram of the demo tenant. Library, Framework and Tool sit in a block under their parent label Package; the selected label, Library, shows its relationship types to the other labels and, in a panel, its properties and relationships. The Add menu offers a new label, relationship type or search index.',
+  'ui-query-dark': 'The Query page of the demo tenant: the Cypher of the saved query maintainers_of, coloured by kind of word, its parameter (Package name: corelog) as a field, and the result as a table: two maintainers of corelog with their teams, each node shown with its label icon. The five saved queries of the tenant are listed on the right.',
+  'ui-explore-styles-dark': 'The canvas showing the result of a query laid out in layers from left to right: the package shiplite, the packages it depends on, and theirs, each drawn in the colour of its label with its icon (a code sign for Library, a box for Framework, a cog for Tool), with a legend of the labels.',
+  'ui-schema-styles-dark': 'The Schema page of the demo tenant: a colour swatch or icon before each label and relationship type. The style editor is open on Library: ten colours to choose from or a hexadecimal colour, a caption property, sized by graphos_pagerank, the icon code, and Reset and Save buttons.',
 };
 for (const [name, alt] of Object.entries(SHOTS)) {
   let jpeg;

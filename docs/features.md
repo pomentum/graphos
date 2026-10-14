@@ -31,7 +31,15 @@ built-in tenants. An admin, or a user with `create_tenants` on a matching name
 pattern (who then owns it), registers each one with `POST /v1/tenants`:
 `vertex_labels`, `edge_labels` (optionally with a `resolve_rule`, §7),
 `property_indexes`, `generated_columns`, `label_hierarchy` (child → parent
-label inheritance), and free-form `meta`.
+label inheritance), free-form `meta`, and `display` (how the web UI draws
+each label and relationship type).
+
+- **Label styles.** `display` declares, per vertex label, a colour, an icon
+  (from a fixed list), a caption property and a size property, and per edge
+  type a colour and a caption. Merged by entry (`null` removes one), checked
+  against the tenant's labels, carried in the schema file and the change
+  feed, served by `GET /v1/{tenant}/schema` to every reader; the dry run warns
+  about a colour hard to see on either canvas. Cosmetic: no effect on data.
 
 - **Idempotent.** Re-posting is safe. By default the stored spec is merged
   (labels and declarations unioned); `?force_shrink=true` replaces it. graphos

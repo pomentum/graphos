@@ -1,8 +1,9 @@
 # graphos UI
 
 A web UI for graphos: see what a tenant's graph is made of, explore it on a canvas, edit nodes
-and relationships, find the paths between two nodes, browse a label as a table, extend the
-schema, and follow changes live.
+and relationships, find the paths between two nodes, ask Cypher questions (where graphos's
+console is on), browse a label as a table, extend the schema and style its labels, and follow
+changes live.
 
 It has no backend of its own. The image is static files served by nginx, which also forwards
 `/api/` to graphos on the same origin, so graphos needs no CORS setup. Every person signs in with
@@ -24,20 +25,25 @@ recorded under the user's name in the audit log and the change feed.
 
 | View | What it shows |
 |---|---|
-| **Explore · Map** | One bubble per label (sized by its nodes) and a line per pair of linked labels (thicker with more edges). Click a label for its relationships in and out; start from its best-connected nodes, or browse it. A tenant of more than 5,000 nodes opens here. |
+| **Explore · Map** | One bubble per label (sized by its nodes, in its declared colour) and a line per pair of linked labels (thicker with more edges). Click a label for its relationships in and out; start from its best-connected nodes, or browse it. A tenant of more than 5,000 nodes opens here. |
 | **Explore · Groups** | What the graph algorithms found, one view at a time: **Groups**, **PageRank**, **Betweenness**, **Degree**, **Components**; the ⓘ beside them says what the view shows and how to read it. The score views draw the tenant's top 25 to 200 nodes by that score and the relationships among them, sized and coloured by the score, with the ranking beside them; double-click (or Open in Graph) takes a node to the canvas. Components lists the islands by size and draws the one picked (at most 300 nodes). Groups: one bubble per community of the last Louvain recompute, named after its best-connected member, with the relationships between groups. Click a group for what it is made of; open its hub or browse its members. Whoever maintains the tenant can compute the groups (a background job) where the server has the Louvain extra; without it the view says so. |
-| **Explore · Graph** | The canvas. A small tenant opens on its whole graph. Double-click (or E) adds a node's neighbours 20 at a time with a "+N more" node, fanned out beside it; the camera follows and the rest fades. Back (Ctrl/⌘+Z) undoes any step; Collapse (C), Hide (H), Focus (F: only the neighbourhood), Escape. Colour by label or by group; size the nodes by their connections or by a graph metric (PageRank, betweenness, degree); inspect and edit node and relationship properties, with a node's group and metrics shown apart, read-only; add and delete nodes and relationships. |
+| **Explore · Graph** | The canvas. A small tenant opens on its whole graph. Double-click (or E) adds a node's neighbours 20 at a time with a "+N more" node, fanned out beside it; the camera follows and the rest fades. Back (Ctrl/⌘+Z) undoes any step; Collapse (C), Hide (H), Focus (F: only the neighbourhood), Escape. Colour by label (the tenant's declared colours first) or by group; size the nodes by their connections, by a graph metric (PageRank, betweenness, degree) or by each label's declared size property; each label's icon and caption as the tenant declared them. Layout: force (ForceAtlas2), a circle label by label, or layers along the edges (up to 500 nodes). Every relationship between two nodes is kept, drawn curved apart. Export: the canvas as PNG, SVG or JSON. Inspect and edit node and relationship properties, with a node's group and metrics shown apart, read-only; add and delete nodes and relationships. |
+| **Query** | Where graphos's Cypher console is on: read-only Cypher in an editor that colours it and suggests labels, relationship types, properties, parameters, clauses and functions as you type (Ctrl+Space asks); a field for each `$parameter`; the result as a table (nodes with their label's icon, CSV) and on the canvas; the tenant's saved queries beside it, run with a form of their parameters, saved and deleted by maintainers. |
 | **Path** | Every shortest path between two nodes, picked by search on any property; the search lives in the address, so it can be shared and survives leaving the view. |
 | **Overview** | Counts and sizes per label and relationship type, how the values of one property are spread, and the **graph algorithms**: the groups (Louvain) and the graph metrics, with what each last run found and, for whoever maintains the tenant, Compute (one at a time; the groups only where the server has Louvain). |
 | **Activity** | The change feed, live, with who made each change; a change to one node opens it. |
-| **Browse** | One label's nodes as a table: a property filter, columns to choose, paging, a row opens in Explore. |
-| **Schema** | Labels as a tree under their parents (counts, properties), relationship types (label pairs, counts), search indexes. Or as a **diagram**: a grid of label boxes, each label holding the labels that inherit from it in a block, busiest first (laid out by ELK). The lines are the schema's associations: each relationship type's declared label pairs (solid), pairs in the data outside them (dashed, warning colour) and, on request, pairs of types that declare none (dotted); the selected label shows all of its lines. Boxes can be moved and put back with Tidy up. Administrators add labels, relationship types and search indexes, declare a label pair by dragging from one label to another (or from a line's panel), remove a declared pair, and can have graphos enforce the declared pairs; labels and types are never removed. |
+| **Browse** | One label's nodes as a table: a property filter, columns to choose, paging, a row opens in Explore; the page or every matching node as CSV. |
+| **Schema** | Labels as a tree under their parents (counts, properties), relationship types (label pairs, counts), search indexes. Or as a **diagram**: a grid of label boxes, each label holding the labels that inherit from it in a block, busiest first (laid out by ELK). The lines are the schema's associations: each relationship type's declared label pairs (solid), pairs in the data outside them (dashed, warning colour) and, on request, pairs of types that declare none (dotted); the selected label shows all of its lines. Boxes can be moved and put back with Tidy up. Administrators add labels, relationship types and search indexes, declare a label pair by dragging from one label to another (or from a line's panel), remove a declared pair, and can have graphos enforce the declared pairs; labels and types are never removed. Each label and relationship type has a style swatch: maintainers set its colour, caption, size and icon, which everyone on the tenant sees. |
 
 | Explore · Map | Explore · Groups |
 |---|---|
 | ![Map: one bubble per label, a line per linked pair](../../docs/images/ui-explore-map-dark.png) | ![Groups: one bubble per community, named after its best-connected member](../../docs/images/ui-explore-groups-dark.png) |
 
 ![The schema diagram with a label selected and the Add menu open](../../docs/images/ui-schema-editor-dark.png)
+
+| Query | Label styles |
+|---|---|
+| ![The Query page: coloured Cypher, a saved query's form, the result with label icons](../../docs/images/ui-query-dark.png) | ![The Schema page with the style editor open on a label](../../docs/images/ui-schema-styles-dark.png) |
 
 The screenshots are of the demo tenant ([`08_demo_ecosystem.py`](../../clients/python/examples/08_demo_ecosystem.py)),
 taken by [`tools/docs/screenshots.py`](../../tools/docs/screenshots.py).
@@ -80,6 +86,8 @@ relationship types and search indexes from `GET /v1/{tenant}/schema`, counts and
 graph map (`GET …/graph/map`), groups from `GET …/graph/communities/map`, property names from the
 catalogue and from the nodes themselves (`nodes:scan`). A label or property added to a tenant
 appears in the UI without a UI change. Groups appear once Louvain has run (the `louvain` extra).
+Label styles come with the schema (`display`); the Query page appears where `GET /v1/info` says
+`"cypher": true`.
 
 ## How the code is organised
 
@@ -129,5 +137,7 @@ used exists. A language is added as another JSON file with the same keys.
 
 React 19, TypeScript, Vite, Mantine 8 (components and theming), TanStack Query (server state),
 React Router, sigma.js 3 with graphology (WebGL graph drawing, ForceAtlas2 layout in a web
-worker), i18next, Vitest and Testing Library. Fonts (Inter, IBM Plex Mono) are bundled, so the
+worker; icons on nodes with @sigma/node-image, curved parallel edges with @sigma/edge-curve,
+pictures with @sigma/export-image), ELK (layered layouts of the schema diagram and the canvas),
+CodeMirror 6 (the Query editor, loaded with that page only), i18next, Vitest and Testing Library. Fonts (Inter, IBM Plex Mono) are bundled, so the
 UI makes no requests to other origins; nginx sends a strict Content-Security-Policy.

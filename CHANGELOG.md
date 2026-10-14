@@ -6,6 +6,14 @@ under one version.
 
 ## Unreleased
 
+People who know Cypher can now ask their own questions: an opt-in, read-only Cypher console with
+saved queries, and a Query page in the web UI that colours Cypher and suggests the tenant's labels
+and properties. A tenant can declare how its labels are drawn (colour, icon, caption, size), seen
+by everyone on it, and the canvas gains circular and layered layouts and saves as PNG, SVG or JSON,
+tables as CSV. No breaking change: every API change adds to 0.8.2 (new endpoints, a new optional
+`display` in registrations and schemas, new response fields), the console is off unless turned on,
+and the only migration creates a table.
+
 ### Added
 
 - **Cypher console (opt-in).** `GRAPHOS_CYPHER=true` lets people who know Cypher run read-only
@@ -37,12 +45,6 @@ under one version.
   and the tenant's saved queries beside it (maintainers save and delete them; a saved query runs
   with a form of its parameters).
 
-- **Web UI: several relationship types between the same two nodes.** The canvas held at most one
-  edge between two nodes: opening, expanding or ranking a graph where two nodes are joined by edges
-  of two types (or both ways) stopped the view ("an edge linking … already exists"). Every edge is
-  kept now, and edges sharing their two nodes are drawn curved apart (@sigma/edge-curve 3.1.0,
-  MIT), so each can be seen and clicked; the SVG export draws them with the same curves.
-
 - **Web UI: label styles and layouts.** The tenant's label styles are drawn everywhere a label is:
   the Explore canvas (declared colours first, the other labels taking the colours left free; a
   child label its parent's colour and icon; the caption property as the node's name; size by a
@@ -61,6 +63,23 @@ under one version.
   with a byte-order mark, and a cell starting with `=`, `+`, `-` or `@` is prefixed with `'` so a
   spreadsheet does not run it as a formula. Everything is made in the browser; nothing new on the
   server.
+
+### Fixed
+
+- **Web UI: several relationship types between the same two nodes.** The canvas held at most one
+  edge between two nodes: opening, expanding or ranking a graph where two nodes are joined by edges
+  of two types (or both ways) stopped the view ("an edge linking … already exists"). Every edge is
+  kept now, and edges sharing their two nodes are drawn curved apart (@sigma/edge-curve 3.1.0,
+  MIT), so each can be seen and clicked; the SVG export draws them with the same curves.
+
+### Changed
+
+- **Demo tenant and docs.** `08_demo_ecosystem.py` declares label styles for the demo and, where the
+  console is on, saves five Cypher queries; the docs' screenshots are taken again
+  (`tools/docs/screenshots.py`, which now keeps the tenant in the address, starts each shot signed
+  out, and adds the Query page, label styles and a layered canvas), and the whitepaper, README,
+  feature survey and Apache AGE notes describe the console, label styles, layouts and exports, and
+  AGE 1.6's limits behind the console's refusals.
 
 ## 0.8.2 — 2026-10-14
 

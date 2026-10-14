@@ -31,9 +31,11 @@ JPEG_QUALITY = 80         # the whitepaper's copies: a quarter of the PNG's size
 
 
 def _go(page: Page, path: str) -> None:
-    """Navigate inside the app (a reload would sign out: nothing is stored)."""
+    """Navigate inside the app (a reload would sign out: nothing is stored), under the
+    tenant the address starts with (``/demo/explore`` → ``/demo`` + ``path``)."""
     page.evaluate(
-        "p => { history.pushState({}, '', p); dispatchEvent(new PopStateEvent('popstate')); }",
+        "p => { const base = location.pathname.replace(/\\/[^/]*$/, '');"
+        " history.pushState({}, '', base + p); dispatchEvent(new PopStateEvent('popstate')); }",
         path,
     )
     page.wait_for_timeout(SETTLE_MS)
@@ -86,11 +88,54 @@ def schema_editor(page: Page) -> None:
     page.wait_for_timeout(1000)
 
 
+def _run_saved(page: Page, name: str, value: str) -> None:
+    """On the Query page: pick a saved query, fill its one parameter, run it."""
+    _go(page, "/query")
+    page.get_by_text(name, exact=True).first.click()
+    page.wait_for_timeout(1000)
+    page.get_by_role("textbox", name="Package name").fill(value)
+    page.get_by_role("button", name="Run", exact=True).click()
+    page.wait_for_timeout(SETTLE_MS)
+
+
+def query(page: Page) -> None:
+    """The Query page: a saved query's Cypher, coloured, and its result, nodes with their label's icon."""
+    _run_saved(page, "maintainers_of", "corelog")
+
+
+def explore_styles(page: Page) -> None:
+    """A query's result on the canvas in layers, drawn with the tenant's label styles."""
+    # Signing in opens Explore on the whole demo graph: start from an empty canvas.
+    _go(page, "/explore")
+    _mode(page, "Graph")
+    page.get_by_role("button", name="Clear").click()
+    page.wait_for_timeout(1000)
+    _run_saved(page, "dependencies_of", "shiplite")
+    page.get_by_role("button", name="Open").filter(has_text="on the canvas").click()
+    page.wait_for_timeout(SETTLE_MS)
+    page.get_by_role("button", name="Colours").click()
+    page.get_by_text("By label", exact=True).click()
+    page.keyboard.press("Escape")
+    page.get_by_role("button", name="Layout").click()
+    page.get_by_text("Layers along the edges", exact=True).click()
+    page.wait_for_timeout(SETTLE_MS)
+
+
+def schema_styles(page: Page) -> None:
+    """The Schema page: each label's style swatch, the style editor open on Library."""
+    _go(page, "/schema")
+    page.get_by_role("button", name="Style of Library").click()
+    page.wait_for_timeout(1000)
+
+
 SHOTS: dict[str, Callable[[Page], None]] = {
     "explore-graph": explore_graph,
     "explore-groups": explore_groups,
     "explore-map": explore_map,
     "schema-editor": schema_editor,
+    "query": query,
+    "explore-styles": explore_styles,
+    "schema-styles": schema_styles,
 }
 
 
@@ -114,10 +159,11 @@ def main() -> int:
 
     with sync_playwright() as p:
         browser = p.chromium.launch(channel=args.channel)
-        ctx = browser.new_context(viewport={"width": 1440, "height": 900},
-                                  color_scheme=args.scheme)
         for name in names:
-            # A fresh page per shot: each starts from the same state.
+            # A fresh context per shot (no session cookie from the last one): each
+            # starts signed out, from the same state.
+            ctx = browser.new_context(viewport={"width": 1440, "height": 900},
+                                      color_scheme=args.scheme)
             page = ctx.new_page()
             page.goto(args.ui + "/")
             page.get_by_label("User name").fill(user)
@@ -130,7 +176,7 @@ def main() -> int:
             page.screenshot(path=target)
             page.screenshot(path=target.with_suffix(".jpg"), type="jpeg", quality=JPEG_QUALITY)
             print(target.relative_to(ROOT) if target.is_relative_to(ROOT) else target)
-            page.close()
+            ctx.close()
         browser.close()
     return 0
 

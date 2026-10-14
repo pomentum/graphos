@@ -937,8 +937,13 @@ people who know Cypher. graphos refuses a query with a schema-qualified
 call (the only way Cypher reaches database functions), runs it in a
 read-only transaction on a small pool of its own with a row cap and a
 timeout, and a watchdog cancels, then terminates, the backend if AGE does
-not stop in time (AGE 1.6 sees a cancel late while it builds large lists;
-a terminate stopped every query tried).
+not stop in time (AGE 1.6 sees a cancel late while it builds large lists),
+and closes the connection if even that is not seen. It also refuses
+variable-length patterns and `vertex_stats()`: AGE serves them from an
+in-memory copy of the graph it cannot load from tables carrying graphos's
+own columns, and the failed load leaves that database process stuck on the
+next one ([AGE notes](apache-age.md#pitfall-extra-columns--variable-length-patterns--a-backend-that-never-returns)).
+A connection on which a query failed is closed, not reused.
 
 | Operation | Language |
 |---|---|
