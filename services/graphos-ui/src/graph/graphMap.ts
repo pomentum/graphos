@@ -2,7 +2,7 @@ import forceAtlas2 from "graphology-layout-forceatlas2";
 import type { GraphMap } from "../api/types";
 import { t } from "../i18n";
 import { formatCount } from "../lib/time";
-import { rankColors } from "../theme/categories";
+import { NO_STYLES, styledColors, type LabelStyles } from "../theme/labelStyles";
 import type { Palette } from "../theme/tokens";
 import { mix, type Categories, type EdgeDisplay, type Emphasis, type NodeDisplay } from "./canvasStyle";
 import { GraphModel, type EdgeAttributes, type NodeAttributes } from "./GraphModel";
@@ -111,10 +111,18 @@ export function bubbleSize(count: number): number {
   return 5 + 3.2 * Math.log10(count + 1);
 }
 
-/** The labels' colours: by size rank, as the canvas colours labels. */
-export function mapCategories(map: GraphMap): Categories {
+/** The labels' colours: declared ones first, the rest by size rank, as the canvas colours labels. */
+export function mapCategories(map: GraphMap, styles: LabelStyles = NO_STYLES): Categories {
   const ranked = map.labels.map((l) => [l.label, l.count] as [string, number]);
-  return { colorBy: "label", ranked, colors: rankColors(ranked.map(([label]) => label)), uncategorised: 0 };
+  return {
+    colorBy: "label",
+    ranked,
+    colors: styledColors(
+      ranked.map(([label]) => label),
+      styles.vertex,
+    ),
+    uncategorised: 0,
+  };
 }
 
 /** What `label` links to, most edges first. */

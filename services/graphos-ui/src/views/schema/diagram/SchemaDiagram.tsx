@@ -41,7 +41,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { GraphMap, TenantSchema } from "../../../api/types";
 import { formatCount } from "../../../lib/time";
-import { CATEGORY_COLORS } from "../../../theme/categories";
+import { labelStyles, styledColors } from "../../../theme/labelStyles";
 import { usePalette } from "../../../theme/usePalette";
 import { DiagramPanel } from "./DiagramPanel";
 import {
@@ -59,7 +59,6 @@ import {
 import {
   buildDiagram,
   captionRect,
-  familyColours,
   familyId,
   focusOf,
   freeGeometry,
@@ -253,7 +252,16 @@ function DiagramCanvas({
     [t, text, properties],
   );
   const diagram = useMemo(() => buildDiagram(schema, map, { hideEmpty, text }), [schema, map, hideEmpty, text]);
-  const colours = useMemo(() => familyColours(diagram.blocks, CATEGORY_COLORS), [diagram]);
+  // Block colours by size, a declared colour first; a label's own declared colour on its box.
+  const colours = useMemo(() => {
+    const styles = labelStyles(schema);
+    const out = styledColors(
+      diagram.blocks.map((block) => block.root),
+      styles.vertex,
+    );
+    for (const [label, style] of styles.vertex) if (style.color) out.set(label, style.color);
+    return out;
+  }, [diagram, schema]);
   const key = useMemo(() => layoutKey(diagram), [diagram]);
   const anyDeclared = diagram.links.some((l) => l.kind === "relationship" && l.status !== "open");
   const lines: LineMode = chosenLines ?? (anyDeclared ? "declared" : "selected");
@@ -474,7 +482,9 @@ function DiagramCanvas({
               nodeColor={(node) =>
                 node.type === "family"
                   ? "transparent"
-                  : (colours.get((node.data as LabelNode["data"]).box.family) ?? palette.nodeIdle)
+                  : (colours.get((node.data as LabelNode["data"]).box.label) ??
+                    colours.get((node.data as LabelNode["data"]).box.family) ??
+                    palette.nodeIdle)
               }
               nodeStrokeColor={(node) =>
                 node.type === "family"

@@ -14,6 +14,7 @@ export function layoutDuration(nodes: number): number {
  * (tests), a short synchronous layout runs instead.
  */
 export function settle(model: GraphModel): () => void {
+  stopSettling();
   const graph = model.graph;
   if (graph.order < 3) return () => undefined;
   // Strong gravity keeps unconnected nodes near the rest, so they do not
@@ -34,8 +35,19 @@ export function settle(model: GraphModel): () => void {
   const layout = new FA2Layout(graph, { settings });
   layout.start();
   const timer = setTimeout(() => layout.kill(), layoutDuration(graph.order));
-  return () => {
+  const stop = () => {
     clearTimeout(timer);
     layout.kill();
+    if (running === stop) running = null;
   };
+  running = stop;
+  return stop;
+}
+
+/** The ForceAtlas2 run still moving nodes, if any. */
+let running: (() => void) | null = null;
+
+/** Stops a ForceAtlas2 run still under way, e.g. before another layout places the nodes. */
+export function stopSettling(): void {
+  running?.();
 }

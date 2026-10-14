@@ -33,6 +33,9 @@ import { AddToSchemaDialog, type AdditionKind } from "./AddToSchemaDialog";
 import { ImportSchemaDialog } from "./ImportSchemaDialog";
 import { labelTree, propertiesByLabel, relationshipRows } from "./schemaModel";
 import { StrictEndpoints } from "./StrictEndpoints";
+import { StyleSwatch } from "./StyleSwatch";
+import type { VertexDisplay } from "../../api/types";
+import { labelStyles } from "../../theme/labelStyles";
 import classes from "./SchemaView.module.css";
 
 // The diagram brings React Flow and ELK: loaded only when it is opened.
@@ -83,6 +86,9 @@ export function SchemaView() {
   const relationships = schema.data ? relationshipRows(schema.data, map.data) : [];
   const indexes = Object.entries(schema.data?.search_indexes ?? {});
   const allProperties = Object.keys(catalogue.data?.by_property ?? {}).sort();
+  const styles = useMemo(() => labelStyles(schema.data), [schema.data]);
+  const saveStyle = (kind: "vertex" | "edge", name: string, entry: VertexDisplay | null, done: () => void) =>
+    add.mutate({ display: { [kind]: { [name]: entry } } }, { onSuccess: done });
 
   if (schema.error) {
     return (
@@ -195,28 +201,39 @@ export function SchemaView() {
             <div className={classes.group}>
               {labels.map((row) => (
                 <div key={row.label}>
-                  <UnstyledButton
-                    className={classes.row}
-                    style={{ paddingLeft: 12 + row.depth * 18 }}
-                    onClick={() => setOpen(open === row.label ? null : row.label)}
-                    aria-expanded={open === row.label}
-                  >
-                    <Text size="sm" fw={500} className={classes.name}>
-                      {row.label}
-                    </Text>
-                    {row.parent ? (
-                      <Text size="xs" c="dimmed">
-                        {t("views.schema.labels.inherits", { parent: row.parent })}
+                  <div className={classes.styledRow} style={{ paddingLeft: 12 + row.depth * 18 }}>
+                    <StyleSwatch
+                      kind="vertex"
+                      name={row.label}
+                      own={ownStyle(schema.data?.display?.vertex?.[row.label])}
+                      shown={styles.vertex.get(row.label) ?? null}
+                      properties={row.properties}
+                      editable={canMaintain}
+                      saving={add.isPending}
+                      onSave={(entry, done) => saveStyle("vertex", row.label, entry, done)}
+                    />
+                    <UnstyledButton
+                      className={classes.row}
+                      onClick={() => setOpen(open === row.label ? null : row.label)}
+                      aria-expanded={open === row.label}
+                    >
+                      <Text size="sm" fw={500} className={classes.name}>
+                        {row.label}
                       </Text>
-                    ) : null}
-                    <Text size="xs" c="dimmed" className={classes.end}>
-                      {row.count === null
-                        ? ""
-                        : t("common.counts.nodes", { count: row.count, formatted: formatCount(row.count) })}
-                      {" · "}
-                      {t("views.schema.labels.properties", { count: row.properties.length })}
-                    </Text>
-                  </UnstyledButton>
+                      {row.parent ? (
+                        <Text size="xs" c="dimmed">
+                          {t("views.schema.labels.inherits", { parent: row.parent })}
+                        </Text>
+                      ) : null}
+                      <Text size="xs" c="dimmed" className={classes.end}>
+                        {row.count === null
+                          ? ""
+                          : t("common.counts.nodes", { count: row.count, formatted: formatCount(row.count) })}
+                        {" · "}
+                        {t("views.schema.labels.properties", { count: row.properties.length })}
+                      </Text>
+                    </UnstyledButton>
+                  </div>
                   {open === row.label ? (
                     <div className={classes.detail} style={{ paddingLeft: 12 + row.depth * 18 }}>
                       {row.properties.length ? (
@@ -255,6 +272,16 @@ export function SchemaView() {
             <div className={classes.group}>
               {relationships.map((row) => (
                 <div key={row.type} className={classes.row}>
+                  <StyleSwatch
+                    kind="edge"
+                    name={row.type}
+                    own={ownStyle(schema.data?.display?.edge?.[row.type])}
+                    shown={styles.edge.get(row.type) ?? null}
+                    properties={allProperties}
+                    editable={canMaintain}
+                    saving={add.isPending}
+                    onSave={(entry, done) => saveStyle("edge", row.type, entry, done)}
+                  />
                   <Text size="sm" fw={500} className={classes.name}>
                     {row.type}
                   </Text>
@@ -357,6 +384,13 @@ export function SchemaView() {
       ) : null}
     </div>
   );
+}
+
+/** What a label or type declares itself, without the nulls the server answers for left-out keys. */
+function ownStyle(entry: VertexDisplay | null | undefined): VertexDisplay | null {
+  if (!entry) return null;
+  const kept = Object.fromEntries(Object.entries(entry).filter(([, v]) => v !== null && v !== undefined));
+  return Object.keys(kept).length ? kept : null;
 }
 
 /** "A → B, C → D and 2 more pairs": the first pairs of a relationship type. */

@@ -28,9 +28,9 @@ import { lazy, Suspense, useMemo, useRef, useState, type FormEvent } from "react
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import type { CypherCell, CypherResult, SavedQuery } from "../../api/types";
-import { displayName } from "../../graph/GraphModel";
-import { rankColors } from "../../theme/categories";
-import { useCatalogue, useSchema, useServiceInfo } from "../../data/queries";
+import { LABEL_ICONS } from "../../lib/labelIcons";
+import { captionOf, styledColors, type LabelStyles } from "../../theme/labelStyles";
+import { useCatalogue, useLabelStyles, useSchema, useServiceInfo } from "../../data/queries";
 import { useWorkspace } from "../../graph/WorkspaceProvider";
 import { CSV_TYPE, exportName, toCsv } from "../../lib/csv";
 import { saveFile } from "../../lib/download";
@@ -325,7 +325,8 @@ function Results({ result, onCsv, preferGraph }: { result: CypherResult; onCsv: 
     frameOn(keys);
     void navigate("/explore");
   };
-  const colors = useMemo(() => labelColors(result), [result]);
+  const styles = useLabelStyles();
+  const colors = useMemo(() => labelColors(result, styles), [result, styles]);
   return (
     <>
       <Group justify="space-between" gap="xs">
@@ -372,7 +373,7 @@ function Results({ result, onCsv, preferGraph }: { result: CypherResult; onCsv: 
               <Table.Tr key={i}>
                 {row.map((cell, j) => (
                   <Table.Td key={j} className={classes.cell} title={cellText(cell)}>
-                    <Cell cell={cell} colors={colors} />
+                    <Cell cell={cell} colors={colors} styles={styles} />
                   </Table.Td>
                 ))}
               </Table.Tr>
@@ -389,23 +390,33 @@ function Results({ result, onCsv, preferGraph }: { result: CypherResult; onCsv: 
   );
 }
 
-/** A colour per node label in the result, most common first, as the canvas colours by label. */
-function labelColors(result: CypherResult): Map<string, string> {
+/** A colour per node label in the result: declared ones, the rest most common first, as on the canvas. */
+function labelColors(result: CypherResult, styles: LabelStyles): Map<string, string> {
   const counts = new Map<string, number>();
   for (const node of result.graph.nodes) counts.set(node.label, (counts.get(node.label) ?? 0) + 1);
   const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  return rankColors(ranked.map(([label]) => label));
+  return styledColors(
+    ranked.map(([label]) => label),
+    styles.vertex,
+  );
 }
 
 /** One cell: a node as its label's dot, label and name; an edge as its type; a path as both in turn. */
-function Cell({ cell, colors }: { cell: CypherCell; colors: Map<string, string> }) {
+function Cell({ cell, colors, styles }: { cell: CypherCell; colors: Map<string, string>; styles: LabelStyles }) {
   if (isNode(cell)) {
     const { node } = cell;
+    const style = styles.vertex.get(node.label);
+    const Icon = style?.icon ? LABEL_ICONS[style.icon] : null;
+    const color = colors.get(node.label) ?? "var(--gx-node-idle)";
     return (
       <span className={classes.node}>
-        <span className={classes.dot} style={{ background: colors.get(node.label) ?? "var(--gx-node-idle)" }} />
+        {Icon ? (
+          <Icon size={13} color={color} aria-hidden />
+        ) : (
+          <span className={classes.dot} style={{ background: color }} />
+        )}
         <span className={classes.kind}>{node.label}</span>
-        {displayName(node.properties, node.id)}
+        {captionOf(node.properties, node.id, style)}
       </span>
     );
   }
@@ -414,7 +425,7 @@ function Cell({ cell, colors }: { cell: CypherCell; colors: Map<string, string> 
     return (
       <span className={classes.path}>
         {cell.map((part, i) => (
-          <Cell key={i} cell={part} colors={colors} />
+          <Cell key={i} cell={part} colors={colors} styles={styles} />
         ))}
       </span>
     );

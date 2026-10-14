@@ -70,7 +70,7 @@ export function LabelBox({ id, data }: NodeProps<LabelNode>) {
   const faded = state.focus !== null && !state.focus.labels.has(id);
   const selected = state.selection?.kind === "label" && state.selection.id === id;
   const target = connection.inProgress && connection.toNode?.id === id;
-  const colour = state.colours.get(box.family);
+  const colour = state.colours.get(box.label) ?? state.colours.get(box.family);
   return (
     <div
       className={classes.box}

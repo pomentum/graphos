@@ -18,6 +18,8 @@ import { saveFile } from "../lib/download";
 import { isActiveJob } from "../lib/jobs";
 import { profileProperties } from "../lib/properties";
 import { useTenantSession } from "../session/SessionProvider";
+import { labelStyles, NO_STYLES, type LabelStyles } from "../theme/labelStyles";
+import { useMemo } from "react";
 
 /**
  * What a mutation says when it ends: `success` and `errorTitle` are i18n keys
@@ -58,6 +60,12 @@ export const keys = {
 export function useSchema() {
   const { api, tenant } = useTenantSession();
   return useQuery({ queryKey: keys.schema(tenant), queryFn: () => api.schema(), staleTime: 5 * 60_000 });
+}
+
+/** The tenant's label styles (`display`), a child label taking its parent's colour and icon. */
+export function useLabelStyles(): LabelStyles {
+  const schema = useSchema();
+  return useMemo(() => (schema.data ? labelStyles(schema.data) : NO_STYLES), [schema.data]);
 }
 
 /** The tenant's labels and the links between them; counted again at most every few minutes. */

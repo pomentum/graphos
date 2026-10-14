@@ -2,8 +2,14 @@ import { ActionIcon, Group } from "@mantine/core";
 import { IconFocusCentered, IconMinus, IconPlus } from "@tabler/icons-react";
 import { useEffect, useRef, type MutableRefObject } from "react";
 import { useTranslation } from "react-i18next";
+import { createNodeImageProgram } from "@sigma/node-image";
 import Sigma from "sigma";
-import type { NodeHoverDrawingFunction } from "sigma/rendering";
+import {
+  createNodeCompoundProgram,
+  NodeCircleProgram,
+  type NodeHoverDrawingFunction,
+  type NodeProgramType,
+} from "sigma/rendering";
 import type { MouseCoords } from "sigma/types";
 import { edgeDisplay, nodeDisplay, type Emphasis } from "../graph/canvasStyle";
 import type { EdgeAttributes, GraphModel, NodeAttributes } from "../graph/GraphModel";
@@ -75,6 +81,14 @@ export function GraphCanvas({
       }),
       labelColor: { color: palette.text },
       defaultDrawNodeHover: drawHoverLabel(() => latest.current.palette),
+      // A label's icon drawn on its disc (label styles); edge captions on the focus only.
+      nodeProgramClasses: {
+        icon: iconProgram(),
+      },
+      renderEdgeLabels: true,
+      edgeLabelColor: { color: palette.muted },
+      edgeLabelSize: 10,
+      edgeLabelFont: "-apple-system, BlinkMacSystemFont, Inter, sans-serif",
     });
     sigma.current = renderer;
     if (rendererRef) rendererRef.current = renderer;
@@ -110,6 +124,7 @@ export function GraphCanvas({
   // New colours or emphasis: redraw without rebuilding the renderer.
   useEffect(() => {
     sigma.current?.setSetting("labelColor", { color: palette.text });
+    sigma.current?.setSetting("edgeLabelColor", { color: palette.muted });
     sigma.current?.refresh();
   }, [emphasis, palette, style]);
 
@@ -155,6 +170,22 @@ export function GraphCanvas({
       </Group>
     </div>
   );
+}
+
+/**
+ * The disc with its label's pictogram on it, in white. Made for each renderer:
+ * the pictograms' texture is shared by the renderer's own programs.
+ */
+function iconProgram(): NodeProgramType<NodeAttributes, EdgeAttributes> {
+  return createNodeCompoundProgram<NodeAttributes, EdgeAttributes>([
+    NodeCircleProgram as unknown as NodeProgramType<NodeAttributes, EdgeAttributes>,
+    createNodeImageProgram<NodeAttributes, EdgeAttributes>({
+      drawingMode: "color",
+      colorAttribute: "pictoColor",
+      padding: 0.24,
+      keepWithinCircle: true,
+    }),
+  ]);
 }
 
 /**

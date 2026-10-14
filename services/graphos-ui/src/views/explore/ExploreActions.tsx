@@ -8,9 +8,11 @@ import {
   IconPalette,
   IconTrashX,
   IconCircles,
+  IconLayoutDistributeHorizontal,
 } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { LAYERED_MAX_NODES, LAYOUTS, type CanvasLayout } from "../../graph/canvasLayouts";
 import type { ColorBy } from "../../graph/canvasStyle";
 import { SIZE_MODES, type SizeBy } from "../../lib/metrics";
 import { isApple } from "../../lib/platform";
@@ -35,6 +37,10 @@ export interface ExploreActionsProps {
   lastStep: string | null;
   /** Only the selection's neighbourhood is shown. */
   focusOnly: boolean;
+  /** How the nodes were last placed, and how many there are (the layered layout has a ceiling). */
+  layout: CanvasLayout;
+  nodeCount: number;
+  onLayout: (layout: CanvasLayout) => void;
   onColorBy: (colorBy: ColorBy) => void;
   onSizeBy: (sizeBy: SizeBy) => void;
   onNewNode: () => void;
@@ -138,6 +144,30 @@ export function ExploreActions(props: ExploreActionsProps) {
               </Menu.Item>
             ))}
             {noMetrics ? <Menu.Label>{t("views.explore.sizes.noMetrics")}</Menu.Label> : null}
+          </Menu.Dropdown>
+        </Menu>
+      ) : null}
+      {!isEmpty ? (
+        <Menu position="bottom-start" width={240}>
+          <Menu.Target>
+            <Button size="compact-xs" variant="default" leftSection={<IconLayoutDistributeHorizontal size={14} />}>
+              {t("views.explore.actions.layout")}
+            </Button>
+          </Menu.Target>
+          <Menu.Dropdown>
+            {LAYOUTS.map((mode) => (
+              <Menu.Item
+                key={mode}
+                disabled={mode === "layered" && props.nodeCount > LAYERED_MAX_NODES}
+                onClick={() => props.onLayout(mode)}
+                rightSection={props.layout === mode ? <IconCheck size={14} /> : null}
+              >
+                {t(`views.explore.layouts.${mode}`)}
+              </Menu.Item>
+            ))}
+            {props.nodeCount > LAYERED_MAX_NODES ? (
+              <Menu.Label>{t("views.explore.layouts.tooMany", { count: LAYERED_MAX_NODES })}</Menu.Label>
+            ) : null}
           </Menu.Dropdown>
         </Menu>
       ) : null}

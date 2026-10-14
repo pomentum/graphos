@@ -2,7 +2,7 @@ import { Button, CloseButton, Group, Loader, Text } from "@mantine/core";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { GraphCanvas } from "../../components/GraphCanvas";
-import { useGraphMap } from "../../data/queries";
+import { useGraphMap, useLabelStyles } from "../../data/queries";
 import { buildMapModel, largestBubbles, mapCategories, mapEdgeDisplay, mapNodeDisplay } from "../../graph/graphMap";
 import { useWorkspace, type ExploreMode } from "../../graph/WorkspaceProvider";
 import { formatCount } from "../../lib/time";
@@ -31,7 +31,8 @@ export function MapView({ onMode }: { onMode: (mode: ExploreMode) => void }) {
   const { openHubs, opening } = useOpenHubs();
 
   const model = useMemo(() => (map.data ? buildMapModel(map.data) : null), [map.data]);
-  const categories = useMemo(() => (map.data ? mapCategories(map.data) : undefined), [map.data]);
+  const styles = useLabelStyles();
+  const categories = useMemo(() => (map.data ? mapCategories(map.data, styles) : undefined), [map.data, styles]);
   const largest = useMemo(() => (model ? largestBubbles(model) : undefined), [model]);
   const emphasis = useMemo(
     () => ({

@@ -72,3 +72,49 @@ button.row:hover {
     display: none;
   }
 }
+
+/* A label row: its style swatch, then the row itself. */
+.styledRow {
+  display: flex;
+  align-items: center;
+  border-top: 0.5px solid var(--gx-separator);
+}
+
+.group > :first-child .styledRow {
+  border-top: 0;
+}
+
+.styledRow > .row {
+  border-top: 0;
+  padding-left: 8px;
+}
+
+.swatchButton,
+.swatchStatic {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+}
+
+.swatchButton:hover {
+  background: var(--gx-accent-soft);
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.swatch[data-empty] {
+  border: 1px dashed var(--gx-muted);
+}
+
+.swatchAuto {
+  border: 1px dashed var(--gx-muted);
+  color: var(--gx-text);
+}

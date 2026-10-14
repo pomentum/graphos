@@ -1,8 +1,10 @@
+import { iconImage } from "../lib/labelIcons";
 import { metricSize } from "../lib/metrics";
 import { middleEllipsis } from "../lib/text";
 import { rankColors } from "../theme/categories";
+import { captionOf, styledColors, type LabelStyles } from "../theme/labelStyles";
 import type { Palette } from "../theme/tokens";
-import { displayName, type EdgeAttributes, type GraphModel, type NodeAttributes } from "./GraphModel";
+import type { EdgeAttributes, GraphModel, NodeAttributes } from "./GraphModel";
 import { nameGroups, type GroupName } from "./groups";
 
 /** How nodes that are not emphasised are coloured. */
@@ -27,6 +29,10 @@ export interface Emphasis {
   isolate?: boolean;
   /** Size nodes by this metric property, against its largest value on the canvas. */
   sizes?: { property: string; max: number };
+  /** The tenant's label styles: captions, sizes, icons, edge colours (colours of labels come with `categories`). */
+  styles?: LabelStyles;
+  /** The largest value on the canvas of each property a label is sized by (`size_by`). */
+  styleMax?: Map<string, number>;
 }
 
 export interface NodeDisplay {
@@ -39,6 +45,12 @@ export interface NodeDisplay {
   forceLabel: boolean;
   zIndex: number;
   hidden?: boolean;
+  /** Sigma's program: `icon` draws the label's pictogram on the disc. */
+  type?: string;
+  /** The pictogram (an image URL), with `type: "icon"`. */
+  image?: string;
+  /** The pictogram's colour, with `type: "icon"`. */
+  pictoColor?: string;
 }
 
 export interface EdgeDisplay {
@@ -46,8 +58,12 @@ export interface EdgeDisplay {
   size: number;
   zIndex: number;
   hidden?: boolean;
+  /** Drawn along the edge: its type's caption property, while the edge is in the focus. */
+  label?: string;
 }
 
+/** A label's icon, drawn on its disc: white reads on every category colour. */
+const PICTOGRAM = "#FFFFFF";
 /** Neighbours of the selection: a lighter step of the accent, readable on both canvases. */
 const FOCUS_BLUE = "#7AA3EB";
 /** Above this many highlighted nodes their labels would overlap: show them on hover only. */
@@ -67,15 +83,29 @@ const DIM = 0.72;
  */
 export function nodeDisplay(key: string, node: NodeAttributes, emphasis: Emphasis, palette: Palette): NodeDisplay {
   const display = nodeDisplayUncut(key, node, emphasis, palette);
-  return { ...display, label: middleEllipsis(display.label, LABEL_CHARS), fullLabel: display.label };
+  const icon = node.more === undefined ? emphasis.styles?.vertex.get(node.vertexLabel)?.icon : undefined;
+  return {
+    ...display,
+    label: middleEllipsis(display.label, LABEL_CHARS),
+    fullLabel: display.label,
+    ...(icon && !display.hidden
+      ? { type: "icon", image: iconImage(icon), pictoColor: PICTOGRAM }
+      : { type: "circle", image: undefined }),
+  };
+}
+
+/** A node's size: by the metric chosen on the canvas, else by its label's `size_by`, else as laid out. */
+function sizeOf(node: NodeAttributes, emphasis: Emphasis): number {
+  if (node.more !== undefined) return node.size;
+  if (emphasis.sizes) return metricSize(node.properties[emphasis.sizes.property], emphasis.sizes.max);
+  const sizeBy = emphasis.styles?.vertex.get(node.vertexLabel)?.size_by;
+  const max = sizeBy ? (emphasis.styleMax?.get(sizeBy) ?? 0) : 0;
+  return sizeBy && max > 0 ? metricSize(node.properties[sizeBy], max) : node.size;
 }
 
 function nodeDisplayUncut(key: string, node: NodeAttributes, emphasis: Emphasis, palette: Palette): NodeDisplay {
-  const name = displayName(node.properties, node.id);
-  const size =
-    emphasis.sizes && node.more === undefined
-      ? metricSize(node.properties[emphasis.sizes.property], emphasis.sizes.max)
-      : node.size;
+  const name = captionOf(node.properties, node.id, emphasis.styles?.vertex.get(node.vertexLabel));
+  const size = sizeOf(node, emphasis);
   const focused = emphasis.focus.nodes.size > 0;
   const inFocus = emphasis.focus.nodes.has(key);
   if (key === emphasis.selected) {
@@ -152,7 +182,7 @@ export interface Categories {
  * common categories are always told apart; a category keeps its colour while
  * the canvas holds the same nodes.
  */
-export function categorize(model: GraphModel, colorBy: ColorBy): Categories {
+export function categorize(model: GraphModel, colorBy: ColorBy, styles?: LabelStyles): Categories {
   const counts = new Map<string, number>();
   let uncategorised = 0;
   if (colorBy !== "none") {
@@ -164,7 +194,8 @@ export function categorize(model: GraphModel, colorBy: ColorBy): Categories {
     });
   }
   const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  const colors = rankColors(ranked.map(([category]) => category));
+  const order = ranked.map(([category]) => category);
+  const colors = colorBy === "label" && styles ? styledColors(order, styles.vertex) : rankColors(order);
   const groupNames = colorBy === "group" ? nameGroups(model, colors.keys()) : undefined;
   return { colorBy, ranked, colors, uncategorised, groupNames };
 }
@@ -180,9 +211,33 @@ function idleColor(node: NodeAttributes, categories: Categories | undefined, pal
  * focus, grey otherwise, and faded (or, isolated, hidden) outside a focus.
  */
 export function edgeDisplay(key: string, edge: EdgeAttributes, emphasis: Emphasis, palette: Palette): EdgeDisplay {
-  if (key === emphasis.selectedEdge) return { color: palette.accent, size: 4, zIndex: 2 };
-  if (emphasis.focus.edges.has(key)) return { color: edge.more ? palette.muted : palette.accent, size: 2, zIndex: 1 };
+  const style = edge.more ? undefined : emphasis.styles?.edge.get(edge.edgeType);
+  const caption = style?.caption ? edgeCaption(edge, style.caption) : undefined;
+  if (key === emphasis.selectedEdge) return { color: palette.accent, size: 4, zIndex: 2, label: caption };
+  if (emphasis.focus.edges.has(key)) {
+    return { color: edge.more ? palette.muted : palette.accent, size: 2, zIndex: 1, label: caption };
+  }
   const focused = emphasis.focus.nodes.size > 0;
   if (focused && emphasis.isolate) return { color: palette.edgeIdle, size: 1, zIndex: 0, hidden: true };
-  return { color: focused ? mix(palette.edgeIdle, palette.canvas, DIM) : palette.edgeIdle, size: 1, zIndex: 0 };
+  const idle = style?.color ?? palette.edgeIdle;
+  return { color: focused ? mix(idle, palette.canvas, DIM) : idle, size: 1, zIndex: 0 };
+}
+
+function edgeCaption(edge: EdgeAttributes, property: string): string | undefined {
+  const value = edge.properties[property];
+  return (typeof value === "string" && value) || typeof value === "number" ? String(value) : undefined;
+}
+
+/** The largest value on the canvas of each property the tenant's labels are sized by. */
+export function styleMaxima(model: GraphModel, styles: LabelStyles): Map<string, number> {
+  const out = new Map<string, number>();
+  const sizeBy = new Map<string, string>();
+  for (const [label, style] of styles.vertex) if (style.size_by) sizeBy.set(label, style.size_by);
+  if (sizeBy.size === 0) return out;
+  model.graph.forEachNode((_, node) => {
+    const property = sizeBy.get(node.vertexLabel);
+    const value = property ? node.properties[property] : undefined;
+    if (property && typeof value === "number" && value > (out.get(property) ?? 0)) out.set(property, value);
+  });
+  return out;
 }

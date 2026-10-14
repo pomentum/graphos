@@ -302,7 +302,8 @@
         "connect": "Connect",
         "colours": "Colours",
         "clear": "Clear",
-        "size": "Size"
+        "size": "Size",
+        "layout": "Layout"
       },
       "colours": {
         "none": "No colours",
@@ -463,6 +464,12 @@
             "A large island is drawn by its best-connected nodes only, and the note below says so."
           ]
         }
+      },
+      "layouts": {
+        "force": "Force (ForceAtlas2)",
+        "circular": "Circle, label by label",
+        "layered": "Layers along the edges",
+        "tooMany": "Layers: at most {{count}} nodes"
       }
     },
     "path": {
@@ -848,6 +855,24 @@
         "more_other": "and {{count}} more",
         "allInside": "Every label pair in the data is declared.",
         "enable": "Enforce"
+      },
+      "style": {
+        "edit": "Style of {{name}}",
+        "title": "How {{name}} is drawn",
+        "declared": "Style declared for the tenant",
+        "color": "Colour",
+        "automatic": "Automatic (by how common it is)",
+        "badColor": "A colour as #RRGGBB",
+        "caption": "Caption",
+        "captionDefault": "name, else the id",
+        "sizeBy": "Size by",
+        "sizeDefault": "Connections on the canvas",
+        "icon": "Icon",
+        "noIcon": "No icon",
+        "reset": "Reset",
+        "captionIs": "caption: {{property}}",
+        "sizeIs": "size by {{property}}",
+        "hex": "Colour as #RRGGBB"
       }
     },
     "access": {

@@ -166,6 +166,62 @@ export interface TenantSchema {
   edge_endpoints?: Record<string, { src: string; dst: string }[]>;
   /** Writes of a declared type outside its pairs are refused. */
   strict_endpoints?: boolean;
+  /** How labels and edge types are drawn, as the tenant declared (absent from older servers). */
+  display?: DisplaySpec;
+}
+
+/** The pictograms a label may be drawn with (graphos's fixed list). */
+export const DISPLAY_ICONS = [
+  "person",
+  "people",
+  "building",
+  "document",
+  "folder",
+  "code",
+  "function",
+  "database",
+  "server",
+  "cloud",
+  "package",
+  "tag",
+  "link",
+  "calendar",
+  "location",
+  "mail",
+  "key",
+  "lock",
+  "shield",
+  "bug",
+  "star",
+  "flag",
+  "chart",
+  "settings",
+  "globe",
+  "book",
+  "cpu",
+  "branch",
+  "message",
+  "box",
+] as const;
+export type DisplayIcon = (typeof DISPLAY_ICONS)[number];
+
+/** How one vertex label is drawn; every key optional (the server answers left-out keys as null). */
+export interface VertexDisplay {
+  color?: string | null;
+  caption?: string | null;
+  size_by?: string | null;
+  icon?: DisplayIcon | null;
+}
+
+export interface EdgeDisplay {
+  color?: string | null;
+  caption?: string | null;
+}
+
+/** `display`: per label and edge type; in a registration, `null` removes an entry. */
+export interface DisplaySpec {
+  vertex?: Record<string, VertexDisplay | null>;
+  edge?: Record<string, EdgeDisplay | null>;
 }
 
 /**
@@ -452,6 +508,8 @@ export interface SchemaAddition {
   /** Label pairs to declare, per edge type: added to the declared ones. */
   edge_endpoints?: Record<string, [string, string][]>;
   strict_endpoints?: boolean;
+  /** Styles to declare (an entry replaces the stored one; `null` removes it). */
+  display?: DisplaySpec;
 }
 
 export interface TenantStats {

@@ -14,8 +14,9 @@ import { GraphCanvas } from "../../components/GraphCanvas";
 import { Inspector } from "../../components/Inspector";
 import { NewEdgeDialog } from "../../components/NewEdgeDialog";
 import { NewNodeDialog } from "../../components/NewNodeDialog";
-import { useCreateEdge, useCreateNode, useSchema } from "../../data/queries";
-import { categorize } from "../../graph/canvasStyle";
+import { useCreateEdge, useCreateNode, useLabelStyles, useSchema } from "../../data/queries";
+import { circular, force, layered, type CanvasLayout } from "../../graph/canvasLayouts";
+import { categorize, styleMaxima } from "../../graph/canvasStyle";
 import {
   displayName,
   moreKey,
@@ -93,7 +94,9 @@ export function ExploreView() {
   const [newLabel, setNewLabel] = useState<string | undefined>(undefined);
 
   // `version` changes with the model, so categories and neighbourhoods are recomputed.
-  const categories = useMemo(() => categorize(model, colorBy), [model, colorBy, version]);
+  const styles = useLabelStyles();
+  const categories = useMemo(() => categorize(model, colorBy, styles), [model, colorBy, styles, version]);
+  const styleMax = useMemo(() => styleMaxima(model, styles), [model, styles, version]);
   const hubs = useMemo(() => new Set(model.hubs(HUB_LABELS)), [model, version]);
   // The metrics the canvas nodes carry, and the largest value of the one sized by.
   const metricMax = useMemo(() => canvasMetricMax(model), [model, version]);
@@ -117,11 +120,24 @@ export function ExploreView() {
       hubs,
       isolate: focusOnly,
       sizes,
+      styles,
+      styleMax,
     }),
-    [model, selected, selectedEdge, categories, recent, fresh, hubs, focusOnly, sizes, version],
+    [model, selected, selectedEdge, categories, recent, fresh, hubs, focusOnly, sizes, styles, styleMax, version],
   );
 
   const selectedNode = selected ? model.graph.getNodeAttributes(selected) : null;
+
+  // How the nodes are placed: ForceAtlas2 as they arrive, or circular / layered on request.
+  const [layout, setLayout] = useState<CanvasLayout>("force");
+  const placeNodes = async (next: CanvasLayout) => {
+    setLayout(next);
+    if (next === "circular") circular(model);
+    else if (next === "layered") await layered(model);
+    else force(model);
+    // Show the whole canvas once the nodes are in place (ForceAtlas2 keeps moving them).
+    renderer.current?.getCamera().animatedReset({ duration: 400 });
+  };
 
   const startCreating = (kind: "node" | "edge") => {
     createNode.reset();
@@ -217,7 +233,7 @@ export function ExploreView() {
           rendererRef={renderer}
         />
         <CanvasStatus overview={overview} isEmpty={model.isEmpty} onLoad={() => void load()} />
-        <CanvasLegend categories={categories} />
+        <CanvasLegend categories={categories} styles={styles} />
         <ExploreActions
           leading={<ModeSwitch mode="graph" onChange={workspace.setMode} />}
           trailing={
@@ -234,6 +250,9 @@ export function ExploreView() {
           focusOnly={focusOnly}
           onBack={() => model.undo()}
           onFocus={() => setFocusOnly((on) => !on)}
+          layout={layout}
+          nodeCount={model.graph.order}
+          onLayout={(next) => void placeNodes(next)}
           onColorBy={workspace.setColorBy}
           onSizeBy={workspace.setSizeBy}
           onNewNode={() => {

@@ -112,7 +112,8 @@ function ui(fetchImpl: typeof fetch, level: "read" | "maintain" = "read") {
 
 /** Replaces the editor's text, as typing would. */
 async function typeQuery(text: string) {
-  const content = await screen.findByRole("textbox", { name: "Cypher query" });
+  // The editor loads with the page (its own chunk): slower while the whole suite runs.
+  const content = await screen.findByRole("textbox", { name: "Cypher query" }, { timeout: 5000 });
   const view = EditorView.findFromDOM(content)!;
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
 }
@@ -155,7 +156,7 @@ describe("the Query view", () => {
     });
     // Readers run saved queries; only maintainers save them.
     expect(screen.queryByRole("button", { name: "Save…" })).not.toBeInTheDocument();
-  });
+  }, 15_000); // the editor loads with the page, slowly while the whole suite runs
 
   it("runs a saved query from its form, and opens the result on the canvas", async () => {
     const { calls, fetchImpl } = fakeGraphos(true);

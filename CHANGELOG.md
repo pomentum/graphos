@@ -36,6 +36,16 @@ under one version.
   and the tenant's saved queries beside it (maintainers save and delete them; a saved query runs
   with a form of its parameters).
 
+- **Web UI: label styles and layouts.** The tenant's label styles are drawn everywhere a label is:
+  the Explore canvas (declared colours first, the other labels taking the colours left free; a
+  child label its parent's colour and icon; the caption property as the node's name; size by a
+  property; the icon on the node, drawn with @sigma/node-image 3.0.0, MIT; edge colours, and edge
+  captions on the selection's edges), the label map, the legend (with icons), the schema diagram's
+  boxes and the Query results. On the Schema page each label and relationship type has a swatch;
+  maintainers click it to set the colour (the category colours or any `#RRGGBB`), caption, size and
+  icon, or reset them. The Graph canvas has a Layout menu: force (ForceAtlas2, as before), a circle
+  label by label, or layers along the edges (ELK, up to 500 nodes).
+
 - **Web UI: exports.** The Explore canvas saves as a picture (PNG, drawn by sigma), a drawing (SVG,
   the nodes, edges and labels as shown, editable in other tools) or a graph (JSON: nodes and edges
   with their properties). Browse saves the page shown, or every node matching the filter (paged
