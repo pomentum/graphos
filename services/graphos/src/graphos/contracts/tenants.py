@@ -291,11 +291,13 @@ MAX_EDGE_ENDPOINTS = 5000
 
 _INDEX_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _COLUMN_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
-# Columns graphos adds to label tables itself; a generated column may not take
-# these names (or any other ``graphos_`` name).
-_RESERVED_COLUMNS = frozenset(
-    {"id", "properties", "start_id", "end_id", "end_community_id", "start_community_id"},
-)
+# Columns graphos adds to label tables itself, and ``community_id`` (graphos's
+# own property, ``graphos.reserved``); a generated column may not take these
+# names (or any other ``graphos_`` name).
+_RESERVED_COLUMNS = frozenset({
+    "id", "properties", "start_id", "end_id", "community_id",
+    "end_community_id", "start_community_id",
+})
 _RESERVED_COLUMN_PREFIX = "graphos_"
 # Before 0.6.0 ``indexes`` and ``generated_columns`` were SQL statements.
 _SQL_REPLACED = (

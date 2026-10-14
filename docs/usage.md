@@ -428,7 +428,7 @@ table, for reading it with SQL directly (reports, BI tools); graphos's own reads
 is `text` (the value as text, any JSON type), `numeric` or `boolean` (the value when it is a JSON
 number / boolean, otherwise `NULL`) or `jsonb`; a value of another type never fails a write. The
 column name is lower case and may not be one graphos uses (`id`, `properties`, `start_id`, `end_id`,
-`end_community_id`, `start_community_id`, any `graphos_…`). A column cannot change once registered
+`community_id`, `end_community_id`, `start_community_id`, any `graphos_…`). A column cannot change once registered
 (422); adding one to a label that has nodes rewrites its table, so declare it early.
 
 Before 0.6.0 both were SQL statements (`indexes`, and strings in `generated_columns`); a request
@@ -1070,7 +1070,8 @@ curl -s -X POST "$G/v1/acme/recompute-communities" \
 # → {"n_nodes":…,"n_communities":…,"n_assigned":…,"n_singletons":…,"modularity":…,"elapsed_ms":…,...}
 ```
 
-Each assigned vertex gets an integer `community_id` property. Ids carry over between runs: a new
+Each assigned vertex gets an integer `community_id` property, which only graphos writes (writes
+that set or remove it are refused, as `graphos_*`, §8). Ids carry over between runs: a new
 cluster keeps the id of the previous cluster it overlaps with at Jaccard ≥ 0.5. An advisory lock
 allows one recompute per tenant at a time; a concurrent call returns **409**.
 
@@ -1122,10 +1123,11 @@ each other (`409` while one runs, and as queued jobs). Read the values with the 
 ones with `nodes:scan`: `"order_by": [{"property": "graphos_pagerank", "desc": true}]` (nodes
 without the value are left out).
 
-**`graphos_*` is reserved.** graphos writes these properties itself, so writes that use one
-(node or edge, single, batch or bulk, a merge-patch removing one included) are refused with `400`.
-Snapshot import is the exception: it writes them as the file has them, so a dataset export
-restores with its computed values.
+**`graphos_*` and `community_id` are reserved.** graphos writes these properties itself (the
+metrics, and the community recompute's groups, §8), so writes that use one (node or edge, single,
+batch or bulk, a merge-patch removing one included) are refused with `400`. Snapshot and dataset
+import are the exception: they write them as the file has them, so an export restores with its
+computed values.
 
 ---
 

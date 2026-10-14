@@ -77,6 +77,7 @@ def test_bad_property_indexes_are_refused(idx: dict[str, Any]) -> None:
     [
         {"label": "Doc", "column": "graphos_rev", "property": "x"},
         {"label": "Doc", "column": "end_community_id", "property": "x"},
+        {"label": "Doc", "column": "community_id", "property": "team"},  # graphos's own name
         {"label": "Doc", "column": "properties", "property": "x"},
         {"label": "Doc", "column": "Kind", "property": "x"},              # lower case only
         {"label": "Doc", "column": "k", "property": "x'||pg_sleep(1)||'"},

@@ -24,6 +24,14 @@ under one version.
   the stored rows as if every rule applied: per label and type, rows with errors and warnings,
   counts by rule, example ids and the undeclared names the rows carry.
 
+### Changed
+
+- **`community_id` is reserved.** graphos writes it (the community recompute), so a node or edge
+  write that sets or removes it is now refused as `graphos_*` writes are: `400` on single and batch
+  writes, an invalid line on the bulk endpoints; a generated column may not be named
+  `community_id`. Snapshot and dataset import still restore it.
+  A client that wrote its own `community_id` must use another name.
+
 ### Fixed
 
 - **Cypher console.** A query whose database process the watchdog had to close answered 500

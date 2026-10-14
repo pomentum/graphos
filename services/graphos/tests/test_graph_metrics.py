@@ -244,6 +244,13 @@ async def test_writes_cannot_use_graphos_properties(api: httpx.AsyncClient) -> N
         await api.patch(f"{graph}/edges/CALLS", params={"src": "s1", "dst": "hub"},
                         json={"graphos_w": 1},
                         headers={"content-type": "application/merge-patch+json"}),
+        # The community recompute's group, as the metrics.
+        await api.post(f"{graph}/nodes", json={"nodes": [
+            {"id": "x", "label": "Function", "properties": {"community_id": 4}},
+        ]}),
+        await api.patch(f"{graph}/nodes/hub", json={"community_id": None},
+                        headers={"content-type": "application/merge-patch+json"}),
+        await api.post(f"{graph}/nodes/hub/properties", json={"properties": {"community_id": 1}}),
     ]
     for resp in refused:
         assert resp.status_code == HTTPStatus.BAD_REQUEST, resp.text
@@ -252,13 +259,14 @@ async def test_writes_cannot_use_graphos_properties(api: httpx.AsyncClient) -> N
     lines = [
         {"id": "b1", "label": "Function", "properties": {"name": "b1"}},
         {"id": "b2", "label": "Function", "properties": {"graphos_component": 3}},
+        {"id": "b3", "label": "Function", "properties": {"community_id": 3}},
     ]
     resp = await api.post(
         f"{graph}/nodes:bulk", content="\n".join(json.dumps(x) for x in lines) + "\n",
         headers={"content-type": "application/x-ndjson"},
     )
     assert resp.status_code == HTTPStatus.OK, resp.text
-    assert resp.json()["rows_invalid"] == 1 and "reserved" in resp.json()["errors"][0]
+    assert resp.json()["rows_invalid"] == 2 and "reserved" in resp.json()["errors"][1]
     # Ordinary names still work.
     ok = await api.post(f"{graph}/nodes/hub/properties", json={"properties": {"graphos": 1}})
     assert ok.status_code == HTTPStatus.OK, ok.text

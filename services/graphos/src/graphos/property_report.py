@@ -52,7 +52,9 @@ class _Collector:
             if len(refs) < self.examples:
                 refs.append(ref)
         declared = self.policy.properties
-        self.undeclared.update(k for k in props if k not in declared and not _computed(k))
+        self.undeclared.update(
+            k for k in props if k not in declared and not properties.always_allowed(k)
+        )
 
     def result(self, names: dict[str, str]) -> LabelCheck:
         def named(ref: str) -> str:
@@ -66,10 +68,6 @@ class _Collector:
             examples={k: [named(r) for r in refs] for k, refs in self.example_refs.items()},
             undeclared=dict(self.undeclared.most_common(_UNDECLARED_SHOWN)),
         )
-
-
-def _computed(name: str) -> bool:
-    return name == "id" or name.startswith("graphos_") or name == "community_id"
 
 
 async def check_stored(

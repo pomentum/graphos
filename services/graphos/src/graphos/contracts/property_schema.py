@@ -13,6 +13,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from graphos import reserved
+
 # The same patterns as the rest of a registration (``contracts.tenants``).
 _LABEL = re.compile(r"^[A-Z][A-Za-z0-9_]{0,62}$")
 _PROPERTY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
@@ -29,10 +31,6 @@ MAX_PROPERTIES = 200
 MAX_ENUM = 1000
 MAX_PATTERN = 200
 MAX_DESCRIPTION = 1000
-
-# Names graphos writes itself: never declarable (always allowed on a write).
-RESERVED_PREFIX = "graphos_"
-RESERVED_NAMES = frozenset({"community_id"})
 
 Scalar = str | int | float | bool
 
@@ -163,7 +161,7 @@ class LabelPropertiesSpec(BaseModel):
         for name, spec in v.items():
             if not _PROPERTY.fullmatch(name):
                 raise ValueError(f"property {name!r} must match {_PROPERTY.pattern}")
-            if name.startswith(RESERVED_PREFIX) or name in RESERVED_NAMES:
+            if reserved.is_reserved(name):
                 raise ValueError(f"property {name!r} is written by graphos and cannot be declared")
             id_extras = spec.model_dump(exclude_defaults=True, exclude={"pattern", "description"})
             if name == "id" and id_extras:

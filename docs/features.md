@@ -317,7 +317,7 @@ dependency) in a child process, and stores them on the nodes as
 above `GRAPHOS_BETWEENNESS_MAX_NODES`). Only changed values are written, so an
 unchanged graph is not rewritten; component ids are kept across runs. One
 whole-graph job per tenant: metrics and community recompute exclude each other.
-`graphos_*` properties are reserved: writes using them are refused (400).
+`graphos_*` and `community_id` are reserved: writes using them are refused (400).
 
 ---
 

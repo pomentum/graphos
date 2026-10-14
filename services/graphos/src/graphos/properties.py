@@ -22,7 +22,8 @@ from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from typing import Any
 
-from graphos.contracts.property_schema import ALL, RESERVED_NAMES, RESERVED_PREFIX
+from graphos import reserved
+from graphos.contracts.property_schema import ALL
 
 # A longer value fails a pattern without the pattern being run.
 MAX_PATTERN_INPUT = 4096
@@ -175,8 +176,9 @@ class Definition:
         return None
 
 
-def _always_allowed(name: str) -> bool:
-    return name == "id" or name.startswith(RESERVED_PREFIX) or name in RESERVED_NAMES
+def always_allowed(name: str) -> bool:
+    """Never undeclared: the id, and the properties graphos writes itself."""
+    return name == "id" or reserved.is_reserved(name)
 
 
 @dataclass(frozen=True)
@@ -205,7 +207,7 @@ class Policy:
             out.extend(
                 Violation(name, "undeclared", "not declared", self.undeclared_source, severity)
                 for name in properties
-                if name not in self.properties and not _always_allowed(name)
+                if name not in self.properties and not always_allowed(name)
             )
         return out
 
