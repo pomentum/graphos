@@ -45,7 +45,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 
-from graphos import lookup, reserved, writes
+from graphos import lookup, properties, reserved, writes
 from graphos import search as search_index
 from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, run_sync, wants_async
 from graphos.auth import ReadPrincipal, WritePrincipal, require_tenant
@@ -121,6 +121,7 @@ from graphos.contracts.tenants import (
 )
 from graphos.cypher import CypherError, parse_agtype
 from graphos.endpoints import policy_for
+from graphos.observability.metrics import record_property_tally
 from graphos.resolver import (
     CompileError,
     catalogue_for_properties,
@@ -468,6 +469,7 @@ async def upsert_nodes(
     spec = registered_tenants()[tenant]
     allowed_labels = set(spec.vertex_labels)
     reserved.check(*(n.properties for n in body.nodes))
+    tally = properties.enforce(properties.node_rows(properties.policies_for(spec), body.nodes))
 
     grouped = _group_by_label(body.nodes)
     unknown = sorted(set(grouped) - allowed_labels)
@@ -499,13 +501,22 @@ async def upsert_nodes(
         total += n
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
+    record_property_tally(tenant, "node", tally)
     return NodesUpsertResponse(
         tenant=tenant,
         nodes_upserted=total,
         by_label=by_label_count,
         elapsed_ms=elapsed_ms,
+        property_warnings=tally.warnings,
     )
 
+
+
+def _row_check(tenant: str, part: str) -> writes.RowCheck | None:
+    """The property check for a single write on ``tenant``, or ``None`` when its
+    mode is off everywhere."""
+    policies = properties.policies_for(registered_tenants()[tenant])
+    return properties.checker(policies, part) if policies.any_checks else None
 
 # ── Per-node property merge ────────────────────────────────────────────────
 #
@@ -602,7 +613,7 @@ async def patch_node(  # noqa: PLR0913 — FastAPI route parameters
     try:
         node = await writes.patch_node(
             request.app.state.pool, tenant=tenant, external_id=external_id,
-            patch=patch, label=label, if_match=precondition,
+            patch=patch, label=label, if_match=precondition, check=_row_check(tenant, "vertex"),
         )
     except lookup.PreconditionFailedError as exc:
         raise _precondition_failed(exc) from exc
@@ -668,7 +679,7 @@ async def upsert_node_properties(  # noqa: PLR0913 — FastAPI route parameters
     try:
         node = await writes.merge_node_properties(
             pool, tenant=tenant, external_id=external_id, properties=body.properties,
-            label=label, if_match=precondition,
+            label=label, if_match=precondition, check=_row_check(tenant, "vertex"),
         )
     except lookup.PreconditionFailedError as exc:
         raise _precondition_failed(exc) from exc
@@ -740,6 +751,7 @@ async def upsert_edges(
     allowed_v = set(spec.vertex_labels)
     allowed_e = set(spec.edge_labels)
     reserved.check(*(e.properties for e in body.edges))
+    tally = properties.enforce(properties.edge_rows(properties.policies_for(spec), body.edges))
 
     grouped = _group_edges(body.edges)
 
@@ -800,12 +812,14 @@ async def upsert_edges(
         total_skipped += skipped
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
+    record_property_tally(tenant, "edge", tally)
     return EdgesUpsertResponse(
         tenant=tenant,
         edges_upserted=total_merged,
         edges_skipped=total_skipped,
         by_type=by_type,
         elapsed_ms=elapsed_ms,
+        property_warnings=tally.warnings,
     )
 
 
@@ -958,6 +972,7 @@ async def patch_edge(  # noqa: PLR0913 — FastAPI route parameters
             request.app.state.pool, tenant=tenant, edge_type=edge_type,
             src_id=ref.src, dst_id=ref.dst, patch=patch,
             src_label=ref.src_label, dst_label=ref.dst_label, if_match=precondition,
+            check=_row_check(tenant, "edge"),
         )
     except lookup.PreconditionFailedError as exc:
         raise _precondition_failed(exc) from exc

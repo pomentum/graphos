@@ -49,7 +49,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 import asyncpg
@@ -61,6 +61,12 @@ from graphos.db import allow_long_statements
 if TYPE_CHECKING:
     from graphos.community_map import CommunityMapData
     from graphos.resolver import CompiledEdgeType
+
+
+# A check of the row a single write leaves, called under its lock before the
+# update: ``(label or edge type, id, properties)``; it raises to refuse the
+# write (``graphos.properties.checker``).
+RowCheck = Callable[[str, str | None, Mapping[str, Any]], None]
 
 log = logging.getLogger(__name__)
 
@@ -283,6 +289,7 @@ async def merge_node_properties(
     properties: Mapping[str, Any],
     label: str | None = None,
     if_match: lookup.IfMatch | None = None,
+    check: RowCheck | None = None,
 ) -> lookup.NodeRow | None:
     """Merge ``properties`` onto the node whose ``id`` is ``external_id``.
 
@@ -305,6 +312,8 @@ async def merge_node_properties(
             node = await _locked_node(conn, tenant, external_id, label, if_match)
             if node is None:
                 return None
+            if check is not None:
+                check(node.label, external_id, {**node.properties, **properties})
             row = await conn.fetchrow(
                 f'UPDATE ONLY "{tenant}"."{node.label}" '
                 f"SET properties = properties || $2::text::agtype, {_BUMP} "
@@ -349,6 +358,7 @@ async def patch_node(  # noqa: PLR0913 — identity, patch and precondition
     patch: Mapping[str, Any],
     label: str | None = None,
     if_match: lookup.IfMatch | None = None,
+    check: RowCheck | None = None,
 ) -> lookup.NodeRow | None:
     """Apply a JSON Merge Patch to the properties of one node.
 
@@ -372,6 +382,8 @@ async def patch_node(  # noqa: PLR0913 — identity, patch and precondition
             if node is None:
                 return None
             properties = apply_merge_patch(node.properties, dict(patch))
+            if check is not None:
+                check(node.label, external_id, properties)
             rev = await conn.fetchval(
                 f'UPDATE ONLY "{tenant}"."{node.label}" '
                 f"SET properties = $2::text::agtype, {_BUMP} WHERE {lookup.ID_MATCH} "
@@ -435,6 +447,7 @@ async def patch_edge(  # noqa: PLR0913 — the edge's identity has this many par
     src_label: str | None = None,
     dst_label: str | None = None,
     if_match: lookup.IfMatch | None = None,
+    check: RowCheck | None = None,
 ) -> lookup.EdgeRow | None:
     """Apply a JSON Merge Patch to the properties of one edge.
 
@@ -460,6 +473,8 @@ async def patch_edge(  # noqa: PLR0913 — the edge's identity has this many par
             if edge is None:
                 return None
             properties = apply_merge_patch(edge.properties, dict(patch))
+            if check is not None:
+                check(edge_type, None, properties)
             rev = await conn.fetchval(
                 f'UPDATE ONLY "{tenant}"."{edge_type}" '
                 f"SET properties = $3::text::agtype, {_BUMP} "

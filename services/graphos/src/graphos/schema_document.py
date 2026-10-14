@@ -26,12 +26,14 @@ from typing import Any
 
 import asyncpg
 
-from graphos import __version__, declared
+from graphos import __version__, by_entry, declared
 from graphos.bootstrap import TenantSpec
 from graphos.search import value_sql
 
 FORMAT = "graphos.schema"
-VERSION = 1
+# Version 2 when the document declares properties (``property_schema``): a
+# server that does not know them refuses the file rather than dropping them.
+VERSION = 2
 
 # A search index over more rows than this is worth a warning: it is built
 # concurrently, which can take minutes.
@@ -62,10 +64,10 @@ def document(spec: TenantSpec, *, now: datetime) -> dict[str, Any]:
     endpoints: dict[str, list[dict[str, str]]] = {}
     for edge_type, src, dst in sorted(set(spec.edge_endpoints)):
         endpoints.setdefault(edge_type, []).append({"src": src, "dst": dst})
-    return {
+    doc: dict[str, Any] = {
         "_export": {
             "format": FORMAT,
-            "version": VERSION,
+            "version": 1,
             "graphos": __version__,
             "tenant": spec.name,
             "exported_at": now.isoformat(timespec="seconds").replace("+00:00", "Z"),
@@ -95,6 +97,29 @@ def document(spec: TenantSpec, *, now: datetime) -> dict[str, Any]:
             for part in ("vertex", "edge") if spec.display.get(part)
         },
     }
+    if spec.property_schema:
+        doc["_export"]["version"] = 2
+        doc["property_schema"] = _sorted_schema(spec.property_schema)
+    return doc
+
+
+def _sorted_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """A property schema with every map sorted, so exports compare line by line."""
+    out: dict[str, Any] = {}
+    if schema.get("mode"):
+        out["mode"] = schema["mode"]
+    for part in ("vertex", "edge"):
+        entries = schema.get(part) or {}
+        if entries:
+            out[part] = {
+                name: {
+                    **{k: v for k, v in sorted(entry.items()) if k != "properties"},
+                    **({"properties": dict(sorted(entry["properties"].items()))}
+                       if entry.get("properties") else {}),
+                }
+                for name, entry in sorted(entries.items())
+            }
+    return out
 
 
 def check_header(header: Any) -> None:
@@ -133,6 +158,7 @@ def merged(
     endpoints_stated: bool,
     meta_removed: Iterable[str] = (),
     display_removed: Iterable[tuple[str, str]] = (),
+    schema_removed: Iterable[tuple[str, str]] = (),
 ) -> TenantSpec:
     """The spec registering ``incoming`` would leave, as the server stores it.
 
@@ -166,27 +192,22 @@ def merged(
             if k not in set(meta_removed)
         },
         search_indexes={**previous.search_indexes, **incoming.search_indexes},
-        display=_merged_display(previous.display, incoming.display, set(display_removed)),
+        display=by_entry.merge(previous.display, incoming.display, tuple(display_removed)),
+        property_schema=merged_property_schema(
+            previous.property_schema, incoming.property_schema, tuple(schema_removed),
+        ),
         edge_endpoints=_union(previous.edge_endpoints, incoming.edge_endpoints),
         strict_endpoints=bool(strict),
     )
 
 
-def _merged_display(
-    stored: dict[str, dict[str, dict[str, object]]],
-    incoming: dict[str, dict[str, dict[str, object]]],
-    removed: set[tuple[str, str]],
-) -> dict[str, dict[str, dict[str, object]]]:
-    out: dict[str, dict[str, dict[str, object]]] = {}
-    for part in ("vertex", "edge"):
-        entries = {
-            name: entry
-            for name, entry in {**stored.get(part, {}), **incoming.get(part, {})}.items()
-            if (part, name) not in removed
-        }
-        if entries:
-            out[part] = entries
-    return out
+def merged_property_schema(
+    stored: dict[str, Any], incoming: dict[str, Any], removed: by_entry.Removed,
+) -> dict[str, Any]:
+    """The property schema a merge registration leaves: entries merged by label or
+    type, the mode replaced only when the request states one."""
+    mode = incoming.get("mode") or stored.get("mode")
+    return {**({"mode": mode} if mode else {}), **by_entry.merge(stored, incoming, removed)}
 
 
 # ── What applying it would cost ─────────────────────────────────────────────

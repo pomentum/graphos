@@ -693,6 +693,10 @@ async def test_ranked_search_and_search_index_registration() -> None:
     assert json.loads(captured[4].content)["display"] == {
         "vertex": {"Class": {"color": "#5FA584"}, "Old": None},
     }
+    schema = {"mode": "warn", "vertex": {"Class": {"properties": {"name": {"type": "string"}}}}}
+    await cli.register_tenant(property_schema=schema)
+    assert json.loads(captured[5].content)["property_schema"] == schema
+    assert "property_schema" not in json.loads(captured[3].content)
     await cli.close()
 
 
@@ -714,7 +718,7 @@ async def test_me_and_schema() -> None:
     assert schema.vertex_labels == ["Person"] and "names" in schema.search_indexes
     # A server that predates declared endpoints sends neither field, nor display.
     assert schema.edge_endpoints == {} and schema.strict_endpoints is False
-    assert schema.display == {}
+    assert schema.display == {} and schema.property_schema == {}
     await cli.close()
 
 

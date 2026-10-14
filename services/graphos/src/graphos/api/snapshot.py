@@ -48,7 +48,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
-from graphos import dataset, writes
+from graphos import dataset, properties, writes
 from graphos.api.bulk import iter_lines
 from graphos.api.graph import _check_tenant
 from graphos.auth import ReadPrincipal, WritePrincipal
@@ -61,6 +61,7 @@ from graphos.contracts.snapshot import (
 )
 from graphos.cypher import CypherError
 from graphos.observability.audit import audit_this
+from graphos.observability.metrics import record_property_tally
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["graph"], prefix="/{tenant}/graph")
@@ -169,6 +170,14 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
             "unless the tenant has no nodes, for an exact restore."
         ),
     )] = "merge",
+    property_checks: Annotated[Literal["enforce", "report"], Query(
+        alias="properties",
+        description=(
+            "`enforce`: rows are checked against the property schema as on any write. "
+            "`report`: checked and counted but never refused, to restore data older than its "
+            "definitions."
+        ),
+    )] = "enforce",
 ) -> SnapshotImportResponse:
     _check_tenant(tenant, principal)
     if mode == "empty" and not await _is_empty(request.app.state.pool, tenant):
@@ -183,6 +192,10 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
     spec = registered_tenants()[tenant]
     allowed_v = set(spec.vertex_labels)
     allowed_e = set(spec.edge_labels)
+    checks = properties.policies_for(spec)
+    if property_checks == "report":
+        checks = checks.relaxed()
+    tally = properties.Tally()
 
     started = time.perf_counter()
     pool = request.app.state.pool
@@ -300,6 +313,10 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
                             "not registered"
                         )
                     continue
+                if why := tally.line(checks.for_vertex(node.label), node.properties, node.id):
+                    if len(errors) < _MAX_ERROR_LINES:
+                        errors.append(f"line {line_no}: {why}")
+                    continue
                 props = {k: v for k, v in node.properties.items() if k != "id"}
                 communities_in_file = communities_in_file or "community_id" in props
                 nodes_by_label[node.label].append({"id": node.id, "props": props})
@@ -324,6 +341,10 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
                         if bad_e:
                             parts.append(f"unknown edge type {sorted(bad_e)}")
                         errors.append(f"line {line_no}: " + "; ".join(parts))
+                    continue
+                if why := tally.line(checks.for_edge(edge.type), edge.properties, None):
+                    if len(errors) < _MAX_ERROR_LINES:
+                        errors.append(f"line {line_no}: {why}")
                     continue
                 key = (edge.src_label, edge.dst_label, edge.type)
                 edges_by_key[key].append({
@@ -390,6 +411,7 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
         },
     )
 
+    record_property_tally(tenant, "snapshot", tally)
     return SnapshotImportResponse(
         tenant=tenant,
         nodes_received=nodes_received,
@@ -407,4 +429,5 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
         header=header,
         complete=complete if header is not None else None,
         edge_communities_set=edge_communities_set,
+        **tally.report(),
     )

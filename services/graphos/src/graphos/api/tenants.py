@@ -40,7 +40,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import Response
 
-from graphos import declared, lifecycle, schema_changes, schema_document, sync
+from graphos import by_entry, declared, lifecycle, schema_changes, schema_document, sync
 from graphos.api.cache import LRU
 from graphos.auth import (
     MaintainPrincipal,
@@ -65,6 +65,7 @@ from graphos.bootstrap import (
     validate_display,
     validate_edge_endpoints,
 )
+from graphos.contracts.property_schema import PropertySchemaSpec
 from graphos.contracts.tenants import (
     DisplaySpec,
     GeneratedColumnSpec,
@@ -77,6 +78,7 @@ from graphos.contracts.tenants import (
     UnregisteredTenant,
 )
 from graphos.identity import Level, Principal
+from graphos.properties import SchemaError, definitions_count, validate_schema
 from graphos.resolver.indexer import ensure_resolve_rule_indexes
 
 log = logging.getLogger(__name__)
@@ -104,20 +106,38 @@ def _spec_to_info(spec: TenantSpec) -> TenantInfo:
         meta=dict(spec.meta),
         search_indexes=dict(spec.search_indexes),
         display=DisplaySpec.model_validate(spec.display),
+        property_schema=PropertySchemaSpec.model_validate(spec.property_schema),
     )
 
 
-def _display(body: TenantSpecBody) -> tuple[dict[str, Any], tuple[tuple[str, str], ...]]:
-    """The display entries a registration declares, and those it removes (sent as ``null``)."""
-    declared_entries: dict[str, Any] = {}
-    removed: list[tuple[str, str]] = []
-    for part in ("vertex", "edge"):
-        for name, entry in getattr(body.display, part).items():
-            if entry is None:
-                removed.append((part, name))
-            else:
-                declared_entries.setdefault(part, {})[name] = entry.model_dump(exclude_none=True)
-    return declared_entries, tuple(removed)
+def _property_schema(body: TenantSpecBody) -> tuple[dict[str, Any], by_entry.Removed]:
+    """The property schema a registration declares and the entries it removes.
+    Definitions keep only the keys stated, so a narrowing entry inherits the rest."""
+    request = body.property_schema
+    entries, removed = by_entry.split(
+        request, lambda e: e.model_dump(exclude_none=True, exclude_defaults=True),
+    )
+    mode = {"mode": request.mode} if request.mode else {}
+    return {**mode, **entries}, removed
+
+
+def _validate_property_schema(
+    previous: TenantSpec | None, incoming: dict[str, Any], removed: by_entry.Removed,
+    *, vertex_labels: set[str], edge_labels: set[str], hierarchy: dict[str, str], replace: bool,
+) -> None:
+    """The schema the registration would leave names the tenant's labels and compiles."""
+    after = incoming if replace or previous is None else schema_document.merged_property_schema(
+        previous.property_schema, incoming, removed,
+    )
+    try:
+        validate_schema(after, vertex_labels, edge_labels, hierarchy)
+    except SchemaError as exc:
+        raise ValueError(f"property_schema: {exc}") from exc
+
+
+def _display(body: TenantSpecBody) -> tuple[dict[str, Any], by_entry.Removed]:
+    """The display entries a registration declares, and those it removes."""
+    return by_entry.split(body.display, lambda e: e.model_dump(exclude_none=True))
 
 
 def _validate_declared(
@@ -150,11 +170,13 @@ async def _dry_run(
     pool: asyncpg.Pool, previous: TenantSpec | None, spec: TenantSpec,
     *, replace: bool, endpoints_stated: bool, meta_removed: tuple[str, ...] = (),
     display_removed: tuple[tuple[str, str], ...] = (),
+    schema_removed: tuple[tuple[str, str], ...] = (),
 ) -> RegisterDryRunResponse:
     """What registering ``spec`` would change, checked as bootstrap would."""
     after = schema_document.merged(
         previous, spec, replace=replace, endpoints_stated=endpoints_stated,
         meta_removed=meta_removed, display_removed=display_removed,
+        schema_removed=schema_removed,
     )
     try:
         _validate_label_hierarchy(spec.label_hierarchy, spec.vertex_labels)
@@ -324,6 +346,7 @@ async def register(
     # earlier, or added now.
     known = registered_tenants().get(body.name)
     display, display_removed = _display(body)
+    property_schema, schema_removed = _property_schema(body)
     try:
         vertex_labels = {*body.vertex_labels, *(known.vertex_labels if known else ())}
         edge_labels = {*edge_label_names, *(known.edge_labels if known else ())}
@@ -336,6 +359,16 @@ async def register(
             validate_display(display, set(edge_label_names), set(body.vertex_labels))
         else:
             validate_display(display, edge_labels, vertex_labels)
+        _validate_property_schema(
+            known, property_schema, schema_removed,
+            vertex_labels=set(body.vertex_labels) if force_shrink else vertex_labels,
+            edge_labels=set(edge_label_names) if force_shrink else edge_labels,
+            hierarchy=(
+                dict(body.label_hierarchy) if force_shrink
+                else {**dict(known.label_hierarchy if known else ()), **body.label_hierarchy}
+            ),
+            replace=force_shrink,
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc),
@@ -354,6 +387,7 @@ async def register(
         meta={k: v for k, v in body.meta.items() if v is not None},
         search_indexes={k: v.model_dump() for k, v in body.search_indexes.items()},
         display=display,
+        property_schema=property_schema,
         edge_endpoints=edge_endpoints,
         strict_endpoints=body.strict_endpoints,
     )
@@ -376,6 +410,7 @@ async def register(
             pool, known, spec, replace=force_shrink,
             endpoints_stated="edge_endpoints" in body.model_fields_set,
             meta_removed=meta_removed, display_removed=display_removed,
+            schema_removed=schema_removed,
         )
         return result.model_copy(update={"exists": previous is not None, "restores": restores})
     if restores:
@@ -409,6 +444,7 @@ async def register(
     else:
         await persist_spec(
             pool, spec, meta_removed=meta_removed, display_removed=display_removed,
+            schema_removed=schema_removed,
         )
     # Persisting merges with the stored spec (unless force_shrink); keep the
     # merged result in memory so a partial re-registration never hides labels
@@ -459,6 +495,8 @@ async def register(
         n_resolver_indexes=n_resolver_indexes,
         n_edge_endpoints=len(spec.edge_endpoints),
         strict_endpoints=bool(spec.strict_endpoints),
+        n_property_definitions=definitions_count(spec.property_schema),
+        property_mode=spec.property_schema.get("mode", "off"),
     )
 
 

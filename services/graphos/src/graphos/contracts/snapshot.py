@@ -49,3 +49,11 @@ class SnapshotImportResponse(BaseModel):
         default=0,
         description="Edge rows whose ends' communities were restored from the nodes'.",
     )
+    property_violations: dict[str, int] = Field(
+        default_factory=dict,
+        description="Refused rows' property errors, by `<label or *>.<property>:<rule>` (strict).",
+    )
+    property_warnings: dict[str, int] = Field(
+        default_factory=dict,
+        description="Written rows' property problems, by `<label or *>.<property>:<rule>`.",
+    )

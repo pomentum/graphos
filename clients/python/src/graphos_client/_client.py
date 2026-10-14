@@ -372,6 +372,7 @@ class GraphosClient:
         edge_endpoints: Mapping[str, Iterable[tuple[str, str] | Mapping[str, str]]] | None = None,
         strict_endpoints: bool | None = None,
         display: Mapping[str, Mapping[str, Mapping[str, Any] | None]] | None = None,
+        property_schema: Mapping[str, Any] | None = None,
         force_shrink: bool = False,
         dry_run: bool = False,
     ) -> dict[str, Any]:
@@ -414,6 +415,14 @@ class GraphosClient:
         {"AUTHORED": {"color": "#8D97AE", "caption": "role"}}}``.  An entry given
         again replaces the stored one; ``None`` removes it.
 
+        ``property_schema`` declares the properties each label and edge type
+        carries and how writes are held to them: ``{"mode": "warn", "vertex":
+        {"*": {"properties": {"source": {"type": "string", "required": True}}},
+        "Person": {"description": "...", "properties": {"email": {"type":
+        "string", "pattern": "[^@]+@[^@]+"}}}}, "edge": {...}}``. ``mode`` is
+        ``off`` (stored, nothing checked), ``warn`` or ``strict``; an entry given
+        again replaces the stored one, ``None`` removes it.
+
         ``edge_labels`` entries are names or ``{"name": ..., "resolve_rule": {...}}``
         dicts (rule-based edges).  ``label_hierarchy`` maps ``{child_label: parent_label}``;
         graphos wires postgres table inheritance so writes under the
@@ -441,6 +450,8 @@ class GraphosClient:
             body["strict_endpoints"] = strict_endpoints
         if display:
             body["display"] = {part: dict(entries) for part, entries in display.items()}
+        if property_schema:
+            body["property_schema"] = dict(property_schema)
         return await self._register(body, force_shrink=force_shrink, dry_run=dry_run)
 
     async def _register(

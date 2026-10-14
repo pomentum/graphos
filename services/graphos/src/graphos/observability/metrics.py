@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from fastapi import Request, Response
 from fastapi.responses import PlainTextResponse
@@ -45,6 +46,12 @@ REQUESTS_TOTAL = Counter(
     "graphos_requests_total",
     "Number of HTTP requests processed.",
     labelnames=("method", "route", "status"),
+)
+
+PROPERTY_VIOLATIONS = Counter(
+    "graphos_property_violations_total",
+    "Property-schema problems in written rows: refused (strict) or warned.",
+    labelnames=("tenant", "kind", "outcome", "rule"),
 )
 
 REQUEST_DURATION = Histogram(
@@ -151,3 +158,12 @@ async def metrics_handler(request: Request) -> Response:
         generate_latest(),
         media_type=CONTENT_TYPE_LATEST,
     )
+
+
+def record_property_tally(tenant: str, kind: str, tally: Any) -> None:
+    """Count a request's property problems (``graphos.properties.Tally``) by rule,
+    not by property, to keep the label set small."""
+    for outcome, counts in (("refused", tally.violations), ("warned", tally.warnings)):
+        for key, n in counts.items():
+            rule = key.rsplit(":", 1)[-1]
+            PROPERTY_VIOLATIONS.labels(tenant=tenant, kind=kind, outcome=outcome, rule=rule).inc(n)

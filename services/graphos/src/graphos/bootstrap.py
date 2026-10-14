@@ -32,7 +32,7 @@ from typing import Any
 
 import asyncpg
 
-from graphos import declared, node_properties, search
+from graphos import by_entry, declared, node_properties, search
 from graphos.db import DDL_TIMEOUT_S, allow_long_statements
 from graphos.lookup import REV
 
@@ -100,6 +100,10 @@ class TenantSpec:
     # How the web UI draws labels and edge types: ``{"vertex": {label: {color,
     # caption, size_by, icon}}, "edge": {type: {color, caption}}}``.  Cosmetic.
     display: dict[str, dict[str, dict[str, object]]] = field(default_factory=dict)
+    # Declared properties per label / edge type (``*`` for every one) and the
+    # mode writes are checked in: ``{"mode": …, "vertex": {label: entry},
+    # "edge": {type: entry}}``, entries without nulls (graphos.properties).
+    property_schema: dict[str, Any] = field(default_factory=dict)
     edge_endpoints: tuple[tuple[str, str, str], ...] = ()
     strict_endpoints: bool | None = None
 
@@ -753,23 +757,19 @@ def _spec_from_jsonable(payload: dict[str, object]) -> TenantSpec:
         meta=dict(payload.get("meta") or {}),
         search_indexes=dict(payload.get("search_indexes") or {}),
         display=display_of(payload.get("display")),
+        property_schema=property_schema_of(payload.get("property_schema")),
     )
 
 
+def property_schema_of(raw: object) -> dict[str, Any]:
+    """A stored ``property_schema``: its mode when set, and its entries."""
+    mode = raw.get("mode") if isinstance(raw, dict) else None
+    return {**({"mode": mode} if isinstance(mode, str) else {}), **by_entry.parse(raw)}
+
+
 def display_of(raw: object) -> dict[str, dict[str, dict[str, object]]]:
-    """A stored ``display`` in its canonical shape: both parts, entries without nulls."""
-    data = raw if isinstance(raw, dict) else {}
-    out: dict[str, dict[str, dict[str, object]]] = {}
-    for part in ("vertex", "edge"):
-        entries = data.get(part)
-        if isinstance(entries, dict):
-            kept = {
-                str(name): {k: v for k, v in entry.items() if v is not None}
-                for name, entry in entries.items() if isinstance(entry, dict)
-            }
-            if kept:
-                out[part] = kept
-    return out
+    """A stored ``display``: its entries, without null keys."""
+    return by_entry.parse(raw, lambda e: {k: v for k, v in e.items() if v is not None})
 
 
 def validate_display(
@@ -859,6 +859,11 @@ async def remove_edge_endpoint(
     return result == "DELETE 1"
 
 
+# The by-entry merges of ``persist_spec`` (parameters $4-$7: the removed entries).
+_DISPLAY_MERGE = by_entry.sql("display", "$4", "$5")
+_PROPERTY_SCHEMA_MERGE = by_entry.sql("property_schema", "$6", "$7")
+
+
 async def persist_spec(
     pool: asyncpg.Pool,
     spec: TenantSpec,
@@ -866,6 +871,7 @@ async def persist_spec(
     replace_endpoints: bool = False,
     meta_removed: tuple[str, ...] = (),
     display_removed: tuple[tuple[str, str], ...] = (),
+    schema_removed: tuple[tuple[str, str], ...] = (),
 ) -> None:
     """Upsert the tenant spec into graphos_meta.tenants.
 
@@ -875,8 +881,10 @@ async def persist_spec(
     generated_columns, label_hierarchy and resolve_rules become the
     set-union of existing and incoming; ``meta`` is merged dict-wise
     (incoming keys overwrite existing keys for the same name), and the keys in
-    ``meta_removed`` (sent as ``null``) are removed; ``display`` is merged by
-    entry, the ``(part, name)`` entries in ``display_removed`` removed.
+    ``meta_removed`` (sent as ``null``) are removed; ``display`` and
+    ``property_schema`` are merged by entry, the ``(part, name)`` entries in
+    ``display_removed`` / ``schema_removed`` removed, and the property mode
+    replaced only when the request states one.
 
     Why: a blind ``DO UPDATE SET spec = EXCLUDED.spec`` would let any
     caller (even a bare ``{"name": ...}`` registration) shrink a tenant
@@ -960,26 +968,19 @@ async def persist_spec(
                     'search_indexes',
                         COALESCE(graphos_meta.tenants.spec->'search_indexes', '{}'::jsonb)
                         || COALESCE(EXCLUDED.spec->'search_indexes', '{}'::jsonb),
-                    -- By entry: an entry declared again replaces the stored one.
-                    'display',
-                        jsonb_strip_nulls(jsonb_build_object(
-                            'vertex', NULLIF(
-                                (COALESCE(graphos_meta.tenants.spec #> '{display,vertex}', '{}')
-                                 || COALESCE(EXCLUDED.spec #> '{display,vertex}', '{}'))
-                                - $4::text[],
-                                '{}'::jsonb),
-                            'edge', NULLIF(
-                                (COALESCE(graphos_meta.tenants.spec #> '{display,edge}', '{}')
-                                 || COALESCE(EXCLUDED.spec #> '{display,edge}', '{}'))
-                                - $5::text[],
-                                '{}'::jsonb)
-                        ))
+                    -- By entry (graphos.by_entry); the property mode only when stated.
+                    'display', jsonb_strip_nulls(jsonb_build_object(""" + _DISPLAY_MERGE + """)),
+                    'property_schema', jsonb_strip_nulls(jsonb_build_object(
+                        'mode', COALESCE(
+                            EXCLUDED.spec #> '{property_schema,mode}',
+                            graphos_meta.tenants.spec #> '{property_schema,mode}'),
+                        """ + _PROPERTY_SCHEMA_MERGE + """))
                 ),
                 updated_at = now();
             """,
             spec.name, payload, list(meta_removed),
-            [name for part, name in display_removed if part == "vertex"],
-            [name for part, name in display_removed if part == "edge"],
+            by_entry.names(display_removed, "vertex"), by_entry.names(display_removed, "edge"),
+            by_entry.names(schema_removed, "vertex"), by_entry.names(schema_removed, "edge"),
         )
         await _supersede_kept(conn, spec.name)
         await _persist_endpoints(conn, spec, replace=replace_endpoints)

@@ -187,7 +187,7 @@ async def test_a_dry_run_refuses_what_the_import_would(api: httpx.AsyncClient) -
                                    "language": "klingon"}}}, "unknown text-search language"),
         ({"generated_columns": [{"label": "Doc", "column": "kind", "property": "kind",
                                  "type": "jsonb"}]}, "cannot change"),
-        ({"_export": {"format": "graphos.schema", "version": 2}}, "version 2"),
+        ({"_export": {"format": "graphos.schema", "version": 3}}, "version 3"),
     ):
         resp = await api.post("/v1/tenants?dry_run=true", json={"name": SOURCE, **body})
         assert resp.status_code == HTTPStatus.UNPROCESSABLE_ENTITY, (body, resp.text)
@@ -312,3 +312,75 @@ async def test_display_merges_by_entry_and_null_removes_one(
     assert faint.json()["warnings"] == [
         "display colour #E0E2E6 of 'Doc' is hard to see on the light canvas",
     ]
+
+
+PROPERTIES: dict[str, Any] = {
+    "mode": "warn",
+    "vertex": {
+        "*": {"properties": {"source": {"type": "string", "required": True}}},
+        "Person": {"description": "Someone who writes", "undeclared": "warn", "properties": {
+            "name": {"type": "string", "required": True},
+        }},
+        "Employee": {"properties": {"name": {"pattern": "[A-Z].*"}}},
+    },
+    "edge": {"AUTHORED": {"properties": {"role": {"type": "string", "enum": ["lead", "co"]}}}},
+}
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_property_schema_is_kept_merged_by_entry_and_exported(
+    api: httpx.AsyncClient, db_pool: asyncpg.Pool,
+) -> None:
+    body = {**FULL, "property_schema": PROPERTIES}
+    resp = await api.post("/v1/tenants", json=body)
+    assert resp.status_code == HTTPStatus.OK, resp.text
+    assert resp.json()["n_property_definitions"] == 4
+    assert resp.json()["property_mode"] == "warn"
+    # A registration that leaves it out keeps it (the persist_spec SQL).
+    assert (await api.post("/v1/tenants", json={"name": SOURCE})).status_code == HTTPStatus.OK
+    schema = (await api.get(f"/v1/{SOURCE}/schema")).json()["property_schema"]
+    assert schema["mode"] == "warn"
+    assert schema["vertex"]["Person"]["description"] == "Someone who writes"
+    assert schema["vertex"]["Employee"]["properties"]["name"]["pattern"] == "[A-Z].*"
+
+    # An entry declared again replaces the stored one; null removes one; mode kept.
+    change = {"name": SOURCE, "property_schema": {
+        "vertex": {"Employee": None}, "edge": {"AUTHORED": {"description": "Who wrote what"}},
+    }}
+    dry = await api.post("/v1/tenants?dry_run=true", json=change)
+    assert dry.json()["changes"] == {
+        "removed": {"property_schema": ["vertex:Employee"]},
+        "changed": {"property_schema": ["edge:AUTHORED"]},
+    }
+    assert (await api.post("/v1/tenants", json=change)).status_code == HTTPStatus.OK
+    spec = await load_spec(db_pool, SOURCE)
+    assert spec is not None
+    assert set(spec.property_schema["vertex"]) == {"*", "Person"}
+    assert spec.property_schema["edge"] == {"AUTHORED": {"description": "Who wrote what"}}
+    assert spec.property_schema["mode"] == "warn"
+
+    # Exported as a version 2 file, imported into another tenant identically.
+    doc = await _export(api, SOURCE)
+    assert doc["_export"]["version"] == 2
+    copy = {**doc, "name": COPY}
+    assert (await api.post("/v1/tenants", json=copy)).status_code == HTTPStatus.OK
+    assert _without_origin(await _export(api, COPY)) == _without_origin(doc)
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_property_schema_must_fit_the_tenant(api: httpx.AsyncClient) -> None:
+    assert (await api.post("/v1/tenants", json=FULL)).status_code == HTTPStatus.OK
+    unknown = {"name": SOURCE, "property_schema": {"vertex": {"Invoice": {}}}}
+    resp = await api.post("/v1/tenants", json=unknown)
+    assert resp.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+    assert "'Invoice' is not a vertex label" in resp.text
+    # Employee inherits from Person: it may narrow name, not change its type.
+    retyped = {"name": SOURCE, "property_schema": {"vertex": {
+        "Person": {"properties": {"name": {"type": "string"}}},
+        "Employee": {"properties": {"name": {"type": "integer"}}},
+    }}}
+    resp = await api.post("/v1/tenants", json=retyped)
+    assert resp.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+    assert "not change its type" in resp.text

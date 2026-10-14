@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from graphos.contracts.property_schema import PropertySchemaSpec
+
 # Tenant name = AGE graph name = postgres schema name. AGE preserves
 # case (the schema is created as a quoted identifier), so mixed case
 # is fine end-to-end. Constrain to ASCII alphanumerics + underscore
@@ -598,6 +600,15 @@ class TenantSpecBody(BaseModel):
             "`null` removes it (`{\"vertex\": {\"Person\": null}}`)."
         ),
     )
+    property_schema: PropertySchemaSpec = Field(
+        default_factory=PropertySchemaSpec,
+        description=(
+            "The properties each vertex label and edge type carries (type, required, enum, "
+            "pattern, …; `*` for every one) and how writes are held to them: `mode` `off` (the "
+            "default: stored and shown, nothing checked), `warn` or `strict`. An entry declared "
+            "again replaces the stored one; `null` removes it; `mode` omitted stays as it is."
+        ),
+    )
 
     edge_endpoints: dict[str, list[EdgeEndpointSpec]] = Field(
         default_factory=dict,
@@ -763,6 +774,7 @@ class TenantInfo(BaseModel):
     meta: dict[str, str] = Field(default_factory=dict)
     search_indexes: dict[str, SearchIndexSpec] = Field(default_factory=dict)
     display: DisplaySpec = Field(default_factory=DisplaySpec)
+    property_schema: PropertySchemaSpec = Field(default_factory=PropertySchemaSpec)
 
 
 class MeResponse(BaseModel):
@@ -822,6 +834,13 @@ class TenantSchema(BaseModel):
     display: DisplaySpec = Field(
         default_factory=DisplaySpec,
         description="How the web UI draws each vertex label and edge type.",
+    )
+    property_schema: PropertySchemaSpec = Field(
+        default_factory=PropertySchemaSpec,
+        description=(
+            "The declared properties of each label and edge type, their descriptions, and the "
+            "mode writes are checked in (`off` when none is registered)."
+        ),
     )
 
 
@@ -920,6 +939,8 @@ class RegisterResponse(BaseModel):
     n_resolver_indexes: int = 0
     n_edge_endpoints: int = 0
     strict_endpoints: bool = False
+    n_property_definitions: int = Field(0, description="Declared properties, `*` included.")
+    property_mode: str = Field("off", description="How writes are held to them.")
     status: str = "bootstrapped"
 
 

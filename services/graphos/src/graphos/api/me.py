@@ -21,6 +21,7 @@ from fastapi import APIRouter, Body, HTTPException, Request, status
 from graphos import preferences
 from graphos.auth import ReadPrincipal
 from graphos.bootstrap import registered_tenants
+from graphos.contracts.property_schema import PropertySchemaSpec
 from graphos.contracts.tenants import DisplaySpec, EdgeEndpointSpec, MeResponse, TenantSchema
 
 log = logging.getLogger(__name__)
@@ -111,6 +112,7 @@ async def tenant_schema(tenant: str, principal: ReadPrincipal) -> TenantSchema: 
         edge_endpoints=_endpoints_by_type(spec.edge_endpoints),
         strict_endpoints=bool(spec.strict_endpoints),
         display=DisplaySpec.model_validate(spec.display),
+        property_schema=PropertySchemaSpec.model_validate(spec.property_schema),
     )
 
 

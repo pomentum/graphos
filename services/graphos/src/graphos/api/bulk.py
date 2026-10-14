@@ -36,7 +36,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import ValidationError
 
-from graphos import reserved, writes
+from graphos import properties, reserved, writes
 from graphos.api.graph import _check_tenant
 from graphos.auth import WritePrincipal
 from graphos.bootstrap import registered_tenants
@@ -49,6 +49,7 @@ from graphos.contracts.graph import (
 )
 from graphos.cypher import CypherError
 from graphos.endpoints import policy_for
+from graphos.observability.metrics import record_property_tally
 
 log = logging.getLogger(__name__)
 
@@ -114,6 +115,8 @@ async def upsert_nodes_bulk(
 
     spec = registered_tenants()[tenant]
     allowed_labels = set(spec.vertex_labels)
+    checks = properties.policies_for(spec)
+    tally = properties.Tally()
 
     started = time.perf_counter()
     pool = request.app.state.pool
@@ -169,6 +172,12 @@ async def upsert_nodes_bulk(
                     )
                 continue
 
+            if why := tally.line(checks.for_vertex(node.label), node.properties, node.id):
+                rows_invalid += 1
+                if len(errors) < _MAX_ERROR_LINES:
+                    errors.append(f"line {line_no}: {why}")
+                continue
+
             props = {k: v for k, v in node.properties.items() if k != "id"}
             buffers[node.label].append({"id": node.id, "props": props})
 
@@ -193,6 +202,7 @@ async def upsert_nodes_bulk(
         ) from exc
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
+    record_property_tally(tenant, "node", tally)
     return BulkNodesResponse(
         tenant=tenant,
         rows_received=rows_received,
@@ -201,6 +211,7 @@ async def upsert_nodes_bulk(
         by_label=dict(by_label_count),
         errors=errors,
         elapsed_ms=elapsed_ms,
+        **tally.report(),
     )
 
 
@@ -248,6 +259,8 @@ async def upsert_edges_bulk(  # noqa: PLR0915 — streaming loop, splitting furt
     allowed_e = set(spec.edge_labels)
     # With strict_endpoints, a line of a declared type outside its pairs is invalid.
     policy = policy_for(spec)
+    checks = properties.policies_for(spec)
+    tally = properties.Tally()
 
     started = time.perf_counter()
     pool = request.app.state.pool
@@ -302,6 +315,7 @@ async def upsert_edges_bulk(  # noqa: PLR0915 — streaming loop, splitting furt
                 (reserved.refusal(found) if found else None)
                 or _validate_edge_labels(edge, allowed_v, allowed_e)
                 or policy.refusal(edge.type, edge.src_label, edge.dst_label)
+                or tally.line(checks.for_edge(edge.type), edge.properties, None)
             )
             if err is not None:
                 rows_invalid += 1
@@ -334,6 +348,7 @@ async def upsert_edges_bulk(  # noqa: PLR0915 — streaming loop, splitting furt
         ) from exc
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
+    record_property_tally(tenant, "edge", tally)
     return BulkEdgesResponse(
         tenant=tenant,
         rows_received=rows_received,
@@ -343,4 +358,5 @@ async def upsert_edges_bulk(  # noqa: PLR0915 — streaming loop, splitting furt
         by_type=dict(by_type_count),
         errors=errors,
         elapsed_ms=elapsed_ms,
+        **tally.report(),
     )

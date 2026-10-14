@@ -147,6 +147,10 @@ class NodesUpsertResponse(BaseModel):
     nodes_upserted: int
     by_label: dict[str, int] = Field(default_factory=dict)
     elapsed_ms: int
+    property_warnings: dict[str, int] = Field(
+        default_factory=dict,
+        description="Written rows' property problems, by `<label or *>.<property>:<rule>`.",
+    )
 
 
 # ── Single-node property merge ─────────────────────────────────────────────
@@ -293,6 +297,10 @@ class EdgesUpsertResponse(BaseModel):
     edges_skipped: int = Field(..., description="Rows whose src or dst node didn't exist.")
     by_type: dict[str, int] = Field(default_factory=dict)
     elapsed_ms: int
+    property_warnings: dict[str, int] = Field(
+        default_factory=dict,
+        description="Written rows' property problems, by `<label or *>.<property>:<rule>`.",
+    )
 
 
 # ── Bulk responses ─────────────────────────────────────────────────────────
@@ -313,9 +321,17 @@ class BulkNodesResponse(BaseModel):
     by_label: dict[str, int] = Field(default_factory=dict)
     errors: list[str] = Field(
         default_factory=list,
-        description="Up to 50 most-recent validation errors, in the form 'line N: <message>'.",
+        description="The first 50 invalid lines' errors, in the form 'line N: <message>'.",
     )
     elapsed_ms: int
+    property_violations: dict[str, int] = Field(
+        default_factory=dict,
+        description="Refused rows' property errors, by `<label or *>.<property>:<rule>` (strict).",
+    )
+    property_warnings: dict[str, int] = Field(
+        default_factory=dict,
+        description="Written rows' property problems, by `<label or *>.<property>:<rule>`.",
+    )
 
 
 class BulkEdgesResponse(BaseModel):
@@ -329,6 +345,14 @@ class BulkEdgesResponse(BaseModel):
     by_type: dict[str, int] = Field(default_factory=dict)
     errors: list[str] = Field(default_factory=list)
     elapsed_ms: int
+    property_violations: dict[str, int] = Field(
+        default_factory=dict,
+        description="Refused rows' property errors, by `<label or *>.<property>:<rule>` (strict).",
+    )
+    property_warnings: dict[str, int] = Field(
+        default_factory=dict,
+        description="Written rows' property problems, by `<label or *>.<property>:<rule>`.",
+    )
 
 
 # ── Reads: neighbors + induced_edges ───────────────────────────────────────

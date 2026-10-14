@@ -2,12 +2,11 @@
 
 A registration that changes the tenant's schema (labels, edge types,
 declared pairs, label hierarchy, search indexes, resolve rules, property
-indexes, generated columns, ``meta`` keys, display entries,
-``strict_endpoints``) is
-recorded with what it added, removed, changed or switched; one that
-changes nothing (a consumer re-registering at startup) records nothing.
-Removing a declared pair, unregistering, restoring and deleting with the
-data are recorded too.
+indexes, generated columns, ``meta`` keys, display and property schema
+entries, ``strict_endpoints``, the property mode) is recorded with what it
+added, removed, changed or switched; one that changes nothing (a consumer
+re-registering at startup) records nothing. Removing a declared pair,
+unregistering, restoring and deleting with the data are recorded too.
 """
 
 from __future__ import annotations
@@ -18,8 +17,11 @@ from typing import Any
 
 import asyncpg
 
-from graphos import changes, declared
+from graphos import by_entry, changes, declared
 from graphos.bootstrap import TenantSpec
+
+# Spec keys kept per label and edge type (graphos.by_entry), recorded by entry.
+_BY_ENTRY = ("display", "property_schema")
 
 
 def _sets(spec: TenantSpec | None) -> dict[str, set[Any]]:
@@ -40,16 +42,17 @@ def _sets(spec: TenantSpec | None) -> dict[str, set[Any]]:
         "generated_columns": {declared.describe_column(x) for x in spec.generated_columns},
         # By key: the notes themselves are free text, kept in the schema, not the feed.
         "meta": set(spec.meta),
-        # By entry, as ``vertex:Person`` / ``edge:WROTE``.
-        "display": set(_display_entries(spec)),
+        **{key: set(_entries(spec, key)) for key in _BY_ENTRY},
     }
 
 
-def _display_entries(spec: TenantSpec) -> dict[str, dict[str, object]]:
+def _entries(spec: TenantSpec, key: str) -> dict[str, Any]:
+    """``key``'s entries named ``vertex:Person`` / ``edge:WROTE``."""
+    value = getattr(spec, key)
     return {
         f"{part}:{name}": entry
-        for part in ("vertex", "edge")
-        for name, entry in spec.display.get(part, {}).items()
+        for part in by_entry.PARTS
+        for name, entry in (value.get(part) or {}).items()
     }
 
 
@@ -64,8 +67,8 @@ def diff(before: TenantSpec | None, after: TenantSpec) -> dict[str, Any] | None:
 
     ``added`` / ``removed`` per part (resolve rules by edge type),
     ``changed.meta`` for ``meta`` keys whose text changed, ``changed.display``
-    for display entries declared again differently,
-    ``strict_endpoints`` as ``[old, new]``, and
+    and ``changed.property_schema`` for entries declared again differently,
+    ``strict_endpoints`` and ``property_mode`` as ``[old, new]``, and
     ``registered: true`` for a new tenant.
     """
     old, new = _sets(before), _sets(after)
@@ -83,15 +86,20 @@ def diff(before: TenantSpec | None, after: TenantSpec) -> dict[str, Any] | None:
         )
         if rewritten:
             detail["changed"] = {"meta": rewritten}
-        old_display, new_display = _display_entries(before), _display_entries(after)
-        restyled = sorted(
-            k for k, v in new_display.items() if k in old_display and old_display[k] != v
-        )
-        if restyled:
-            detail.setdefault("changed", {})["display"] = restyled
+        for key in _BY_ENTRY:
+            old_entries, new_entries = _entries(before, key), _entries(after, key)
+            redeclared = sorted(
+                k for k, v in new_entries.items() if k in old_entries and old_entries[k] != v
+            )
+            if redeclared:
+                detail.setdefault("changed", {})[key] = redeclared
     strict_before = bool(before.strict_endpoints) if before else False
     if bool(after.strict_endpoints) != strict_before:
         detail["strict_endpoints"] = [strict_before, bool(after.strict_endpoints)]
+    mode_before = before.property_schema.get("mode", "off") if before else "off"
+    mode_after = after.property_schema.get("mode", "off")
+    if mode_after != mode_before:
+        detail["property_mode"] = [mode_before, mode_after]
     if before is None:
         detail["registered"] = True
     return detail or None
@@ -103,7 +111,7 @@ def size(detail: dict[str, Any]) -> int:
     for part in ("added", "removed", "changed"):
         for values in detail.get(part, {}).values():
             n += len(values)
-    return max(n + ("strict_endpoints" in detail), 1)
+    return max(n + ("strict_endpoints" in detail) + ("property_mode" in detail), 1)
 
 
 async def record(pool: asyncpg.Pool, tenant: str, detail: dict[str, Any]) -> None:

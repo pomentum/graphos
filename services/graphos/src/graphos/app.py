@@ -25,7 +25,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from graphos import __version__, console, identity, node_properties, oidc
+from graphos import __version__, console, identity, node_properties, oidc, properties
 from graphos.api import (
     access,
     bulk,
@@ -42,6 +42,7 @@ from graphos.api import (
     louvain,
     me,
     paths,
+    property_check,
     snapshot,
     tenants,
 )
@@ -58,6 +59,7 @@ from graphos.config import Settings
 from graphos.contracts.db import VacuumRequest
 from graphos.contracts.graph_metrics import ComputeMetricsRequest
 from graphos.contracts.louvain import RecomputeCommunitiesRequest
+from graphos.contracts.property_schema import PropertiesCheckRequest
 from graphos.contracts.tenants import ResolveEdgesRequest
 from graphos.db import create_pool, ensure_internal_schema
 from graphos.graph_compute import terminate_running
@@ -94,6 +96,11 @@ async def _run_resolve(pool: asyncpg.Pool, tenant: str | None, params: dict) -> 
     return await graph.run_resolve(pool, _registered(tenant), body)
 
 
+async def _run_check(pool: asyncpg.Pool, tenant: str | None, params: dict) -> BaseModel:
+    body = PropertiesCheckRequest.model_validate(params)
+    return await property_check.run_check(pool, _registered(tenant), body)
+
+
 async def _run_vacuum(pool: asyncpg.Pool, _tenant: str | None, params: dict) -> BaseModel:
     return await db.run_vacuum(pool, VacuumRequest.model_validate(params))
 
@@ -103,6 +110,7 @@ JOB_KINDS: dict[str, JobKind] = {
     "recompute_communities": JobKind(run=_run_recompute, needs="maintain"),
     "compute_metrics": JobKind(run=_run_metrics, needs="maintain"),
     "resolve_edges": JobKind(run=_run_resolve),
+    "check_properties": JobKind(run=_run_check, needs="maintain"),
     "vacuum": JobKind(run=_run_vacuum, needs="admin"),
 }
 
@@ -317,6 +325,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.add_exception_handler(asyncpg.exceptions.UniqueViolationError, _unique_violation)
 
+    async def _property_refusal(request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, properties.Refused)
+        log.info("property schema refusal path=%s total=%d", request.url.path, exc.total)
+        return JSONResponse(
+            status_code=422,
+            media_type="application/problem+json",
+            content={
+                "type": "about:blank",
+                "title": "Property schema violations",
+                "status": 422,
+                "detail": (
+                    f"{exc.total} property violations (property_schema, mode strict); "
+                    "nothing was written"
+                ),
+                "total": exc.total,
+                "violations": exc.listed,
+            },
+        )
+
+    app.add_exception_handler(properties.Refused, _property_refusal)
+
     # Observability middleware stack. Outermost runs first on the
     # request path, last on response — FastAPI applies them in
     # reverse-registration order. Registration order here gives the
@@ -356,6 +385,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(db.router, prefix="/v1")
     app.include_router(louvain.router, prefix="/v1")
     app.include_router(graph_metrics.router, prefix="/v1")
+    app.include_router(property_check.router, prefix="/v1")
     app.include_router(communities.router, prefix="/v1")
     app.include_router(cache.router, prefix="/v1")
     app.include_router(snapshot.router, prefix="/v1")
