@@ -4,6 +4,32 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Added
+
+- **Property schema.** A tenant can declare the properties each vertex label and edge type carries
+  (`property_schema` in the registration): per label, type or `*`, each property's `type`,
+  `required` or `recommended`, `enum`, `pattern`, `format` (`date`, `date-time`), `minimum`,
+  `maximum` and array `items`, and what to do with undeclared keys. Definitions combine from `*`
+  through the label hierarchy; a narrower entry adds rules but cannot change a type. `mode` is
+  `off` (the default: stored, served, exported), `warn` (writes counted in `property_warnings`) or
+  `strict` (`POST …/nodes` and `…/edges` answer 422 with the `violations`; bulk and snapshot lines
+  are counted invalid; `PATCH` and the properties merge are checked on the row they leave).
+  `snapshot-import?properties=report` restores without refusing. Merged by entry (`null` removes
+  one), served by `GET /v1/{tenant}/schema`, carried in the schema file (version 2 when present)
+  and recorded in the change feed. Prometheus: `graphos_property_violations_total`. Client:
+  `register_tenant(property_schema=…)`.
+- **Property report.** `POST /v1/{tenant}/graph/properties:check` (`maintain`, or as a job) reads
+  the stored rows as if every rule applied: per label and type, rows with errors and warnings,
+  counts by rule, example ids and the undeclared names the rows carry.
+
+### Fixed
+
+- **Cypher console.** A query whose database process the watchdog had to close answered 500
+  instead of 499 (cancelled) or 504: graphos tried to close the connection again after asyncpg had
+  handed it back to the pool.
+
 ## 0.8.3 — 2026-10-14
 
 People who know Cypher can now ask their own questions: an opt-in, read-only Cypher console with

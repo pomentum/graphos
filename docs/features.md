@@ -31,8 +31,9 @@ built-in tenants. An admin, or a user with `create_tenants` on a matching name
 pattern (who then owns it), registers each one with `POST /v1/tenants`:
 `vertex_labels`, `edge_labels` (optionally with a `resolve_rule`, §7),
 `property_indexes`, `generated_columns`, `label_hierarchy` (child → parent
-label inheritance), free-form `meta`, and `display` (how the web UI draws
-each label and relationship type).
+label inheritance), free-form `meta`, `display` (how the web UI draws
+each label and relationship type) and `property_schema` (the properties each
+carries).
 
 - **Label styles.** `display` declares, per vertex label, a colour, an icon
   (from a fixed list), a caption property and a size property, and per edge
@@ -40,6 +41,14 @@ each label and relationship type).
   against the tenant's labels, carried in the schema file and the change
   feed, served by `GET /v1/{tenant}/schema` to every reader; the dry run warns
   about a colour hard to see on either canvas. Cosmetic: no effect on data.
+- **Property schema.** `property_schema` declares, per vertex label and edge
+  type (or `*` for all), each property's type, whether it is required or
+  recommended, and its allowed values (enum, pattern, date formats, numeric
+  bounds, array items), combined down the label hierarchy. `off` only records
+  it, `warn` writes and counts, `strict` refuses: a batch with 422, a bulk or
+  snapshot line as invalid, a patch checked on the row it leaves. A report
+  (`properties:check`) reads the stored rows as if every rule applied, so a
+  schema can be tried before it is turned on.
 
 - **Idempotent.** Re-posting is safe. By default the stored spec is merged
   (labels and declarations unioned); `?force_shrink=true` replaces it. graphos

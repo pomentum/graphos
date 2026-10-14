@@ -297,6 +297,7 @@ owner), `maintain` on it (or a matching `create_tenants`) to re-register one. Th
 | `edge_endpoints` | dict edge type → list of `{src, dst}` (or `[src, dst]`) | the label pairs each relationship type may join; see *Declared endpoints* below. At most 5000 pairs per request. |
 | `strict_endpoints` | bool, optional | refuse edge writes outside the declared pairs; omitted: unchanged (off for a new tenant) |
 | `display` | `{vertex: {label: {color, caption, size_by, icon} \| null}, edge: {type: {color, caption} \| null}}` | how the web UI draws each label and edge type; see *Label styles* below |
+| `property_schema` | `{mode, vertex: {label or *: entry \| null}, edge: {type or *: entry \| null}}` | the properties each label and edge type carries, and how strictly writes are held to them; see *Property schema* below |
 
 **Merge vs replace.** By default, re-registering merges the incoming spec into the stored one.
 Labels, indexes, generated columns, the hierarchy and rules are unioned, and `meta` keys are
@@ -349,6 +350,57 @@ its parent's colour (`label_hierarchy`), else the UI's own. The dry run warns ab
 close to the light or the dark canvas. `GET /v1/{tenant}/schema` serves `display` to every reader;
 it is in the schema file and the change feed (`display` entries as `vertex:Person`, `edge:AUTHORED`).
 Cosmetic: no effect on data, queries or validation.
+
+**Property schema.** `property_schema` declares the properties each vertex label and edge type
+carries, and how strictly writes are held to them:
+
+```json
+{"name": "acme", "property_schema": {
+  "mode": "warn",
+  "vertex": {
+    "*": {"properties": {"source": {"type": "string", "required": true}}},
+    "Person": {"description": "Someone who writes", "properties": {
+      "name": {"type": "string", "required": true},
+      "email": {"type": "string", "pattern": "[^@]+@[^@]+", "recommended": true},
+      "born": {"type": "string", "format": "date"}}}},
+  "edge": {"AUTHORED": {"undeclared": "warn", "properties": {
+    "role": {"type": "string", "enum": ["lead", "co", "editor"]},
+    "share": {"type": "number", "minimum": 0, "maximum": 1}}}}}}
+```
+
+`mode` is `off` (stored, served and exported; nothing checked), `warn` (rows are checked, written
+anyway and counted) or `strict` (a row with an error is refused). Omitted, it stays as registered
+(`off` for a new tenant). An entry may set its own `mode` and
+`undeclared`. Per property: `type` (`string`, `number`, `integer`, `boolean`, `array`, `object`,
+`any`; JSON types, so `true` is not a number and `1.0` not an integer), `required` (absent or
+`null` is an error), `recommended` (absent is a warning only, in any mode), `enum`, `pattern` (a
+full match, Python `re`), `format` (`date`, or `date-time` with an offset or `Z`), `minimum` and
+`maximum` (inclusive), `items` (an array's items: `type`, `enum`, `pattern`) and `description`.
+`undeclared` says what happens to keys no definition names: `allow` (the default), `warn` or
+`reject`. `id` may declare a `pattern` only; `graphos_*` and `community_id` are written by graphos
+and cannot be declared.
+
+Definitions combine: `*` first, then the label's ancestors (`label_hierarchy`), then the label's own
+entry. A later entry may add rules to a property (`required`, a narrower `enum`) but not change its
+type (else 422). Each label or type must be registered, and patterns must compile (else 422). On a
+merge an entry declared again replaces the stored one and `null` removes one; entries left out stay.
+
+Every write path checks the row as sent: `POST …/graph/nodes` and `…/edges` answer 422
+(`application/problem+json`: `violations`, the first 100, and `total`) and write nothing; the bulk
+and snapshot endpoints count the line in `rows_invalid` with the reason in `errors`; `PATCH` and
+`POST …/properties` check the row the change leaves, under its lock. Responses count by
+`<label or *>.<property>:<rule>`: `property_warnings` (written) and, on the bulk and snapshot
+endpoints, `property_violations` (refused). `snapshot-import?properties=report` checks and counts
+but refuses nothing, to restore data older than its definitions. Prometheus counts every problem
+in `graphos_property_violations_total{tenant,kind,outcome,rule}`.
+
+`POST /v1/{tenant}/graph/properties:check` (`maintain`; `Prefer: respond-async` runs it as a
+job) reads the stored rows as if every rule applied, whatever the mode, so a schema can be tried in
+`off` before it is turned on: per label and type, rows read, rows with errors and warnings, counts
+by rule, some example ids (`examples`, default 10) and the undeclared names the rows carry.
+`labels` and `types` narrow it. `GET /v1/{tenant}/schema` serves `property_schema` to every reader; it is in the schema
+file (version 2 when present) and the change feed (entries as `vertex:Person`, the mode as
+`property_mode`).
 
 **Indexes created automatically.** Per vertex label: `<Label>_properties_gin` (GIN on
 `properties`), `<Label>_id_unique` (unique on the `id` property, so ids are unique within a label),
@@ -1281,7 +1333,7 @@ replica applies on all.
 
 ### Background jobs
 
-Community recompute, graph metrics, `edges:resolve` and vacuum can take minutes on a large graph. Send them with
+Community recompute, graph metrics, `edges:resolve`, `properties:check` and vacuum can take minutes on a large graph. Send them with
 `Prefer: respond-async` to run them as a background job: graphos validates the request exactly as
 it would synchronously (so a bad body, scope or tenant still fails at once), queues it and answers
 **202** with the job, `Location: /v1/jobs/{id}`, `Retry-After: 2` and
@@ -1405,7 +1457,7 @@ timeout is the exception: it returns `application/problem+json`.
 | 410 | a change-feed cursor whose records were pruned (§10) |
 | 412 | `If-Match` did not match: the node or edge changed (or is gone) since it was read |
 | 413 | `snapshot-import` over 50M rows |
-| 422 | body or query validation (patterns, ranges, `resolve_rule`, `label_hierarchy`), or `order_by: null` sent with a `cursor`; a registration that sends SQL (`indexes`, or a string in `generated_columns`), declares a property index or generated column on a label that is not a vertex label, changes a registered generated column, or declares a unique index over values nodes already share |
+| 422 | body or query validation (patterns, ranges, `resolve_rule`, `label_hierarchy`), or `order_by: null` sent with a `cursor`; a registration that sends SQL (`indexes`, or a string in `generated_columns`), declares a property index or generated column on a label that is not a vertex label, changes a registered generated column, or declares a unique index over values nodes already share; a property-schema entry for an unregistered label, a pattern that does not compile, or a narrowing that changes a type; a write a `strict` property schema refuses (`application/problem+json` with `violations`) |
 | 429 | rate limited (when enabled) |
 | 501 | Louvain extra not installed |
 | 503 | `/readyz` not ready |
