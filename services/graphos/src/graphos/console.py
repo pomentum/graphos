@@ -19,11 +19,16 @@ exports", §6):
   sees a cancel late while it builds large lists), and, should the backend
   still not stop, closes the connection so the caller is answered and the
   slot freed; one query per user, on a small pool of its own.
-- **No variable-length patterns** (``-[*1..3]->``) unless
-  ``GRAPHOS_CYPHER_VARIABLE_LENGTH`` allows them (:func:`variable_length`):
-  AGE's search for them does not check for a cancel, so neither the
-  statement timeout nor the watchdog stops one until it is done; it can hold
-  a database process for many minutes.
+- **Nothing that needs AGE's in-memory graph** (:func:`needs_age_graph`):
+  variable-length patterns (``-[*1..3]->``) and ``vertex_stats()``.  AGE
+  serves them from a copy of the whole graph it loads under a process-wide
+  lock, and refuses to load label tables with more than its own columns, as
+  graphos's are (``graphos_rev``, the community columns).  The failed load
+  leaves the lock taken (the error unwinds past the unlock), so the next such
+  call in that database process waits on it forever: no cancel, terminate or
+  shutdown reaches it.
+- **A connection is not reused after a failed query**: a failed AGE call can
+  leave its database process unusable, so the console closes it.
 
 AGE needs the result columns declared: they are read from the query's last
 top-level ``RETURN`` (:func:`return_columns`); when that count is wrong, AGE
@@ -52,6 +57,7 @@ from graphos.db import _on_acquire, _on_connect
 log = logging.getLogger(__name__)
 
 MAX_QUERY_CHARS = 20_000
+APPLICATION_NAME = "graphos cypher console"
 # Column counts tried when the RETURN cannot be read (RETURN *) or was misread.
 MAX_COLUMNS = 32
 # How long a query may outlive its statement timeout before the watchdog acts,
@@ -137,6 +143,26 @@ def qualified_calls(query: str) -> list[str]:
         if k1 in ("word", "tick") and t2 == "." and k3 in ("word", "tick") and t4 == "(":
             found.append(f"{t1.strip('`')}.{t3.strip('`')}")
     return found
+
+
+# AGE's Cypher functions that load AGE's in-memory copy of the graph.
+_GRAPH_LOADING_FUNCTIONS = frozenset({"vertex_stats"})
+
+
+def needs_age_graph(query: str) -> str | None:
+    """What in ``query`` would make AGE load its in-memory graph (which it
+    cannot on graphos's tables, see the module notes), or ``None``."""
+    if variable_length(query):
+        return "variable-length patterns (-[*1..3]->)"
+    tokens = [
+        (m.lastgroup or "", m.group())
+        for m in _TOKEN.finditer(query)
+        if m.lastgroup not in ("ws", "comment")
+    ]
+    for (kind, text), (_, after) in zip(tokens, tokens[1:], strict=False):
+        if kind == "word" and text.lower() in _GRAPH_LOADING_FUNCTIONS and after == "(":
+            return f"{text}()"
+    return None
 
 
 def variable_length(query: str) -> bool:
@@ -303,12 +329,14 @@ class Console:
                 "the console runs Cypher's own functions only, not database functions: "
                 + ", ".join(sorted(set(calls))),
             )
-        if not self.settings.cypher_variable_length and variable_length(text):
+        needs = needs_age_graph(text)
+        if needs:
             raise ConsoleError(
                 400,
-                "the console does not run variable-length patterns (-[*1..3]->): AGE cannot "
-                "stop one once it runs. Write the hops out (-[:R]->()-[:R]->()), or use "
-                "graphos's paths (POST /v1/{tenant}/graph/paths, the Path page)",
+                f"the console does not run {needs}: AGE serves them from an in-memory copy of "
+                "the graph it cannot build on graphos's tables. Write the hops out "
+                "(-[:R]->()-[:R]->(), OPTIONAL MATCH for the further ones), or use graphos's "
+                "paths (POST /v1/{tenant}/graph/paths, the Path page)",
             )
         cap = min(limit or self.settings.cypher_max_rows, self.settings.cypher_max_rows)
         if self._running.get(consumer, 0) >= self.settings.cypher_per_user:
@@ -326,6 +354,11 @@ class Console:
                 raise ConsoleError(429, "the console is busy; try again in a moment") from exc
             try:
                 return await self._on(conn, tenant, text, tag, names, params, cap, gone)
+            except BaseException:
+                # A failed AGE call can leave its database process unusable
+                # (a lock it took and did not release): never reuse it.
+                conn.terminate()
+                raise
             finally:
                 await self.pool.release(conn)
         finally:
@@ -443,6 +476,8 @@ async def start(settings: Settings, owner: asyncpg.Pool) -> Console | None:
         server_settings={
             "statement_timeout": str(int(settings.cypher_timeout_s * 1000)),
             "jit": "off",
+            # Its backends, told apart in pg_stat_activity.
+            "application_name": APPLICATION_NAME,
         },
         command_timeout=None,
     )

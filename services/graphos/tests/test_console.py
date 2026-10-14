@@ -21,6 +21,7 @@ from graphos.console import (
     _Graph,
     _resolve_edges,
     agtype_value,
+    needs_age_graph,
     qualified_calls,
     return_columns,
     variable_length,
@@ -145,6 +146,14 @@ def test_qualified_calls_are_found_however_written(query: str, calls: list[str])
 )
 def test_variable_length_patterns_are_found(query: str, found: bool) -> None:  # noqa: FBT001
     assert variable_length(query) is found
+
+
+def test_what_needs_ages_in_memory_graph_is_named() -> None:
+    assert needs_age_graph("MATCH p = (a)-[*1..2]->(b) RETURN p") == (
+        "variable-length patterns (-[*1..3]->)"
+    )
+    assert needs_age_graph("MATCH (n) RETURN VERTEX_STATS(n)") == "VERTEX_STATS()"
+    assert needs_age_graph("MATCH (n {k: 'vertex_stats(n)'}) RETURN n.vertex_stats") is None
 
 
 @pytest.mark.asyncio

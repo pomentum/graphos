@@ -180,10 +180,6 @@ class Settings(BaseSettings):
     cypher_pool_size: int = Field(default=2, ge=1, le=32)
     # Queries one user may run at once.
     cypher_per_user: int = Field(default=1, ge=1)
-    # Allow variable-length patterns (-[*1..3]->). Off: AGE's search for them
-    # does not check for a cancel, so a large one holds a database process
-    # past the timeout until it is done.
-    cypher_variable_length: bool = False
 
     # NOTE: graphos has no hardcoded tenants. Consumers register their own
     # schemas at runtime via `POST /v1/tenants`. See bootstrap.py and

@@ -888,12 +888,13 @@ curl -s -X POST "$G/v1/acme/cypher" -H "Authorization: Bearer $TOKEN" -H 'Conten
   (504; graphos also terminates a query AGE is slow to stop, and if even that is not seen, closes
   the connection so the caller is answered); one query per user at a time and
   `GRAPHOS_CYPHER_POOL_SIZE` (2) in all (429 when busy). Cancelling the request stops the query.
-- **No variable-length patterns** (`-[:R*1..3]->`, 400): AGE's search for them does not check for a
-  cancel, so neither the timeout nor a terminate stops one before it is done; on a graph of a
-  million edges a two-hop one from a well-connected node held a database process for over a
-  quarter of an hour. Write the hops out (`-[:R]->()-[:R]->()`, with `OPTIONAL MATCH` for the
-  further ones) or use `POST …/graph/paths`. `GRAPHOS_CYPHER_VARIABLE_LENGTH=true` allows them, for
-  small graphs and trusted users.
+- **No variable-length patterns** (`-[:R*1..3]->`) **nor `vertex_stats()`** (400): AGE serves them
+  from an in-memory copy of the whole graph, which it refuses to build from tables carrying more than
+  its own columns, as graphos's do (revisions, communities). Worse, the failed attempt leaves a lock
+  of AGE's taken in that database process, and the next such query there waits on it forever,
+  beyond any cancel or timeout. Write the hops out (`-[:R]->()-[:R]->()`, with `OPTIONAL MATCH` for
+  the further ones) or use `POST …/graph/paths`. And after any failed query the console closes its
+  connection rather than reuse it.
 - **Who:** `GRAPHOS_CYPHER_LEVEL` on the tenant (`read` by default). Each run is in the audit log.
 - **AGE's dialect:** AGE 1.6 implements openCypher with gaps; for example `ORDER BY` cannot name a
   `RETURN` alias (order by the expression). `MATCH (n:Person)` includes the nodes of child labels

@@ -182,7 +182,6 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | `GRAPHOS_CYPHER_LEVEL` | `read` | Level on a tenant needed to run console queries (`read`, `write`, `maintain`) |
 | `GRAPHOS_CYPHER_TIMEOUT_S`, `GRAPHOS_CYPHER_MAX_ROWS` | `30`, `5000` | Per console query: time before it is stopped (504), rows returned at most |
 | `GRAPHOS_CYPHER_POOL_SIZE`, `GRAPHOS_CYPHER_PER_USER` | `2`, `1` | Console queries running at once per replica, and per user |
-| `GRAPHOS_CYPHER_VARIABLE_LENGTH` | `false` | Allow variable-length patterns (`-[*1..3]->`) in the console; AGE cannot stop one once it runs |
 | `GRAPHOS_RATE_LIMIT_ENABLED` | `false` | Per-user sliding-window rate limit |
 | `GRAPHOS_DB_USER` | `graphos` (compose: `graphos_app`) | Database role; compose uses an unprivileged role created at init |
 | `GRAPHOS_FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxies whose `X-Forwarded-*` headers are trusted |

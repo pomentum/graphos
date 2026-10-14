@@ -26,6 +26,7 @@ from graphos.app import create_app
 from graphos.auth import StaticAuthenticator
 from graphos.bootstrap import forget
 from graphos.config import Settings
+from graphos.console import APPLICATION_NAME
 from graphos.identity import Principal
 
 from .conftest import requires_db
@@ -132,6 +133,38 @@ async def _query(
     api: httpx.AsyncClient, query: str, who: str = "reader", **body: Any
 ) -> httpx.Response:
     return await api.post(f"/v1/{TENANT}/cypher", json={"query": query, **body}, headers=_as(who))
+
+
+async def _console_backends(db_pool: asyncpg.Pool) -> set[int]:
+    rows = await db_pool.fetch(
+        "SELECT pid FROM pg_stat_activity WHERE application_name = $1;", APPLICATION_NAME,
+    )
+    return {r["pid"] for r in rows}
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_failed_query_does_not_leave_its_connection_for_the_next(
+    api: httpx.AsyncClient, db_pool: asyncpg.Pool,
+) -> None:
+    # A failed AGE call can leave its database process unusable (a lock AGE
+    # took and kept): the console closes the connection rather than reuse it.
+    assert (await _query(api, "MATCH (d:Doc) RETURN count(d)")).status_code == HTTPStatus.OK
+    before = await _console_backends(db_pool)
+    assert before
+    failed = await _query(api, "MATCH (d:Doc) RETURN d.pages / 0")
+    assert failed.status_code == HTTPStatus.BAD_REQUEST, failed.text
+    for _ in range(50):  # the close reaches the server shortly after
+        if not before & await _console_backends(db_pool):
+            break
+        await asyncio.sleep(0.1)
+    assert not before & await _console_backends(db_pool)
+    # The console carries on, on a fresh connection.
+    assert (await _query(api, "MATCH (d:Doc) RETURN count(d)")).json()["rows"] == [[2]]
+    # What needs AGE's in-memory graph is refused before it runs.
+    stats = await _query(api, "MATCH (d:Doc) RETURN vertex_stats(d)")
+    assert stats.status_code == HTTPStatus.BAD_REQUEST
+    assert "vertex_stats()" in stats.json()["detail"]
 
 
 @requires_db
