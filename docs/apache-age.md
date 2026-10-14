@@ -29,9 +29,11 @@ SQL in one module, `graphos.writes`: node and edge upserts go through the
 COPY-staged path of §6 (`writes.upsert_nodes` / `writes.upsert_edges`), and
 node deletes are one SQL statement that removes the nodes and their edges
 together. §5 gives the two reasons (throughput and a backend segfault).
-Cypher remains in use for some reads only. The rows
-above about inlined map literals and per-row `cypher()` calls describe what
-a Cypher write needs on AGE 1.6; graphos does not write that way.
+Every API read is SQL too; Cypher runs only in the opt-in, read-only
+console (`GRAPHOS_CYPHER=true`). The rows above about inlined map literals and
+per-row `cypher()` calls describe what a Cypher write needs on AGE 1.6;
+graphos does not write that way. §11 lists which of these AGE has fixed
+since, and in which release.
 
 ---
 
@@ -98,9 +100,13 @@ for every registered label:
 | `UNIQUE (start_id, end_id)` per edge label | Arbiter for the `ON CONFLICT` of every edge write |
 | `btree (start_id, end_id)` per edge label | Outgoing-edge lookups on read paths (kept alongside the unique one) |
 | `btree (end_id)` per edge label | Incoming-edge lookups (`WHERE end_id IN (…)`) |
-| partial `btree (end_community_id)`, `btree (start_community_id)` per edge label | Community-scoped BFS (forward and backward hops) |
+| partial btree on `end_community_id` and partial btree on `start_community_id` per edge label | Community-scoped BFS (forward and backward hops) |
 | `btree (id)` per edge label (`CONCURRENTLY`) | Paging edges in graphid order; AGE does not index the graphid |
 | `btree (id)` per vertex label (opt-in, `GRAPHOS_VERTEX_GRAPHID_INDEXES`) | Resolving edge endpoints by graphid; costs 20–30% on bulk vertex writes |
+
+Declared `property_indexes` and `search_indexes` are built at registration as well, and label
+tables that were never analyzed are analyzed once. The full list, with names, is in
+[concept.md §2.3](./concept.md#23-indexes-created-at-registration).
 
 Two different access paths, two different indexes:
 
@@ -108,8 +114,9 @@ Two different access paths, two different indexes:
   `WHERE properties @> '{"id":"X"}'::agtype`** — the GIN containment
   operator. It does *not* lower to `properties->'"id"' = …`, so the btree
   unique index is **not** used by Cypher MATCH. GIN on `properties` is
-  what keeps a Cypher read by id off a sequential scan. (graphos itself runs
-  no Cypher; it reads by id in SQL, through the unique btree.)
+  what keeps a Cypher read by id off a sequential scan. (graphos's own reads
+  run no Cypher and read by id in SQL, through the unique btree; the opt-in
+  console's `MATCH {id: …}` uses this GIN index.)
 - **Direct SQL** that compares `properties->'"id"'` (node-by-id reads,
   property stamping, the `ON CONFLICT` of every node write, and the edge
   write path's endpoint JOIN) uses the unique btree.
@@ -135,8 +142,10 @@ Plan shape for `MATCH (n:Person {id: …})`:
 round), so an index scan for `expr >= v` starts after the entries equal to
 `v` and silently loses them; a sequential scan of the same query returns
 them. `>`, `<`, `<=` and `=` are right. graphos's keyset pagination
-(`nodes:scan` cursors) therefore never sends `>=`: it queries an equality
-branch and a strict `>` branch one after the other. Check it with:
+(`nodes:scan` cursors) therefore never sends `>=`: it queries one branch per
+sort key (equalities on the tied keys, then a strict `>`, or `<` when
+descending), in order. Fixed on AGE master (apache/age#2577), not yet in a
+release (§11). Check it with:
 
 ```sql
 SELECT a.amopstrategy, a.amopopr::regoperator
@@ -155,14 +164,19 @@ carry which properties is recorded at write time instead
 
 ---
 
-## 5. Why every write is COPY-staged SQL
+## 5. Why every write is SQL
 
-graphos has one write path: the COPY-staged `INSERT … ON CONFLICT` of §6.
-There is no flag and no fallback. Two findings led there.
+Every write is SQL in `graphos.writes`, with no flag and no fallback to
+Cypher. Every node and edge upsert goes through the COPY-staged
+`INSERT … ON CONFLICT` of §6; a merge or patch of one node or edge is a
+single-row `UPDATE`, a delete one `DELETE` statement, and `edges:resolve` an
+`INSERT … SELECT … ON CONFLICT DO NOTHING`. Two findings led there.
 
-**Reason 1 — throughput.** Measured with `scripts/bench_bulk_write.py`
-on a 13k-node + 44k-edge synthetic dataset (graphos-db with 4 GB
-shared_buffers, single host), comparing per-row Cypher with the COPY path:
+**Reason 1 — throughput.** On a 13k-node + 44k-edge synthetic dataset
+(graphos-db with 4 GB shared_buffers, single host). The COPY figures come
+from `scripts/bench_bulk_write.py`; the per-row Cypher baseline was measured
+with an earlier graphos that still had a Cypher write path, and the script
+can no longer reproduce it:
 
 | Approach | Mechanism | Edge throughput |
 |---|---|---|
@@ -174,7 +188,7 @@ That is ≈37–156× in favour of the COPY path on this benchmark.
 **Reason 2 — stability.** A Cypher write into a label table with extra
 columns crashes the server; see the pitfall below.
 
-Every write endpoint uses that path: `POST /v1/{tenant}/graph/nodes`,
+Every upsert endpoint uses that path: `POST /v1/{tenant}/graph/nodes`,
 `/edges`, `nodes:bulk`, `edges:bulk` and `snapshot-import`. Node upserts
 need the unique id index and edge upserts the `UNIQUE (start_id, end_id)`
 index from §4; bootstrap installs both, and graphos re-bootstraps every
@@ -195,10 +209,12 @@ not create, AGE 1.6.0 segfaults the Postgres backend on any Cypher `SET` or
 `MERGE … SET` that writes a row of that label, new or existing. The
 postmaster then restarts the whole server and every connection drops.
 
-graphos label tables can carry such columns in two ways: bootstrap adds
-`end_community_id` and `start_community_id` columns to every edge table (§9,
-community-scoped traversal), and declared `generated_columns` add columns to vertex
-labels. Verified live on AGE 1.6.0. graphos therefore issues **no
+graphos label tables always carry such columns: bootstrap adds
+`graphos_rev` to every label table (through AGE's two parent tables), and
+`end_community_id` and `start_community_id` to every edge table (§9,
+community-scoped traversal); declared `generated_columns` add more to vertex
+labels. Verified live on AGE 1.6.0; fixed in AGE 1.8.0 (apache/age#2458),
+which has no PostgreSQL 16 release (§11). graphos therefore issues **no
 Cypher writes**: every node and edge write is the SQL `INSERT … ON CONFLICT
 … DO UPDATE SET properties = properties || EXCLUDED.properties` of §6,
 which never enters AGE's tuple-building code and keeps the same contract
@@ -229,9 +245,15 @@ no wait event, no CPU, deaf to `pg_cancel_backend`, `pg_terminate_backend`,
 `statement_timeout` and a fast shutdown; only `SIGKILL` (a restart with
 crash recovery) ends it. A different backend just gets the error again.
 Verified on AGE 1.6.0 with a native stack in `pthread_mutex_lock`
-(`age_global_graph.c:847`). Neither `age_global_graph.c` nor `age_vle.c`
-calls `CHECK_FOR_INTERRUPTS()`, so even a successful load of a large graph
-cannot be cancelled.
+(`age_global_graph.c:847`). In 1.6.0 neither `age_global_graph.c` nor
+`age_vle.c` calls `CHECK_FOR_INTERRUPTS()`, so even a successful load of a
+large graph cannot be cancelled.
+
+Upstream, AGE 1.8.0 removed the mutex (apache/age#2433) and checks for
+interrupts in the variable-length search (apache/age#2430), though not in the
+graph load. The column-count check is still there (apache/age#2583, open), so
+variable-length patterns still fail on graphos's tables; and 1.8.0 has no
+PostgreSQL 16 release (§11).
 
 graphos runs neither: its paths, expand and other reads are plain SQL. The
 Cypher console refuses variable-length patterns and `vertex_stats()` before
@@ -267,6 +289,9 @@ INSERT INTO "G"."L" (properties)
 COMMIT;
 ```
 
+Simplified: the real statements (`graphos.writes`) also bump `graphos_rev`
+and record which properties each label carries (`graphos_meta.node_properties`).
+
 The `DISTINCT ON … ORDER BY ctid DESC` collapses duplicate ids within one
 batch (last row wins). Without it Postgres rejects the INSERT with
 "ON CONFLICT DO UPDATE command cannot affect row a second time".
@@ -298,10 +323,10 @@ it, the JOIN becomes btree probes on the unique `properties->'"id"'`
 index. The hint is `SET LOCAL`, so read paths keep the default planner.
 
 Edges whose endpoints don't resolve fall out of the inner JOIN — the
-same "no endpoint → no edge" result a Cypher MATCH-MATCH-MERGE gives. They
-are counted as `skipped` with a separate `NOT EXISTS` probe (an
-anti-semi-join that also uses the unique index); that count is of input
-rows, before de-duplication.
+same "no endpoint → no edge" result a Cypher MATCH-MATCH-MERGE gives. A
+separate `EXISTS` probe (a semi-join on the unique index) finds the pairs
+whose two ends exist; `skipped` counts the input rows not among them, before
+de-duplication.
 
 ### Why `to_jsonb(text)::text::agtype` works for the JOIN
 
@@ -316,7 +341,9 @@ SELECT properties->'"id"' = to_jsonb('n000001'::text)::text::agtype
 
 ### Idempotency contract
 
-The COPY path is safe to call repeatedly with the same payload:
+The COPY path is safe to call repeatedly with the same payload: the
+properties come out the same (each repeat still bumps the revision and
+records a change-feed entry).
 
 - Vertex: `ON CONFLICT ((properties->'"id"')) DO UPDATE SET
   properties = old || excluded` — the same result as Cypher
@@ -379,15 +406,17 @@ Guidance:
 - **Statement timeout.** Every pooled connection runs with a server-side
   `statement_timeout` of `GRAPHOS_STATEMENT_TIMEOUT_S` (default 60 s);
   a cancelled statement answers 504, on write endpoints (`/nodes`,
-  `/edges`, `:bulk`, `snapshot-import`) as on reads. It is the only
-  per-statement limit:
-  the asyncpg pool sets no client-side `command_timeout`. The timeout
-  applies per statement, so it bounds each statement of a COPY-staged
-  flush (the COPY, the `INSERT`), not the flush as a whole. Long operations raise it for their own statements:
-  tenant bootstrap, internal schema setup and the startup reload of stored
-  tenants to 1800 s (index builds on large labels can take minutes),
-  Louvain stages to 600 s / 300 s, rule-based edge resolution to 1800 s,
-  and vacuum to 3600 s.
+  `/edges`, `:bulk`, `snapshot-import`) as on reads. The asyncpg pool sets
+  no client-side `command_timeout`. The timeout applies per statement, so
+  it bounds each statement of a COPY-staged flush (the COPY, the `INSERT`),
+  not the flush as a whole. The Cypher console's own pool uses
+  `GRAPHOS_CYPHER_TIMEOUT_S` (default 30 s) instead, with a watchdog. Long
+  operations raise the limit for their own statements: tenant bootstrap,
+  internal schema setup and the startup reload of stored tenants to 1800 s
+  (index builds on large labels can take minutes), rule-based edge
+  resolution to 1800 s, the Louvain edge stream and graph metrics to 600 s,
+  the community back-fill to 300 s per edge label, the dataset export to
+  900 s, and vacuum to 3600 s.
 
 ---
 
@@ -480,7 +509,8 @@ aggregates back.
   sequential scans until it is rebuilt; schedule index rebuilds in a
   quiet window.
 - **Audit logging** emits one structured JSON line per write request (one
-  per `:bulk` POST, not per row) with `method`, `path`, `tenant`,
+  per `:bulk` POST, not per row; message `write`), and one per large read
+  such as an export (message `read`), with `method`, `path`, `tenant`,
   `consumer`, `args_hash`, `status` and `elapsed_ms`. Turn it off with
   `GRAPHOS_AUDIT_ENABLED=false` if it is unwanted.
 - **`pg_stat_activity`** shows a backend as `active` only while a
@@ -490,7 +520,32 @@ aggregates back.
 
 ---
 
-## 11. References
+## 11. Upstream status
+
+Checked 2026-10-14 against `apache/age`. graphos runs AGE 1.6.0 on
+PostgreSQL 16, and AGE has no PostgreSQL 16 release after 1.6.0: the fixes
+below ship in 1.8.0 for PostgreSQL 15, 17 and 18. Every pitfall in this
+document therefore still applies to graphos.
+
+| Pitfall | Upstream |
+|---|---|
+| Cypher write on a label table with extra columns segfaults (§5) | Fixed in 1.8.0 (apache/age#2458) |
+| Variable-length patterns and `vertex_stats()`: the mutex left locked (§5) | Fixed in 1.8.0 (apache/age#2433) |
+| Variable-length patterns and `vertex_stats()`: the column-count check (§5) | Open (apache/age#2583) |
+| No interrupt checks in the variable-length search (§5) | Added in 1.8.0 (apache/age#2430); still none in the graph load |
+| `>=` and `>` swapped in `agtype_ops_btree` (§4) | Fixed on master (apache/age#2577), in no release yet; reported as apache/age#2587 |
+| `ON CREATE SET` / `ON MATCH SET` rejected (§1) | Supported from 1.8.0 (apache/age#2347) |
+| Multi-label patterns (§1, §3) | Open (apache/age#234) |
+| `SET n += $param`, `SET n += row.props` (§1) | Not supported |
+| Chained `MERGE` slow (§1) | Open (apache/age#2177) |
+| GIN key-exists `?` missing rows (§4) | No matching issue found; apache/age#2322 reports missing rows with a GIN index |
+
+Moving to a newer AGE therefore means moving to PostgreSQL 15, 17 or 18 as
+well.
+
+---
+
+## 12. References
 
 - AGE source — `apache/age` on GitHub
 - apache/age#2177 — performance of upserting 10k+ edges with `MERGE`:

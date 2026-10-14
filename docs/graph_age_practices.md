@@ -2,7 +2,7 @@
 
 A working catalogue of what AGE 1.6.x does and does not accept, what
 costs are surprising, and the concrete templates graphos uses on the
-write path (`graphos.cypher`, `graphos.bootstrap`, `graphos.api.bulk`).
+write path (`graphos.writes`, `graphos.bootstrap`, `graphos.api.bulk`).
 Verified against AGE 1.6.0 on PostgreSQL 16. For tuning, concurrency
 and community-detection notes see [`apache-age.md`](./apache-age.md).
 
@@ -19,10 +19,15 @@ What Neo4j-style Cypher accepts that AGE 1.6 does not:
 | `;` between cypher statements inside one `cypher(...)` call | rejected — one statement per call |
 | Cypher `SET` on a label whose table has extra (non-AGE) columns | backend segfault (AGE 1.6.0) |
 
+AGE 1.8.0 accepts `ON CREATE SET` / `ON MATCH SET` and no longer segfaults,
+but it has no PostgreSQL 16 release; graphos runs 1.6.0 on PostgreSQL 16
+(see [`apache-age.md` §11](./apache-age.md#11-upstream-status)).
+
 Because of the last row (and the throughput gap in §3), graphos writes
 no rows through Cypher: every write is SQL in `graphos.writes`, and every
-node and edge upsert is the COPY-staged SQL path of §3. Cypher is still used
-for some reads. What follows is what graphos does,
+node and edge upsert is the COPY-staged SQL path of §3. Every API read is
+SQL too; Cypher runs only in the opt-in, read-only console. What follows is
+what graphos does,
 plus the workaround a per-row Cypher write would need:
 
 - **Per-row Cypher writes must inline every property map as a literal**
@@ -38,9 +43,10 @@ plus the workaround a per-row Cypher write would need:
   inserts a new row into the parent table instead of finding the
   inherited child.
 - **All rows are written only through SQL.** When an AGE label table has
-  any column beyond AGE's own (bootstrap's `end_community_id` and
-  `start_community_id` on every edge table, or a declared generated column on a vertex
-  label), AGE 1.6 segfaults the Postgres backend on a Cypher `SET` /
+  any column beyond AGE's own, as every graphos label table does
+  (bootstrap's `graphos_rev` on every table, `end_community_id` and
+  `start_community_id` on every edge table, declared generated columns on
+  vertex labels), AGE 1.6 segfaults the Postgres backend on a Cypher `SET` /
   `MERGE … SET` that writes a row into that table (verified live; the
   server restarts and every connection drops). `graphos.writes`
   therefore upserts nodes and edges with SQL only (§3): `INSERT …
@@ -50,7 +56,7 @@ plus the workaround a per-row Cypher write would need:
   SQL writes fill generated columns correctly, so generated columns
   on vertex labels are safe. This also avoids the intermittent
   ``Entity failed to be updated: N`` from `SET r += {…}`.
-  See [`apache-age.md` §5](./apache-age.md#5-why-every-write-is-copy-staged-sql).
+  See [`apache-age.md` §5](./apache-age.md#5-why-every-write-is-sql).
 
 ## 2. Indexing — the load-bearing optimisation
 
@@ -67,7 +73,8 @@ needs its own index:
 
 Cypher never lowers the property-map match to the `->` form, so the btree
 doesn't help Cypher, and GIN can't act as an `ON CONFLICT` arbiter — hence
-both. Bootstrap creates them for every label:
+both. Bootstrap creates them for every label (among others; the full list
+is in [`apache-age.md` §4](./apache-age.md#4-index-strategy)):
 
 ```sql
 CREATE INDEX IF NOT EXISTS "<label>_properties_gin"
@@ -109,7 +116,8 @@ the same predicate without `LIMIT`, can hide it. `>`, `<`, `<=` and `=` are
 unaffected in practice: the start position may be off by one, but the row
 check uses the right operator. graphos's scan cursors resume with an
 equality on the tied keys followed by a strict `>` / `<`, one query each,
-never `>=` (`api/graph.py`, `_cursor_branches`). Check it with:
+never `>=` (`api/graph.py`, `_cursor_branches`). Fixed on AGE master
+(apache/age#2577), in no release yet. Check it with:
 
 ```sql
 SELECT a.amopstrategy, a.amopopr::regoperator
@@ -135,8 +143,8 @@ $$, $1::agtype) AS (_ agtype)
 
 The edge form is `MATCH (a:Src {id: $src_id}) MATCH (b:Dst {id: $dst_id})
 MERGE (a)-[r:TYPE]->(b) SET r += {…}`. Cost is dominated by the per-call
-parse + plan: on `scripts/bench_bulk_write.py` (13k nodes, 44k edges)
-it sustains **31 edges/s**.
+parse + plan: on 13k nodes and 44k edges it sustained **31 edges/s**
+(measured with an earlier graphos that still had a Cypher write path).
 
 ### Chained MERGE inside one `cypher()` call — DO NOT USE
 
@@ -215,9 +223,9 @@ Lessons baked into that template:
 
 On the same benchmark this path sustained **1,153–4,840 edges/s**
 (≈37–156× the per-row path). That gap, together with the segfault in §1,
-is why every node and edge write uses it, on every endpoint (`/nodes`,
+is why every node and edge upsert uses it, on every endpoint (`/nodes`,
 `/edges`, `nodes:bulk`, `edges:bulk`, `snapshot-import`); there is no
-flag. The upserts need bootstrap's unique `<Label>_id_unique` and
+flag. Single-row merges and patches are SQL `UPDATE`s. The upserts need bootstrap's unique `<Label>_id_unique` and
 `(start_id, end_id)` indexes as `ON CONFLICT` arbiters. graphos
 re-bootstraps every stored tenant at startup, so a tenant created before
 those indexes existed gets them on the next restart.
@@ -247,10 +255,12 @@ Every pooled connection runs with a server-side `statement_timeout` of
 answers 504, on the write endpoints (`/nodes`, `/edges`, `:bulk`,
 `snapshot-import`) as on reads. It is the only per-statement limit — the pool sets no
 client-side `command_timeout`. It applies per statement — each COPY and
-each COPY-path `INSERT` — so a 500-row flush stays well inside it on an
-indexed tenant. If bulk writes start timing out, check for
-a missing index before raising the limit. Tenant bootstrap (index builds)
-runs under its own 1800 s limit.
+each COPY-path `INSERT` — so a 500-row bulk flush (5,000 rows for snapshot
+import) stays well inside it on an indexed tenant. If bulk writes start
+timing out, check for a missing index before raising the limit. Tenant
+bootstrap (index builds) runs under its own 1800 s limit, and the Cypher
+console's pool under `GRAPHOS_CYPHER_TIMEOUT_S` (30 s). The other long
+operations are listed in [`apache-age.md` §7](./apache-age.md#7-tuning-postgres-for-graphos).
 
 ## 4. Graph names and identifier safety
 
@@ -274,8 +284,9 @@ escaping `'` in the name.
 | Chained MERGE in one `cypher()` | super-linear slowdown | never |
 | COPY into staging + `INSERT … ON CONFLICT` | 1,153–4,840 edges/s | every node and edge write, on every endpoint |
 
-Numbers are from `scripts/bench_bulk_write.py` (13k nodes, 44k edges,
-single host). There is no choice to make: the COPY-staged SQL path is
+The COPY numbers are from `scripts/bench_bulk_write.py` (13k nodes, 44k
+edges, single host); the per-row number from an earlier graphos with a
+Cypher write path. There is no choice to make: the COPY-staged SQL path is
 graphos's only write path, for throughput and because Cypher writes crash
 the backend on label tables with extra columns (§1). The contract surface
 is thinner on the COPY path (AGE's invariants shift to the writer), which
