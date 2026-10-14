@@ -45,6 +45,7 @@ def test_the_document_is_a_registration_body_and_says_what_it_is() -> None:
     assert list(doc)[1:] == [
         "name", "vertex_labels", "edge_labels", "label_hierarchy", "edge_endpoints",
         "strict_endpoints", "search_indexes", "property_indexes", "generated_columns", "meta",
+        "display",
     ]
     # Sorted, and one entry per resolve rule beside the plain names.
     assert doc["vertex_labels"] == ["Doc", "Employee", "Person"]
@@ -152,3 +153,53 @@ def test_a_new_tenant_is_the_incoming_spec() -> None:
     after = schema_document.merged(None, SPEC, replace=False, endpoints_stated=True)
     assert after == SPEC
     assert diff(None, after)["registered"] is True  # type: ignore[index]
+
+
+def test_display_entries_are_checked() -> None:
+    body = TenantSpecBody.model_validate({"name": "acme", "display": {
+        "vertex": {"Person": {"color": "#5fa584", "caption": "full_name", "size_by":
+                              "graphos_pagerank", "icon": "person"}, "Doc": None},
+        "edge": {"AUTHORED": {"caption": "role"}},
+    }})
+    assert body.display.vertex["Person"] is not None
+    assert body.display.vertex["Person"].color == "#5FA584"          # kept upper case
+    assert body.display.vertex["Doc"] is None                         # a removal
+    for bad in (
+        {"vertex": {"Person": {"color": "green"}}},
+        {"vertex": {"Person": {"caption": "full name"}}},
+        {"vertex": {"Person": {"icon": "rocket"}}},
+        {"vertex": {"person": {"color": "#5FA584"}}},
+        {"vertex": {"Person": {"colour": "#5FA584"}}},
+        {"edge": {"AUTHORED": {"icon": "link"}}},                     # icons are for vertices
+        {"nodes": {}},
+    ):
+        with pytest.raises(ValidationError):
+            TenantSpecBody.model_validate({"name": "acme", "display": bad})
+
+
+def test_display_merges_by_entry() -> None:
+    stored = TenantSpec(name="acme", vertex_labels=("Person", "Doc"), edge_labels=("AUTHORED",),
+                        display={"vertex": {"Person": {"color": "#5FA584"},
+                                            "Doc": {"icon": "document"}},
+                                 "edge": {"AUTHORED": {"color": "#8D97AE"}}})
+    incoming = TenantSpec(name="acme", display={"vertex": {"Person": {"caption": "full_name"}}})
+    after = schema_document.merged(
+        stored, incoming, replace=False, endpoints_stated=False,
+        display_removed=(("edge", "AUTHORED"),),
+    )
+    assert after.display == {"vertex": {"Person": {"caption": "full_name"},
+                                        "Doc": {"icon": "document"}}}
+    assert diff(stored, after) == {
+        "removed": {"display": ["edge:AUTHORED"]}, "changed": {"display": ["vertex:Person"]},
+    }
+    doc = schema_document.document(after, now=NOW)
+    assert doc["display"] == {"vertex": {"Doc": {"icon": "document"},
+                                         "Person": {"caption": "full_name"}}}
+
+
+def test_contrast_against_the_canvases() -> None:
+    assert schema_document.contrast("#000000", "#FFFFFF") == pytest.approx(21)
+    # The UI's own category colours read on both canvases.
+    for color in ("#C9825B", "#5FA584", "#8D97AE"):
+        assert schema_document.contrast(color, "#E3E5E9") >= 1.6
+        assert schema_document.contrast(color, "#26292E") >= 1.6

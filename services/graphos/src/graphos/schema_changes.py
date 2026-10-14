@@ -2,7 +2,8 @@
 
 A registration that changes the tenant's schema (labels, edge types,
 declared pairs, label hierarchy, search indexes, resolve rules, property
-indexes, generated columns, ``meta`` keys, ``strict_endpoints``) is
+indexes, generated columns, ``meta`` keys, display entries,
+``strict_endpoints``) is
 recorded with what it added, removed, changed or switched; one that
 changes nothing (a consumer re-registering at startup) records nothing.
 Removing a declared pair, unregistering, restoring and deleting with the
@@ -39,6 +40,16 @@ def _sets(spec: TenantSpec | None) -> dict[str, set[Any]]:
         "generated_columns": {declared.describe_column(x) for x in spec.generated_columns},
         # By key: the notes themselves are free text, kept in the schema, not the feed.
         "meta": set(spec.meta),
+        # By entry, as ``vertex:Person`` / ``edge:WROTE``.
+        "display": set(_display_entries(spec)),
+    }
+
+
+def _display_entries(spec: TenantSpec) -> dict[str, dict[str, object]]:
+    return {
+        f"{part}:{name}": entry
+        for part in ("vertex", "edge")
+        for name, entry in spec.display.get(part, {}).items()
     }
 
 
@@ -52,7 +63,8 @@ def diff(before: TenantSpec | None, after: TenantSpec) -> dict[str, Any] | None:
     """What a registration changed, or ``None`` when it changed nothing.
 
     ``added`` / ``removed`` per part (resolve rules by edge type),
-    ``changed.meta`` for ``meta`` keys whose text changed,
+    ``changed.meta`` for ``meta`` keys whose text changed, ``changed.display``
+    for display entries declared again differently,
     ``strict_endpoints`` as ``[old, new]``, and
     ``registered: true`` for a new tenant.
     """
@@ -71,6 +83,12 @@ def diff(before: TenantSpec | None, after: TenantSpec) -> dict[str, Any] | None:
         )
         if rewritten:
             detail["changed"] = {"meta": rewritten}
+        old_display, new_display = _display_entries(before), _display_entries(after)
+        restyled = sorted(
+            k for k, v in new_display.items() if k in old_display and old_display[k] != v
+        )
+        if restyled:
+            detail.setdefault("changed", {})["display"] = restyled
     strict_before = bool(before.strict_endpoints) if before else False
     if bool(after.strict_endpoints) != strict_before:
         detail["strict_endpoints"] = [strict_before, bool(after.strict_endpoints)]

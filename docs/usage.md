@@ -296,6 +296,7 @@ owner), `maintain` on it (or a matching `create_tenants`) to re-register one. Th
 | `search_indexes` | dict name → `{labels, properties, analyzer, language}` | named search indexes for ranked search (§5, *search*); name `^[a-z][a-z0-9_]{0,39}$` |
 | `edge_endpoints` | dict edge type → list of `{src, dst}` (or `[src, dst]`) | the label pairs each relationship type may join; see *Declared endpoints* below. At most 5000 pairs per request. |
 | `strict_endpoints` | bool, optional | refuse edge writes outside the declared pairs; omitted: unchanged (off for a new tenant) |
+| `display` | `{vertex: {label: {color, caption, size_by, icon} \| null}, edge: {type: {color, caption} \| null}}` | how the web UI draws each label and edge type; see *Label styles* below |
 
 **Merge vs replace.** By default, re-registering merges the incoming spec into the stored one.
 Labels, indexes, generated columns, the hierarchy and rules are unioned, and `meta` keys are
@@ -325,6 +326,29 @@ that declares no pairs accepts any pair, strict or not, and edges already stored
 Snapshot imports restore edges as they were saved. Declared pairs and the setting are stored apart
 from the spec (`graphos_meta.edge_endpoints`, `graphos_meta.tenant_settings`), so a server that
 predates them cannot drop them when it rewrites a spec.
+
+**Label styles.** `display` says how the web UI draws each vertex label and edge type, the same for
+everyone on the tenant:
+
+```json
+{"name": "acme", "display": {
+  "vertex": {"Person": {"color": "#5FA584", "caption": "full_name", "size_by": "graphos_pagerank", "icon": "person"},
+             "Document": {"color": "#C9825B", "caption": "title", "icon": "document"}},
+  "edge": {"AUTHORED": {"color": "#8D97AE", "caption": "role"}}}}
+```
+
+`color` is `#RRGGBB` (stored upper case); `caption` the property drawn as the name (default `name`,
+else the id); `size_by` a numeric property the node's size follows (a metric, §8); `icon` one of
+`person`, `people`, `building`, `document`, `folder`, `code`, `function`, `database`, `server`,
+`cloud`, `package`, `tag`, `link`, `calendar`, `location`, `mail`, `key`, `lock`, `shield`, `bug`,
+`star`, `flag`, `chart`, `settings`, `globe`, `book`, `cpu`, `branch`, `message`, `box`. Every key
+is optional. Each label or type must be registered, already or in the same request (else 422). On
+a merge an entry declared again replaces the stored one and `null` removes one
+(`{"display": {"vertex": {"Person": null}}}`); entries left out stay. A label without an entry takes
+its parent's colour (`label_hierarchy`), else the UI's own. The dry run warns about a colour too
+close to the light or the dark canvas. `GET /v1/{tenant}/schema` serves `display` to every reader;
+it is in the schema file and the change feed (`display` entries as `vertex:Person`, `edge:AUTHORED`).
+Cosmetic: no effect on data, queries or validation.
 
 **Indexes created automatically.** Per vertex label: `<Label>_properties_gin` (GIN on
 `properties`), `<Label>_id_unique` (unique on the `id` property, so ids are unique within a label),

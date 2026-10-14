@@ -62,9 +62,11 @@ from graphos.bootstrap import (
     remember,
     remove_edge_endpoint,
     unregister_tenant,
+    validate_display,
     validate_edge_endpoints,
 )
 from graphos.contracts.tenants import (
+    DisplaySpec,
     GeneratedColumnSpec,
     PropertyIndexSpec,
     RegisterDryRunResponse,
@@ -101,7 +103,21 @@ def _spec_to_info(spec: TenantSpec) -> TenantInfo:
         label_hierarchy={c: p for (c, p) in spec.label_hierarchy},
         meta=dict(spec.meta),
         search_indexes=dict(spec.search_indexes),
+        display=DisplaySpec.model_validate(spec.display),
     )
+
+
+def _display(body: TenantSpecBody) -> tuple[dict[str, Any], tuple[tuple[str, str], ...]]:
+    """The display entries a registration declares, and those it removes (sent as ``null``)."""
+    declared_entries: dict[str, Any] = {}
+    removed: list[tuple[str, str]] = []
+    for part in ("vertex", "edge"):
+        for name, entry in getattr(body.display, part).items():
+            if entry is None:
+                removed.append((part, name))
+            else:
+                declared_entries.setdefault(part, {})[name] = entry.model_dump(exclude_none=True)
+    return declared_entries, tuple(removed)
 
 
 def _validate_declared(
@@ -133,14 +149,16 @@ def _validate_declared(
 async def _dry_run(
     pool: asyncpg.Pool, previous: TenantSpec | None, spec: TenantSpec,
     *, replace: bool, endpoints_stated: bool, meta_removed: tuple[str, ...] = (),
+    display_removed: tuple[tuple[str, str], ...] = (),
 ) -> RegisterDryRunResponse:
     """What registering ``spec`` would change, checked as bootstrap would."""
     after = schema_document.merged(
         previous, spec, replace=replace, endpoints_stated=endpoints_stated,
-        meta_removed=meta_removed,
+        meta_removed=meta_removed, display_removed=display_removed,
     )
     try:
         _validate_label_hierarchy(spec.label_hierarchy, spec.vertex_labels)
+        validate_display(spec.display, set(after.edge_labels), set(after.vertex_labels))
         async with pool.acquire() as conn:
             for name, body in spec.search_indexes.items():
                 for label in body.get("labels") or ():
@@ -305,14 +323,19 @@ async def register(
     # Declared pairs, indexes and columns may name labels and types registered
     # earlier, or added now.
     known = registered_tenants().get(body.name)
+    display, display_removed = _display(body)
     try:
         vertex_labels = {*body.vertex_labels, *(known.vertex_labels if known else ())}
+        edge_labels = {*edge_label_names, *(known.edge_labels if known else ())}
         validate_edge_endpoints(
-            edge_endpoints,
-            edge_labels={*edge_label_names, *(known.edge_labels if known else ())},
-            vertex_labels=vertex_labels,
+            edge_endpoints, edge_labels=edge_labels, vertex_labels=vertex_labels,
         )
         _validate_declared(body, known, vertex_labels)
+        # Replacing the schema keeps only the labels sent: entries must name those.
+        if force_shrink:
+            validate_display(display, set(edge_label_names), set(body.vertex_labels))
+        else:
+            validate_display(display, edge_labels, vertex_labels)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc),
@@ -330,6 +353,7 @@ async def register(
         resolve_rules=resolve_rules,
         meta={k: v for k, v in body.meta.items() if v is not None},
         search_indexes={k: v.model_dump() for k, v in body.search_indexes.items()},
+        display=display,
         edge_endpoints=edge_endpoints,
         strict_endpoints=body.strict_endpoints,
     )
@@ -351,7 +375,7 @@ async def register(
         result = await _dry_run(
             pool, known, spec, replace=force_shrink,
             endpoints_stated="edge_endpoints" in body.model_fields_set,
-            meta_removed=meta_removed,
+            meta_removed=meta_removed, display_removed=display_removed,
         )
         return result.model_copy(update={"exists": previous is not None, "restores": restores})
     if restores:
@@ -383,7 +407,9 @@ async def register(
             pool, spec, replace_endpoints="edge_endpoints" in body.model_fields_set,
         )
     else:
-        await persist_spec(pool, spec, meta_removed=meta_removed)
+        await persist_spec(
+            pool, spec, meta_removed=meta_removed, display_removed=display_removed,
+        )
     # Persisting merges with the stored spec (unless force_shrink); keep the
     # merged result in memory so a partial re-registration never hides labels
     # or resolve rules registered earlier.

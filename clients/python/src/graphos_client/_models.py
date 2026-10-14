@@ -52,6 +52,8 @@ class TenantInfo(BaseModel):
     label_hierarchy: dict[str, str] = Field(default_factory=dict)
     meta: dict[str, str] = Field(default_factory=dict)
     search_indexes: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    # ``{"vertex": {label: {color, caption, size_by, icon}}, "edge": {type: {color, caption}}}``.
+    display: dict[str, dict[str, dict[str, Any]]] = Field(default_factory=dict)
 
 
 class Me(BaseModel):
@@ -117,6 +119,8 @@ class TenantSchemaInfo(BaseModel):
     # Empty and False from a server that predates declared endpoints.
     edge_endpoints: dict[str, list[EdgeEndpoint]] = Field(default_factory=dict)
     strict_endpoints: bool = False
+    # How the web UI draws labels and edge types; empty from an older server.
+    display: dict[str, dict[str, dict[str, Any]]] = Field(default_factory=dict)
 
 
 # ── Reads ───────────────────────────────────────────────────────────────────

@@ -97,6 +97,9 @@ class TenantSpec:
     # Named search indexes (``graphos.search``): name -> {labels, properties,
     # analyzer, language}.
     search_indexes: dict[str, dict[str, object]] = field(default_factory=dict)
+    # How the web UI draws labels and edge types: ``{"vertex": {label: {color,
+    # caption, size_by, icon}}, "edge": {type: {color, caption}}}``.  Cosmetic.
+    display: dict[str, dict[str, dict[str, object]]] = field(default_factory=dict)
     edge_endpoints: tuple[tuple[str, str, str], ...] = ()
     strict_endpoints: bool | None = None
 
@@ -749,7 +752,38 @@ def _spec_from_jsonable(payload: dict[str, object]) -> TenantSpec:
         resolve_rules=rules_pairs,
         meta=dict(payload.get("meta") or {}),
         search_indexes=dict(payload.get("search_indexes") or {}),
+        display=display_of(payload.get("display")),
     )
+
+
+def display_of(raw: object) -> dict[str, dict[str, dict[str, object]]]:
+    """A stored ``display`` in its canonical shape: both parts, entries without nulls."""
+    data = raw if isinstance(raw, dict) else {}
+    out: dict[str, dict[str, dict[str, object]]] = {}
+    for part in ("vertex", "edge"):
+        entries = data.get(part)
+        if isinstance(entries, dict):
+            kept = {
+                str(name): {k: v for k, v in entry.items() if v is not None}
+                for name, entry in entries.items() if isinstance(entry, dict)
+            }
+            if kept:
+                out[part] = kept
+    return out
+
+
+def validate_display(
+    display: dict[str, dict[str, dict[str, object]]],
+    edge_labels: set[str],
+    vertex_labels: set[str],
+) -> None:
+    """Refuse display entries naming a label or an edge type the tenant lacks."""
+    for label in display.get("vertex", {}):
+        if label not in vertex_labels:
+            raise ValueError(f"display: {label!r} is not a vertex label of the tenant")
+    for edge_type in display.get("edge", {}):
+        if edge_type not in edge_labels:
+            raise ValueError(f"display: {edge_type!r} is not an edge label of the tenant")
 
 
 def validate_edge_endpoints(
@@ -831,6 +865,7 @@ async def persist_spec(
     *,
     replace_endpoints: bool = False,
     meta_removed: tuple[str, ...] = (),
+    display_removed: tuple[tuple[str, str], ...] = (),
 ) -> None:
     """Upsert the tenant spec into graphos_meta.tenants.
 
@@ -840,7 +875,8 @@ async def persist_spec(
     generated_columns, label_hierarchy and resolve_rules become the
     set-union of existing and incoming; ``meta`` is merged dict-wise
     (incoming keys overwrite existing keys for the same name), and the keys in
-    ``meta_removed`` (sent as ``null``) are removed.
+    ``meta_removed`` (sent as ``null``) are removed; ``display`` is merged by
+    entry, the ``(part, name)`` entries in ``display_removed`` removed.
 
     Why: a blind ``DO UPDATE SET spec = EXCLUDED.spec`` would let any
     caller (even a bare ``{"name": ...}`` registration) shrink a tenant
@@ -923,11 +959,27 @@ async def persist_spec(
                     -- By name: an index declared again replaces its definition.
                     'search_indexes',
                         COALESCE(graphos_meta.tenants.spec->'search_indexes', '{}'::jsonb)
-                        || COALESCE(EXCLUDED.spec->'search_indexes', '{}'::jsonb)
+                        || COALESCE(EXCLUDED.spec->'search_indexes', '{}'::jsonb),
+                    -- By entry: an entry declared again replaces the stored one.
+                    'display',
+                        jsonb_strip_nulls(jsonb_build_object(
+                            'vertex', NULLIF(
+                                (COALESCE(graphos_meta.tenants.spec #> '{display,vertex}', '{}')
+                                 || COALESCE(EXCLUDED.spec #> '{display,vertex}', '{}'))
+                                - $4::text[],
+                                '{}'::jsonb),
+                            'edge', NULLIF(
+                                (COALESCE(graphos_meta.tenants.spec #> '{display,edge}', '{}')
+                                 || COALESCE(EXCLUDED.spec #> '{display,edge}', '{}'))
+                                - $5::text[],
+                                '{}'::jsonb)
+                        ))
                 ),
                 updated_at = now();
             """,
             spec.name, payload, list(meta_removed),
+            [name for part, name in display_removed if part == "vertex"],
+            [name for part, name in display_removed if part == "edge"],
         )
         await _supersede_kept(conn, spec.name)
         await _persist_endpoints(conn, spec, replace=replace_endpoints)

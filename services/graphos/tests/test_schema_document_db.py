@@ -41,6 +41,10 @@ FULL: dict[str, Any] = {
     "property_indexes": [{"label": "Doc", "properties": ["kind"]}],
     "generated_columns": [{"label": "Doc", "column": "kind", "property": "kind"}],
     "meta": {"owner": "team-a"},
+    "display": {
+        "vertex": {"Person": {"color": "#5FA584", "caption": "full_name", "icon": "person"}},
+        "edge": {"AUTHORED": {"color": "#8D97AE"}},
+    },
 }
 
 
@@ -256,3 +260,55 @@ async def test_a_null_meta_key_is_removed_and_the_dry_run_says_so(
         "/v1/tenants?dry_run=true", json={"name": SOURCE, "meta": {"model": None}},
     )
     assert again.json()["changes"] is None
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_display_merges_by_entry_and_null_removes_one(
+    api: httpx.AsyncClient, db_pool: asyncpg.Pool,
+) -> None:
+    body = {
+        "name": SOURCE, "vertex_labels": ["Person", "Doc"], "edge_labels": ["AUTHORED"],
+        "display": {"vertex": {"Person": {"color": "#5fa584", "caption": "full_name"},
+                               "Doc": {"icon": "document"}},
+                    "edge": {"AUTHORED": {"color": "#8D97AE"}}},
+    }
+    assert (await api.post("/v1/tenants", json=body)).status_code == HTTPStatus.OK
+    # A registration that leaves display out keeps it (the merge SQL).
+    assert (await api.post("/v1/tenants", json={"name": SOURCE})).status_code == HTTPStatus.OK
+    schema = (await api.get(f"/v1/{SOURCE}/schema")).json()
+    # Keys left out of an entry are answered as null.
+    shown = {part: {name: {k: v for k, v in entry.items() if v is not None}
+                    for name, entry in entries.items()}
+             for part, entries in schema["display"].items()}
+    assert shown == {
+        "vertex": {"Person": {"color": "#5FA584", "caption": "full_name"},
+                   "Doc": {"icon": "document"}},
+        "edge": {"AUTHORED": {"color": "#8D97AE"}},
+    }
+    # An entry declared again replaces the stored one; null removes one.
+    change = {"name": SOURCE, "display": {"vertex": {"Person": {"color": "#C9825B"}, "Doc": None},
+                                          "edge": {"AUTHORED": None}}}
+    dry = await api.post("/v1/tenants?dry_run=true", json=change)
+    assert dry.json()["changes"] == {
+        "removed": {"display": ["edge:AUTHORED", "vertex:Doc"]},
+        "changed": {"display": ["vertex:Person"]},
+    }
+    assert (await api.post("/v1/tenants", json=change)).status_code == HTTPStatus.OK
+    spec = await load_spec(db_pool, SOURCE)
+    assert spec is not None
+    assert spec.display == {"vertex": {"Person": {"color": "#C9825B"}}}
+    # Entries must name the tenant's labels and types.
+    bad = await api.post(
+        "/v1/tenants", json={"name": SOURCE, "display": {"edge": {"CITES": {"color": "#8D97AE"}}}},
+    )
+    assert bad.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+    assert "'CITES' is not an edge label" in bad.text
+    # A colour lost on a canvas is a warning, not a refusal.
+    faint = await api.post(
+        "/v1/tenants?dry_run=true",
+        json={"name": SOURCE, "display": {"vertex": {"Doc": {"color": "#E0E2E6"}}}},
+    )
+    assert faint.json()["warnings"] == [
+        "display colour #E0E2E6 of 'Doc' is hard to see on the light canvas",
+    ]

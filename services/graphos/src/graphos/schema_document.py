@@ -89,6 +89,11 @@ def document(spec: TenantSpec, *, now: datetime) -> dict[str, Any]:
             key=lambda x: (x["label"], x["column"]),
         ),
         "meta": dict(sorted(spec.meta.items())),
+        # Cosmetic: a server that predates it ignores the key (the version stays 1).
+        "display": {
+            part: dict(sorted(spec.display[part].items()))
+            for part in ("vertex", "edge") if spec.display.get(part)
+        },
     }
 
 
@@ -127,13 +132,15 @@ def merged(
     replace: bool,
     endpoints_stated: bool,
     meta_removed: Iterable[str] = (),
+    display_removed: Iterable[tuple[str, str]] = (),
 ) -> TenantSpec:
     """The spec registering ``incoming`` would leave, as the server stores it.
 
     Merge (the default): labels, declarations, hierarchy, rules and declared
     pairs are added to the stored ones, ``meta`` merged key by key (the keys
     in ``meta_removed``, sent as ``null``, removed), search indexes replaced
-    by name.  ``replace`` (``force_shrink``): the incoming
+    by name, display entries replaced by entry (those in ``display_removed``
+    removed).  ``replace`` (``force_shrink``): the incoming
     spec, but declared pairs only when the request states them.  Either way
     ``strict_endpoints`` stays as stored when the request leaves it out.
     """
@@ -159,12 +166,70 @@ def merged(
             if k not in set(meta_removed)
         },
         search_indexes={**previous.search_indexes, **incoming.search_indexes},
+        display=_merged_display(previous.display, incoming.display, set(display_removed)),
         edge_endpoints=_union(previous.edge_endpoints, incoming.edge_endpoints),
         strict_endpoints=bool(strict),
     )
 
 
+def _merged_display(
+    stored: dict[str, dict[str, dict[str, object]]],
+    incoming: dict[str, dict[str, dict[str, object]]],
+    removed: set[tuple[str, str]],
+) -> dict[str, dict[str, dict[str, object]]]:
+    out: dict[str, dict[str, dict[str, object]]] = {}
+    for part in ("vertex", "edge"):
+        entries = {
+            name: entry
+            for name, entry in {**stored.get(part, {}), **incoming.get(part, {})}.items()
+            if (part, name) not in removed
+        }
+        if entries:
+            out[part] = entries
+    return out
+
+
 # ── What applying it would cost ─────────────────────────────────────────────
+
+# The web UI's canvas backgrounds (light, dark); a declared colour too close to
+# either is hard to see there.
+_CANVASES = {"light": "#E3E5E9", "dark": "#26292E"}
+_MIN_CONTRAST = 1.6
+
+
+def _luminance(color: str) -> float:
+    def channel(i: int) -> float:
+        c = int(color[i:i + 2], 16) / 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4  # noqa: PLR2004 - sRGB
+    return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5)
+
+
+def contrast(a: str, b: str) -> float:
+    """The WCAG contrast ratio of two ``#RRGGBB`` colours (1 to 21)."""
+    la, lb = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+def _hard_to_see(previous: TenantSpec | None, after: TenantSpec) -> list[str]:
+    """Declared colours, new or changed, too close to a canvas background."""
+    out: list[str] = []
+    before = previous.display if previous else {}
+    for part in ("vertex", "edge"):
+        for name, entry in after.display.get(part, {}).items():
+            color = entry.get("color")
+            was = before.get(part, {}).get(name, {}).get("color")
+            if not isinstance(color, str) or was == color:
+                continue
+            faint = [
+                scheme for scheme, canvas in _CANVASES.items()
+                if contrast(color, canvas) < _MIN_CONTRAST
+            ]
+            if faint:
+                out.append(
+                    f"display colour {color} of {name!r} is hard to see on the "
+                    f"{' and '.join(faint)} canvas"
+                )
+    return out
 
 
 async def _rows(conn: asyncpg.Connection, tenant: str, label: str) -> int | None:
@@ -194,9 +259,9 @@ async def warnings(
 
     Cheap catalog reads, plus one duplicate check per new unique index.
     """
+    out = _hard_to_see(previous, after)
     if previous is None:
-        return []
-    out: list[str] = []
+        return out
     if replace:
         gone = sorted(
             (set(previous.vertex_labels) - set(after.vertex_labels))

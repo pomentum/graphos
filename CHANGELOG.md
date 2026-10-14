@@ -18,6 +18,11 @@ under one version.
   `GRAPHOS_CYPHER_LEVEL` sets the level it needs (`read`). Saved queries
   (`/v1/{tenant}/cypher/saved`) keep named, parameterised queries for a tenant's readers.
   Client: `cypher`, `saved_queries`, `save_query`, `run_saved_query`, `delete_saved_query`.
+- **Label styles.** A tenant can declare how the web UI draws each vertex label (`color`,
+  `caption`, `size_by`, `icon` from a fixed list) and edge type (`color`, `caption`): `display`
+  in the registration, merged by entry (`null` removes one), checked against the tenant's labels,
+  served by `GET /v1/{tenant}/schema`, carried in the schema file and recorded in the change feed;
+  the dry run warns about a colour hard to see on either canvas. Client: `register_tenant(display=…)`.
 - **Web UI: Query.** Where the console is on, a Query page (under Graph): a Cypher editor
   (Ctrl/⌘+Enter runs) that colours Cypher (clauses, labels, edge types, properties, parameters,
   functions, strings, comments) and suggests as one types or on Ctrl+Space: the tenant's labels

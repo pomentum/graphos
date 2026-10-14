@@ -448,6 +448,78 @@ class EdgeEndpointSpec(BaseModel):
         return v
 
 
+# Icons a vertex label may be drawn with: generic shapes only, named for what
+# they show; the web UI maps each to a pictogram.
+DISPLAY_ICONS: tuple[str, ...] = (
+    "person", "people", "building", "document", "folder", "code", "function",
+    "database", "server", "cloud", "package", "tag", "link", "calendar",
+    "location", "mail", "key", "lock", "shield", "bug", "star", "flag",
+    "chart", "settings", "globe", "book", "cpu", "branch", "message", "box",
+)
+_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
+
+
+class _DisplayBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    color: str | None = Field(
+        None, description="`#RRGGBB`; undeclared labels keep the UI's colours.",
+    )
+    caption: str | None = Field(
+        None, description="The property drawn as the name (default: `name`, else the id).",
+    )
+
+    @field_validator("color")
+    @classmethod
+    def _color(cls, v: str | None) -> str | None:
+        if v is not None and not _COLOR.fullmatch(v):
+            raise ValueError(f"colour {v!r} must be #RRGGBB")
+        return v.upper() if v else v
+
+    @field_validator("caption")
+    @classmethod
+    def _caption(cls, v: str | None) -> str | None:
+        return v if v is None else _property_name(v)
+
+
+class VertexDisplay(_DisplayBase):
+    """How the web UI draws one vertex label."""
+
+    size_by: str | None = Field(
+        None, description="A numeric property (e.g. a `graphos_*` metric) the node's size follows.",
+    )
+    icon: Literal[DISPLAY_ICONS] | None = Field(  # type: ignore[valid-type]
+        None, description="A pictogram drawn on the node, from a fixed list.",
+    )
+
+    @field_validator("size_by")
+    @classmethod
+    def _size_by(cls, v: str | None) -> str | None:
+        return v if v is None else _property_name(v)
+
+
+class EdgeDisplay(_DisplayBase):
+    """How the web UI draws one edge type."""
+
+
+class DisplaySpec(BaseModel):
+    """Per vertex label and edge type, how the web UI draws it: shared by
+    everyone on the tenant. Cosmetic: no effect on data or queries."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vertex: dict[str, VertexDisplay | None] = Field(default_factory=dict)
+    edge: dict[str, EdgeDisplay | None] = Field(default_factory=dict)
+
+    @field_validator("vertex", "edge")
+    @classmethod
+    def _names(cls, v: dict[str, Any]) -> dict[str, Any]:
+        for name in v:
+            if not _LABEL_PATTERN.fullmatch(name):
+                raise ValueError(f"display entry {name!r} must match {_LABEL_PATTERN.pattern}")
+        return v
+
+
 class TenantSpecBody(BaseModel):
     """Body for POST /v1/tenants.
 
@@ -515,6 +587,15 @@ class TenantSpecBody(BaseModel):
         description=(
             "Named search indexes, queried with `GET …/graph/search?index=<name>`. "
             "Declaring a name again replaces its definition."
+        ),
+    )
+
+    display: DisplaySpec = Field(
+        default_factory=DisplaySpec,
+        description=(
+            "How the web UI draws each vertex label (`color`, `caption`, `size_by`, `icon`) and "
+            "edge type (`color`, `caption`). An entry declared again replaces the stored one; "
+            "`null` removes it (`{\"vertex\": {\"Person\": null}}`)."
         ),
     )
 
@@ -681,6 +762,7 @@ class TenantInfo(BaseModel):
     label_hierarchy: dict[str, str] = Field(default_factory=dict)
     meta: dict[str, str] = Field(default_factory=dict)
     search_indexes: dict[str, SearchIndexSpec] = Field(default_factory=dict)
+    display: DisplaySpec = Field(default_factory=DisplaySpec)
 
 
 class MeResponse(BaseModel):
@@ -736,6 +818,10 @@ class TenantSchema(BaseModel):
     strict_endpoints: bool = Field(
         default=False,
         description="Edge writes of a declared type outside its declared pairs are refused.",
+    )
+    display: DisplaySpec = Field(
+        default_factory=DisplaySpec,
+        description="How the web UI draws each vertex label and edge type.",
     )
 
 
