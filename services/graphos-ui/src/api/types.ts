@@ -535,6 +535,8 @@ export interface SchemaChangeDetail {
   changed?: Record<string, unknown[]>;
   /** [before, after] */
   strict_endpoints?: [boolean, boolean];
+  /** The property schema's mode, [before, after] (`off`, `warn`, `strict`). */
+  property_mode?: [string | null, string];
   registered?: boolean;
   unregistered?: boolean;
   /** Registered again after being unregistered, as it was. */

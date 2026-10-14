@@ -66,6 +66,8 @@ type SchemaField =
   | "property_indexes"
   | "generated_columns"
   | "meta"
+  | "display"
+  | "property_schema"
   | "indexes";
 
 const SCHEMA_FIELDS: SchemaField[] = [
@@ -78,8 +80,20 @@ const SCHEMA_FIELDS: SchemaField[] = [
   "property_indexes",
   "generated_columns",
   "meta",
+  "display",
+  "property_schema",
   "indexes",
 ];
+
+/** Fields whose items are entries `vertex:<label>` / `edge:<type>` (`*`: every one). */
+const BY_ENTRY: SchemaField[] = ["display", "property_schema"];
+
+/** "Person", "AUTHORED", "every label": one entry of a field merged by entry. */
+function entryName(entry: string): string {
+  const [part, name] = entry.split(":", 2);
+  if (name !== "*") return name ?? entry;
+  return part === "edge" ? t("common.changes.schema.everyType") : t("common.changes.schema.everyLabel");
+}
 
 /** How many names a schema change lists before "N more". */
 const NAMES_SHOWN = 3;
@@ -92,6 +106,7 @@ function schemaItems(field: SchemaField, values: unknown[]): string {
     return `${count} ${t(`common.changes.schema.fields.${field}`, { count })}`;
   }
   const names = values.map((value) => {
+    if (BY_ENTRY.includes(field)) return entryName(String(value));
     if (!Array.isArray(value)) return String(value);
     if (field === "edge_endpoints") return `${value[1]} –${value[0]}→ ${value[2]}`;
     return value.join(" → "); // label_hierarchy: child → parent
@@ -120,6 +135,10 @@ export function describeSchema(detail: SchemaChangeDetail): string {
   }
   if (detail.strict_endpoints) {
     parts.push(detail.strict_endpoints[1] ? t("common.changes.schema.strictOn") : t("common.changes.schema.strictOff"));
+  }
+  if (detail.property_mode) {
+    const [before, after] = detail.property_mode;
+    parts.push(t("common.changes.schema.propertyMode", { before: before ?? "off", after }));
   }
   return parts.length
     ? t("common.changes.schema.changed", { parts: parts.join("; ") })

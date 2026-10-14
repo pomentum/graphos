@@ -97,6 +97,9 @@
         "changedParts": "rewrote {{items}}",
         "strictOn": "strict endpoints on",
         "strictOff": "strict endpoints off",
+        "propertyMode": "property checks {{before}} → {{after}}",
+        "everyLabel": "every label",
+        "everyType": "every relationship type",
         "more_one": "{{count}} more",
         "more_other": "{{count}} more",
         "fields": {
@@ -118,6 +121,10 @@
           "generated_columns_other": "generated columns",
           "meta_one": "note",
           "meta_other": "notes",
+          "display_one": "style of",
+          "display_other": "styles of",
+          "property_schema_one": "property definitions of",
+          "property_schema_other": "property definitions of",
           "indexes_one": "index",
           "indexes_other": "indexes"
         }

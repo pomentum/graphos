@@ -81,6 +81,22 @@ describe("activity rows", () => {
     expect(describeChange(schema({ added: { generated_columns: [1] } }))).toBe(
       "Changed the schema: added 1 generated column",
     );
+    // Merged by entry: `vertex:<label>` / `edge:<type>`, `*` for every one.
+    expect(
+      describeChange(
+        schema({
+          added: { display: ["vertex:Person", "edge:AUTHORED"], property_schema: ["vertex:*", "edge:*"] },
+          changed: { property_schema: ["vertex:Person"] },
+          removed: { display: ["vertex:Doc"] },
+        }),
+      ),
+    ).toBe(
+      "Changed the schema: added styles of Person, AUTHORED, property definitions of every label, " +
+        "every relationship type; removed style of Doc; rewrote property definitions of Person",
+    );
+    expect(describeChange(schema({ property_mode: ["off", "strict"] }))).toBe(
+      "Changed the schema: property checks off → strict",
+    );
   });
 
   it("words a summary over every label without a label", () => {
