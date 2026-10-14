@@ -3,8 +3,12 @@
 Surface:
 
 - ``GET  /v1/tenants``           list currently-registered tenants
+  (``?unregistered=true``: also those unregistered with their data kept)
 - ``POST /v1/tenants``           register or re-apply a tenant spec (idempotent)
 - ``GET  /v1/tenants/{name}``    inspect one tenant's registered spec
+- ``DELETE /v1/tenants/{name}``  unregister it, keeping its data
+  (``?drop_data=true``: delete it with its data)
+- ``POST /v1/tenants/{name}/restore``  register an unregistered tenant again
 - ``DELETE /v1/tenants/{name}/edge_endpoints``  remove one declared label pair
 
 Who may do what (grants, see ``graphos.identity``):
@@ -13,7 +17,9 @@ Who may do what (grants, see ``graphos.identity``):
   the creator becomes the tenant's ``owner``;
 - re-register (publish schema), remove a declared pair, inspect the spec:
   ``maintain`` on the tenant, or ``create_tenants`` on a matching pattern;
-- unregister: ``owner``;
+- unregister, restore, delete with its data: ``owner`` (grants on its name
+  stay while it is unregistered); an orphan graph (unregistered before
+  graphos kept registrations): admin only;
 - the list shows the tenants the caller may maintain (admins: all).
 
 Consumers own their schemas. graphos accepts whatever spec a token-authorised
@@ -26,6 +32,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any
 
@@ -33,12 +40,14 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import Response
 
-from graphos import declared, schema_changes, schema_document
+from graphos import declared, lifecycle, schema_changes, schema_document, sync
+from graphos.api.cache import LRU
 from graphos.auth import (
     MaintainPrincipal,
     OwnerPrincipal,
     ReadPrincipal,
     WritePrincipal,
+    require_admin,
     require_level,
 )
 from graphos.bootstrap import (
@@ -61,7 +70,9 @@ from graphos.contracts.tenants import (
     RegisterDryRunResponse,
     RegisterResponse,
     TenantInfo,
+    TenantList,
     TenantSpecBody,
+    UnregisteredTenant,
 )
 from graphos.identity import Level, Principal
 from graphos.resolver.indexer import ensure_resolve_rule_indexes
@@ -158,14 +169,27 @@ def _may_maintain(principal: Principal, name: str) -> bool:
     return principal.has(name, Level.MAINTAIN) or principal.can_create(name)
 
 
-@router.get("", summary="List the registered tenants the caller may maintain")
-async def list_tenants(principal: ReadPrincipal) -> dict[str, list[TenantInfo]]:
-    return {
-        "tenants": [
+@router.get(
+    "", summary="List the registered tenants the caller may maintain",
+    response_model=TenantList, response_model_exclude_none=True,
+)
+async def list_tenants(
+    principal: ReadPrincipal, request: Request, unregistered: bool = False,
+) -> TenantList:
+    out = TenantList(
+        tenants=[
             _spec_to_info(s) for name, s in registered_tenants().items()
             if _may_maintain(principal, name)
         ],
-    }
+    )
+    if unregistered:
+        found = await lifecycle.list_unregistered(request.app.state.pool)
+        out.unregistered = [
+            UnregisteredTenant(**asdict(u)) for u in found
+            if principal.admin
+            or (u.kind == "unregistered" and principal.has(u.name, Level.OWNER))
+        ]
+    return out
 
 
 @router.get("/{name}", summary="Inspect one registered tenant")
@@ -311,16 +335,25 @@ async def register(
 
     pool = request.app.state.pool
     previous = await load_spec(pool, spec.name)
-    if previous is None and not principal.can_create(spec.name):
+    # A name whose data is kept unregistered is not free: registering it
+    # restores it, for whoever may (never hands old data to a new creator).
+    restores = previous is None and await _restores(pool, spec.name, principal)
+    if previous is None and not restores and not principal.can_create(spec.name):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"tenant '{spec.name}' does not exist; creating it needs 'create_tenants'",
         )
     if dry_run:
-        return await _dry_run(
-            pool, previous, spec, replace=force_shrink,
+        known = await lifecycle.unregistered_spec(pool, spec.name) if restores else previous
+        result = await _dry_run(
+            pool, known, spec, replace=force_shrink,
             endpoints_stated="edge_endpoints" in body.model_fields_set,
         )
+        return result.model_copy(update={"exists": previous is not None, "restores": restores})
+    if restores:
+        await lifecycle.restore_tenant(pool, spec.name)
+        await _record_schema(pool, spec.name, {"restored": True})
+        previous = await load_spec(pool, spec.name)
     try:
         await bootstrap_tenant(
             pool, spec,
@@ -439,30 +472,125 @@ async def delete_edge_endpoint(
 
 @router.delete(
     "/{name}",
-    summary="Forget a registered tenant (does NOT drop the AGE graph data)",
+    summary="Unregister a tenant, keeping its data; or delete it with its data",
     description=(
-        "Removes the registration row from `graphos_meta.tenants` and the "
-        "in-process cache. The AGE graph itself stays intact — data-plane "
-        "tombstones via `DELETE /v1/{tenant}/graph/nodes` if you also "
-        "want to remove the rows. Re-POSTing the same spec brings the "
-        "tenant back."
+        "Without `drop_data`: the tenant is unregistered and its data kept. Its "
+        "registration (schema, declared endpoints, settings) and the grants on its name "
+        "are kept too, so `POST /v1/tenants/{name}/restore` brings it back as it was; "
+        "data-plane calls answer 404 meanwhile. With `drop_data=true`: the tenant, "
+        "registered or unregistered, is deleted for good: its AGE graph and data, its "
+        "registration, cache, community map, finished jobs, change records and the grants "
+        "on its name. That cannot be undone (download the dataset first). An orphan graph "
+        "(unregistered before 0.8.2, no kept registration) is deleted only by an admin."
     ),
+    responses={
+        404: {"description": "No such tenant (registered, or with `drop_data`, unregistered)."},
+        409: {"description": "`drop_data`: a job runs on the tenant, or its tables stay in use."},
+    },
 )
 async def unregister(
     name: str,
     request: Request,
     principal: OwnerPrincipal,
+    drop_data: bool = False,
 ) -> dict[str, object]:
-    require_level(principal, name, Level.OWNER)
+    if not drop_data:
+        require_level(principal, name, Level.OWNER)
+        pool = request.app.state.pool
+        if not await unregister_tenant(pool, name, by=principal.consumer):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"tenant '{name}' is not registered",
+            )
+        await _record_schema(pool, name, {"unregistered": True})
+        return {"tenant": name, "status": "unregistered"}
+
     pool = request.app.state.pool
-    existed = await unregister_tenant(pool, name)
-    if not existed:
+    async with pool.acquire() as conn:
+        state = await lifecycle.tenant_state(conn, name)
+    if state == "orphan":
+        require_admin(principal)
+    else:
+        require_level(principal, name, Level.OWNER)
+    try:
+        dropped = state is not None and await lifecycle.drop_tenant_data(pool, name)
+    except lifecycle.TenantBusyError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if not dropped:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"tenant '{name}' is not registered",
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"no tenant named '{name}'",
         )
-    await _record_schema(pool, name, {"unregistered": True})
     store = getattr(request.app.state, "access_store", None)
     if store is not None:
         await store.drop_tenant(name)
-    return {"tenant": name, "status": "unregistered"}
+    LRU.evict_tenant(name)
+    async with pool.acquire() as conn:
+        await sync.notify_cache(conn, name, None)
+    await _record_schema(pool, name, {"data_deleted": True})
+    return {"tenant": name, "status": "deleted"}
+
+
+@router.post(
+    "/{name}/restore",
+    summary="Register an unregistered tenant again, as it was",
+    description=(
+        "Brings back a tenant unregistered with its data kept: its schema, declared "
+        "endpoints and settings as they were when it was unregistered. Needs `owner` on it "
+        "(grants on its name stay while it is unregistered)."
+    ),
+    responses={
+        404: {"description": "No unregistered tenant by that name."},
+        409: {"description": "It is registered, or an orphan graph with no kept registration."},
+    },
+)
+async def restore(name: str, request: Request, principal: OwnerPrincipal) -> dict[str, object]:
+    require_level(principal, name, Level.OWNER)
+    pool = request.app.state.pool
+    if not await lifecycle.restore_tenant(pool, name):
+        async with pool.acquire() as conn:
+            state = await lifecycle.tenant_state(conn, name)
+        if state == "registered":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"tenant '{name}' is registered",
+            )
+        if state == "orphan":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"the graph '{name}' has no kept registration (it was unregistered before "
+                    "graphos 0.8.2): an admin registers it again with its schema"
+                ),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"no unregistered tenant named '{name}'",
+        )
+    await _record_schema(pool, name, {"restored": True})
+    return {"tenant": name, "status": "restored"}
+
+
+async def _restores(pool: asyncpg.Pool, name: str, principal: Principal) -> bool:
+    """Whether registering the unregistered ``name`` restores it; raises 409
+    when its kept data is not the caller's to take."""
+    async with pool.acquire() as conn:
+        state = await lifecycle.tenant_state(conn, name)
+    if state == "unregistered":
+        if principal.has(name, Level.OWNER):
+            return True
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"tenant '{name}' is unregistered and keeps its data: its owner or an admin "
+                "can restore it, or delete it with its data, before the name is free"
+            ),
+        )
+    if state == "orphan" and not principal.admin:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"a graph named '{name}' holds data without a registration (unregistered "
+                "before graphos 0.8.2): only an admin can register it again or delete it"
+            ),
+        )
+    return False

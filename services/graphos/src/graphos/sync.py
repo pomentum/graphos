@@ -43,8 +43,9 @@ CACHE_CHANNEL = "graphos_cache"
 INSTANCE_ID = uuid.uuid4().hex
 
 
-async def notify_cache(conn: asyncpg.Connection, tenant: str, key: str) -> None:
-    """Announce that a cache key changed, for the other replicas' LRUs."""
+async def notify_cache(conn: asyncpg.Connection, tenant: str, key: str | None) -> None:
+    """Announce that a cache key changed (``None``: every key of the tenant),
+    for the other replicas' LRUs."""
     payload = json.dumps({"tenant": tenant, "key": key, "by": INSTANCE_ID})
     await conn.execute("SELECT pg_notify($1, $2);", CACHE_CHANNEL, payload)
 

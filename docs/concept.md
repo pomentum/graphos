@@ -359,12 +359,14 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `GET /metrics` | Prometheus exposition (§2.5.6) | none |
 | **Tenant control** | | |
 | `POST /v1/tenants[?force_shrink=true]` | Register / re-apply a spec (§2.2) | new: `create_tenants` (the caller becomes owner); existing: `maintain` |
-| `GET /v1/tenants` | The registered tenants the caller may maintain | signed in |
+| `GET /v1/tenants[?unregistered=true]` | The registered tenants the caller may maintain; also the unregistered ones it owns | signed in |
 | `GET /v1/tenants/{name}` | One tenant's spec summary | `maintain` |
-| `GET /v1/me` | The caller: user, kind, `admin`, `must_change`, its tenants, its level on each, `create_tenants` patterns | signed in |
+| `GET /v1/me` | The caller: user, kind, `admin`, `must_change`, its tenants, its level on each, `create_tenants` patterns, its web UI preferences | signed in |
+| `PATCH /v1/me/preferences` | Change one's web UI preferences (`theme`, `last_tenant`) | signed in |
 | `GET /v1/{tenant}/schema` | Labels, label hierarchy, search indexes and rule-derived edge labels (no DDL, rules or `meta`) | tenant |
 | `DELETE /v1/tenants/{name}/edge_endpoints` | Remove one declared pair | `maintain` |
-| `DELETE /v1/tenants/{name}` | Unregister (see below) | `owner` |
+| `DELETE /v1/tenants/{name}[?drop_data=true]` | Unregister, keeping the data; or delete with the data (see below) | `owner` (an orphan: admin) |
+| `POST /v1/tenants/{name}/restore` | Register an unregistered tenant again, as it was | `owner` |
 | **Sign-in, users and grants** (§2.5.3) | | |
 | `POST /v1/auth/login`, `/refresh`, `/logout` | Access token (and a person's refresh token); renew; end a session (and the provider's URL to end it there) | none |
 | `GET /v1/auth/config`, `POST /v1/auth/oidc/start`, `/oidc/callback` | How to sign in; single sign-on with PKCE held by graphos | none |
@@ -435,16 +437,31 @@ The last column is the tenant or admin scope.  Each operation also needs
 `GET /v1/db/*` and `GET /v1/jobs*`; `write` for the rest.
 `/openapi.json` lists it per operation as the bearer scope.
 
-`DELETE /v1/tenants/{name}` deletes the row in `graphos_meta.tenants` and the
-in-process registry entry, then returns `{"tenant": name, "status":
-"unregistered"}` (404 if it was not registered). It does **not** drop the AGE
-graph, its tables, indexes, or data, and does not delete the tenant's
-`graphos_meta.cache` rows. Data-plane calls for the tenant then return 404;
-re-posting the spec restores access to the existing data.
+`DELETE /v1/tenants/{name}` unregisters a tenant and keeps its data: in one
+transaction its registration (spec, declared endpoints, settings) moves from
+`graphos_meta.tenants` to `graphos_meta.unregistered_tenants` (a table of its
+own, so a server that predates it, after a rollback, cannot bring the tenant
+back), and the in-process registry forgets it. The AGE graph, its data, cache
+rows and the grants on its name stay. Data-plane calls for the tenant return
+404. `POST /v1/tenants/{name}/restore` moves the registration back as it was;
+registering the name restores it the same way, for its owner or an admin, and
+answers 409 to anyone else, so a name another user may create never hands
+them the old data. A graph unregistered before 0.8.2 has no kept registration
+(an *orphan*): only an admin may register it again or delete it.
+
+`DELETE /v1/tenants/{name}?drop_data=true` deletes a tenant, registered or
+unregistered, in one transaction: its graph (`drop_graph`, cascading), its
+registration, K/V cache, property-name record, community map, finished jobs
+and change records (the tenant's change horizon moves past them, so a reader
+holding a cursor into them gets 410), then the grants on its name. It holds
+the tenant's bootstrap lock, waits at most 5 s for its tables (an export, an
+import or a long query; 409 after that) and is refused while a job is queued
+or running on the tenant.
 
 Not in the surface: raw Cypher or SQL execution, connection-string
-passthrough, any `DROP`, and any consumer-supplied DDL: indexes and generated
-columns are declared, and graphos writes their SQL.
+passthrough, any `DROP` other than deleting a whole tenant as above, and any
+consumer-supplied DDL: indexes and generated columns are declared, and
+graphos writes their SQL.
 
 #### 2.5.2 Requests, responses, errors
 
@@ -509,8 +526,9 @@ Error shapes:
   tenant is the highest matching grant; an admin is `owner` everywhere.
   Registering a new tenant needs `create_tenants` on a matching pattern and
   grants the creator `owner` on it; re-registering needs `maintain` or a
-  matching `create_tenants`; unregistering needs `owner` and drops the
-  tenant's exact grants. Admins manage users and every grant; an owner
+  matching `create_tenants`; unregistering, restoring and deleting with the
+  data need `owner`; the tenant's exact grants stay while it is unregistered
+  and go when its data does. Admins manage users and every grant; an owner
   manages grants on its tenant's exact name. graphos refuses to remove its
   last enabled admin.
 - **Replicas.** Each replica keeps users and grants in memory
@@ -1295,7 +1313,7 @@ Postgres instance.
 5. **Community freshness.** `end_community_id`, `start_community_id` and
    `community_id` change only when Louvain writes; new edges are invisible to community-scoped `expand`
    until then, and unassigned vertices keep old ids.
-6. **`DELETE /v1/tenants/{name}` keeps data** (§2.5.1).
+6. **`DELETE /v1/tenants/{name}` keeps data** unless `drop_data=true` (§2.5.1).
 7. **Generated columns on tables that already hold rows** rewrite the table;
    add them early.
 8. **AGE version.** The compose pins `apache/age:release_PG16_1.6.0`; several

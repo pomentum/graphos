@@ -79,6 +79,7 @@ from graphos_client._models import (
     TenantInfo,
     TenantSchemaInfo,
     TenantStatsResponse,
+    UnregisteredTenant,
 )
 from graphos_client._pool import GraphosPool, TenantSchema, is_schema_drift
 
@@ -155,6 +156,7 @@ __all__ = [
     "SearchResponse",
     "Me",
     "TenantInfo",
+    "UnregisteredTenant",
     "TenantSchemaInfo",
     "EdgeEndpoint",
     "TenantStatsResponse",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -699,6 +700,13 @@ class MeResponse(BaseModel):
         default_factory=list,
         description="Patterns of tenant names the caller may create (`*` for an admin).",
     )
+    preferences: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "What the caller chose in the web UI (`theme`, `last_tenant`); changed with "
+            "`PATCH /v1/me/preferences`."
+        ),
+    )
 
 
 class TenantSchema(BaseModel):
@@ -779,6 +787,13 @@ class RegisterDryRunResponse(BaseModel):
 
     tenant: str
     exists: bool = Field(description="The tenant is registered already.")
+    restores: bool = Field(
+        False,
+        description=(
+            "The tenant is unregistered with its data kept: registering it restores it "
+            "first, with the schema it had."
+        ),
+    )
     mode: Literal["merge", "replace"]
     changes: dict[str, Any] | None = Field(
         description=(
@@ -813,3 +828,34 @@ class RegisterResponse(BaseModel):
     n_edge_endpoints: int = 0
     strict_endpoints: bool = False
     status: str = "bootstrapped"
+
+
+class UnregisteredTenant(BaseModel):
+    """A tenant whose data is kept without a registration."""
+
+    name: str
+    kind: Literal["unregistered", "orphan"] = Field(
+        description=(
+            "`unregistered`: its registration is kept and `POST /v1/tenants/{name}/restore` "
+            "brings it back; `orphan`: a graph unregistered before graphos kept "
+            "registrations (0.8.2), which only an admin may register again or delete."
+        ),
+    )
+    vertex_labels: int = Field(0, description="Vertex labels in its kept registration.")
+    edge_labels: int = Field(0, description="Edge labels in its kept registration.")
+    created_at: datetime | None = None
+    unregistered_at: datetime | None = None
+    unregistered_by: str | None = None
+
+
+class TenantList(BaseModel):
+    """Returned by GET /v1/tenants."""
+
+    tenants: list[TenantInfo]
+    unregistered: list[UnregisteredTenant] | None = Field(
+        None,
+        description=(
+            "With `?unregistered=true`: tenants unregistered with their data kept that the "
+            "caller owns (every one, orphans included, for an admin)."
+        ),
+    )

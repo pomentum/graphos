@@ -185,6 +185,14 @@ class CacheLRU:
         with self._lock:
             self._store.clear()
 
+    def evict_tenant(self, tenant: str) -> int:
+        """Drop every entry of ``tenant`` (its data was deleted)."""
+        with self._lock:
+            keys = [k for k in self._store if k[0] == tenant]
+            for k in keys:
+                del self._store[k]
+            return len(keys)
+
     def size(self) -> int:
         with self._lock:
             return len(self._store)
@@ -201,7 +209,11 @@ def on_notification(payload: str) -> None:
         note = _json.loads(payload)
     except ValueError:
         return
-    if note.get("by") != sync.INSTANCE_ID:
+    if note.get("by") == sync.INSTANCE_ID:
+        return
+    if note.get("key") is None:
+        LRU.evict_tenant(str(note.get("tenant")))
+    else:
         LRU.evict(str(note.get("tenant")), str(note.get("key")))
 
 

@@ -108,6 +108,14 @@ async def _remove_since(dsn: str, before: tuple[set[str], set[str]]) -> None:
             await conn.execute("LOAD 'age';")
             for name in sorted(graphs - before[1]):
                 await conn.execute("SELECT ag_catalog.drop_graph($1::name, true);", name)
+            # Unregistering keeps the registration aside (to restore it).
+            if await conn.fetchval(
+                "SELECT to_regclass('graphos_meta.unregistered_tenants') IS NOT NULL;",
+            ):
+                await conn.execute(
+                    "DELETE FROM graphos_meta.unregistered_tenants WHERE name = ANY($1::text[]);",
+                    sorted((tenants - before[0]) | (graphs - before[1])),
+                )
     finally:
         await pool.close()
 

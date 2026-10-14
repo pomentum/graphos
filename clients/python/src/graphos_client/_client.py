@@ -62,6 +62,7 @@ from graphos_client._models import (
     TenantSchemaInfo,
     TenantStatsResponse,
     TopByEdgeResponse,
+    UnregisteredTenant,
 )
 
 log = logging.getLogger(__name__)
@@ -334,6 +335,12 @@ class GraphosClient:
         resp = await self._request("GET", "/v1/tenants")
         return [TenantInfo.model_validate(t) for t in resp.json()["tenants"]]
 
+    async def list_unregistered_tenants(self) -> list[UnregisteredTenant]:
+        """Tenants unregistered with their data kept that the caller owns
+        (every one, orphan graphs included, for an admin)."""
+        resp = await self._request("GET", "/v1/tenants", params={"unregistered": "true"})
+        return [UnregisteredTenant.model_validate(t) for t in resp.json().get("unregistered", [])]
+
     async def me(self) -> Me:
         """``GET /v1/me``: who is signed in, their level per tenant and rights."""
         resp = await self._request("GET", "/v1/me")
@@ -498,9 +505,26 @@ class GraphosClient:
         )
         return resp.json()
 
-    async def unregister_tenant(self, name: str | None = None) -> dict[str, Any]:
+    async def unregister_tenant(
+        self, name: str | None = None, *, drop_data: bool = False,
+    ) -> dict[str, Any]:
+        """Unregister a tenant (owner).  Its data, schema and grants are kept and
+        :meth:`restore_tenant` brings it back.  ``drop_data=True`` deletes it for
+        good instead, registered or unregistered: graph, data, registration,
+        cache, change records.  That cannot be undone."""
         target = name or self._tenant
-        resp = await self._request("DELETE", f"/v1/tenants/{target}")
+        params = {"drop_data": "true"} if drop_data else None
+        resp = await self._request(
+            "DELETE", f"/v1/tenants/{target}", params=params, idempotent=not drop_data,
+        )
+        return resp.json()
+
+    async def restore_tenant(self, name: str | None = None) -> dict[str, Any]:
+        """Register an unregistered tenant again, as it was (owner)."""
+        target = name or self._tenant
+        resp = await self._request(
+            "POST", f"/v1/tenants/{target}/restore", idempotent=False,
+        )
         return resp.json()
 
     async def resolve_edges(

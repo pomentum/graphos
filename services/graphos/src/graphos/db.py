@@ -359,6 +359,29 @@ CREATE TABLE IF NOT EXISTS graphos_meta.signing_keys (
     created_at   timestamptz NOT NULL DEFAULT now(),
     retired_at   timestamptz
 );
+
+-- Tenants unregistered with their data kept (``graphos.bootstrap``): the
+-- registration (spec, declared endpoints, settings) waits here to be
+-- restored.  A table of its own, not a flag on ``tenants``: a server that
+-- predates it (a rollback, a rolling upgrade) never reads it, so it cannot
+-- bring an unregistered tenant back.
+CREATE TABLE IF NOT EXISTS graphos_meta.unregistered_tenants (
+    name              text PRIMARY KEY,
+    spec              jsonb NOT NULL,
+    endpoints         jsonb NOT NULL DEFAULT '[]'::jsonb,
+    strict_endpoints  boolean NOT NULL DEFAULT false,
+    created_at        timestamptz NOT NULL,
+    unregistered_at   timestamptz NOT NULL DEFAULT now(),
+    unregistered_by   text
+);
+
+-- What a signed-in person chose in the web UI (theme, ...): one JSON
+-- document per subject, only names graphos knows (``graphos.preferences``).
+CREATE TABLE IF NOT EXISTS graphos_meta.user_preferences (
+    subject     text PRIMARY KEY,
+    prefs       jsonb NOT NULL DEFAULT '{}'::jsonb,
+    updated_at  timestamptz NOT NULL DEFAULT now()
+);
 """
 
 

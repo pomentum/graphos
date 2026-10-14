@@ -1059,3 +1059,36 @@ async def test_import_dataset_applies_the_schema_then_streams_the_file(tmp_path)
     assert upload[2] == path.read_bytes()                 # the file as it is, gzip included
     await cli.close()
 
+
+
+@pytest.mark.asyncio
+async def test_unregister_restore_and_delete_a_tenant_with_its_data() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if request.method == "GET":
+            return httpx.Response(200, json={"tenants": [], "unregistered": [
+                {"name": "old", "kind": "unregistered", "vertex_labels": 3, "edge_labels": 1,
+                 "unregistered_at": "2026-10-14T08:00:00Z", "unregistered_by": "olive"},
+                {"name": "older", "kind": "orphan"},
+            ]})
+        return httpx.Response(200, json={"tenant": "demo", "status": "ok"})
+
+    cli = GraphosClient(base_url="http://x", token="tok", tenant="demo")
+    cli._http = httpx.AsyncClient(base_url="http://x", transport=_mock_transport(handler))
+    await cli.unregister_tenant()
+    await cli.restore_tenant("old")
+    await cli.unregister_tenant("old", drop_data=True)
+    listed = await cli.list_unregistered_tenants()
+    assert [(r.method, r.url.path, dict(r.url.params)) for r in captured] == [
+        ("DELETE", "/v1/tenants/demo", {}),
+        ("POST", "/v1/tenants/old/restore", {}),
+        ("DELETE", "/v1/tenants/old", {"drop_data": "true"}),
+        ("GET", "/v1/tenants", {"unregistered": "true"}),
+    ]
+    assert [(u.name, u.kind, u.vertex_labels) for u in listed] == [
+        ("old", "unregistered", 3), ("older", "orphan", 0),
+    ]
+    assert listed[0].unregistered_by == "olive"
+    await cli.close()

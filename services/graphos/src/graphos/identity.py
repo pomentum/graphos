@@ -448,6 +448,9 @@ class AccessStore:
                 "DELETE FROM graphos_meta.grants WHERE subject = $1;", subject_of(name),
             )
             await revoke_sessions(conn, name)
+            await conn.execute(
+                "DELETE FROM graphos_meta.user_preferences WHERE subject = $1;", subject_of(name),
+            )
             await self._changed(conn)
         await self.load()
 

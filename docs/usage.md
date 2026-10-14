@@ -150,7 +150,7 @@ address (the compose file publishes it on `127.0.0.1` only) until you have.
 | `read` | every operation that changes nothing: reads, search, aggregates, the schema, the change feed, jobs |
 | `write` | + node and edge writes (single, batch, bulk, snapshot import), `edges:resolve`, the cache |
 | `maintain` | + publish schema (re-register: labels, types, declared pairs, hierarchy, indexes, `strict_endpoints`; remove a declared pair; inspect the spec), recompute groups, compute metrics |
-| `owner` | + give and take access to this tenant (any level, `owner` included), unregister it |
+| `owner` | + give and take access to this tenant (any level, `owner` included), unregister it, restore it, delete it with its data |
 
 Two global rights: `create_tenants` on a pattern (register a new tenant whose name matches, and
 become its `owner`, as the creator of a PostgreSQL database owns it; also re-register any existing
@@ -196,9 +196,16 @@ These endpoints need no token: `/healthz`, `/readyz`, `/metrics`, `/v1/info`, `/
 `/v1/auth/login`, `/refresh`, `/logout`, `/config`, `/oidc/start`, `/oidc/callback`.
 
 `GET /v1/me` tells a signed-in user who it is: `{"consumer", "kind", "via", "admin",
-"must_change", "tenants", "levels", "create_tenants"}` (`via`: `password` or `oidc`), where `tenants` lists the registered tenants it may use
+"must_change", "tenants", "levels", "create_tenants", "preferences"}` (`via`: `password` or `oidc`), where `tenants` lists the registered tenants it may use
 (all of them for an admin) and `levels` its level on each. The web UI uses it to offer the right
 tenants and controls.
+
+`preferences` is what the user chose in the web UI, kept by graphos so that it follows them to any
+browser and nothing is stored in the browser: `theme` (`auto`, `light`, `dark`) and `last_tenant`
+(opened at the next sign-in when the address names none). `PATCH /v1/me/preferences` changes them
+(JSON Merge Patch: `{"theme": "dark"}`; `null` removes one) and answers all of them. Only those
+names are kept, each with the values it takes (422 otherwise), so the document never holds free
+text or personal data; it is stored as one JSON document per user and deleted with the user.
 
 `GRAPHOS_AUTH_DISABLED=true` turns all of this off: every request is an anonymous admin. Use it for
 local development only.
@@ -374,11 +381,13 @@ with the same `email`.
 
 | Call | Effect |
 |---|---|
-| `GET /v1/tenants` | `{"tenants": [TenantInfo…]}`: the tenants the caller may maintain (all for an admin) |
+| `GET /v1/tenants[?unregistered=true]` | `{"tenants": [TenantInfo…]}`: the tenants the caller may maintain (all for an admin). With `unregistered=true`, also `"unregistered": [{"name", "kind", "vertex_labels", "edge_labels", "created_at", "unregistered_at", "unregistered_by"}…]`: the unregistered tenants the caller owns (every one for an admin, orphans included, see below) |
 | `GET /v1/tenants/{name}` | one `TenantInfo` (404 if unknown); `maintain` |
 | `GET /v1/tenants/{name}/spec` | the whole schema as a file (see *Export and import a schema*); `maintain` |
 | `POST /v1/tenants?dry_run=true` | what a registration would change, writing nothing (same levels as registering) |
-| `DELETE /v1/tenants/{name}` | **Forgets the registration only.** It deletes the `graphos_meta.tenants` row, the tenant's declared endpoints and settings, and the in-memory entry. The AGE graph and its data are kept, and re-POSTing the spec brings the tenant back. Returns `{"tenant", "status": "unregistered"}` (404 if unknown). |
+| `DELETE /v1/tenants/{name}` | **Unregisters the tenant and keeps its data.** Its registration (schema, declared endpoints, settings) is set aside and the grants on its name stay, so it can be restored as it was. Returns `{"tenant", "status": "unregistered"}` (404 if not registered); `owner`. |
+| `DELETE /v1/tenants/{name}?drop_data=true` | **Deletes the tenant for good**, registered or unregistered: its AGE graph and data, its registration, K/V cache, community map, finished jobs, change records (a reader holding a cursor into them gets 410) and the grants on its name. Cannot be undone: download the dataset first. 409 while a job is queued or running on it, or when an export, an import or a long query holds its tables for more than 5 s. Returns `{"tenant", "status": "deleted"}`; `owner` (an orphan: admin). |
+| `POST /v1/tenants/{name}/restore` | Registers an unregistered tenant again, as it was. 404 if there is none by that name, 409 if it is registered or an orphan; `owner`. |
 | `DELETE /v1/tenants/{name}/edge_endpoints?type=&src=&dst=` | Removes one declared label pair; 404 if it is not declared. |
 
 Any token on a tenant, read-only included, can read its shape with `GET /v1/{tenant}/schema`:
@@ -430,9 +439,14 @@ A registration carries at most 5,000 declared label pairs. A schema with more is
 several calls: the first with everything else (and `force_shrink` when replacing), the rest adding
 pairs; the Python client's `import_schema` and the web UI do this.
 
-While a tenant is unregistered, data-plane calls to it return 404. To remove the data itself, delete
-it before you unregister: use `DELETE /v1/{tenant}/graph/nodes?property_key=…&property_value=…`, or
-delete nodes one at a time.
+While a tenant is unregistered, data-plane calls to it return 404. Its name is not free: registering
+it again (`POST /v1/tenants`) restores it first, with the schema it had, for its owner or an admin,
+and is refused (409) to anyone else, so a name someone else may create never hands them old data.
+To free the name, delete the tenant with its data (`?drop_data=true`).
+
+A graph unregistered before 0.8.2 kept no registration: it is listed as an `orphan` (admins only).
+An admin registers it again with its schema, or deletes it with its data; anyone else is refused
+(409) when registering its name.
 
 ---
 

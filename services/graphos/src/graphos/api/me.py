@@ -1,6 +1,7 @@
 """Endpoints any token may call about itself and its tenants.
 
-- ``GET /v1/me``                who is signed in: user, levels, rights
+- ``GET /v1/me``                who is signed in: user, levels, rights, preferences
+- ``PATCH /v1/me/preferences``  change the caller's web UI preferences
 - ``GET /v1/{tenant}/schema``   one tenant's labels and search indexes
 
 They give a client (such as the UI) what it needs to start without an admin
@@ -11,20 +12,26 @@ metadata).
 
 from __future__ import annotations
 
-from typing import Literal, cast
+import logging
+from typing import Any, Literal, cast
 
-from fastapi import APIRouter, HTTPException, status
+import asyncpg
+from fastapi import APIRouter, Body, HTTPException, Request, status
 
+from graphos import preferences
 from graphos.auth import ReadPrincipal
 from graphos.bootstrap import registered_tenants
 from graphos.contracts.tenants import EdgeEndpointSpec, MeResponse, TenantSchema
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["tenants"])
 
 
 @router.get("/me", summary="Who is signed in: user, levels per tenant, rights")
-async def me(principal: ReadPrincipal) -> MeResponse:
+async def me(principal: ReadPrincipal, request: Request) -> MeResponse:
     tenants = principal.visible(registered_tenants())
+    prefs = await _preferences(request, principal.subject)
     levels = {t: level.label for t in tenants if (level := principal.level(t)) is not None}
     return MeResponse(
         consumer=principal.consumer,
@@ -36,7 +43,49 @@ async def me(principal: ReadPrincipal) -> MeResponse:
         tenants=tenants,
         levels=levels,  # type: ignore[arg-type]
         create_tenants=["*"] if principal.admin else list(principal.create_tenants),
+        preferences=prefs,
     )
+
+
+async def _preferences(request: Request, subject: str | None) -> dict[str, Any]:
+    """The caller's preferences; never in the way of signing in (empty when
+    there is no user, or they cannot be read)."""
+    pool = getattr(request.app.state, "pool", None)
+    if not subject or pool is None:
+        return {}
+    try:
+        return await preferences.load(pool, subject)
+    except (asyncpg.PostgresError, OSError, ValueError):
+        log.warning("preferences could not be read", exc_info=True)
+        return {}
+
+
+@router.patch(
+    "/me/preferences",
+    summary="Change the caller's web UI preferences (JSON Merge Patch)",
+    description=(
+        "Only the preferences graphos knows are kept, each with the values it takes: "
+        "`theme` (`auto`, `light`, `dark`) and `last_tenant` (a tenant name). `null` "
+        "removes one. Answers all of them."
+    ),
+    responses={422: {"description": "An unknown preference, or a value it does not take."}},
+)
+async def update_preferences(
+    principal: ReadPrincipal,
+    request: Request,
+    patch: dict[str, Any] = Body(..., examples=[{"theme": "dark"}]),  # noqa: B008 — FastAPI idiom
+) -> dict[str, Any]:
+    if not principal.subject:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="preferences belong to a signed-in user",
+        )
+    try:
+        return await preferences.update(request.app.state.pool, principal.subject, patch)
+    except preferences.PreferenceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc),
+        ) from exc
 
 
 @router.get(

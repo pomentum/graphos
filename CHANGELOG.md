@@ -4,6 +4,49 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+Tenants can now be created, unregistered, restored and deleted with their data, from the API, the
+Python client and the web UI; unregistering keeps everything needed to restore a tenant as it was.
+The web UI keeps each user's theme and last tenant at graphos, and the schema diagram is laid out
+along the relationships. One behaviour change for clients: registering the name of an unregistered
+tenant restores it for its owner and is refused (409) to anyone else (see Changed).
+
+### Added
+
+- **Restore an unregistered tenant.** `POST /v1/tenants/{name}/restore` (owner) registers it again
+  with the schema, declared endpoints and settings it had. `GET /v1/tenants?unregistered=true` lists
+  the unregistered tenants the caller owns (every one for an admin). Client: `restore_tenant`,
+  `list_unregistered_tenants`.
+- **Delete a tenant with its data.** `DELETE /v1/tenants/{name}?drop_data=true` (owner) deletes a
+  registered or unregistered tenant for good, in one transaction: its graph and data,
+  registration, cache, community map, finished jobs, change records (a reader holding a cursor into
+  them gets 410) and the grants on its name. Refused (409) while a job is queued or running on it,
+  or when its tables stay in use for 5 s. Client: `unregister_tenant(drop_data=True)`.
+- **User preferences.** `GET /v1/me` carries `preferences`, and `PATCH /v1/me/preferences` (JSON
+  Merge Patch) changes them: `theme` and `last_tenant`, one JSON document per user, only known
+  names and values (422 otherwise), deleted with the user. Nothing is stored in the browser.
+- **Web UI: tenants.** "New tenant…" (empty, or with a schema file) in the tenant menu and on the
+  tenant chooser, for admins and users who may create tenants; "Unregistered tenants…" with Restore
+  and Delete data; "Delete this tenant" at the foot of the Overview for owners: unregister by
+  default, or delete with the data after typing the name. The theme and the last tenant follow the
+  user to any browser.
+
+### Changed
+
+- **Unregistering keeps the registration.** `DELETE /v1/tenants/{name}` still keeps the data, and
+  now also sets the schema, declared endpoints and settings aside and keeps the grants on the
+  name, so the tenant can be restored. Registering the name of an unregistered tenant restores it
+  first for its owner or an admin, and answers 409 to anyone else: a name another user may create
+  never hands them old data. A graph unregistered before 0.8.2 (no kept registration) is an
+  *orphan*: only an admin may register it again or delete it.
+- **Web UI: the schema diagram follows the relationships.** Up to 40 labels, boxes are placed in
+  layers along their relationships and the lines routed between them, with room for each caption,
+  so lines no longer cross boxes or blocks and captions no longer cover each other; a larger
+  schema keeps the grid. Captions are drawn above blocks, the view is fitted below the toolbar, and
+  a tenant without edges shows the relationship types without counts. Importing a schema into
+  another tenant refreshes the tenant list.
+
 ## 0.8.1 — 2026-10-13
 
 A web UI release: dataset downloads and uploads show their progress and go on while the user moves

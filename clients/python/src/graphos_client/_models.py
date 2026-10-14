@@ -67,6 +67,23 @@ class Me(BaseModel):
     create_tenants: list[str] = Field(default_factory=list)  # name patterns
 
 
+class UnregisteredTenant(BaseModel):
+    """A tenant unregistered with its data kept (``GET /v1/tenants?unregistered=true``).
+
+    ``kind`` is ``unregistered`` (``restore_tenant`` brings it back as it was) or
+    ``orphan`` (a graph unregistered before 0.8.2, with no kept registration:
+    admin only).
+    """
+
+    name: str
+    kind: str = "unregistered"
+    vertex_labels: int = 0
+    edge_labels: int = 0
+    created_at: datetime | None = None
+    unregistered_at: datetime | None = None
+    unregistered_by: str | None = None
+
+
 class EdgeEndpoint(BaseModel):
     """One label pair an edge type is declared to join: ``src`` -> ``dst``."""
 

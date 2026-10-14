@@ -1064,22 +1064,43 @@ async def register_tenant(
     remember(await load_spec(pool, spec.name) or spec)
 
 
-async def unregister_tenant(pool: asyncpg.Pool, name: str) -> bool:
-    """Forget a tenant — drop the in-memory entry and the persistent row.
+async def unregister_tenant(pool: asyncpg.Pool, name: str, *, by: str | None = None) -> bool:
+    """Unregister a tenant, keeping its data and, to restore it, its registration.
 
-    Does **not** drop the AGE graph itself; that's a destructive operation
-    that we don't want a `unregister` to imply. Use the data-plane DELETE
-    endpoints first if you want to tombstone state. Returns True iff the
-    name was registered.
+    The registration (spec, declared endpoints, settings) moves to
+    ``graphos_meta.unregistered_tenants`` in one transaction, so
+    :func:`graphos.lifecycle.restore_tenant` brings the tenant back as it was.
+    The AGE graph and its data stay; :func:`graphos.lifecycle.drop_tenant_data`
+    deletes them.  Returns True iff the name was registered.
     """
     async with pool.acquire() as conn, conn.transaction():
-        result = await conn.execute(
-            "DELETE FROM graphos_meta.tenants WHERE name = $1;", name,
-        )
-        # Its declared endpoints and settings go with the registration.
+        moved = await conn.fetchval(_UNREGISTER_SQL, name, by)
+        # Its declared endpoints and settings went with the registration.
         await conn.execute("DELETE FROM graphos_meta.edge_endpoints WHERE tenant = $1;", name)
         await conn.execute("DELETE FROM graphos_meta.tenant_settings WHERE tenant = $1;", name)
         await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, name)
     existed = forget(name)
-    # asyncpg returns 'DELETE N'; we also count the in-memory removal as success.
-    return existed or "DELETE 1" in result
+    return existed or bool(moved)
+
+
+# Moves a tenant's registration to ``unregistered_tenants`` (1 when it did).
+_UNREGISTER_SQL = """
+WITH gone AS (
+    DELETE FROM graphos_meta.tenants WHERE name = $1 RETURNING name, spec, created_at
+)
+INSERT INTO graphos_meta.unregistered_tenants AS u
+    (name, spec, endpoints, strict_endpoints, created_at, unregistered_by)
+SELECT g.name, g.spec,
+       COALESCE((SELECT jsonb_agg(jsonb_build_array(edge_type, src_label, dst_label)
+                                  ORDER BY edge_type, src_label, dst_label)
+                 FROM graphos_meta.edge_endpoints WHERE tenant = $1), '[]'::jsonb),
+       COALESCE((SELECT strict_endpoints FROM graphos_meta.tenant_settings
+                 WHERE tenant = $1), false),
+       g.created_at, $2
+FROM gone g
+ON CONFLICT (name) DO UPDATE
+SET spec = EXCLUDED.spec, endpoints = EXCLUDED.endpoints,
+    strict_endpoints = EXCLUDED.strict_endpoints, created_at = EXCLUDED.created_at,
+    unregistered_at = now(), unregistered_by = EXCLUDED.unregistered_by
+RETURNING 1;
+"""

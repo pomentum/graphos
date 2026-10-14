@@ -58,7 +58,7 @@ and get an access token valid 15 minutes, signed by graphos (ES256); people
 also get a rotating refresh token for their browser session. A grant gives a
 user a level on a tenant or a name pattern (`sol_*`, `*`): `read`, `write`,
 `maintain` (schema, recompute, metrics) or `owner` (grants on the tenant,
-unregister), each including the ones before it; `create_tenants` on a
+unregister, restore, delete with its data), each including the ones before it; `create_tenants` on a
 pattern lets a user create tenants it then owns, and `admin` allows
 everything. Admins manage users and grants (API or the UI's Access page);
 an owner manages access to its tenant.
@@ -481,13 +481,17 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   inspect and edit (saved with `If-Match`); shortest paths; counts per label;
   activity (what runs now, with cancel, and the writes, computations and
   schema changes of the last days, filterable, with a running indicator in
-  the toolbar on every page); a label as a table; the schema as a list or a diagram, which
-  maintainers can extend (labels, relationship types, declared label pairs);
+  the toolbar on every page); a label as a table; the schema as a list or a diagram (laid out
+  along the relationships, lines routed between the boxes with their captions; a large schema as
+  a grid), which maintainers can extend (labels, relationship types, declared label pairs);
+  creating a tenant (empty or from a schema file), unregistering it, restoring it, and deleting it
+  with its data;
   an Access page for owners and admins (users, service accounts, grants). An
   nginx image with no backend of its own; people sign in with their graphos
   user name and password, so permissions and attribution are graphos's; the
   session is one HttpOnly cookie no page script can read (nothing in browser
-  storage), so a reload or a new tab stays signed in until the session ends.
+  storage), so a reload or a new tab stays signed in until the session ends; the theme and the
+  last tenant are kept by graphos as the user's preferences.
   It reads labels and search indexes from `GET /v1/{tenant}/schema`, which
   anyone on the tenant may call, and `GET /v1/me` lists the user's tenants and
   levels. All its text is in one i18n JSON file.
@@ -548,8 +552,10 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
 - **No pattern matching in scans.** `nodes:scan` filters by label and
   properties only. Use `neighbors`, `expand`, or `induced_edges` for
   relationships.
-- **No `DROP` through the API.** Schema changes go through (validated)
-  registration. Unregistering a tenant does not delete its data.
+- **No `DROP` through the API**, except deleting a whole tenant with its data
+  (`DELETE /v1/tenants/{name}?drop_data=true`, owner). Schema changes go
+  through (validated) registration. Unregistering a tenant keeps its data
+  and its registration, to restore it.
 - **No shared rate limit.** Each replica limits on its own (sign-in
   attempts too). Users, grants, tenant registrations and the K/V cache are
   kept in step across replicas (`LISTEN` / `NOTIFY`, with periodic
