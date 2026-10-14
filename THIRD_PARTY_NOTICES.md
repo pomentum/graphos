@@ -82,7 +82,7 @@ file in its npm distribution.
 | @tanstack/react-query | MIT |
 | @tabler/icons-react | MIT |
 | sigma | MIT |
-| @sigma/export-image (with file-saver), @sigma/node-image | MIT |
+| @sigma/export-image (with file-saver), @sigma/node-image, @sigma/edge-curve | MIT |
 | graphology, graphology-layout, graphology-layout-forceatlas2 | MIT |
 | i18next, react-i18next | MIT |
 | @xyflow/react (React Flow) | MIT |
@@ -91,7 +91,7 @@ file in its npm distribution.
 | @fontsource/inter (Inter typeface) | SIL Open Font License 1.1 |
 | @fontsource/ibm-plex-mono (IBM Plex Mono typeface) | SIL Open Font License 1.1 |
 
-These are the direct dependencies. They bundle 88 packages in all. Apart from elkjs, each is
+These are the direct dependencies. They bundle 89 packages in all. Apart from elkjs, each is
 under a permissive licence: MIT for most, ISC (the d3 modules React Flow uses), BSD-3-Clause
 (react-transition-group, d3-ease), 0BSD (tslib) and MIT OR CC0-1.0 (type-fest). The fonts are redistributed unmodified under the OFL, which permits bundling them
 with software. The image is built on `nginxinc/nginx-unprivileged` (nginx: BSD-2-Clause, on

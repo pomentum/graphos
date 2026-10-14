@@ -37,6 +37,12 @@ under one version.
   and the tenant's saved queries beside it (maintainers save and delete them; a saved query runs
   with a form of its parameters).
 
+- **Web UI: several relationship types between the same two nodes.** The canvas held at most one
+  edge between two nodes: opening, expanding or ranking a graph where two nodes are joined by edges
+  of two types (or both ways) stopped the view ("an edge linking … already exists"). Every edge is
+  kept now, and edges sharing their two nodes are drawn curved apart (@sigma/edge-curve 3.1.0,
+  MIT), so each can be seen and clicked.
+
 - **Web UI: label styles and layouts.** The tenant's label styles are drawn everywhere a label is:
   the Explore canvas (declared colours first, the other labels taking the colours left free; a
   child label its parent's colour and icon; the caption property as the node's name; size by a

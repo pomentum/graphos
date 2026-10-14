@@ -2,17 +2,20 @@ import { ActionIcon, Group } from "@mantine/core";
 import { IconFocusCentered, IconMinus, IconPlus } from "@tabler/icons-react";
 import { useEffect, useRef, type MutableRefObject } from "react";
 import { useTranslation } from "react-i18next";
+import { EdgeCurvedArrowProgram } from "@sigma/edge-curve";
 import { createNodeImageProgram } from "@sigma/node-image";
 import Sigma from "sigma";
 import {
   createNodeCompoundProgram,
   NodeCircleProgram,
   type NodeHoverDrawingFunction,
+  type EdgeProgramType,
   type NodeProgramType,
 } from "sigma/rendering";
 import type { MouseCoords } from "sigma/types";
 import { edgeDisplay, nodeDisplay, type Emphasis } from "../graph/canvasStyle";
 import type { EdgeAttributes, GraphModel, NodeAttributes } from "../graph/GraphModel";
+import { parallelCurvature } from "../graph/parallelEdges";
 import type { Palette } from "../theme/tokens";
 import classes from "./GraphCanvas.module.css";
 
@@ -75,15 +78,23 @@ export function GraphCanvas({
         ...node,
         ...latest.current.style.node(key, node, latest.current.emphasis, latest.current.palette),
       }),
-      edgeReducer: (key, edge) => ({
-        ...edge,
-        ...latest.current.style.edge(key, edge, latest.current.emphasis, latest.current.palette),
-      }),
+      edgeReducer: (key, edge) => {
+        // Edges sharing their two nodes bend apart, so each can be seen and clicked.
+        const curvature = parallelCurvature(model.graph, key);
+        return {
+          ...edge,
+          ...latest.current.style.edge(key, edge, latest.current.emphasis, latest.current.palette),
+          ...(curvature === null ? {} : { type: "curvedArrow", curvature }),
+        };
+      },
       labelColor: { color: palette.text },
       defaultDrawNodeHover: drawHoverLabel(() => latest.current.palette),
       // A label's icon drawn on its disc (label styles); edge captions on the focus only.
       nodeProgramClasses: {
         icon: iconProgram(),
+      },
+      edgeProgramClasses: {
+        curvedArrow: EdgeCurvedArrowProgram as unknown as EdgeProgramType<NodeAttributes, EdgeAttributes>,
       },
       renderEdgeLabels: true,
       edgeLabelColor: { color: palette.muted },

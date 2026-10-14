@@ -89,7 +89,9 @@ function ringSlot(index: number): [number, number] {
  * can be collapsed again. Knows nothing about React or sigma.
  */
 export class GraphModel {
-  readonly graph = new Graph<NodeAttributes, EdgeAttributes>({ type: "directed", multi: false });
+  // Multi: two nodes can be joined by edges of several types (one per type, as
+  // graphos allows); edge keys carry the type.
+  readonly graph = new Graph<NodeAttributes, EdgeAttributes>({ type: "directed", multi: true });
   private readonly listeners = new Set<() => void>();
   private changes = 0;
   private readonly steps: Step[] = [];
