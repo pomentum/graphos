@@ -356,8 +356,11 @@ class Console:
                 return await self._on(conn, tenant, text, tag, names, params, cap, gone)
             except BaseException:
                 # A failed AGE call can leave its database process unusable
-                # (a lock it took and did not release): never reuse it.
-                conn.terminate()
+                # (a lock it took and did not release): never reuse it. When the
+                # watchdog closed it already, asyncpg has handed it back to the
+                # pool and refuses the call.
+                with contextlib.suppress(asyncpg.InterfaceError):
+                    conn.terminate()
                 raise
             finally:
                 await self.pool.release(conn)
