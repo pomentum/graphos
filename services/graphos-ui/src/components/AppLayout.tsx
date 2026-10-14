@@ -8,7 +8,8 @@ import type { SearchHit } from "../api/types";
 import { useWorkspace } from "../graph/WorkspaceProvider";
 import { guardLeavingWhileTransferring } from "../lib/transfers";
 import { useTenantSession } from "../session/SessionProvider";
-import { visibleViews } from "../views/registry";
+import { VIEWS, visibleViews } from "../views/registry";
+import { useServiceInfo } from "../data/queries";
 import classes from "./AppLayout.module.css";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { NodeSearch, type PickMode } from "./NodeSearch";
@@ -27,6 +28,7 @@ const NARROW = "(max-width: 900px)";
 export function AppLayout() {
   const { t } = useTranslation();
   const session = useTenantSession();
+  const info = useServiceInfo();
   const workspace = useWorkspace();
   const navigate = useNavigate();
   const location = useLocation();
@@ -41,7 +43,7 @@ export function AppLayout() {
     // On moving to another view, or the window becoming narrow.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [narrow, location.pathname]);
-  const views = visibleViews(session);
+  const views = visibleViews(session, VIEWS, info.data?.features);
   const current = views.find((view) => location.pathname.startsWith(view.path));
 
   const openHit = (hit: SearchHit, mode: PickMode) => {

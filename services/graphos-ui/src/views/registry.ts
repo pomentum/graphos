@@ -5,6 +5,7 @@ import {
   IconRoute,
   IconSchema,
   IconTable,
+  IconTerminal2,
   IconTopologyStar3,
   type Icon,
 } from "@tabler/icons-react";
@@ -23,6 +24,8 @@ export interface ViewDefinition {
   group: ViewGroup;
   /** `read`: anyone on the tenant; `owner`: its owners and admins; `admin`: admins only. */
   requires: "read" | "owner" | "admin";
+  /** Shown only when the server has this feature on (`GET /v1/info`). */
+  feature?: "cypher";
 }
 
 /** The i18n key of each menu group's heading. */
@@ -44,6 +47,15 @@ export const VIEWS: ViewDefinition[] = [
     requires: "read",
   },
   { id: "path", path: "/path", title: "views.registry.titles.path", icon: IconRoute, group: "Graph", requires: "read" },
+  {
+    id: "query",
+    path: "/query",
+    title: "views.registry.titles.query",
+    icon: IconTerminal2,
+    group: "Graph",
+    requires: "read",
+    feature: "cypher",
+  },
   {
     id: "overview",
     path: "/overview",
@@ -90,9 +102,12 @@ export const VIEWS: ViewDefinition[] = [
 export function visibleViews(
   session: Pick<Session, "isAdmin" | "isOwner">,
   views: ViewDefinition[] = VIEWS,
+  features: Partial<Record<NonNullable<ViewDefinition["feature"]>, boolean>> = {},
 ): ViewDefinition[] {
   return views.filter(
-    (view) => view.requires === "read" || session.isAdmin || (view.requires === "owner" && session.isOwner),
+    (view) =>
+      (!view.feature || features[view.feature] === true) &&
+      (view.requires === "read" || session.isAdmin || (view.requires === "owner" && session.isOwner)),
   );
 }
 

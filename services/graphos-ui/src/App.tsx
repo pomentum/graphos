@@ -19,6 +19,7 @@ import { ConnectView } from "./views/connect/ConnectView";
 import { ExploreView } from "./views/explore/ExploreView";
 import { OverviewView } from "./views/overview/OverviewView";
 import { PathView } from "./views/path/PathView";
+import { QueryView } from "./views/query/QueryView";
 import { t } from "./i18n";
 import { VIEWS } from "./views/registry";
 
@@ -31,6 +32,7 @@ const SCREENS: Record<string, ComponentType> = {
   browse: BrowseView,
   schema: SchemaView,
   access: AccessView,
+  query: QueryView,
 };
 
 /** Client errors (4xx) are answers, not outages: they are not retried. */

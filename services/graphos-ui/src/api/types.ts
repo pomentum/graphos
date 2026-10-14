@@ -73,7 +73,52 @@ export type GrantLevel = Level | "create_tenants" | "admin";
 export interface ServiceInfo {
   service: string;
   version: string;
-  features: { louvain: boolean; metrics: boolean };
+  features: { louvain: boolean; metrics: boolean; cypher?: boolean };
+}
+
+/** A node in a Cypher result: its graphos id, its own label, its properties. */
+export interface CypherNode {
+  id: string;
+  label: string;
+  properties: Properties;
+}
+
+/** An edge in a Cypher result; its ends are null when they were not returned. */
+export interface CypherEdge {
+  type: string;
+  properties: Properties;
+  src_id: string | null;
+  src_label: string | null;
+  dst_id: string | null;
+  dst_label: string | null;
+}
+
+/** A cell: a node, an edge, a path (a list of them), or a plain value. */
+export type CypherCell = { node: CypherNode } | { edge: CypherEdge } | CypherCell[] | unknown;
+
+/** `POST /v1/{tenant}/cypher`: a table, and the graph its nodes and edges make. */
+export interface CypherResult {
+  columns: string[];
+  rows: CypherCell[][];
+  graph: { nodes: CypherNode[]; edges: (CypherEdge & { src_id: string; dst_id: string })[] };
+  truncated: boolean;
+  elapsed_ms: number;
+}
+
+export interface SavedQueryParam {
+  type: "string" | "number" | "boolean" | "list";
+  label?: string | null;
+}
+
+/** A saved Cypher query (`/v1/{tenant}/cypher/saved`). */
+export interface SavedQuery {
+  name: string;
+  description: string;
+  query: string;
+  params: Record<string, SavedQueryParam>;
+  show: "table" | "graph";
+  created_by?: string | null;
+  updated_at?: string | null;
 }
 
 /** A user or service account (`/v1/users`, admin). */

@@ -142,6 +142,13 @@ describe("view registry", () => {
     expect(ids({ isAdmin: true, isOwner: false })).toEqual(expect.arrayContaining(["tenants", "access"]));
     expect(menuGroups(VIEWS).map(([group]) => group)).toEqual(["Graph", "Insights", "Data", "Admin"]);
   });
+
+  it("shows the Query view only where the server has the Cypher console on", () => {
+    const session = { isAdmin: true, isOwner: true };
+    expect(visibleViews(session).map((v) => v.id)).not.toContain("query");
+    expect(visibleViews(session, VIEWS, { cypher: false }).map((v) => v.id)).not.toContain("query");
+    expect(visibleViews(session, VIEWS, { cypher: true }).map((v) => v.id)).toContain("query");
+  });
 });
 
 describe("groupsOffer", () => {

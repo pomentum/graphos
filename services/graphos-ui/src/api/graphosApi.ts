@@ -24,6 +24,8 @@ import type {
   HistogramResponse,
   Me,
   Preferences,
+  CypherResult,
+  SavedQuery,
   NeighborsResponse,
   NodeRecord,
   NodesScanRequest,
@@ -401,6 +403,44 @@ export class GraphosApi {
       query: { mode },
       ...progress,
     });
+  }
+
+  /** Runs a read-only Cypher query on the tenant's graph (the console, when on). */
+  cypher(
+    query: string,
+    params: Record<string, unknown>,
+    options: { limit?: number; signal?: AbortSignal } = {},
+  ): Promise<CypherResult> {
+    return this.http
+      .request<CypherResult>("POST", `/v1/${enc(this.tenant)}/cypher`, {
+        body: { query, params, ...(options.limit ? { limit: options.limit } : {}) },
+        signal: options.signal,
+      })
+      .then((r) => r.data);
+  }
+
+  savedQueries(): Promise<SavedQuery[]> {
+    return this.http.get(`/v1/${enc(this.tenant)}/cypher/saved`);
+  }
+
+  /** Saves a query under `name`, replacing one of that name (`maintain`). */
+  saveQuery(name: string, query: Omit<SavedQuery, "name" | "created_by" | "updated_at">): Promise<SavedQuery> {
+    return this.http
+      .request<SavedQuery>("PUT", `/v1/${enc(this.tenant)}/cypher/saved/${enc(name)}`, { body: query })
+      .then((r) => r.data);
+  }
+
+  async deleteSavedQuery(name: string): Promise<void> {
+    await this.http.request("DELETE", `/v1/${enc(this.tenant)}/cypher/saved/${enc(name)}`);
+  }
+
+  runSavedQuery(name: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<CypherResult> {
+    return this.http
+      .request<CypherResult>("POST", `/v1/${enc(this.tenant)}/cypher/saved/${enc(name)}:run`, {
+        body: { params },
+        signal,
+      })
+      .then((r) => r.data);
   }
 
   /** The tenant's whole schema as a file (`maintain`). */

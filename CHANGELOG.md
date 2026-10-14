@@ -18,6 +18,11 @@ under one version.
   `GRAPHOS_CYPHER_LEVEL` sets the level it needs (`read`). Saved queries
   (`/v1/{tenant}/cypher/saved`) keep named, parameterised queries for a tenant's readers.
   Client: `cypher`, `saved_queries`, `save_query`, `run_saved_query`, `delete_saved_query`.
+- **Web UI: Query.** Where the console is on, a Query page (under Graph): a Cypher editor
+  (Ctrl/⌘+Enter runs), a field for each `$name` parameter, the result as a table (CSV) with rows,
+  time and whether it was cut, "Open on the canvas" for its nodes and edges, Cancel while it runs,
+  and the tenant's saved queries beside it (maintainers save and delete them; a saved query runs
+  with a form of its parameters).
 
 - **Web UI: exports.** The Explore canvas saves as a picture (PNG, drawn by sigma), a drawing (SVG,
   the nodes, edges and labels as shown, editable in other tools) or a graph (JSON: nodes and edges
