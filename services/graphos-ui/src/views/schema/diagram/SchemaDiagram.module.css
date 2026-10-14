@@ -40,6 +40,12 @@
   box-shadow: none;
 }
 
+/* Captions above the boxes and blocks: they are placed clear of the boxes, and a
+   block (drawn behind its labels) must not cover a caption inside it. */
+.canvas :global(.react-flow__edgelabel-renderer) {
+  z-index: 1001;
+}
+
 .canvas :global(.react-flow__node:focus-visible) {
   outline: 2px solid var(--gx-accent);
   outline-offset: 2px;

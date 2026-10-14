@@ -82,10 +82,20 @@ export interface Rect {
   h: number;
 }
 
-/** Where ELK put things, in diagram coordinates: each box's and each block's top-left corner and size. */
+/** A line as ELK routed it, in diagram coordinates: border to border through its bends, and its caption's centre. */
+export interface Route {
+  points: Point[];
+  caption: Point | null;
+}
+
+/**
+ * Where ELK put things, in diagram coordinates: each box's and each block's
+ * top-left corner and size, and each routed line (by its key).
+ */
 export interface Layout {
   positions: Record<string, Point>;
   blocks: Record<string, Rect>;
+  routes: Record<string, Route>;
 }
 
 export type Positions = Record<string, Point>;
@@ -105,13 +115,20 @@ export function boxSize(label: string, meta: string): { w: number; h: number } {
   return { w: Math.max(MIN_BOX_WIDTH, Math.round(chars * CHAR_WIDTH + BOX_PADDING)), h: BOX_HEIGHT };
 }
 
-/** A line's caption: its first types with counts (declared first), then how many more. */
+/**
+ * A line's caption: its first types with counts (declared first), then how
+ * many more. `counts: false` leaves the counts out (a tenant without edges,
+ * where every one would read 0).
+ */
 export function linkCaption(
   types: Pick<LinkType, "type" | "count" | "estimated">[],
   formatCount: (count: number) => string,
   more: (count: number) => string,
+  counts = true,
 ): string {
-  const named = types.slice(0, CAPTION_TYPES).map((t) => `${t.type} ${t.estimated ? "≈" : ""}${formatCount(t.count)}`);
+  const named = types
+    .slice(0, CAPTION_TYPES)
+    .map((t) => (counts ? `${t.type} ${t.estimated ? "≈" : ""}${formatCount(t.count)}` : t.type));
   const rest = types.length - CAPTION_TYPES;
   return rest > 0 ? `${named.join(" · ")} ${more(rest)}` : named.join(" · ");
 }
@@ -218,6 +235,8 @@ export function buildDiagram(
     }
   }
   const rank: Record<EndpointStatus, number> = { declared: 0, undeclared: 1, open: 2 };
+  // Without a single edge, every count would read 0: the captions name the types only.
+  const withCounts = (map?.links ?? []).some((l) => l.count > 0);
   for (const line of byPair.values()) {
     line.types.sort((a, b) => rank[a.status] - rank[b.status] || b.count - a.count || a.type.localeCompare(b.type));
     line.status = line.types.some((t) => t.status === "undeclared")
@@ -225,7 +244,7 @@ export function buildDiagram(
       : line.types.some((t) => t.status === "declared")
         ? "declared"
         : "open";
-    line.caption = linkCaption(line.types, text.formatCount, text.more);
+    line.caption = linkCaption(line.types, text.formatCount, text.more, withCounts);
   }
 
   // Children by parent, among the labels shown (a hidden parent leaves its children on their own).
@@ -304,7 +323,31 @@ function shape(item: string | Block): unknown {
  * that change the text but not the sizes do not lay the diagram out again.
  */
 export function layoutKey(diagram: Diagram): string {
-  return JSON.stringify([diagram.boxes.map((b) => [b.label, b.w, b.h]), diagram.blocks.map(shape), diagram.lone]);
+  return JSON.stringify([
+    diagram.boxes.map((b) => [b.label, b.w, b.h]),
+    diagram.blocks.map(shape),
+    diagram.lone,
+    isLayered(diagram) ? routedLinks(diagram).map((l) => [l.key, captionRoom(l)]) : [],
+  ]);
+}
+
+/**
+ * The lines the layout routes: each relationship line between two labels,
+ * except those of types that declare no pairs (drawn only on request, as
+ * free curves). A label's line to itself is drawn as a loop.
+ */
+export function routedLinks(diagram: Diagram): Link[] {
+  return diagram.links.filter((l) => l.kind === "relationship" && l.src !== l.dst && l.status !== "open");
+}
+
+/**
+ * The caption room a routed line keeps: its first types with room for large
+ * counts, so new counts do not lay the diagram out again.
+ */
+export function captionRoom(link: Link): number {
+  const named = link.types.slice(0, CAPTION_TYPES).map((t) => `${t.type} ≈000,000`);
+  const more = link.types.length > CAPTION_TYPES ? " +99" : "";
+  return Math.round(captionRect(named.join(" · ") + more, { x: 0, y: 0 }).w);
 }
 
 /** What is selected on the diagram: a label's box or a line. */
@@ -337,6 +380,39 @@ export function familyColours(blocks: Block[], palette: readonly string[]): Map<
   return new Map(blocks.slice(0, palette.length).map((block, i) => [block.root, palette[i]!]));
 }
 
+/**
+ * Up to this many labels and lines, the diagram follows the relationships
+ * (`LAYERED_OPTIONS`); a larger schema is packed into a tidy grid, which
+ * stays readable where a layered drawing grows thousands of pixels wide and
+ * takes seconds to lay out.
+ */
+export const LAYERED_MAX_LABELS = 40;
+export const LAYERED_MAX_LINES = 80;
+
+/**
+ * Labels placed in layers along their lines, top to bottom (near the
+ * screen's shape), so lines run between boxes rather than across them,
+ * routed at right angles with room kept for their captions; blocks are laid
+ * out with the rest (their lines cross into them). Labels without lines are
+ * packed beside.
+ */
+export const LAYERED_OPTIONS: Record<string, string> = {
+  "elk.algorithm": "layered",
+  "elk.direction": "DOWN",
+  "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+  "elk.edgeRouting": "ORTHOGONAL",
+  "elk.json.edgeCoords": "ROOT",
+  "elk.layered.spacing.nodeNodeBetweenLayers": "56",
+  "elk.layered.spacing.edgeNodeBetweenLayers": "20",
+  "elk.spacing.nodeNode": "28",
+  "elk.spacing.edgeEdge": "12",
+  "elk.spacing.edgeNode": "16",
+  "elk.spacing.edgeLabel": "4",
+  "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+  "elk.padding": "[top=0,left=0,bottom=0,right=0]",
+};
+const BLOCK_PADDING = `[top=${BLOCK_TITLE + 8},left=12,bottom=12,right=12]`;
+
 /** Blocks and labels packed into rows, in order, near the screen's shape; the same inside a block. */
 export function packOptions(padding: string): Record<string, string> {
   return {
@@ -348,23 +424,48 @@ export function packOptions(padding: string): Record<string, string> {
 }
 
 export const GRID_OPTIONS = { ...packOptions("[top=0,left=0,bottom=0,right=0]"), "elk.spacing.nodeNode": "28" };
-export const BLOCK_OPTIONS = packOptions(`[top=${BLOCK_TITLE + 8},left=12,bottom=12,right=12]`);
+
+/** Whether a diagram is drawn along its relationships (else as a grid). */
+export function isLayered(diagram: Diagram): boolean {
+  return diagram.boxes.length <= LAYERED_MAX_LABELS && routedLinks(diagram).length <= LAYERED_MAX_LINES;
+}
 
 export const familyId = (root: string) => `family:${root}`;
 
-/** The diagram as an ELK graph: blocks (nested as inheritance nests), then the lone labels. */
+/**
+ * The diagram as an ELK graph: blocks (nested as inheritance nests), the
+ * lone labels and, laid out along the relationships, the routed lines; a
+ * large schema as a grid, without lines (they are drawn as free curves).
+ */
 export function toElkGraph(diagram: Diagram): ElkNode {
+  const layered = isLayered(diagram);
   const size = new Map(diagram.boxes.map((b) => [b.label, b] as const));
   const item = (it: string | Block): ElkNode =>
     typeof it === "string"
       ? { id: it, width: size.get(it)!.w, height: size.get(it)!.h }
-      : { id: familyId(it.root), layoutOptions: BLOCK_OPTIONS, children: it.items.map(item) };
-  return { id: "schema", layoutOptions: GRID_OPTIONS, children: [...diagram.blocks, ...diagram.lone].map(item) };
+      : {
+          id: familyId(it.root),
+          layoutOptions: layered ? { "elk.padding": BLOCK_PADDING } : packOptions(BLOCK_PADDING),
+          children: it.items.map(item),
+        };
+  const children = [...diagram.blocks, ...diagram.lone].map(item);
+  if (!layered) return { id: "schema", layoutOptions: GRID_OPTIONS, children };
+  return {
+    id: "schema",
+    layoutOptions: LAYERED_OPTIONS,
+    children,
+    edges: routedLinks(diagram).map((link) => ({
+      id: link.key,
+      sources: [link.src],
+      targets: [link.dst],
+      labels: [{ id: `${link.key}|caption`, text: link.key, width: captionRoom(link), height: CAPTION_HEIGHT }],
+    })),
+  };
 }
 
-/** Every box's and block's place out of ELK's answer, in diagram coordinates. */
+/** Every box's and block's place, and every line's route, out of ELK's answer, in diagram coordinates. */
 export function readElkLayout(laid: ElkNode): Layout {
-  const layout: Layout = { positions: {}, blocks: {} };
+  const layout: Layout = { positions: {}, blocks: {}, routes: {} };
   const walk = (node: ElkNode, offset: Point) => {
     for (const child of node.children ?? []) {
       const at = { x: offset.x + (child.x ?? 0), y: offset.y + (child.y ?? 0) };
@@ -377,7 +478,61 @@ export function readElkLayout(laid: ElkNode): Layout {
     }
   };
   walk(laid, { x: 0, y: 0 });
+  for (const edge of laid.edges ?? []) {
+    const section = edge.sections?.[0];
+    if (!section) continue;
+    const label = edge.labels?.[0];
+    layout.routes[edge.id] = {
+      points: [section.startPoint, ...(section.bendPoints ?? []), section.endPoint].map(({ x, y }) => ({ x, y })),
+      caption:
+        label?.x !== undefined && label.y !== undefined
+          ? { x: label.x + (label.width ?? 0) / 2, y: label.y + (label.height ?? 0) / 2 }
+          : null,
+    };
+  }
   return layout;
+}
+
+/** A routed line as a path: straight runs with rounded corners. */
+export function routePath(points: Point[], radius = 8): string {
+  if (points.length === 0) return "";
+  const [first, ...rest] = points;
+  let d = `M ${first!.x} ${first!.y}`;
+  for (let i = 0; i < rest.length - 1; i++) {
+    const prev = points[i]!;
+    const at = rest[i]!;
+    const next = rest[i + 1]!;
+    const r = Math.min(
+      radius,
+      Math.hypot(at.x - prev.x, at.y - prev.y) / 2,
+      Math.hypot(next.x - at.x, next.y - at.y) / 2,
+    );
+    const toward = (p: Point) => {
+      const len = Math.hypot(p.x - at.x, p.y - at.y) || 1;
+      return { x: at.x + ((p.x - at.x) / len) * r, y: at.y + ((p.y - at.y) / len) * r };
+    };
+    const a = toward(prev);
+    const b = toward(next);
+    d += ` L ${a.x} ${a.y} Q ${at.x} ${at.y} ${b.x} ${b.y}`;
+  }
+  const last = points[points.length - 1]!;
+  return `${d} L ${last.x} ${last.y}`;
+}
+
+/** The point halfway along a route, for a caption ELK did not place. */
+export function routeMiddle(points: Point[]): Point {
+  const lengths = points.slice(1).map((p, i) => Math.hypot(p.x - points[i]!.x, p.y - points[i]!.y));
+  let left = lengths.reduce((a, b) => a + b, 0) / 2;
+  for (const [i, length] of lengths.entries()) {
+    if (left <= length) {
+      const a = points[i]!;
+      const b = points[i + 1]!;
+      const t = length ? left / length : 0;
+      return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+    }
+    left -= length;
+  }
+  return points[0] ?? { x: 0, y: 0 };
 }
 
 /** Where the line from a box's centre towards `toward` leaves the box. */

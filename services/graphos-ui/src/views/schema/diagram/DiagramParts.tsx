@@ -13,7 +13,17 @@ import {
 } from "@xyflow/react";
 import { createContext, useContext } from "react";
 import { useTranslation } from "react-i18next";
-import { freeGeometry, type Box, type Link, type Point, type Rect, type Selection } from "./diagramModel";
+import {
+  freeGeometry,
+  routeMiddle,
+  routePath,
+  type Box,
+  type Link,
+  type Point,
+  type Rect,
+  type Route,
+  type Selection,
+} from "./diagramModel";
 import classes from "./SchemaDiagram.module.css";
 
 /** What every box and line on the diagram needs to know to draw itself. */
@@ -46,6 +56,8 @@ export interface LineData extends Record<string, unknown> {
   extra: boolean;
   /** Where its caption goes, placed with the others' (null: the middle of the line). */
   captionAt: Point | null;
+  /** The route the layout gave it, while its boxes are where the layout put them (null: a free curve). */
+  route: Route | null;
 }
 
 export type LineEdge = Edge<LineData, "line">;
@@ -106,10 +118,11 @@ export function SchemaLine({ id, source, target, data }: EdgeProps<LineEdge>) {
   const src = useInternalNode(source);
   const dst = useInternalNode(target);
   if (!src || !dst || !data) return null;
-  const { link, bowed, extra, captionAt } = data;
+  const { link, bowed, extra, captionAt, route } = data;
 
-  const { d: path, caption: middle } = freeGeometry(rectOf(src), rectOf(dst), source === target, bowed);
-  const at = captionAt ?? middle;
+  const free = route ? null : freeGeometry(rectOf(src), rectOf(dst), source === target, bowed);
+  const path = route ? routePath(route.points) : free!.d;
+  const at = captionAt ?? (route ? (route.caption ?? routeMiddle(route.points)) : free!.caption);
 
   const selected = state.selection?.kind === "link" && state.selection.id === id;
   const lit = selected || (state.focus?.links.has(id) ?? false);

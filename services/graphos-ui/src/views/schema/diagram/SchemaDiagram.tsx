@@ -33,6 +33,7 @@ import {
   useReactFlow,
   type Connection,
   type EdgeChange,
+  type FitViewOptions,
   type NodeChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -57,6 +58,7 @@ import {
 } from "./DiagramParts";
 import {
   buildDiagram,
+  captionRect,
   familyColours,
   familyId,
   focusOf,
@@ -96,7 +98,11 @@ export interface SchemaDiagramProps {
 
 const NODE_TYPES = { label: LabelBox, family: FamilyBlock };
 const EDGE_TYPES = { line: SchemaLine };
-const FIT = { padding: 0.12, maxZoom: 1.2 };
+// Fitted below the toolbar and the legend, which float over the canvas's top.
+const FIT: FitViewOptions = {
+  padding: { top: "112px", right: "5%", bottom: "5%", left: "5%" },
+  maxZoom: 1.2,
+};
 // Whether the legend is open, for the life of the page (nothing is kept in
 // the browser's storage).
 let legendOpen = true;
@@ -156,9 +162,12 @@ function placeNodes(diagram: Diagram, laid: Layout, kept: Positions, meta: (box:
 }
 
 /**
- * The schema drawn as a tidy grid: a box per label, a label that others
- * inherit from holding them in a block, the other labels after them,
- * busiest first; ELK packs it. The lines are the schema's associations:
+ * The schema drawn by ELK: a box per label, a label that others inherit
+ * from holding them in a block. Up to 40 labels the boxes are placed along
+ * their relationships, top to bottom, and the lines routed between them with
+ * room for their captions; a larger schema is packed into a tidy grid
+ * (blocks first, busiest labels first) with free curves. The lines are the
+ * schema's associations:
  * the declared label pairs of each relationship type (solid), pairs in the
  * data outside them (dashed, in the warning colour) and, on request, pairs
  * of types that declare none (dotted). The selected label shows all of its
@@ -298,13 +307,30 @@ function DiagramCanvas({
     const bowed = (l: { src: string; dst: string }) => l.src !== l.dst && pairs.has(`relationship|${l.dst}|${l.src}`);
     const extra = (l: (typeof drawn)[number]) => !touches(l) && l.status === "open";
 
-    // Captions placed together, so they do not cover each other or the boxes.
+    // A line keeps the route the layout gave it while its two boxes are where
+    // the layout put them; once one is moved, it is drawn as a free curve.
     const rects = boxRects(nodes);
+    const inPlace = (label: string) => {
+      const now = rects.get(label);
+      const was = laid.positions[label];
+      return (
+        Boolean(now && was) && Math.abs(now!.x - now!.w / 2 - was!.x) < 1 && Math.abs(now!.y - now!.h / 2 - was!.y) < 1
+      );
+    };
+    const routeOf = (l: (typeof drawn)[number]) =>
+      inPlace(l.src) && inPlace(l.dst) ? (laid.routes[l.key] ?? null) : null;
+
+    // Captions of routed lines sit where the layout kept room for them; the
+    // others are placed together, clear of those, of each other and of the boxes.
+    const routedCaptions = drawn.flatMap((l) => {
+      const at = routeOf(l)?.caption;
+      return at && l.caption && !extra(l) ? [captionRect(l.caption, at)] : [];
+    });
     const inputs: CaptionInput[] = [];
     for (const link of drawn) {
       const src = rects.get(link.src);
       const dst = rects.get(link.dst);
-      if (!src || !dst || !link.caption || extra(link)) continue;
+      if (!src || !dst || !link.caption || extra(link) || routeOf(link)) continue;
       const geometry = freeGeometry(src, dst, link.src === link.dst, bowed(link));
       inputs.push({
         key: link.key,
@@ -314,7 +340,7 @@ function DiagramCanvas({
         priority: (touches(link) ? 1e12 : 0) + link.count,
       });
     }
-    const captions = placeCaptions(inputs, [...rects.values()]);
+    const captions = placeCaptions(inputs, [...rects.values(), ...routedCaptions]);
 
     setEdges(
       drawn.map((link) => ({
@@ -322,7 +348,13 @@ function DiagramCanvas({
         type: "line",
         source: link.src,
         target: link.dst,
-        data: { link, bowed: bowed(link), extra: extra(link), captionAt: captions[link.key] ?? null },
+        data: {
+          link,
+          bowed: bowed(link),
+          extra: extra(link),
+          captionAt: captions[link.key] ?? null,
+          route: routeOf(link),
+        },
       })),
     );
   }, [laid, diagram, lines, selection, nodes]);

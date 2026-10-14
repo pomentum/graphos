@@ -11,6 +11,8 @@ import {
   placeCaptions,
   captionRect,
   savePositions,
+  isLayered,
+  routePath,
   type Block,
 } from "../src/views/schema/diagram/diagramModel";
 import { layoutDiagram } from "../src/views/schema/diagram/elkLayout";
@@ -161,5 +163,90 @@ describe("schema diagram", () => {
     });
     expect(loadPositions("t1")).toEqual({});
     spy.mockRestore();
+  });
+
+  it("lays a small schema out along its relationships, lines routed clear of the boxes and captions apart", async () => {
+    // A block of three, lines into and out of it, a pair joined by two types, a loop.
+    const small: TenantSchema = {
+      name: "s",
+      vertex_labels: ["Party", "Bank", "Vendor", "Deal", "Offer", "Area", "Group", "Kind", "Duty"],
+      edge_labels: [
+        "SIGNS",
+        "WITH",
+        "COVERS",
+        "SELLS",
+        "DOES",
+        "SERVES",
+        "USES",
+        "IN",
+        "MEMBER",
+        "OF",
+        "NEEDS",
+        "MUST",
+      ],
+      label_hierarchy: { Bank: "Party", Vendor: "Party" },
+      search_indexes: {},
+      rule_edge_labels: [],
+      edge_endpoints: Object.fromEntries(
+        (
+          [
+            ["SIGNS", "Bank", "Deal"],
+            ["WITH", "Deal", "Vendor"],
+            ["COVERS", "Deal", "Offer"],
+            ["SELLS", "Vendor", "Offer"],
+            ["DOES", "Bank", "Duty"],
+            ["SERVES", "Deal", "Duty"],
+            ["USES", "Offer", "Offer"],
+            ["MEMBER", "Party", "Group"],
+            ["IN", "Party", "Area"],
+            ["OF", "Offer", "Kind"],
+            ["NEEDS", "Bank", "Vendor"],
+            ["MUST", "Bank", "Vendor"],
+          ] as const
+        ).map(([type, src, dst]) => [type, [{ src, dst }]]),
+      ),
+      strict_endpoints: false,
+    };
+    const diagram = buildDiagram(small, { labels: [], links: [], estimated: false });
+    expect(isLayered(diagram)).toBe(true);
+    // No edges at all: the captions name the types without a row of zeros.
+    expect(diagram.links.find((l) => l.key === "rel|Bank|Vendor")!.caption).toBe("MUST · NEEDS");
+    const layout = await layoutDiagram(diagram, new ELK());
+    const routed = diagram.links.filter((l) => l.kind === "relationship" && l.src !== l.dst);
+    expect(Object.keys(layout.routes).sort()).toEqual(routed.map((l) => l.key).sort());
+    expect(layout.routes["rel|Offer|Offer"]).toBeUndefined(); // a loop is drawn, not routed
+
+    const boxes = diagram.boxes.map((b) => ({ ...layout.positions[b.label]!, w: b.w, h: b.h, label: b.label }));
+    const inside = (p: { x: number; y: number }, b: (typeof boxes)[number]) =>
+      p.x > b.x + 1 && p.x < b.x + b.w - 1 && p.y > b.y + 1 && p.y < b.y + b.h - 1;
+    const captions = routed.map((l) => captionRect(l.caption, layout.routes[l.key]!.caption!));
+    for (const link of routed) {
+      const route = layout.routes[link.key]!;
+      expect(route.points.length).toBeGreaterThanOrEqual(2);
+      expect(routePath(route.points)).toMatch(/^M /);
+      // No bend inside a box other than its own two ends.
+      for (const point of route.points.slice(1, -1)) {
+        for (const box of boxes)
+          if (box.label !== link.src && box.label !== link.dst) expect(inside(point, box)).toBe(false);
+      }
+    }
+    // Captions cover neither each other nor a box.
+    const overlaps = (a: { x: number; y: number; w: number; h: number }, b: typeof a) =>
+      Math.abs(a.x - b.x) < (a.w + b.w) / 2 - 1 && Math.abs(a.y - b.y) < (a.h + b.h) / 2 - 1;
+    for (const [i, a] of captions.entries()) {
+      for (const b of captions.slice(i + 1)) expect(overlaps(a, b)).toBe(false);
+      for (const box of boxes)
+        expect(overlaps(a, { x: box.x + box.w / 2, y: box.y + box.h / 2, w: box.w, h: box.h })).toBe(false);
+    }
+  });
+
+  it("packs a large schema into a grid, its lines drawn as free curves", async () => {
+    const labels = Array.from({ length: 45 }, (_, i) => `L${i}`);
+    const large: TenantSchema = { ...schema, vertex_labels: labels, label_hierarchy: {} };
+    const diagram = buildDiagram(large, undefined);
+    expect(isLayered(diagram)).toBe(false);
+    const layout = await layoutDiagram(diagram, new ELK());
+    expect(layout.routes).toEqual({});
+    expect(Object.keys(layout.positions)).toHaveLength(45);
   });
 });
