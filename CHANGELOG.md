@@ -4,7 +4,7 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.8.3 — 2026-10-14
 
 People who know Cypher can now ask their own questions: an opt-in, read-only Cypher console with
 saved queries, and a Query page in the web UI that colours Cypher and suggests the tenant's labels
