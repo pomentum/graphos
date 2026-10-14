@@ -27,8 +27,15 @@ function escapeXml(text: string): string {
 
 const round = (n: number) => Math.round(n * 10) / 10;
 
+/** The direction of (x, y), of length 1 ((0, 0) stays put). */
+function unit(x: number, y: number): [number, number] {
+  const length = Math.hypot(x, y) || 1;
+  return [x / length, y / length];
+}
+
 /**
- * The canvas as SVG, as it is drawn now: edges (with arrowheads), nodes, and
+ * The canvas as SVG, as it is drawn now: edges (with arrowheads; those sharing
+ * their two nodes curved apart, as on the canvas), nodes, and
  * the labels sigma shows (those of highlighted and forced nodes), on the
  * canvas's background and at its size. Hidden nodes and edges are left out.
  */
@@ -56,18 +63,31 @@ export function canvasSvg(renderer: Renderer, graph: Graph<NodeAttributes, EdgeA
     const a = at(source);
     const b = at(target);
     if (!data || data.hidden || !a || !b || source === target) return;
-    // From border to border, so the arrowhead is not under the target.
     const dx = b.x - a.x;
     const dy = b.y - a.y;
-    const length = Math.hypot(dx, dy) || 1;
-    const x1 = a.x + (dx / length) * a.r;
-    const y1 = a.y + (dy / length) * a.r;
-    const x2 = b.x - (dx / length) * b.r;
-    const y2 = b.y - (dy / length) * b.r;
     const stroke = Math.max(renderer.scaleSize(data.size), 0.5);
+    const paint = `stroke="${data.color}" stroke-width="${round(stroke)}" marker-end="url(#${markerFor(data.color)})"`;
+    // Edges sharing their two nodes are drawn curved apart (graph/parallelEdges):
+    // the same quadratic as sigma's curve program, its control point off the
+    // middle by curvature × the edge's length, on the screen's axes (y down).
+    const curvature = (data as { curvature?: unknown }).curvature;
+    if (typeof curvature === "number" && curvature !== 0) {
+      const cx = (a.x + b.x) / 2 + dy * curvature;
+      const cy = (a.y + b.y) / 2 - dx * curvature;
+      // From border to border along the curve's own ends, so the arrowhead is not under the target.
+      const [sx, sy] = unit(cx - a.x, cy - a.y);
+      const [ex, ey] = unit(b.x - cx, b.y - cy);
+      edges.push(
+        `<path d="M${round(a.x + sx * a.r)},${round(a.y + sy * a.r)} Q${round(cx)},${round(cy)} ` +
+          `${round(b.x - ex * b.r)},${round(b.y - ey * b.r)}" fill="none" ${paint}/>`,
+      );
+      return;
+    }
+    // From border to border, so the arrowhead is not under the target.
+    const [ux, uy] = unit(dx, dy);
     edges.push(
-      `<line x1="${round(x1)}" y1="${round(y1)}" x2="${round(x2)}" y2="${round(y2)}" stroke="${data.color}" ` +
-        `stroke-width="${round(stroke)}" marker-end="url(#${markerFor(data.color)})"/>`,
+      `<line x1="${round(a.x + ux * a.r)}" y1="${round(a.y + uy * a.r)}" x2="${round(b.x - ux * b.r)}" ` +
+        `y2="${round(b.y - uy * b.r)}" ${paint}/>`,
     );
   });
 

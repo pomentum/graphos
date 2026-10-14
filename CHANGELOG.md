@@ -41,7 +41,7 @@ under one version.
   edge between two nodes: opening, expanding or ranking a graph where two nodes are joined by edges
   of two types (or both ways) stopped the view ("an edge linking … already exists"). Every edge is
   kept now, and edges sharing their two nodes are drawn curved apart (@sigma/edge-curve 3.1.0,
-  MIT), so each can be seen and clicked.
+  MIT), so each can be seen and clicked; the SVG export draws them with the same curves.
 
 - **Web UI: label styles and layouts.** The tenant's label styles are drawn everywhere a label is:
   the Explore canvas (declared colours first, the other labels taking the colours left free; a

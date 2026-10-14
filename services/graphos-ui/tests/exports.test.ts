@@ -151,6 +151,23 @@ describe("the canvas as a file", () => {
     expect(svg).toContain('marker-end="url(#a0)"');
   });
 
+  it("draws edges sharing their two nodes curved, as the canvas does", () => {
+    const { graph, renderer } = canvas();
+    const curved = {
+      ...(renderer as unknown as Record<string, unknown>),
+      getEdgeDisplayData: () => ({ color: "#888888", size: 1, hidden: false, curvature: 0.25 }),
+    };
+    const svg = canvasSvg(curved as never, graph, DARK);
+    expect(svg).not.toContain("<line ");
+    const path = /<path d="M([\d.]+),([\d.]+) Q([\d.]+),([\d.]+) ([\d.]+),([\d.]+)" fill="none"/.exec(svg);
+    expect(path).not.toBeNull();
+    const [x1, y1, cx, cy, x2, y2] = path!.slice(1).map(Number);
+    // Its control point off the straight line, to the side sigma bends it (left of the direction, y down).
+    const cross = (x2! - x1!) * (cy! - y1!) - (y2! - y1!) * (cx! - x1!);
+    expect(cross).toBeLessThan(0);
+    expect(svg).toContain('marker-end="url(#a0)"');
+  });
+
   it("saves the graph as JSON without the +N placeholders", () => {
     const { graph } = canvas();
     const doc = JSON.parse(canvasJson(graph)) as { nodes: unknown[]; edges: unknown[] };
