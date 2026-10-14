@@ -14,6 +14,7 @@ import { IconCheck } from "@tabler/icons-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DISPLAY_ICONS, type DisplayIcon, type VertexDisplay } from "../../api/types";
+import { useEdgeProperties } from "../../data/queries";
 import { LABEL_ICONS } from "../../lib/labelIcons";
 import { METRIC_PROPERTIES } from "../../lib/metrics";
 import { CATEGORY_COLORS } from "../../theme/categories";
@@ -26,13 +27,15 @@ const HEX = /^#[0-9A-Fa-f]{6}$/;
  * (and icon) as a swatch; maintainers click it to set the colour, caption,
  * size and icon everyone on the tenant sees. `shown` is what is drawn (a
  * child label takes its parent's colour); `own` what this one declares.
+ * A label's caption is picked from `properties`; a relationship type's
+ * from its own edges' properties, sampled when the editor opens.
  */
 export function StyleSwatch({
   kind,
   name,
   own,
   shown,
-  properties,
+  properties = [],
   editable,
   saving,
   onSave,
@@ -41,7 +44,8 @@ export function StyleSwatch({
   name: string;
   own: VertexDisplay | null;
   shown: VertexDisplay | null;
-  properties: string[];
+  /** A label's property names (a relationship type samples its own). */
+  properties?: string[];
   editable: boolean;
   saving: boolean;
   /** The entry to declare, or null to remove the declared one. */
@@ -60,6 +64,10 @@ export function StyleSwatch({
     setIcon(own?.icon ?? null);
     setOpened(true);
   };
+  const sampled = useEdgeProperties(kind === "edge" && opened ? name : null);
+  const offered = kind === "edge" ? (sampled.data ?? []) : properties;
+  // The declared caption stays choosable even when no sampled row carries it.
+  const captions = own?.caption && !offered.includes(own.caption) ? [own.caption, ...offered] : offered;
   const badColor = color !== "" && !HEX.test(color);
   const entry: VertexDisplay = Object.fromEntries(
     Object.entries({
@@ -152,7 +160,7 @@ export function StyleSwatch({
             size="xs"
             label={t("views.schema.style.caption")}
             placeholder={t("views.schema.style.captionDefault")}
-            data={properties}
+            data={captions}
             value={caption}
             onChange={setCaption}
             clearable

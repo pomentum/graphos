@@ -259,6 +259,11 @@ export interface NodesScanResponse {
   next_cursor: string | null;
 }
 
+export interface EdgesScanResponse {
+  items: { type: string; src_id: string; dst_id: string; properties: Properties }[];
+  next_cursor: string | null;
+}
+
 export interface SearchHit {
   /** AGE graphid; the node's own id is `properties.id`. */
   id: number;

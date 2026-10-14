@@ -277,7 +277,6 @@ export function SchemaView() {
                     name={row.type}
                     own={ownStyle(schema.data?.display?.edge?.[row.type])}
                     shown={styles.edge.get(row.type) ?? null}
-                    properties={allProperties}
                     editable={canMaintain}
                     saving={add.isPending}
                     onSave={(entry, done) => saveStyle("edge", row.type, entry, done)}

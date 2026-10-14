@@ -40,6 +40,7 @@ export const keys = {
     ["edge", tenant, edge.type, edge.srcLabel, edge.srcId, edge.dstLabel, edge.dstId] as const,
   stats: (tenant: string) => ["stats", tenant] as const,
   properties: (tenant: string, label: string) => ["properties", tenant, label] as const,
+  edgeProperties: (tenant: string, type: string) => ["edgeProperties", tenant, type] as const,
   scan: (tenant: string, request: NodesScanRequest) => ["scan", tenant, request] as const,
   histogram: (tenant: string, label: string, property: string) => ["histogram", tenant, label, property] as const,
   catalogue: (tenant: string) => ["catalogue", tenant] as const,
@@ -275,6 +276,18 @@ export function useProperties(label: string | null) {
     enabled: label !== null,
     staleTime: 60_000,
     select: (page) => [...new Set(page.items.flatMap((node) => Object.keys(node.properties)))].sort(),
+  });
+}
+
+/** The property names a relationship type's edges carry, from a sample of them; idle without a type. */
+export function useEdgeProperties(type: string | null) {
+  const { api, tenant } = useTenantSession();
+  return useQuery({
+    queryKey: keys.edgeProperties(tenant, type ?? ""),
+    queryFn: () => api.sampleEdges(type!, PROPERTY_SAMPLE),
+    enabled: type !== null,
+    staleTime: 60_000,
+    select: (page) => [...new Set(page.items.flatMap((edge) => Object.keys(edge.properties)))].sort(),
   });
 }
 

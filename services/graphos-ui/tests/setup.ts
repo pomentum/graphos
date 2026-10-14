@@ -23,3 +23,6 @@ globalThis.ResizeObserver ??= class {
   unobserve() {}
   disconnect() {}
 };
+
+// A searchable combobox scrolls its selected option into view.
+Element.prototype.scrollIntoView ??= () => undefined;

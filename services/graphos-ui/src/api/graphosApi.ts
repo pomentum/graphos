@@ -29,6 +29,7 @@ import type {
   NeighborsResponse,
   NodeRecord,
   NodesScanRequest,
+  EdgesScanResponse,
   NodesScanResponse,
   NodeUpsert,
   PathsRequest,
@@ -160,6 +161,12 @@ export class GraphosApi {
   /** The first `limit` nodes of a label with all their properties. */
   sampleNodes(label: string, limit: number): Promise<NodesScanResponse> {
     return this.scanNodes({ labels: [label], project: ["*"], limit });
+  }
+
+  /** The first `limit` edges of a type with all their properties. */
+  async sampleEdges(type: string, limit: number): Promise<EdgesScanResponse> {
+    const body = { types: [type], project: ["*"], limit };
+    return (await this.http.request<EdgesScanResponse>("POST", `${this.graph}/edges:scan`, { body })).data;
   }
 
   /** One page of nodes in id order; send `next_cursor` back for the next page. */
