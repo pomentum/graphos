@@ -1,3 +1,4 @@
+import { EditorView } from "@codemirror/view";
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -109,6 +110,13 @@ function ui(fetchImpl: typeof fetch, level: "read" | "maintain" = "read") {
   );
 }
 
+/** Replaces the editor's text, as typing would. */
+async function typeQuery(text: string) {
+  const content = await screen.findByRole("textbox", { name: "Cypher query" });
+  const view = EditorView.findFromDOM(content)!;
+  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+}
+
 describe("the query text", () => {
   it("finds parameters outside strings and comments, and types their values", () => {
     expect(queryParams("MATCH (n {id: $id, k: $k}) WHERE n.x = '$no' // $nor\nRETURN n, $id")).toEqual(["id", "k"]);
@@ -132,12 +140,13 @@ describe("the Query view", () => {
   it("runs a query with its parameters and shows the table", async () => {
     const { calls, fetchImpl } = fakeGraphos(true);
     render(ui(fetchImpl));
-    const editor = await screen.findByRole("textbox", { name: "Cypher query" });
-    fireEvent.change(editor, { target: { value: "MATCH (d:Doc {id: $id, pages: $pages}) RETURN d" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "$id" }), { target: { value: "d1" } });
+    await typeQuery("MATCH (d:Doc {id: $id, pages: $pages}) RETURN d");
+    fireEvent.change(await screen.findByRole("textbox", { name: "$id" }), { target: { value: "d1" } });
     fireEvent.change(screen.getByRole("textbox", { name: "$pages" }), { target: { value: "5" } });
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
-    expect(await screen.findByText("Author a1")).toBeInTheDocument();
+    expect(await screen.findByText("Ada")).toBeInTheDocument();
+    // Nodes carry their label, coloured as the canvas colours labels.
+    expect(screen.getAllByText("Author")[0]).toHaveClass(/kind/);
     expect(screen.getByText(/1 row in 12 ms · more rows matched/)).toBeInTheDocument();
     const run = calls.find((c) => c.url === "/v1/acme/cypher");
     expect(run?.body).toEqual({
@@ -154,7 +163,7 @@ describe("the Query view", () => {
     fireEvent.click(await screen.findByText("docs_of"));
     fireEvent.change(screen.getByRole("textbox", { name: "Author id" }), { target: { value: "a1" } });
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
-    await screen.findByText("Author a1");
+    await screen.findByText("Ada");
     expect(calls.find((c) => c.url === "/v1/acme/cypher/saved/docs_of:run")?.body).toEqual({
       params: { author: "a1" },
     });

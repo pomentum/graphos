@@ -19,7 +19,12 @@ under one version.
   (`/v1/{tenant}/cypher/saved`) keep named, parameterised queries for a tenant's readers.
   Client: `cypher`, `saved_queries`, `save_query`, `run_saved_query`, `delete_saved_query`.
 - **Web UI: Query.** Where the console is on, a Query page (under Graph): a Cypher editor
-  (Ctrl/⌘+Enter runs), a field for each `$name` parameter, the result as a table (CSV) with rows,
+  (Ctrl/⌘+Enter runs) that colours Cypher (clauses, labels, edge types, properties, parameters,
+  functions, strings, comments) and suggests as one types or on Ctrl+Space: the tenant's labels
+  after `:` in a node, its edge types in an edge, property names after `variable.` (the
+  variable's label's first), parameters after `$`, clauses, functions with a hint, the query's
+  variables, and a few whole queries to start from. A field for each `$name` parameter; the
+  result as a table (CSV), nodes with a dot in their label's colour and edges by type, with rows,
   time and whether it was cut, "Open on the canvas" for its nodes and edges, Cancel while it runs,
   and the tenant's saved queries beside it (maintainers save and delete them; a saved query runs
   with a form of its parameters).

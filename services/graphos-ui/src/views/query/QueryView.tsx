@@ -7,6 +7,7 @@ import {
   Menu,
   Modal,
   Radio,
+  Skeleton,
   Stack,
   Table,
   Text,
@@ -23,19 +24,25 @@ import {
   IconTopologyStar3,
 } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState, type FormEvent } from "react";
+import { lazy, Suspense, useMemo, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import type { CypherResult, SavedQuery } from "../../api/types";
-import { useServiceInfo } from "../../data/queries";
+import type { CypherCell, CypherResult, SavedQuery } from "../../api/types";
+import { displayName } from "../../graph/GraphModel";
+import { rankColors } from "../../theme/categories";
+import { useCatalogue, useSchema, useServiceInfo } from "../../data/queries";
 import { useWorkspace } from "../../graph/WorkspaceProvider";
 import { CSV_TYPE, exportName, toCsv } from "../../lib/csv";
 import { saveFile } from "../../lib/download";
 import { formatCount } from "../../lib/time";
 import { isApple } from "../../lib/platform";
 import { useTenantSession } from "../../session/SessionProvider";
-import { cellText, paramValue, queryParams } from "./cypherText";
+import type { CypherVocabulary } from "./cypherLanguage";
+import { cellText, isEdge, isNode, paramValue, queryParams } from "./cypherText";
 import classes from "./QueryView.module.css";
+
+// The editor (CodeMirror) is loaded with the page that uses it.
+const CypherEditor = lazy(() => import("./CypherEditor").then((m) => ({ default: m.CypherEditor })));
 
 const SAVED_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/;
 
@@ -65,6 +72,8 @@ export function QueryView() {
   const stop = useRef<AbortController | null>(null);
   const client = useQueryClient();
   const saved = useQuery({ queryKey: ["cypher-saved", tenant], queryFn: () => api.savedQueries() });
+  const schema = useSchema();
+  const catalogue = useCatalogue();
   const remember = (next: Partial<{ query: string; params: Record<string, string>; result: CypherResult | null }>) =>
     memory.set(tenant, { query, params, result, ...next });
 
@@ -80,6 +89,12 @@ export function QueryView() {
 
   const names = queryParams(query);
   const declared = active && active.query === query ? active.params : {};
+  const vocabulary: CypherVocabulary = {
+    vertexLabels: schema.data?.vertex_labels ?? [],
+    edgeTypes: schema.data?.edge_labels ?? [],
+    properties: catalogue.data?.by_property ?? {},
+    params: Object.keys(active?.params ?? {}),
+  };
 
   const run = async (event?: FormEvent) => {
     event?.preventDefault();
@@ -135,22 +150,19 @@ export function QueryView() {
         </div>
         <form onSubmit={(event) => void run(event)}>
           <Stack gap="xs">
-            <Textarea
-              className={classes.editor}
-              aria-label={t("views.query.editor")}
-              value={query}
-              autosize
-              minRows={5}
-              maxRows={18}
-              spellCheck={false}
-              onChange={(event) => {
-                setQuery(event.currentTarget.value);
-                remember({ query: event.currentTarget.value });
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) void run();
-              }}
-            />
+            <Suspense fallback={<Skeleton h={128} radius="md" />}>
+              <CypherEditor
+                label={t("views.query.editor")}
+                hint={t("views.query.placeholder")}
+                value={query}
+                vocabulary={vocabulary}
+                onRun={() => void run()}
+                onChange={(next) => {
+                  setQuery(next);
+                  remember({ query: next });
+                }}
+              />
+            </Suspense>
             {names.length ? (
               <Group gap="xs" align="flex-end">
                 {names.map((name) => (
@@ -313,6 +325,7 @@ function Results({ result, onCsv, preferGraph }: { result: CypherResult; onCsv: 
     frameOn(keys);
     void navigate("/explore");
   };
+  const colors = useMemo(() => labelColors(result), [result]);
   return (
     <>
       <Group justify="space-between" gap="xs">
@@ -357,14 +370,11 @@ function Results({ result, onCsv, preferGraph }: { result: CypherResult; onCsv: 
           <Table.Tbody>
             {result.rows.map((row, i) => (
               <Table.Tr key={i}>
-                {row.map((cell, j) => {
-                  const text = cellText(cell);
-                  return (
-                    <Table.Td key={j} className={classes.cell} title={text}>
-                      {text}
-                    </Table.Td>
-                  );
-                })}
+                {row.map((cell, j) => (
+                  <Table.Td key={j} className={classes.cell} title={cellText(cell)}>
+                    <Cell cell={cell} colors={colors} />
+                  </Table.Td>
+                ))}
               </Table.Tr>
             ))}
           </Table.Tbody>
@@ -377,6 +387,42 @@ function Results({ result, onCsv, preferGraph }: { result: CypherResult; onCsv: 
       </div>
     </>
   );
+}
+
+/** A colour per node label in the result, most common first, as the canvas colours by label. */
+function labelColors(result: CypherResult): Map<string, string> {
+  const counts = new Map<string, number>();
+  for (const node of result.graph.nodes) counts.set(node.label, (counts.get(node.label) ?? 0) + 1);
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return rankColors(ranked.map(([label]) => label));
+}
+
+/** One cell: a node as its label's dot, label and name; an edge as its type; a path as both in turn. */
+function Cell({ cell, colors }: { cell: CypherCell; colors: Map<string, string> }) {
+  if (isNode(cell)) {
+    const { node } = cell;
+    return (
+      <span className={classes.node}>
+        <span className={classes.dot} style={{ background: colors.get(node.label) ?? "var(--gx-node-idle)" }} />
+        <span className={classes.kind}>{node.label}</span>
+        {displayName(node.properties, node.id)}
+      </span>
+    );
+  }
+  if (isEdge(cell)) return <span className={classes.edge}>{`–${cell.edge.type}→`}</span>;
+  if (Array.isArray(cell) && cell.length > 0 && cell.every((c) => isNode(c) || isEdge(c))) {
+    return (
+      <span className={classes.path}>
+        {cell.map((part, i) => (
+          <Cell key={i} cell={part} colors={colors} />
+        ))}
+      </span>
+    );
+  }
+  if (cell === null || cell === undefined) return <span className={classes.none}>null</span>;
+  if (typeof cell === "number" || typeof cell === "boolean")
+    return <span className={classes.value}>{String(cell)}</span>;
+  return <>{cellText(cell)}</>;
 }
 
 /** Saves the query under a name, for the tenant's readers (maintainers). */
