@@ -8,6 +8,17 @@ under one version.
 
 ### Added
 
+- **Cypher console (opt-in).** `GRAPHOS_CYPHER=true` lets people who know Cypher run read-only
+  Cypher on one tenant's graph: `POST /v1/{tenant}/cypher` with `$name` parameters answers a table
+  (vertices, edges and paths as graphos nodes and edges) and the graph they make. graphos refuses
+  calls of database functions (schema-qualified names) before the query reaches the database, runs
+  it in a read-only transaction on a small pool of its own, caps rows
+  (`GRAPHOS_CYPHER_MAX_ROWS`) and time (`GRAPHOS_CYPHER_TIMEOUT_S`; a watchdog terminates a query
+  AGE is slow to stop, and a cancelled request stops its query), and allows one query per user.
+  `GRAPHOS_CYPHER_LEVEL` sets the level it needs (`read`). Saved queries
+  (`/v1/{tenant}/cypher/saved`) keep named, parameterised queries for a tenant's readers.
+  Client: `cypher`, `saved_queries`, `save_query`, `run_saved_query`, `delete_saved_query`.
+
 - **Web UI: exports.** The Explore canvas saves as a picture (PNG, drawn by sigma), a drawing (SVG,
   the nodes, edges and labels as shown, editable in other tools) or a graph (JSON: nodes and edges
   with their properties). Browse saves the page shown, or every node matching the filter (paged

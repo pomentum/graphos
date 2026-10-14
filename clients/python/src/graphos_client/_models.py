@@ -84,6 +84,22 @@ class UnregisteredTenant(BaseModel):
     unregistered_by: str | None = None
 
 
+class CypherResult(BaseModel):
+    """What a Cypher console query returned (``POST /v1/{tenant}/cypher``).
+
+    ``rows`` holds one list of cells per row: a vertex as
+    ``{"node": {id, label, properties}}``, an edge as ``{"edge": {type,
+    properties, src_id, src_label, dst_id, dst_label}}``, a path as a list of
+    them.  ``graph`` holds the returned nodes and the edges between them.
+    """
+
+    columns: list[str] = Field(default_factory=list)
+    rows: list[list[Any]] = Field(default_factory=list)
+    graph: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    truncated: bool = False
+    elapsed_ms: int = 0
+
+
 class EdgeEndpoint(BaseModel):
     """One label pair an edge type is declared to join: ``src`` -> ``dst``."""
 

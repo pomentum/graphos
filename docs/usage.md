@@ -832,6 +832,48 @@ scope property.
 
 ---
 
+### Cypher console (opt-in)
+
+For people who know Cypher, graphos can run **read-only** Cypher on one tenant's graph. It is off
+unless an operator sets `GRAPHOS_CYPHER=true`; `GET /v1/info` then says `"cypher": true` and the
+web UI shows a Query page.
+
+```bash
+curl -s -X POST "$G/v1/acme/cypher" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"query": "MATCH (a:Person)-[w:WROTE]->(d:Doc {kind: $kind}) RETURN a, w, d LIMIT 50",
+       "params": {"kind": "guide"}}'
+# → {"columns": ["a", "w", "d"], "rows": [[{"node": {...}}, {"edge": {...}}, {"node": {...}}], ...],
+#    "graph": {"nodes": [...], "edges": [...]}, "truncated": false, "elapsed_ms": 12}
+```
+
+- **Cells:** a vertex is `{"node": {id, label, properties}}` (`id` is the graphos id), an edge
+  `{"edge": {type, properties, src_id, src_label, dst_id, dst_label}}` (ends `null` when they are
+  not returned), a path a list of them. `graph` holds the returned nodes and the edges between
+  them: return the nodes with their edges (`RETURN a, w, d`, or a path) to see them as a graph.
+- **Columns** are named after the `RETURN` items (`AS` aliases, else the expression); `RETURN *`
+  works, its columns named `c1`, `c2`, … .
+- **Parameters** are used as `$name`.
+- **Read-only:** `CREATE`, `SET`, `DELETE`, `MERGE` answer 400; write through the API, which keeps
+  revisions, the change feed and the audit log right.
+- **Only Cypher's own functions:** a call of a database function by its schema-qualified name
+  (`pg_catalog.version()`) is refused (400) before the query reaches the database.
+- **Limits:** `GRAPHOS_CYPHER_MAX_ROWS` rows (5,000; `truncated` says when more matched, and
+  `"limit"` asks for fewer); `GRAPHOS_CYPHER_TIMEOUT_S` (30 s), after which the query is stopped
+  (504; graphos also terminates a query AGE is slow to stop); one query per user at a time and
+  `GRAPHOS_CYPHER_POOL_SIZE` (2) in all (429 when busy). Cancelling the request stops the query.
+- **Who:** `GRAPHOS_CYPHER_LEVEL` on the tenant (`read` by default). Each run is in the audit log.
+- **AGE's dialect:** AGE 1.6 implements openCypher with gaps; for example `ORDER BY` cannot name a
+  `RETURN` alias (order by the expression). `MATCH (n:Person)` includes the nodes of child labels
+  (`label_hierarchy`); `label(n)` is a node's own label.
+
+**Saved queries** are named, parameterised queries a tenant's maintainers keep for its readers:
+`PUT /v1/{tenant}/cypher/saved/{name}` with `{"description", "query", "params": {"kind":
+{"type": "string", "label": "Kind"}}, "show": "table" | "graph"}` (`maintain`);
+`GET /v1/{tenant}/cypher/saved`; `POST /v1/{tenant}/cypher/saved/{name}:run` with `{"params": …}`
+(each parameter of its declared type, 422 otherwise); `DELETE …/saved/{name}`. They go with the
+tenant's data. Python: `cypher(query, params)`, `saved_queries()`, `save_query(...)`,
+`run_saved_query(name, params)`, `delete_saved_query(name)`.
+
 ## 6. Aggregates
 
 | Endpoint (`/v1/{t}` prefix) | Inputs (default / max) | Result |

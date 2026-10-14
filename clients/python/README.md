@@ -113,6 +113,7 @@ Runnable scripts in [`examples/`](examples/). Each reads `GRAPHOS_URL` (default 
 | Area | Methods |
 |---|---|
 | Tenants | `register_tenant` (with `edge_endpoints`, `strict_endpoints`, `force_shrink`, `dry_run`), `export_schema`, `import_schema`, `remove_edge_endpoint`, `list_tenants`, `get_tenant`, `unregister_tenant` (`drop_data=True` deletes it with its data), `restore_tenant`, `list_unregistered_tenants`, `me`, `schema` |
+| Cypher console (when the server turns it on) | `cypher` (read-only, `$name` parameters), `saved_queries`, `save_query`, `run_saved_query`, `delete_saved_query` |
 | Dataset | `export_dataset` (streamed to a file, gzip by suffix), `import_dataset` (streamed from one; `mode="empty"` to restore, `schema="apply"` to register the file's schema first), `read_dataset_header` |
 | Writes | `upsert_nodes`, `upsert_edges`, `bulk_upsert_nodes`, `bulk_upsert_edges`, `snapshot_import`, `upsert_node_properties`, `patch_node`, `patch_edge`, `delete_node`, `delete_edge`, `delete_by_property` |
 | Reads | `search`, `get_node`, `get_edge`, `find_paths`, `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `scan_nodes` / `scan_nodes_iter`, `scan_edges` / `scan_edges_iter`, `export_graph` |

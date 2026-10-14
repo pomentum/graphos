@@ -375,6 +375,17 @@ CREATE TABLE IF NOT EXISTS graphos_meta.unregistered_tenants (
     unregistered_by   text
 );
 
+-- Saved Cypher queries of the console (graphos.api.cypher), per tenant:
+-- the query, its parameters and how to show it, as one JSON document.
+CREATE TABLE IF NOT EXISTS graphos_meta.saved_queries (
+    tenant      text NOT NULL,
+    name        text NOT NULL,
+    definition  jsonb NOT NULL,
+    created_by  text,
+    updated_at  timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant, name)
+);
+
 -- What a signed-in person chose in the web UI (theme, ...): one JSON
 -- document per subject, only names graphos knows (``graphos.preferences``).
 CREATE TABLE IF NOT EXISTS graphos_meta.user_preferences (

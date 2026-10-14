@@ -25,7 +25,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from graphos import __version__, identity, node_properties, oidc
+from graphos import __version__, console, identity, node_properties, oidc
 from graphos.api import (
     access,
     bulk,
@@ -46,6 +46,7 @@ from graphos.api import (
     tenants,
 )
 from graphos.api import auth as auth_api
+from graphos.api import cypher as cypher_api
 from graphos.auth import TokenAuthenticator
 from graphos.bootstrap import (
     bootstrap_tenant,
@@ -193,6 +194,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         name="graphos-node-properties-backfill",
     )
 
+    # 3c. The Cypher console, when turned on (graphos.console): a small pool
+    #     of its own, so console queries never take the API's connections.
+    app.state.console = await console.start(settings, pool)
+
     # 4. Background jobs.
     runner = JobRunner(
         pool, JOB_KINDS,
@@ -245,6 +250,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await access_store.stop()
         await runner.stop()
         terminate_running()
+        if app.state.console is not None:
+            await app.state.console.pool.close()
         await pool.close()
         log.info("graphos shutdown complete")
 
@@ -354,6 +361,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(snapshot.router, prefix="/v1")
     app.include_router(jobs.router, prefix="/v1")
     app.include_router(changes.router, prefix="/v1")
+    app.include_router(cypher_api.router, prefix="/v1")
 
     @app.get("/")
     async def _root() -> dict[str, Any]:

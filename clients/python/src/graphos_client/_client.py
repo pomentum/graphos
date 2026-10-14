@@ -31,6 +31,7 @@ from graphos_client._models import (
     CommunityMap,
     CommunitySummary,
     ComputeMetricsResponse,
+    CypherResult,
     DeleteByPropertyResponse,
     DeleteEdgeResponse,
     DeleteNodeResponse,
@@ -521,6 +522,68 @@ class GraphosClient:
             "DELETE", f"/v1/tenants/{target}", params=params, idempotent=not drop_data,
         )
         return resp.json()
+
+    async def cypher(
+        self,
+        query: str,
+        params: Mapping[str, Any] | None = None,
+        *,
+        limit: int | None = None,
+    ) -> CypherResult:
+        """Run a read-only Cypher query on this tenant's graph (the Cypher console,
+        when the server turns it on; 404 otherwise).  Parameters are used in the
+        query as ``$name``.  Not retried: a slow query is not run twice."""
+        body: dict[str, Any] = {"query": query, "params": dict(params or {})}
+        if limit is not None:
+            body["limit"] = limit
+        resp = await self._request(
+            "POST", f"/v1/{self._tenant}/cypher", json_body=body, idempotent=False,
+        )
+        return CypherResult.model_validate(resp.json())
+
+    async def saved_queries(self) -> list[dict[str, Any]]:
+        """The tenant's saved Cypher queries."""
+        resp = await self._request("GET", f"/v1/{self._tenant}/cypher/saved")
+        return list(resp.json())
+
+    async def save_query(  # noqa: PLR0913 — a saved query's fields
+        self,
+        name: str,
+        query: str,
+        *,
+        description: str = "",
+        params: Mapping[str, Mapping[str, Any]] | None = None,
+        show: str = "table",
+    ) -> dict[str, Any]:
+        """Save a Cypher query under ``name`` (``maintain``); ``params`` maps each
+        parameter to ``{"type": "string" | "number" | "boolean" | "list", "label": ...}``."""
+        body = {
+            "description": description,
+            "query": query,
+            "params": {k: dict(v) for k, v in (params or {}).items()},
+            "show": show,
+        }
+        resp = await self._request(
+            "PUT", f"/v1/{self._tenant}/cypher/saved/{name}", json_body=body,
+        )
+        return resp.json()
+
+    async def delete_saved_query(self, name: str) -> None:
+        """Delete a saved Cypher query (``maintain``)."""
+        await self._request("DELETE", f"/v1/{self._tenant}/cypher/saved/{name}")
+
+    async def run_saved_query(
+        self, name: str, params: Mapping[str, Any] | None = None, *, limit: int | None = None,
+    ) -> CypherResult:
+        """Run a saved Cypher query with its parameters."""
+        body: dict[str, Any] = {"params": dict(params or {})}
+        if limit is not None:
+            body["limit"] = limit
+        resp = await self._request(
+            "POST", f"/v1/{self._tenant}/cypher/saved/{name}:run",
+            json_body=body, idempotent=False,
+        )
+        return CypherResult.model_validate(resp.json())
 
     async def restore_tenant(self, name: str | None = None) -> dict[str, Any]:
         """Register an unregistered tenant again, as it was (owner)."""

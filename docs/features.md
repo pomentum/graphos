@@ -545,8 +545,9 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
 
 ## 11. What graphos does not do
 
-- **No raw Cypher or SQL endpoint.** The surface stays typed so limits,
-  timeouts, and tenant checks remain enforceable. The bundled compose gives
+- **No SQL endpoint, and Cypher only read-only and opt-in.** The surface stays
+  typed so limits, timeouts, and tenant checks remain enforceable; the
+  optional Cypher console reads one tenant's graph under graphos's checks. The bundled compose gives
   `graphos-db` no published port and keeps it on an internal-only network.
 - **No consumer concepts at the wire.** Labels, property keys, and edge types
   are strings the caller supplies.

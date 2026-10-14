@@ -165,6 +165,7 @@ _TENANT_ROWS = (
     "DELETE FROM graphos_meta.community_links WHERE tenant = $1;",
     "DELETE FROM graphos_meta.community_map_runs WHERE tenant = $1;",
     "DELETE FROM graphos_meta.jobs WHERE tenant = $1;",
+    "DELETE FROM graphos_meta.saved_queries WHERE tenant = $1;",
 )
 
 # The tenant's change records go; its horizon moves past them, so a reader

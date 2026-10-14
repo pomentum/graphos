@@ -26,5 +26,9 @@ async def info(request: Request) -> dict[str, Any]:
         # Count only: /v1/info needs no token, so tenant names are not
         # disclosed here (admins list them via GET /v1/tenants).
         "tenants": len(registered_tenants()),
-        "features": {"louvain": LOUVAIN_AVAILABLE, "metrics": True},
+        "features": {
+            "louvain": LOUVAIN_AVAILABLE,
+            "metrics": True,
+            "cypher": getattr(request.app.state, "console", None) is not None,
+        },
     }

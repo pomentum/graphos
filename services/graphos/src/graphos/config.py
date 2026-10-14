@@ -8,7 +8,7 @@ in auth.py (not in this module — config itself is immutable post-construction)
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 
 from pydantic import Field, SecretStr, field_validator
@@ -166,6 +166,20 @@ class Settings(BaseSettings):
     # well); empty: any http(s) URI.
     oidc_redirect_uris: list[str] = Field(default_factory=list)
     oidc_http_timeout_s: float = Field(default=10.0, gt=0)
+
+    # ── Cypher console (graphos.console) ───────────────────────────────
+    # Read-only Cypher on one tenant's graph, off unless an operator turns it
+    # on.  It runs on a small pool of its own (as graphos's own user); graphos
+    # checks every query before it runs (graphos.console).
+    cypher: bool = False
+    # The level on a tenant needed to run queries on it.
+    cypher_level: Literal["read", "write", "maintain"] = "read"
+    cypher_timeout_s: float = Field(default=30.0, gt=0)
+    cypher_max_rows: int = Field(default=5000, ge=1, le=100_000)
+    # Connections of the console's pool: also how many queries run at once.
+    cypher_pool_size: int = Field(default=2, ge=1, le=32)
+    # Queries one user may run at once.
+    cypher_per_user: int = Field(default=1, ge=1)
 
     # NOTE: graphos has no hardcoded tenants. Consumers register their own
     # schemas at runtime via `POST /v1/tenants`. See bootstrap.py and

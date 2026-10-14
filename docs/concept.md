@@ -458,10 +458,11 @@ the tenant's bootstrap lock, waits at most 5 s for its tables (an export, an
 import or a long query; 409 after that) and is refused while a job is queued
 or running on the tenant.
 
-Not in the surface: raw Cypher or SQL execution, connection-string
+Not in the surface: SQL execution, Cypher that writes, connection-string
 passthrough, any `DROP` other than deleting a whole tenant as above, and any
 consumer-supplied DDL: indexes and generated columns are declared, and
-graphos writes their SQL.
+graphos writes their SQL. Read-only Cypher runs only in the opt-in console
+(§3.1).
 
 #### 2.5.2 Requests, responses, errors
 
@@ -925,11 +926,19 @@ request-context logging → rate limit → metrics → audit → router.
 
 ### 3.1 Cypher / SQL boundary
 
-No endpoint runs Cypher. Every read and write is plain SQL against AGE's
-storage tables: graphos picks the tables and indexes directly, and
-`statement_timeout` and cancellation always apply. (On an 8M-edge tenant,
-AGE's Cypher executor ran a node-plus-edges pattern for over ten minutes
-without stopping at either.)
+Every read and write of the API is plain SQL against AGE's storage tables:
+graphos picks the tables and indexes directly, and `statement_timeout` and
+cancellation always apply. (On an 8M-edge tenant, AGE's Cypher executor ran a
+node-plus-edges pattern for over ten minutes without stopping at either.)
+
+The one exception is the opt-in Cypher console (`GRAPHOS_CYPHER=true`,
+`POST /v1/{tenant}/cypher`): read-only Cypher on one tenant's graph, for
+people who know Cypher. graphos refuses a query with a schema-qualified
+call (the only way Cypher reaches database functions), runs it in a
+read-only transaction on a small pool of its own with a row cap and a
+timeout, and a watchdog cancels, then terminates, the backend if AGE does
+not stop in time (AGE 1.6 sees a cancel late while it builds large lists;
+a terminate stopped every query tried).
 
 | Operation | Language |
 |---|---|

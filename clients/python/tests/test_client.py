@@ -1107,3 +1107,43 @@ async def test_a_meta_key_given_as_none_is_sent_as_null() -> None:
     await cli.register_tenant(meta={"draft": None, "owner": "team-a"})
     assert json.loads(captured[0].content)["meta"] == {"draft": None, "owner": "team-a"}
     await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_cypher_and_saved_queries() -> None:
+    captured: list[httpx.Request] = []
+    node = {"id": "d1", "label": "Doc", "properties": {}}
+    answer = {"columns": ["d"], "rows": [[{"node": node}]],
+              "graph": {"nodes": [{"id": "d1", "label": "Doc", "properties": {}}], "edges": []},
+              "truncated": False, "elapsed_ms": 3}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if request.method == "GET":
+            return httpx.Response(200, json=[{"name": "q1", "query": "MATCH (d) RETURN d"}])
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        if request.method == "PUT":
+            return httpx.Response(200, json={"name": "q1"})
+        return httpx.Response(200, json=answer)
+
+    cli = GraphosClient(base_url="http://x", token="tok", tenant="demo")
+    cli._http = httpx.AsyncClient(base_url="http://x", transport=_mock_transport(handler))
+    result = await cli.cypher("MATCH (d:Doc {id: $id}) RETURN d", {"id": "d1"}, limit=10)
+    assert result.columns == ["d"] and result.rows[0][0]["node"]["id"] == "d1"
+    assert json.loads(captured[0].content) == {
+        "query": "MATCH (d:Doc {id: $id}) RETURN d", "params": {"id": "d1"}, "limit": 10,
+    }
+    await cli.save_query("q1", "MATCH (d) RETURN d", params={"id": {"type": "string"}})
+    assert json.loads(captured[1].content)["params"] == {"id": {"type": "string"}}
+    assert [q["name"] for q in await cli.saved_queries()] == ["q1"]
+    await cli.run_saved_query("q1", {"id": "d1"})
+    await cli.delete_saved_query("q1")
+    assert [(r.method, r.url.path) for r in captured] == [
+        ("POST", "/v1/demo/cypher"),
+        ("PUT", "/v1/demo/cypher/saved/q1"),
+        ("GET", "/v1/demo/cypher/saved"),
+        ("POST", "/v1/demo/cypher/saved/q1:run"),
+        ("DELETE", "/v1/demo/cypher/saved/q1"),
+    ]
+    await cli.close()
