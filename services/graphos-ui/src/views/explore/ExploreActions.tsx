@@ -21,6 +21,8 @@ const COLOR_MODES: ColorBy[] = ["none", "label", "group"];
 export interface ExploreActionsProps {
   /** Shown first, e.g. the Map / Graph switch. */
   leading?: ReactNode;
+  /** Shown last, e.g. the Export menu. */
+  trailing?: ReactNode;
   canWrite: boolean;
   hasSelection: boolean;
   isEmpty: boolean;
@@ -150,6 +152,7 @@ export function ExploreActions(props: ExploreActionsProps) {
           {t("views.explore.actions.clear")}
         </Button>
       ) : null}
+      {!isEmpty ? props.trailing : null}
       {busy ? <Loader size={14} /> : null}
     </Group>
   );

@@ -13,6 +13,7 @@ import { formatCount } from "../../lib/time";
 import { browseParams, defaultColumns, readBrowseState, scanFilter, type BrowseFilter } from "./browseState";
 import classes from "./BrowseView.module.css";
 import { MAX_OPEN_NODES, useOpenNodes } from "../explore/useOpenNodes";
+import { BrowseExport } from "./BrowseExport";
 import { FilterBar } from "./FilterBar";
 
 /** Rows per page. */
@@ -228,6 +229,13 @@ function LabelPages({
               </Button>
             </>
           ) : null}
+          <BrowseExport
+            label={label}
+            where={filter ? [scanFilter(filter, profile.data ?? [])] : []}
+            columns={columns}
+            rows={rows}
+            total={total}
+          />
           <ColumnPicker options={names} value={columns} onChange={onColumns} />
         </Group>
       </Group>

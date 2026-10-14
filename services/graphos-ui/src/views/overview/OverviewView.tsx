@@ -3,9 +3,11 @@ import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { CountBars } from "../../components/CountBars";
+import { CsvButton } from "../../components/CsvButton";
 import { StatTile } from "../../components/StatTile";
 import { useHistogram, useProperties, useStats } from "../../data/queries";
 import { formatBytes, formatCount } from "../../lib/time";
+import { useTenantSession } from "../../session/SessionProvider";
 import { DeleteTenantSection } from "./DeleteTenantSection";
 import { DatasetPanel } from "./DatasetPanel";
 import { GraphAlgorithms } from "./GraphAlgorithms";
@@ -20,6 +22,7 @@ import classes from "./OverviewView.module.css";
  */
 export function OverviewView() {
   const { t } = useTranslation();
+  const { tenant } = useTenantSession();
   const stats = useStats();
   const [params, setParams] = useSearchParams();
   const label = params.get("label") || null;
@@ -82,9 +85,17 @@ export function OverviewView() {
 
       <SimpleGrid cols={{ base: 1, md: 2 }} mt="xl" spacing="xl">
         <Stack gap="xs">
-          <Title order={2} size="sm">
-            {t("views.overview.labels")}
-          </Title>
+          <Group justify="space-between" gap="xs">
+            <Title order={2} size="sm">
+              {t("views.overview.labels")}
+            </Title>
+            <CsvButton
+              name={[tenant, "labels"]}
+              header={["label", "nodes"]}
+              rows={toRows(labels).map((r) => [r.name, r.count])}
+              label={t("views.overview.labels")}
+            />
+          </Group>
           <CountBars
             rows={toRows(labels)}
             onPick={(name) => {
@@ -97,9 +108,17 @@ export function OverviewView() {
           />
         </Stack>
         <Stack gap="xs">
-          <Title order={2} size="sm">
-            {t("views.overview.relationships")}
-          </Title>
+          <Group justify="space-between" gap="xs">
+            <Title order={2} size="sm">
+              {t("views.overview.relationships")}
+            </Title>
+            <CsvButton
+              name={[tenant, "relationships"]}
+              header={["type", "edges"]}
+              rows={toRows(edges).map((r) => [r.name, r.count])}
+              label={t("views.overview.relationships")}
+            />
+          </Group>
           <CountBars rows={toRows(edges)} empty={t("views.overview.noEdges")} />
         </Stack>
       </SimpleGrid>
@@ -139,6 +158,14 @@ export function OverviewView() {
               })}
             </Text>
             <CountBars rows={histogram.data.bins.map((b) => ({ name: b.value, count: b.count }))} />
+            <Group justify="flex-end">
+              <CsvButton
+                name={[tenant, label ?? "", property ?? ""]}
+                header={[property ?? "value", "nodes"]}
+                rows={histogram.data.bins.map((b) => [b.value, b.count])}
+                label={t("views.overview.values")}
+              />
+            </Group>
           </>
         ) : null}
         {histogram.error ? (

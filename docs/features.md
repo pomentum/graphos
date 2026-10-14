@@ -485,7 +485,8 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   along the relationships, lines routed between the boxes with their captions; a large schema as
   a grid), which maintainers can extend (labels, relationship types, declared label pairs);
   creating a tenant (empty or from a schema file), unregistering it, restoring it, and deleting it
-  with its data;
+  with its data; exports of what is on screen: the canvas as PNG, SVG or JSON, a label's nodes and
+  the overview's counts as CSV;
   an Access page for owners and admins (users, service accounts, grants). An
   nginx image with no backend of its own; people sign in with their graphos
   user name and password, so permissions and attribution are graphos's; the

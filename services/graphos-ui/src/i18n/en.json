@@ -1,5 +1,14 @@
 {
   "common": {
+    "export": {
+      "label": "Export",
+      "png": "Picture (PNG)",
+      "svg": "Drawing (SVG)",
+      "json": "Graph (JSON)",
+      "csv": "CSV",
+      "csvOf": "{{what}} as CSV",
+      "failed": "The export failed"
+    },
     "transfers": {
       "phase": {
         "receiving": "Downloading",
@@ -605,6 +614,16 @@
         "isNot": "is not",
         "isSet": "is set",
         "isNotSet": "is not set"
+      },
+      "export": {
+        "page_one": "This page ({{count}} row)",
+        "page_other": "This page ({{count}} rows)",
+        "all": "Every matching node",
+        "allOf": "Every matching node ({{formatted}})",
+        "progress": "Exporting: {{rows}} rows",
+        "progressOf": "Exporting: {{rows}} of {{total}} rows",
+        "done_one": "Exported {{formatted}} row",
+        "done_other": "Exported {{formatted}} rows"
       },
       "selection": {
         "picked_one": "{{count}} picked",

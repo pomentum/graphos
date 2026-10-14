@@ -1,6 +1,6 @@
 import { ActionIcon, Group } from "@mantine/core";
 import { IconFocusCentered, IconMinus, IconPlus } from "@tabler/icons-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type MutableRefObject } from "react";
 import { useTranslation } from "react-i18next";
 import Sigma from "sigma";
 import type { NodeHoverDrawingFunction } from "sigma/rendering";
@@ -23,6 +23,8 @@ export interface GraphCanvasProps {
   frame?: { keys: string[]; token: number };
   /** How nodes and edges are drawn; the graph canvas style by default (the map has its own). */
   style?: { node: typeof nodeDisplay; edge: typeof edgeDisplay };
+  /** Set to the renderer while it lives, e.g. to save the canvas as a picture. */
+  rendererRef?: MutableRefObject<Sigma<NodeAttributes, EdgeAttributes> | null>;
 }
 
 const GRAPH_STYLE = { node: nodeDisplay, edge: edgeDisplay };
@@ -41,6 +43,7 @@ export function GraphCanvas({
   onSelectEdge,
   frame,
   style = GRAPH_STYLE,
+  rendererRef,
 }: GraphCanvasProps) {
   const { t } = useTranslation();
   const container = useRef<HTMLDivElement>(null);
@@ -74,6 +77,7 @@ export function GraphCanvas({
       defaultDrawNodeHover: drawHoverLabel(() => latest.current.palette),
     });
     sigma.current = renderer;
+    if (rendererRef) rendererRef.current = renderer;
 
     // A "+N more" placeholder is not a node to inspect: a click opens the next page.
     renderer.on("clickNode", ({ node }) => {
@@ -99,6 +103,7 @@ export function GraphCanvas({
       stopDragging();
       renderer.kill();
       sigma.current = null;
+      if (rendererRef) rendererRef.current = null;
     };
   }, [model, edgesClickable]);
 

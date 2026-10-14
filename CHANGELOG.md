@@ -4,6 +4,19 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Added
+
+- **Web UI: exports.** The Explore canvas saves as a picture (PNG, drawn by sigma), a drawing (SVG,
+  the nodes, edges and labels as shown, editable in other tools) or a graph (JSON: nodes and edges
+  with their properties). Browse saves the page shown, or every node matching the filter (paged
+  through graphos and written to the file as it arrives), as CSV with the chosen columns. The
+  Overview's label and relationship counts and a property's values save as CSV. CSV files are UTF-8
+  with a byte-order mark, and a cell starting with `=`, `+`, `-` or `@` is prefixed with `'` so a
+  spreadsheet does not run it as a formula. Everything is made in the browser; nothing new on the
+  server.
+
 ## 0.8.2 — 2026-10-14
 
 Tenants can now be created, unregistered, restored and deleted with their data, from the API, the

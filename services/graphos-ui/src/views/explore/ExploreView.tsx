@@ -1,10 +1,12 @@
 import { CloseButton } from "@mantine/core";
 import { useHotkeys } from "@mantine/hooks";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
+import type Sigma from "sigma";
 import { ApiError } from "../../api/http";
 import type { NodeUpsert, SearchHit } from "../../api/types";
+import { CanvasExportMenu } from "../../components/CanvasExportMenu";
 import { CanvasLegend } from "../../components/CanvasLegend";
 import { EdgeInspector } from "../../components/EdgeInspector";
 import { ExpandDialog } from "../../components/ExpandDialog";
@@ -14,7 +16,14 @@ import { NewEdgeDialog } from "../../components/NewEdgeDialog";
 import { NewNodeDialog } from "../../components/NewNodeDialog";
 import { useCreateEdge, useCreateNode, useSchema } from "../../data/queries";
 import { categorize } from "../../graph/canvasStyle";
-import { displayName, moreKey, type GraphModel, type NodeRef } from "../../graph/GraphModel";
+import {
+  displayName,
+  moreKey,
+  type EdgeAttributes,
+  type GraphModel,
+  type NodeAttributes,
+  type NodeRef,
+} from "../../graph/GraphModel";
 import { Endpoints } from "../../lib/endpoints";
 import { SIZE_MODES, type SizeBy } from "../../lib/metrics";
 import { useWorkspace } from "../../graph/WorkspaceProvider";
@@ -49,8 +58,10 @@ const HUB_LABELS = 12;
  */
 export function ExploreView() {
   const { t } = useTranslation();
-  const { canWrite, api } = useTenantSession();
+  const { canWrite, api, tenant } = useTenantSession();
   const workspace = useWorkspace();
+  // The canvas's renderer, for saving it as a picture.
+  const renderer = useRef<Sigma<NodeAttributes, EdgeAttributes> | null>(null);
   const { model, version, selected, select, selectedEdge, selectEdge, colorBy, sizeBy, open, overview, frameOn, mode } =
     workspace;
   const { load } = useWholeGraph();
@@ -203,11 +214,15 @@ export function ExploreView() {
           onSelectEdge={selectEdge}
           onExpand={(key) => void expand(key)}
           frame={workspace.frame}
+          rendererRef={renderer}
         />
         <CanvasStatus overview={overview} isEmpty={model.isEmpty} onLoad={() => void load()} />
         <CanvasLegend categories={categories} />
         <ExploreActions
           leading={<ModeSwitch mode="graph" onChange={workspace.setMode} />}
+          trailing={
+            <CanvasExportMenu renderer={renderer} graph={model.graph} palette={palette} name={[tenant, "graph"]} />
+          }
           canWrite={canWrite}
           hasSelection={Boolean(selected)}
           isEmpty={model.isEmpty}
