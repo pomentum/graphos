@@ -50,6 +50,9 @@ async def _fresh(pool: asyncpg.Pool) -> None:
             if await conn.fetchval("SELECT 1 FROM ag_catalog.ag_graph WHERE name = $1;", name):
                 await conn.execute(f"SELECT drop_graph('{name}', true);")
             await conn.execute("DELETE FROM graphos_meta.tenants WHERE name = $1;", name)
+            await conn.execute(
+                "DELETE FROM graphos_meta.unregistered_tenants WHERE name = $1;", name,
+            )
             await conn.execute("DELETE FROM graphos_meta.edge_endpoints WHERE tenant = $1;", name)
             await conn.execute("DELETE FROM graphos_meta.tenant_settings WHERE tenant = $1;", name)
             forget(name)
@@ -224,3 +227,32 @@ async def test_a_dry_run_for_a_new_tenant_and_the_levels(db_pool: asyncpg.Pool) 
             assert missing.status_code == HTTPStatus.NOT_FOUND
     finally:
         await _fresh(db_pool)
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_null_meta_key_is_removed_and_the_dry_run_says_so(
+    api: httpx.AsyncClient, db_pool: asyncpg.Pool,
+) -> None:
+    body = {"name": SOURCE, "vertex_labels": ["Doc"], "meta": {"owner": "team-a", "model": "v1"}}
+    assert (await api.post("/v1/tenants", json=body)).status_code == HTTPStatus.OK
+    change = {"name": SOURCE, "meta": {"model": None, "basis": "a note"}}
+    dry = await api.post("/v1/tenants?dry_run=true", json=change)
+    assert dry.json()["changes"] == {"added": {"meta": ["basis"]}, "removed": {"meta": ["model"]}}
+
+    assert (await api.post("/v1/tenants", json=change)).status_code == HTTPStatus.OK
+    spec = await load_spec(db_pool, SOURCE)
+    assert spec is not None and spec.meta == {"owner": "team-a", "basis": "a note"}
+    assert spec.vertex_labels == ("Doc",)       # the rest of the schema is untouched
+    # Recorded in the feed by key (the text stays in the schema).
+    detail = await db_pool.fetchval(
+        "SELECT detail::text FROM graphos_meta.changes WHERE tenant = $1 "
+        "ORDER BY seq DESC LIMIT 1;",
+        SOURCE,
+    )
+    assert json.loads(detail) == {"added": {"meta": ["basis"]}, "removed": {"meta": ["model"]}}
+    # Removing a key that is not there changes nothing.
+    again = await api.post(
+        "/v1/tenants?dry_run=true", json={"name": SOURCE, "meta": {"model": None}},
+    )
+    assert again.json()["changes"] is None

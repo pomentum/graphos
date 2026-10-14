@@ -132,11 +132,12 @@ def _validate_declared(
 
 async def _dry_run(
     pool: asyncpg.Pool, previous: TenantSpec | None, spec: TenantSpec,
-    *, replace: bool, endpoints_stated: bool,
+    *, replace: bool, endpoints_stated: bool, meta_removed: tuple[str, ...] = (),
 ) -> RegisterDryRunResponse:
     """What registering ``spec`` would change, checked as bootstrap would."""
     after = schema_document.merged(
         previous, spec, replace=replace, endpoints_stated=endpoints_stated,
+        meta_removed=meta_removed,
     )
     try:
         _validate_label_hierarchy(spec.label_hierarchy, spec.vertex_labels)
@@ -327,12 +328,14 @@ async def register(
             (child, parent) for child, parent in body.label_hierarchy.items()
         ),
         resolve_rules=resolve_rules,
-        meta=dict(body.meta),
+        meta={k: v for k, v in body.meta.items() if v is not None},
         search_indexes={k: v.model_dump() for k, v in body.search_indexes.items()},
         edge_endpoints=edge_endpoints,
         strict_endpoints=body.strict_endpoints,
     )
 
+    # ``null`` removes a key from the stored meta (a merge); replacing keeps only those sent.
+    meta_removed = tuple(sorted(k for k, v in body.meta.items() if v is None))
     pool = request.app.state.pool
     previous = await load_spec(pool, spec.name)
     # A name whose data is kept unregistered is not free: registering it
@@ -348,6 +351,7 @@ async def register(
         result = await _dry_run(
             pool, known, spec, replace=force_shrink,
             endpoints_stated="edge_endpoints" in body.model_fields_set,
+            meta_removed=meta_removed,
         )
         return result.model_copy(update={"exists": previous is not None, "restores": restores})
     if restores:
@@ -379,7 +383,7 @@ async def register(
             pool, spec, replace_endpoints="edge_endpoints" in body.model_fields_set,
         )
     else:
-        await persist_spec(pool, spec)
+        await persist_spec(pool, spec, meta_removed=meta_removed)
     # Persisting merges with the stored spec (unless force_shrink); keep the
     # merged result in memory so a partial re-registration never hides labels
     # or resolve rules registered earlier.

@@ -292,14 +292,14 @@ owner), `maintain` on it (or a matching `create_tenants`) to re-register one. Th
 | `property_indexes` | list of `{label, properties, kind, unique, name}` | indexes on vertex-label properties (see below) |
 | `generated_columns` | list of `{label, column, property, type}` | stored columns computed from a property (see below) |
 | `label_hierarchy` | dict child→parent | both labels must be in `vertex_labels`, and a label cannot be its own parent; reads on the parent see the child's rows |
-| `meta` | dict[str, str] | free-form |
+| `meta` | dict[str, str \| null] | free-form notes about the tenant; on a merge, `null` removes a key |
 | `search_indexes` | dict name → `{labels, properties, analyzer, language}` | named search indexes for ranked search (§5, *search*); name `^[a-z][a-z0-9_]{0,39}$` |
 | `edge_endpoints` | dict edge type → list of `{src, dst}` (or `[src, dst]`) | the label pairs each relationship type may join; see *Declared endpoints* below. At most 5000 pairs per request. |
 | `strict_endpoints` | bool, optional | refuse edge writes outside the declared pairs; omitted: unchanged (off for a new tenant) |
 
 **Merge vs replace.** By default, re-registering merges the incoming spec into the stored one.
 Labels, indexes, generated columns, the hierarchy and rules are unioned, and `meta` keys are
-overwritten. Search indexes are merged by name: declaring a name again replaces its definition. A
+overwritten; a `meta` key sent as `null` is removed (`{"name": "acme", "meta": {"draft": null}}`). Search indexes are merged by name: declaring a name again replaces its definition. A
 bare `{"name": "acme"}` therefore never shrinks a tenant. `?force_shrink=true`
 replaces the stored spec instead. Labels removed this way are **not** dropped from AGE; their tables
 and data stay in place. In both modes graphos then serves the stored (merged) spec: the response's

@@ -1092,3 +1092,18 @@ async def test_unregister_restore_and_delete_a_tenant_with_its_data() -> None:
     ]
     assert listed[0].unregistered_by == "olive"
     await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_a_meta_key_given_as_none_is_sent_as_null() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"tenant": "demo"})
+
+    cli = GraphosClient(base_url="http://x", token="tok", tenant="demo")
+    cli._http = httpx.AsyncClient(base_url="http://x", transport=_mock_transport(handler))
+    await cli.register_tenant(meta={"draft": None, "owner": "team-a"})
+    assert json.loads(captured[0].content)["meta"] == {"draft": None, "owner": "team-a"}
+    await cli.close()

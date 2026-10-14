@@ -114,7 +114,26 @@ def test_merge_adds_and_keeps() -> None:
     assert set(after.edge_endpoints) == set(SPEC.edge_endpoints)      # added, never removed
     assert after.strict_endpoints is True                             # left out: as stored
     # The change feed names search indexes, so a redefinition is not listed.
-    assert diff(SPEC, after) == {"added": {"vertex_labels": ["Invoice"]}}
+    # meta keys by name: the text of one changed.
+    assert diff(SPEC, after) == {
+        "added": {"vertex_labels": ["Invoice"]}, "changed": {"meta": ["a"]},
+    }
+
+
+def test_a_null_meta_key_is_removed_by_a_merge() -> None:
+    body = TenantSpecBody.model_validate({"name": "acme", "meta": {"z": None, "b": "new"}})
+    assert body.meta == {"z": None, "b": "new"}
+    incoming = TenantSpec(name="acme", meta={"b": "new"})
+    after = schema_document.merged(
+        SPEC, incoming, replace=False, endpoints_stated=False, meta_removed=("z",),
+    )
+    assert after.meta == {"a": "2", "b": "new"}
+    assert diff(SPEC, after) == {"added": {"meta": ["b"]}, "removed": {"meta": ["z"]}}
+    # Replacing keeps only the keys sent (a null one is simply left out).
+    replaced = schema_document.merged(
+        SPEC, incoming, replace=True, endpoints_stated=False, meta_removed=("z",),
+    )
+    assert replaced.meta == {"b": "new"}
 
 
 def test_replace_keeps_declared_pairs_unless_stated() -> None:

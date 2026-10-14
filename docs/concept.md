@@ -162,7 +162,7 @@ an existing volume picks up new internal tables without re-initialisation.
 After bootstrap the spec is persisted to `graphos_meta.tenants` and cached in
 process. Persistence **merges** by default: label lists, property indexes,
 generated columns, hierarchy, and resolve rules are unioned with the stored spec, and
-`meta` keys are overwritten per key. `?force_shrink=true` replaces the stored
+`meta` keys are overwritten per key (a key sent as `null` is removed). `?force_shrink=true` replaces the stored
 spec instead (labels removed from the spec are not dropped from AGE). In both
 modes the process then reloads the stored spec (`bootstrap.py::load_spec`)
 and serves that, so a partial re-registration never hides labels or rules

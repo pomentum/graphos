@@ -45,6 +45,13 @@ describe("activity rows", () => {
       "Registered the tenant",
     );
     expect(describeChange(schema({ unregistered: true }))).toBe("Unregistered the tenant");
+    expect(describeChange(schema({ restored: true }))).toBe("Restored the tenant");
+    expect(describeChange(schema({ data_deleted: true }))).toBe("Deleted the tenant with its data");
+    expect(
+      describeChange(
+        schema({ added: { meta: ["basis"] }, removed: { meta: ["model"] }, changed: { meta: ["owner"] } }),
+      ),
+    ).toBe("Changed the schema: added note basis; removed note model; rewrote note owner");
     expect(
       describeChange(
         schema({

@@ -47,6 +47,9 @@ async def _write(pool: asyncpg.Pool, name: str, spec: str, *, notify: bool) -> N
 async def _delete(pool: asyncpg.Pool, name: str, *, notify: bool) -> None:
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute("DELETE FROM graphos_meta.tenants WHERE name = $1;", name)
+        await conn.execute(
+            "DELETE FROM graphos_meta.unregistered_tenants WHERE name = $1;", name,
+        )
         if notify:
             await conn.execute("SELECT pg_notify($1, $2);", sync.TENANTS_CHANNEL, name)
 

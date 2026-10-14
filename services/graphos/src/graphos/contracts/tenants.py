@@ -502,7 +502,14 @@ class TenantSpecBody(BaseModel):
             "declared in `vertex_labels`."
         ),
     )
-    meta: dict[str, str] = Field(default_factory=dict)
+    meta: dict[str, str | None] = Field(
+        default_factory=dict,
+        description=(
+            "Free-form notes about the tenant, as strings. A registration adds and replaces "
+            "keys; `null` removes one (`{\"model\": null}`). Replacing the schema "
+            "(`force_shrink`) keeps only the keys sent."
+        ),
+    )
     search_indexes: dict[str, SearchIndexSpec] = Field(
         default_factory=dict,
         description=(

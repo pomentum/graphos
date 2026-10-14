@@ -57,8 +57,8 @@ async def _fresh(pool: asyncpg.Pool) -> None:
     async with pool.acquire() as conn:
         if await conn.fetchval("SELECT 1 FROM ag_catalog.ag_graph WHERE name = $1;", TENANT):
             await conn.execute(f"SELECT drop_graph('{TENANT}', true);")
-        for table in ("tenants", "edge_endpoints", "tenant_settings"):
-            column = "name" if table == "tenants" else "tenant"
+        for table in ("tenants", "unregistered_tenants", "edge_endpoints", "tenant_settings"):
+            column = "name" if table.endswith("tenants") else "tenant"
             await conn.execute(f"DELETE FROM graphos_meta.{table} WHERE {column} = $1;", TENANT)
     forget(TENANT)
 

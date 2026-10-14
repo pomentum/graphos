@@ -19,6 +19,7 @@ against the stored spec, exactly as the change feed records the real import.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import replace as dc_replace
 from datetime import datetime
 from typing import Any
@@ -125,12 +126,14 @@ def merged(
     *,
     replace: bool,
     endpoints_stated: bool,
+    meta_removed: Iterable[str] = (),
 ) -> TenantSpec:
     """The spec registering ``incoming`` would leave, as the server stores it.
 
     Merge (the default): labels, declarations, hierarchy, rules and declared
-    pairs are added to the stored ones, ``meta`` merged key by key, search
-    indexes replaced by name.  ``replace`` (``force_shrink``): the incoming
+    pairs are added to the stored ones, ``meta`` merged key by key (the keys
+    in ``meta_removed``, sent as ``null``, removed), search indexes replaced
+    by name.  ``replace`` (``force_shrink``): the incoming
     spec, but declared pairs only when the request states them.  Either way
     ``strict_endpoints`` stays as stored when the request leaves it out.
     """
@@ -151,7 +154,10 @@ def merged(
         generated_columns=_union(previous.generated_columns, incoming.generated_columns),
         resolve_rules=_union(previous.resolve_rules, incoming.resolve_rules),
         label_hierarchy=_union(previous.label_hierarchy, incoming.label_hierarchy),
-        meta={**previous.meta, **incoming.meta},
+        meta={
+            k: v for k, v in {**previous.meta, **incoming.meta}.items()
+            if k not in set(meta_removed)
+        },
         search_indexes={**previous.search_indexes, **incoming.search_indexes},
         edge_endpoints=_union(previous.edge_endpoints, incoming.edge_endpoints),
         strict_endpoints=bool(strict),

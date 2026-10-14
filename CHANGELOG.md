@@ -26,6 +26,10 @@ tenant restores it for its owner and is refused (409) to anyone else (see Change
 - **User preferences.** `GET /v1/me` carries `preferences`, and `PATCH /v1/me/preferences` (JSON
   Merge Patch) changes them: `theme` and `last_tenant`, one JSON document per user, only known
   names and values (422 otherwise), deleted with the user. Nothing is stored in the browser.
+- **Removing a `meta` key.** A registration that sends a `meta` key as `null` removes it
+  (`{"name": "acme", "meta": {"draft": null}}`); before, only replacing the whole schema could.
+  `meta` keys added, removed or rewritten are now recorded in the change feed and shown by the dry
+  run, by key (the text stays in the schema). Client: `register_tenant(meta={"draft": None})`.
 - **Web UI: tenants.** "New tenant…" (empty, or with a schema file) in the tenant menu and on the
   tenant chooser, for admins and users who may create tenants; "Unregistered tenants…" with Restore
   and Delete data; "Delete this tenant" at the foot of the Overview for owners: unregister by

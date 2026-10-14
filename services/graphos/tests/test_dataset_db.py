@@ -65,6 +65,9 @@ async def _fresh(pool: asyncpg.Pool) -> None:
             if await conn.fetchval("SELECT 1 FROM ag_catalog.ag_graph WHERE name = $1;", name):
                 await conn.execute(f"SELECT drop_graph('{name}', true);")
             await conn.execute("DELETE FROM graphos_meta.tenants WHERE name = $1;", name)
+            await conn.execute(
+                "DELETE FROM graphos_meta.unregistered_tenants WHERE name = $1;", name,
+            )
             forget(name)
 
 

@@ -639,4 +639,7 @@ async def test_schema_changes_are_recorded(db_pool: asyncpg.Pool) -> None:
             if await conn.fetchval("SELECT 1 FROM ag_catalog.ag_graph WHERE name = $1;", t):
                 await conn.execute(f"SELECT drop_graph('{t}', true);")
             await conn.execute("DELETE FROM graphos_meta.tenants WHERE name = $1;", t)
+            await conn.execute(
+                "DELETE FROM graphos_meta.unregistered_tenants WHERE name = $1;", t,
+            )
             await conn.execute("DELETE FROM graphos_meta.changes WHERE tenant = $1;", t)

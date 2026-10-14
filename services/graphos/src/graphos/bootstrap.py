@@ -775,6 +775,13 @@ def validate_edge_endpoints(
                 )
 
 
+async def _supersede_kept(conn: asyncpg.Connection, name: str) -> None:
+    """A name is registered or kept unregistered, never both: a registration
+    written supersedes a kept one.  (The API restores a kept registration, or
+    refuses the name, before it gets here.)"""
+    await conn.execute("DELETE FROM graphos_meta.unregistered_tenants WHERE name = $1;", name)
+
+
 async def _persist_endpoints(
     conn: asyncpg.Connection, spec: TenantSpec, *, replace: bool,
 ) -> None:
@@ -819,7 +826,11 @@ async def remove_edge_endpoint(
 
 
 async def persist_spec(
-    pool: asyncpg.Pool, spec: TenantSpec, *, replace_endpoints: bool = False,
+    pool: asyncpg.Pool,
+    spec: TenantSpec,
+    *,
+    replace_endpoints: bool = False,
+    meta_removed: tuple[str, ...] = (),
 ) -> None:
     """Upsert the tenant spec into graphos_meta.tenants.
 
@@ -828,7 +839,8 @@ async def persist_spec(
     blindly replaced — vertex_labels, edge_labels, property_indexes,
     generated_columns, label_hierarchy and resolve_rules become the
     set-union of existing and incoming; ``meta`` is merged dict-wise
-    (incoming keys overwrite existing keys for the same name).
+    (incoming keys overwrite existing keys for the same name), and the keys in
+    ``meta_removed`` (sent as ``null``) are removed.
 
     Why: a blind ``DO UPDATE SET spec = EXCLUDED.spec`` would let any
     caller (even a bare ``{"name": ...}`` registration) shrink a tenant
@@ -906,8 +918,8 @@ async def persist_spec(
                             ) AS x
                         ),
                     'meta',
-                        COALESCE(graphos_meta.tenants.spec->'meta', '{}'::jsonb)
-                        || COALESCE(EXCLUDED.spec->'meta', '{}'::jsonb),
+                        (COALESCE(graphos_meta.tenants.spec->'meta', '{}'::jsonb)
+                         || COALESCE(EXCLUDED.spec->'meta', '{}'::jsonb)) - $3::text[],
                     -- By name: an index declared again replaces its definition.
                     'search_indexes',
                         COALESCE(graphos_meta.tenants.spec->'search_indexes', '{}'::jsonb)
@@ -915,8 +927,9 @@ async def persist_spec(
                 ),
                 updated_at = now();
             """,
-            spec.name, payload,
+            spec.name, payload, list(meta_removed),
         )
+        await _supersede_kept(conn, spec.name)
         await _persist_endpoints(conn, spec, replace=replace_endpoints)
         await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, spec.name)
 
@@ -943,6 +956,7 @@ async def persist_spec_replace(
             """,
             spec.name, payload,
         )
+        await _supersede_kept(conn, spec.name)
         await _persist_endpoints(conn, spec, replace=replace_endpoints)
         await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, spec.name)
 

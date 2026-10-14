@@ -428,10 +428,16 @@ export interface HistogramResponse {
 export interface SchemaChangeDetail {
   added?: Record<string, unknown[]>;
   removed?: Record<string, unknown[]>;
+  /** Parts changed in place: `meta` keys whose text changed. */
+  changed?: Record<string, unknown[]>;
   /** [before, after] */
   strict_endpoints?: [boolean, boolean];
   registered?: boolean;
   unregistered?: boolean;
+  /** Registered again after being unregistered, as it was. */
+  restored?: boolean;
+  /** Deleted with its data. */
+  data_deleted?: boolean;
 }
 
 /** One record of the change feed: what changed and who changed it, not the new values. */

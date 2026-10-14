@@ -366,7 +366,7 @@ class GraphosClient:
         property_indexes: Iterable[Mapping[str, Any]] = (),
         generated_columns: Iterable[Mapping[str, Any]] = (),
         label_hierarchy: Mapping[str, str] | None = None,
-        meta: Mapping[str, str] | None = None,
+        meta: Mapping[str, str | None] | None = None,
         search_indexes: Mapping[str, Mapping[str, Any]] | None = None,
         edge_endpoints: Mapping[str, Iterable[tuple[str, str] | Mapping[str, str]]] | None = None,
         strict_endpoints: bool | None = None,
@@ -380,6 +380,9 @@ class GraphosClient:
         and data).  ``dry_run=True`` registers nothing and answers what the call
         would change (``changes``, as the change feed would record it) and what
         applying it would cost (``warnings``).
+
+        ``meta`` holds free-form notes about the tenant; keys are added or
+        overwritten, and a key given as ``None`` is removed.
 
         ``edge_endpoints`` declares, per edge type, the label pairs it may join:
         ``{"CALLS": [("Function", "Function")], "DEFINES": [("File", "Symbol")]}``

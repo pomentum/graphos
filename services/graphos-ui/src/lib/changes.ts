@@ -65,6 +65,7 @@ type SchemaField =
   | "resolve_rules"
   | "property_indexes"
   | "generated_columns"
+  | "meta"
   | "indexes";
 
 const SCHEMA_FIELDS: SchemaField[] = [
@@ -76,6 +77,7 @@ const SCHEMA_FIELDS: SchemaField[] = [
   "resolve_rules",
   "property_indexes",
   "generated_columns",
+  "meta",
   "indexes",
 ];
 
@@ -102,15 +104,19 @@ function schemaItems(field: SchemaField, values: unknown[]): string {
 
 /** One line for a schema change: "Changed the schema: added labels Tag, Doc; strict endpoints on". */
 export function describeSchema(detail: SchemaChangeDetail): string {
+  if (detail.data_deleted) return t("common.changes.schema.dataDeleted");
+  if (detail.restored) return t("common.changes.schema.restored");
   if (detail.unregistered) return t("common.changes.schema.unregistered");
   if (detail.registered) return t("common.changes.schema.registered");
   const parts: string[] = [];
-  for (const side of ["added", "removed"] as const) {
+  for (const side of ["added", "removed", "changed"] as const) {
     const fields = detail[side] ?? {};
     const items = SCHEMA_FIELDS.filter((field) => fields[field]?.length).map((field) =>
       schemaItems(field, fields[field]!),
     );
-    if (items.length) parts.push(t(`common.changes.schema.${side}`, { items: items.join(", ") }));
+    // "changed" (meta notes rewritten) has its own wording: "Changed the schema" is the line itself.
+    const key = side === "changed" ? "changedParts" : side;
+    if (items.length) parts.push(t(`common.changes.schema.${key}`, { items: items.join(", ") }));
   }
   if (detail.strict_endpoints) {
     parts.push(detail.strict_endpoints[1] ? t("common.changes.schema.strictOn") : t("common.changes.schema.strictOff"));

@@ -80,9 +80,12 @@
       "schema": {
         "registered": "Registered the tenant",
         "unregistered": "Unregistered the tenant",
+        "restored": "Restored the tenant",
+        "dataDeleted": "Deleted the tenant with its data",
         "changed": "Changed the schema: {{parts}}",
         "added": "added {{items}}",
         "removed": "removed {{items}}",
+        "changedParts": "rewrote {{items}}",
         "strictOn": "strict endpoints on",
         "strictOff": "strict endpoints off",
         "more_one": "{{count}} more",
@@ -104,6 +107,8 @@
           "property_indexes_other": "property indexes",
           "generated_columns_one": "generated column",
           "generated_columns_other": "generated columns",
+          "meta_one": "note",
+          "meta_other": "notes",
           "indexes_one": "index",
           "indexes_other": "indexes"
         }

@@ -370,6 +370,9 @@ async def test_a_service_account_creates_tenants_and_owns_them(
             if await conn.fetchval("SELECT 1 FROM ag_catalog.ag_graph WHERE name = $1;", tenant):
                 await conn.execute(f"SELECT drop_graph('{tenant}', true);")
             await conn.execute("DELETE FROM graphos_meta.tenants WHERE name = $1;", tenant)
+            await conn.execute(
+                "DELETE FROM graphos_meta.unregistered_tenants WHERE name = $1;", tenant,
+            )
             await conn.execute("DELETE FROM graphos_meta.changes WHERE tenant = $1;", tenant)
         forget(tenant)
 

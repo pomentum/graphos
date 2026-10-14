@@ -2,9 +2,11 @@
 
 A registration that changes the tenant's schema (labels, edge types,
 declared pairs, label hierarchy, search indexes, resolve rules, property
-indexes, generated columns, ``strict_endpoints``) is recorded with what it
-added, removed or switched; one that changes nothing (a consumer re-registering at startup) records
-nothing.  Removing a declared pair and unregistering are recorded too.
+indexes, generated columns, ``meta`` keys, ``strict_endpoints``) is
+recorded with what it added, removed, changed or switched; one that
+changes nothing (a consumer re-registering at startup) records nothing.
+Removing a declared pair, unregistering, restoring and deleting with the
+data are recorded too.
 """
 
 from __future__ import annotations
@@ -35,6 +37,8 @@ def _sets(spec: TenantSpec | None) -> dict[str, set[Any]]:
         },
         "property_indexes": {declared.describe_index(x) for x in spec.property_indexes},
         "generated_columns": {declared.describe_column(x) for x in spec.generated_columns},
+        # By key: the notes themselves are free text, kept in the schema, not the feed.
+        "meta": set(spec.meta),
     }
 
 
@@ -48,6 +52,7 @@ def diff(before: TenantSpec | None, after: TenantSpec) -> dict[str, Any] | None:
     """What a registration changed, or ``None`` when it changed nothing.
 
     ``added`` / ``removed`` per part (resolve rules by edge type),
+    ``changed.meta`` for ``meta`` keys whose text changed,
     ``strict_endpoints`` as ``[old, new]``, and
     ``registered: true`` for a new tenant.
     """
@@ -60,6 +65,12 @@ def diff(before: TenantSpec | None, after: TenantSpec) -> dict[str, Any] | None:
             detail.setdefault("added", {})[field] = _shown(field, added)
         if removed:
             detail.setdefault("removed", {})[field] = _shown(field, removed)
+    if before is not None:
+        rewritten = sorted(
+            k for k, v in after.meta.items() if k in before.meta and before.meta[k] != v
+        )
+        if rewritten:
+            detail["changed"] = {"meta": rewritten}
     strict_before = bool(before.strict_endpoints) if before else False
     if bool(after.strict_endpoints) != strict_before:
         detail["strict_endpoints"] = [strict_before, bool(after.strict_endpoints)]
@@ -71,7 +82,7 @@ def diff(before: TenantSpec | None, after: TenantSpec) -> dict[str, Any] | None:
 def size(detail: dict[str, Any]) -> int:
     """How many schema items a change touched (the record's ``count``), at least 1."""
     n = 0
-    for part in ("added", "removed"):
+    for part in ("added", "removed", "changed"):
         for values in detail.get(part, {}).values():
             n += len(values)
     return max(n + ("strict_endpoints" in detail), 1)
