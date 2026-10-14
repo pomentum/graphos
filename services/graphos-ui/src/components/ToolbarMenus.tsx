@@ -1,6 +1,7 @@
 import {
   ActionIcon,
   Avatar,
+  Button,
   Combobox,
   Group,
   Indicator,
@@ -21,6 +22,8 @@ import {
   IconKey,
   IconLogout,
   IconMoon,
+  IconPlus,
+  IconRestore,
   IconSun,
   IconSunMoon,
 } from "@tabler/icons-react";
@@ -31,6 +34,7 @@ import { describeChange, streamStatusText } from "../lib/changes";
 import { relativeTime } from "../lib/time";
 import { useSessionContext, useTenantSession } from "../session/SessionProvider";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
+import { NewTenantDialog, UnregisteredTenantsDialog, useMayCreateTenants } from "./TenantLifecycle";
 
 /** Above this many tenants the switcher offers a search box. */
 const TENANT_SEARCH_FROM = 8;
@@ -38,11 +42,15 @@ const TENANT_SEARCH_FROM = 8;
 /**
  * The tenant name, opening a list of the tenants the token may use. The
  * list scrolls within the window and can be searched, so a token with
- * hundreds of tenants stays usable; arrows and Enter pick one.
+ * hundreds of tenants stays usable; arrows and Enter pick one. Below it: a
+ * new tenant (for whoever may create one) and the unregistered tenants.
  */
 export function TenantSwitcher() {
   const { t } = useTranslation();
   const { session, selectTenant } = useSessionContext();
+  const mayCreate = useMayCreateTenants();
+  const [creating, setCreating] = useState(false);
+  const [listing, setListing] = useState(false);
   const [query, setQuery] = useState("");
   const combobox = useCombobox({
     onDropdownOpen: () => combobox.focusSearchInput(),
@@ -57,56 +65,87 @@ export function TenantSwitcher() {
   const shown = needle ? tenants.filter((tenant) => tenant.toLowerCase().includes(needle)) : tenants;
 
   return (
-    <Combobox
-      store={combobox}
-      width={240}
-      position="bottom-start"
-      onOptionSubmit={(tenant) => {
-        selectTenant(tenant);
-        combobox.closeDropdown();
-      }}
-    >
-      <Combobox.Target withAriaAttributes={false}>
-        <UnstyledButton
-          aria-label={t("shell.tenants.switch")}
-          disabled={tenants.length < 2}
-          onClick={() => combobox.toggleDropdown()}
-        >
-          <Text fw={600} size="sm" span>
-            {session.tenant}
-          </Text>
-          {tenants.length > 1 ? <IconChevronDown size={12} style={{ marginLeft: 4 }} /> : null}
-        </UnstyledButton>
-      </Combobox.Target>
-      <Combobox.Dropdown>
-        {tenants.length > TENANT_SEARCH_FROM ? (
-          <Combobox.Search
-            value={query}
-            onChange={(event) => {
-              setQuery(event.currentTarget.value);
-              combobox.updateSelectedOptionIndex();
-            }}
-            placeholder={t("shell.tenants.findAmong", { count: tenants.length })}
-            aria-label={t("shell.tenants.find")}
-          />
-        ) : null}
-        <Combobox.Options>
-          <ScrollArea.Autosize mah="min(360px, calc(100vh - 140px))" type="auto">
-            {shown.map((tenant) => (
-              <Combobox.Option key={tenant} value={tenant} active={tenant === session.tenant}>
-                <Group justify="space-between" wrap="nowrap" gap="xs">
-                  <Text size="sm" truncate title={tenant}>
-                    {tenant}
-                  </Text>
-                  {tenant === session.tenant ? <IconCheck size={14} /> : null}
-                </Group>
-              </Combobox.Option>
-            ))}
-            {shown.length === 0 ? <Combobox.Empty>{t("shell.tenants.noMatch")}</Combobox.Empty> : null}
-          </ScrollArea.Autosize>
-        </Combobox.Options>
-      </Combobox.Dropdown>
-    </Combobox>
+    <>
+      <Combobox
+        store={combobox}
+        width={240}
+        position="bottom-start"
+        onOptionSubmit={(tenant) => {
+          selectTenant(tenant);
+          combobox.closeDropdown();
+        }}
+      >
+        <Combobox.Target withAriaAttributes={false}>
+          <UnstyledButton aria-label={t("shell.tenants.switch")} onClick={() => combobox.toggleDropdown()}>
+            <Text fw={600} size="sm" span>
+              {session.tenant}
+            </Text>
+            <IconChevronDown size={12} style={{ marginLeft: 4 }} />
+          </UnstyledButton>
+        </Combobox.Target>
+        <Combobox.Dropdown>
+          {tenants.length > TENANT_SEARCH_FROM ? (
+            <Combobox.Search
+              value={query}
+              onChange={(event) => {
+                setQuery(event.currentTarget.value);
+                combobox.updateSelectedOptionIndex();
+              }}
+              placeholder={t("shell.tenants.findAmong", { count: tenants.length })}
+              aria-label={t("shell.tenants.find")}
+            />
+          ) : null}
+          <Combobox.Options>
+            <ScrollArea.Autosize mah="min(360px, calc(100vh - 140px))" type="auto">
+              {shown.map((tenant) => (
+                <Combobox.Option key={tenant} value={tenant} active={tenant === session.tenant}>
+                  <Group justify="space-between" wrap="nowrap" gap="xs">
+                    <Text size="sm" truncate title={tenant}>
+                      {tenant}
+                    </Text>
+                    {tenant === session.tenant ? <IconCheck size={14} /> : null}
+                  </Group>
+                </Combobox.Option>
+              ))}
+              {shown.length === 0 ? <Combobox.Empty>{t("shell.tenants.noMatch")}</Combobox.Empty> : null}
+            </ScrollArea.Autosize>
+          </Combobox.Options>
+          <Combobox.Footer>
+            <Stack gap={2}>
+              {mayCreate ? (
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  justify="flex-start"
+                  leftSection={<IconPlus size={13} />}
+                  onClick={() => {
+                    combobox.closeDropdown();
+                    setCreating(true);
+                  }}
+                >
+                  {t("shell.tenantLife.newTenant")}
+                </Button>
+              ) : null}
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                color="gray"
+                justify="flex-start"
+                leftSection={<IconRestore size={13} />}
+                onClick={() => {
+                  combobox.closeDropdown();
+                  setListing(true);
+                }}
+              >
+                {t("shell.tenantLife.unregistered")}
+              </Button>
+            </Stack>
+          </Combobox.Footer>
+        </Combobox.Dropdown>
+      </Combobox>
+      <NewTenantDialog opened={creating} onClose={() => setCreating(false)} />
+      <UnregisteredTenantsDialog opened={listing} onClose={() => setListing(false)} />
+    </>
   );
 }
 
@@ -163,7 +202,7 @@ export function ActivityBell() {
 export function AccountMenu() {
   const { t } = useTranslation();
   const { me, level, isAdmin } = useTenantSession();
-  const { signOut } = useSessionContext();
+  const { signOut, setPreferences } = useSessionContext();
   const [changing, setChanging] = useState(false);
   const { colorScheme, setColorScheme } = useMantineColorScheme();
   const schemes = [
@@ -199,7 +238,10 @@ export function AccountMenu() {
               key={value}
               leftSection={<Icon size={14} />}
               rightSection={colorScheme === value ? <IconCheck size={14} /> : null}
-              onClick={() => setColorScheme(value)}
+              onClick={() => {
+                setColorScheme(value);
+                setPreferences({ theme: value });
+              }}
             >
               {label}
             </Menu.Item>

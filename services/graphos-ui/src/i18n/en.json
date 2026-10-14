@@ -174,6 +174,47 @@
       "findAmong_other": "Find among {{count}} tenants",
       "noMatch": "No tenant matches"
     },
+    "tenantLife": {
+      "newTenant": "New tenant…",
+      "unregistered": "Unregistered tenants…",
+      "create": {
+        "title": "New tenant",
+        "name": "Name",
+        "nameHint": "A letter, then letters, digits or _ (up to 63). It cannot be changed later.",
+        "badName": "Start with a letter, then use letters, digits or _ (up to 63).",
+        "mayNotCreate": "You may not create a tenant named {{name}}.",
+        "schema": "Schema file (optional)",
+        "schemaHint": "A schema downloaded from a tenant's Schema page, or written by hand. Without one the tenant starts empty; labels can be added later.",
+        "exists": "A tenant named {{name}} already exists.",
+        "restores": "{{name}} is an unregistered tenant that keeps its data: restore it from Unregistered tenants, or delete it there first.",
+        "create": "Create"
+      },
+      "list": {
+        "title": "Unregistered tenants",
+        "hint": "Their data, schema and access are kept: restore one to use it again as it was, or delete it with its data.",
+        "empty": "No unregistered tenants.",
+        "labels": "{{vertex}} labels, {{edge}} relationship types",
+        "by": "unregistered {{when}} by {{who}}",
+        "orphanBadge": "no schema kept",
+        "orphan": "Unregistered before graphos 0.8.2: its data is there but no schema was kept. Register it again with a schema file of the same name, or delete it.",
+        "restore": "Restore",
+        "deleteData": "Delete data"
+      },
+      "delete": {
+        "section": "Delete this tenant",
+        "sectionWhat": "Unregister it (its data is kept and it can be restored), or delete it with its data.",
+        "button": "Delete tenant…",
+        "title": "Delete {{name}}",
+        "titleData": "Delete {{name}} with its data",
+        "unregisterWhat": "Unregistering takes the tenant out of use: its data, schema and access are kept, and it can be restored from Unregistered tenants in the tenant menu.",
+        "dropData": "Also delete its data",
+        "dropDataWhat": "The graph, its data, schema, history and access are deleted for good. This cannot be undone: download the dataset first if you may need it.",
+        "typeName": "Type {{name}} to confirm",
+        "unregister": "Unregister",
+        "deleteForGood": "Delete for good",
+        "transferRunning": "A dataset download or upload of this tenant is running: wait for it, or cancel it."
+      }
+    },
     "activityBell": {
       "label": "Activity",
       "labelUnseen": "Activity, {{unseen}} new",

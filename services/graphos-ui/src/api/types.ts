@@ -22,6 +22,26 @@ export interface Me {
   levels: Record<string, Level>;
   /** Patterns of tenant names this user may create. */
   create_tenants: string[];
+  /** What the user chose in the UI, kept by graphos (not in the browser). */
+  preferences?: Preferences;
+}
+
+/** Preferences graphos keeps per user (`PATCH /v1/me/preferences`; `null` removes one). */
+export interface Preferences {
+  theme?: "auto" | "light" | "dark";
+  last_tenant?: string;
+}
+
+/** A tenant unregistered with its data kept (`GET /v1/tenants?unregistered=true`). */
+export interface UnregisteredTenant {
+  name: string;
+  /** `orphan`: unregistered before 0.8.2, no kept registration (admins only). */
+  kind: "unregistered" | "orphan";
+  vertex_labels: number;
+  edge_labels: number;
+  created_at: string | null;
+  unregistered_at: string | null;
+  unregistered_by: string | null;
 }
 
 /** Answer of `/v1/auth/login`, `/v1/auth/refresh` and `/v1/me/password`. */
@@ -369,6 +389,8 @@ export interface DatasetImportResult {
 export interface SchemaDryRun {
   tenant: string;
   exists: boolean;
+  /** The tenant is unregistered with its data kept: registering it restores it first. */
+  restores?: boolean;
   mode: "merge" | "replace";
   /** What the change feed would record; null when nothing would change. */
   changes: SchemaChangeDetail | null;

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { fetchMe, GraphosApi } from "../api/graphosApi";
+import { AccountApi, fetchMe, GraphosApi } from "../api/graphosApi";
 import { HttpClient } from "../api/http";
-import type { AuthConfig, Level, Me, OidcSignedIn, TokenResponse } from "../api/types";
+import type { AuthConfig, Level, Me, OidcSignedIn, Preferences, TokenResponse } from "../api/types";
 import { Credentials } from "./credentials";
 import { splitTenantPath } from "./tenantPath";
 import { atLeast } from "./levels";
@@ -48,13 +48,34 @@ interface SessionContextValue {
   /** Changes the password (required first when `me.must_change`). */
   changePassword: (current: string, next: string) => Promise<void>;
   selectTenant: (tenant: string) => void;
+  /** Outside any one tenant: preferences, creating and deleting tenants (null when signed out). */
+  account: AccountApi | null;
+  /**
+   * Reads who is signed in again (after a tenant was created, restored or
+   * deleted) and selects `select` if given and still there; otherwise keeps the
+   * selected tenant while it is there.
+   */
+  refreshMe: (select?: string | null) => Promise<void>;
+  /** Changes preferences at once here, and keeps them at graphos (`null` removes one). */
+  setPreferences: (patch: PreferencesPatch) => void;
   signOut: () => void;
   /** The page to show after signing in through the provider, once. */
   returnTo: string | null;
   clearReturnTo: () => void;
 }
 
+export type PreferencesPatch = { [K in keyof Preferences]?: Preferences[K] | null };
+
 const SessionContext = createContext<SessionContextValue | null>(null);
+
+function patched(preferences: Preferences | undefined, patch: PreferencesPatch): Preferences {
+  const out: Record<string, unknown> = { ...preferences };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null || value === undefined) delete out[key];
+    else out[key] = value;
+  }
+  return out as Preferences;
+}
 
 interface State {
   me: Me;
@@ -125,7 +146,9 @@ export function SessionProvider({
       const credentials = newCredentials(tokens);
       const me = await fetchMe(new HttpClient(API_BASE, credentials, fetchImpl));
       setNotice(null);
-      const tenant = me.must_change ? null : pickTenant(me, splitTenantPath(path, me.tenants).tenant);
+      const named = splitTenantPath(path, me.tenants).tenant;
+      // The address's tenant, else the one used last (kept by graphos), else the only one.
+      const tenant = me.must_change ? null : pickTenant(me, named ?? me.preferences?.last_tenant ?? null);
       setState({ me, credentials, tenant });
       return { me, tenant };
     },
@@ -220,9 +243,41 @@ export function SessionProvider({
     [state, fetchImpl],
   );
 
-  const selectTenant = useCallback((tenant: string) => {
-    setState((current) => (current ? { ...current, tenant } : current));
-  }, []);
+  const credentials = state?.credentials ?? null;
+  const account = useMemo(
+    () => (credentials ? new AccountApi(new HttpClient(API_BASE, credentials, fetchImpl)) : null),
+    [credentials, fetchImpl],
+  );
+
+  const setPreferences = useCallback(
+    (patch: PreferencesPatch) => {
+      setState((s) => (s ? { ...s, me: { ...s.me, preferences: patched(s.me.preferences, patch) } } : s));
+      // Kept for the next sign-in, anywhere; nothing depends on it now.
+      void account?.updatePreferences(patch).catch(() => undefined);
+    },
+    [account],
+  );
+
+  const selectTenant = useCallback(
+    (tenant: string) => {
+      setState((current) => (current ? { ...current, tenant } : current));
+      setPreferences({ last_tenant: tenant });
+    },
+    [setPreferences],
+  );
+
+  const refreshMe = useCallback(
+    async (select?: string | null) => {
+      if (!credentials) return;
+      const me = await fetchMe(new HttpClient(API_BASE, credentials, fetchImpl));
+      setState((s) => {
+        if (!s) return s;
+        const wanted = select === undefined ? s.tenant : select;
+        return { ...s, me, tenant: me.must_change ? null : pickTenant(me, wanted) };
+      });
+    },
+    [credentials, fetchImpl],
+  );
 
   const signOut = useCallback(() => {
     const credentials = state?.credentials;
@@ -263,6 +318,9 @@ export function SessionProvider({
       signInWithSso,
       changePassword,
       selectTenant,
+      account,
+      refreshMe,
+      setPreferences,
       signOut,
       returnTo,
       clearReturnTo,
@@ -276,6 +334,9 @@ export function SessionProvider({
       signInWithSso,
       changePassword,
       selectTenant,
+      account,
+      refreshMe,
+      setPreferences,
       signOut,
       returnTo,
       clearReturnTo,

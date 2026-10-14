@@ -1,4 +1,4 @@
-import { Center, Loader, MantineProvider } from "@mantine/core";
+import { Center, Loader, MantineProvider, useMantineColorScheme } from "@mantine/core";
 import { Notifications, notifications } from "@mantine/notifications";
 import { MutationCache, QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
@@ -76,6 +76,7 @@ export function App() {
       <QueryClientProvider client={client}>
         <SessionProvider>
           <SignOutOnRejectedToken />
+          <PreferredColorScheme />
           <Screens />
         </SessionProvider>
       </QueryClientProvider>
@@ -153,8 +154,23 @@ function TenantScope({ tenant, tenants, children }: { tenant: string; tenants: s
   );
 }
 
-/** The light/dark choice lasts while the page is open: nothing is kept in the browser. */
+/**
+ * The light/dark choice is held in page memory (nothing is kept in the
+ * browser) and, once someone is signed in, follows their preference, which
+ * graphos keeps for them.
+ */
 const COLOR_SCHEME = memoryColorSchemeManager();
+
+/** Applies the signed-in user's theme preference. */
+function PreferredColorScheme() {
+  const { session } = useSessionContext();
+  const { setColorScheme } = useMantineColorScheme();
+  const theme = session?.me.preferences?.theme;
+  useEffect(() => {
+    if (theme) setColorScheme(theme);
+  }, [theme, setColorScheme]);
+  return null;
+}
 
 /** A session graphos stops accepting (ended, revoked) signs out. */
 function SignOutOnRejectedToken() {

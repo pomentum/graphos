@@ -27,7 +27,7 @@ import {
 } from "../../data/queries";
 import { mayCreate } from "../../lib/schemaFile";
 import { formatCount } from "../../lib/time";
-import { useTenantSession } from "../../session/SessionProvider";
+import { useSessionContext, useTenantSession } from "../../session/SessionProvider";
 import { browseParams } from "../browse/browseState";
 import { AddToSchemaDialog, type AdditionKind } from "./AddToSchemaDialog";
 import { ImportSchemaDialog } from "./ImportSchemaDialog";
@@ -58,6 +58,7 @@ const SHOWN_PAIRS = 3;
 export function SchemaView() {
   const { t } = useTranslation();
   const { tenant, canMaintain, api, me } = useTenantSession();
+  const { refreshMe } = useSessionContext();
   const schema = useSchema();
   const map = useGraphMap();
   const catalogue = useCatalogue();
@@ -338,7 +339,18 @@ export function SchemaView() {
           tenant={tenant}
           mayCreate={(name) => mayCreate(me.create_tenants, me.admin, name)}
           onPreview={(doc, options) => api.previewSchema(doc, options)}
-          onImport={(doc, options) => importSchema.mutate({ doc, options }, { onSuccess: () => setImporting(false) })}
+          onImport={(doc, options) =>
+            importSchema.mutate(
+              { doc, options },
+              {
+                onSuccess: () => {
+                  setImporting(false);
+                  // Into another tenant, perhaps a new one: the tenant list changes.
+                  if (options.name && options.name !== tenant) void refreshMe();
+                },
+              },
+            )
+          }
           importing={importSchema.isPending}
           onCancel={() => setImporting(false)}
         />

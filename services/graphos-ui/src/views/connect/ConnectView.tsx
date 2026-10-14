@@ -2,6 +2,7 @@ import {
   Alert,
   Button,
   Divider,
+  Group,
   Paper,
   PasswordInput,
   ScrollArea,
@@ -11,10 +12,11 @@ import {
   Title,
   UnstyledButton,
 } from "@mantine/core";
-import { IconChevronRight, IconSearch } from "@tabler/icons-react";
+import { IconChevronRight, IconPlus, IconRestore, IconSearch } from "@tabler/icons-react";
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { ApiError } from "../../api/http";
+import { NewTenantDialog, UnregisteredTenantsDialog, useMayCreateTenants } from "../../components/TenantLifecycle";
 import { useSessionContext } from "../../session/SessionProvider";
 import classes from "./ConnectView.module.css";
 
@@ -199,6 +201,9 @@ function ChangePasswordForm() {
 function TenantChooser() {
   const { t } = useTranslation();
   const { session, selectTenant, signOut } = useSessionContext();
+  const mayCreate = useMayCreateTenants();
+  const [creating, setCreating] = useState(false);
+  const [listing, setListing] = useState(false);
   const [query, setQuery] = useState("");
   const tenants = session?.me.tenants ?? [];
   const needle = query.trim().toLowerCase();
@@ -247,9 +252,27 @@ function TenantChooser() {
           </ScrollArea.Autosize>
         </Stack>
       )}
+      <Group gap="xs" justify="center">
+        {mayCreate ? (
+          <Button variant="light" size="xs" leftSection={<IconPlus size={14} />} onClick={() => setCreating(true)}>
+            {t("shell.tenantLife.newTenant")}
+          </Button>
+        ) : null}
+        <Button
+          variant="subtle"
+          color="gray"
+          size="xs"
+          leftSection={<IconRestore size={14} />}
+          onClick={() => setListing(true)}
+        >
+          {t("shell.tenantLife.unregistered")}
+        </Button>
+      </Group>
       <Button variant="subtle" color="gray" size="xs" onClick={signOut}>
         {t("shell.signIn.signOut")}
       </Button>
+      <NewTenantDialog opened={creating} onClose={() => setCreating(false)} />
+      <UnregisteredTenantsDialog opened={listing} onClose={() => setListing(false)} />
     </>
   );
 }

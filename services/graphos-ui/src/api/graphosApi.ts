@@ -23,6 +23,7 @@ import type {
   EdgesUpsertResponse,
   HistogramResponse,
   Me,
+  Preferences,
   NeighborsResponse,
   NodeRecord,
   NodesScanRequest,
@@ -35,6 +36,7 @@ import type {
   ServiceInfo,
   TenantSchema,
   TenantStats,
+  UnregisteredTenant,
 } from "./types";
 
 export interface SearchParams {
@@ -64,6 +66,53 @@ function edgeQuery(edge: EdgeKey) {
 /** The calling token, independent of any tenant. */
 export function fetchMe(http: HttpClient): Promise<Me> {
   return http.get<Me>("/v1/me");
+}
+
+/**
+ * What the signed-in user does outside any one tenant: their preferences, and
+ * creating, restoring and deleting tenants.
+ */
+export class AccountApi {
+  constructor(private readonly http: HttpClient) {}
+
+  /** Changes some preferences (`null` removes one); answers all of them. */
+  updatePreferences(patch: { [K in keyof Preferences]?: Preferences[K] | null }): Promise<Preferences> {
+    return this.http.request<Preferences>("PATCH", "/v1/me/preferences", { body: patch }).then((r) => r.data);
+  }
+
+  /**
+   * What creating `name` would do, writing nothing: `exists` when it is
+   * registered, `restores` when it is unregistered with its data (409 when
+   * that data is not the caller's).
+   */
+  previewTenant(name: string, schema?: SchemaDocument): Promise<SchemaDryRun> {
+    return schema
+      ? new GraphosApi(this.http, name).previewSchema(schema, { name })
+      : this.http.post<SchemaDryRun>("/v1/tenants", { name }, { dry_run: true });
+  }
+
+  /** Creates tenant `name`, empty or with the schema of a schema file. */
+  createTenant(name: string, schema?: SchemaDocument): Promise<unknown> {
+    return schema
+      ? new GraphosApi(this.http, name).importSchema(schema, { name })
+      : this.http.post("/v1/tenants", { name });
+  }
+
+  /** Tenants unregistered with their data kept that the user owns (all, for an admin). */
+  async unregisteredTenants(): Promise<UnregisteredTenant[]> {
+    const list = await this.http.get<{ unregistered?: UnregisteredTenant[] }>("/v1/tenants", { unregistered: true });
+    return list.unregistered ?? [];
+  }
+
+  /** Unregisters a tenant, keeping its data; with `dropData`, deletes it for good. */
+  async deleteTenant(name: string, dropData: boolean): Promise<void> {
+    await this.http.request("DELETE", `/v1/tenants/${enc(name)}`, { query: dropData ? { drop_data: true } : {} });
+  }
+
+  /** Registers an unregistered tenant again, as it was. */
+  async restoreTenant(name: string): Promise<void> {
+    await this.http.post(`/v1/tenants/${enc(name)}/restore`, {});
+  }
 }
 
 /**

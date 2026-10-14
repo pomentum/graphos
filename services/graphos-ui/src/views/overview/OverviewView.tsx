@@ -6,6 +6,7 @@ import { CountBars } from "../../components/CountBars";
 import { StatTile } from "../../components/StatTile";
 import { useHistogram, useProperties, useStats } from "../../data/queries";
 import { formatBytes, formatCount } from "../../lib/time";
+import { DeleteTenantSection } from "./DeleteTenantSection";
 import { DatasetPanel } from "./DatasetPanel";
 import { GraphAlgorithms } from "./GraphAlgorithms";
 import classes from "./OverviewView.module.css";
@@ -146,6 +147,7 @@ export function OverviewView() {
           </Text>
         ) : null}
       </Stack>
+      <DeleteTenantSection />
     </div>
   );
 }
