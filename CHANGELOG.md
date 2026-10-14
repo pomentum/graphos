@@ -4,12 +4,12 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.8.2 — 2026-10-14
 
 Tenants can now be created, unregistered, restored and deleted with their data, from the API, the
 Python client and the web UI; unregistering keeps everything needed to restore a tenant as it was.
-The web UI keeps each user's theme and last tenant at graphos, and the schema diagram is laid out
-along the relationships. One behaviour change for clients: registering the name of an unregistered
+The web UI keeps each user's theme and last tenant at graphos, the schema diagram is laid out
+along the relationships, and a `meta` key can be removed without replacing the schema. One behaviour change for clients: registering the name of an unregistered
 tenant restores it for its owner and is refused (409) to anyone else (see Changed).
 
 ### Added
