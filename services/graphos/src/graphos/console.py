@@ -13,10 +13,14 @@ exports", §6):
   qualified name (:func:`qualified_calls`) or one that is not Cypher's
   (:func:`unknown_calls`, against :data:`CYPHER_FUNCTIONS`), whatever the
   database user may do and whichever AGE runs.
-- **Read-only, one tenant.**  ``BEGIN READ ONLY``; graphos writes the graph
-  name; the user's text goes inside a random dollar tag it does not
-  contain; parameters go as one agtype map.  Writes stay on the API, which
-  keeps revisions, the change feed and the audit log right.
+- **Read-only, one tenant.**  A query with a write clause is refused before
+  the database (:func:`write_clauses`): AGE 1.6 carries out ``SET``,
+  ``REMOVE`` and ``DELETE`` (``DETACH DELETE`` too) itself, where
+  PostgreSQL's read-only check does not see them; it stops only ``CREATE``
+  and ``MERGE``.  The query then runs in ``BEGIN READ ONLY`` as well;
+  graphos writes the graph name; the user's text goes inside a random dollar
+  tag it does not contain; parameters go as one agtype map.  Writes stay on
+  the API, which keeps revisions, the change feed and the audit log right.
 - **Bounded and stoppable.**  ``LIMIT n + 1`` (to say a result was cut);
   ``statement_timeout``; a watchdog that cancels, then terminates, the
   backend if a query outlives the timeout or the caller goes away (AGE
@@ -146,6 +150,31 @@ def qualified_calls(query: str) -> list[str]:
         (k1, t1), (k2, t2), (k3, t3), (k4, t4) = tokens[i:i + 4]
         if k1 in ("word", "tick") and t2 == "." and k3 in ("word", "tick") and t4 == "(":
             found.append(f"{t1.strip('`')}.{t3.strip('`')}")
+    return found
+
+
+_WRITE_CLAUSES = frozenset({"create", "merge", "set", "delete", "detach", "remove"})
+
+
+def write_clauses(query: str) -> list[str]:
+    """The write clauses in ``query`` (``CREATE``, ``MERGE``, ``SET``, ``DELETE``,
+    ``DETACH``, ``REMOVE``), outside strings, comments and quoted names, and not
+    as a label (``:Set``), property (``n.set``), map key (``{set: 1}``) or
+    parameter (``$set``)."""
+    tokens = [
+        (m.lastgroup or "", m.group())
+        for m in _TOKEN.finditer(query)
+        if m.lastgroup not in ("ws", "comment")
+    ]
+    found = []
+    for i, (kind, text) in enumerate(tokens):
+        if kind != "word" or text.lower() not in _WRITE_CLAUSES:
+            continue
+        if i and tokens[i - 1][1] in (".", ":", "$"):
+            continue
+        if i + 1 < len(tokens) and tokens[i + 1][1] == ":":
+            continue
+        found.append(text.upper())
     return found
 
 
@@ -378,6 +407,13 @@ class Console:
             raise ConsoleError(400, "the query is empty")
         if len(text) > MAX_QUERY_CHARS:
             raise ConsoleError(400, f"the query is longer than {MAX_QUERY_CHARS} characters")
+        writes = write_clauses(text)
+        if writes:
+            raise ConsoleError(
+                400,
+                "the console only reads: write through the API ("
+                + ", ".join(dict.fromkeys(writes)) + ")",
+            )
         calls = qualified_calls(text)
         if calls:
             raise ConsoleError(
