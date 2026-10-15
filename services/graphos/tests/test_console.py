@@ -24,6 +24,7 @@ from graphos.console import (
     needs_age_graph,
     qualified_calls,
     return_columns,
+    unknown_calls,
     variable_length,
 )
 from graphos.identity import Principal
@@ -130,6 +131,24 @@ def test_a_result_becomes_cells_and_a_graph_of_its_nodes_and_their_edges() -> No
 )
 def test_qualified_calls_are_found_however_written(query: str, calls: list[str]) -> None:
     assert qualified_calls(query) == calls
+
+
+@pytest.mark.parametrize(
+    ("query", "calls"),
+    [
+        ("MATCH (n:Doc) RETURN toUpper(n.title), count(*), coalesce(n.x, 1)", []),
+        ("MATCH (n) WHERE exists(n.x) AND (n)-[:R]->() RETURN collect(DISTINCT n)", []),
+        ("MATCH p = (a)-->(b) RETURN length(p), nodes(p), [x IN range(1, 3) | x * 2]", []),
+        ("UNWIND [1, 2] AS x WITH x WHERE (x > 1) RETURN CASE WHEN (x = 2) THEN 1 END", []),
+        ("RETURN version()", ["version"]),
+        ("RETURN similarity('a', 'b'), `set_limit`(0.5)", ["similarity", "set_limit"]),
+        ("MATCH (n) RETURN prepare_cypher(n)", ["prepare_cypher"]),        # AGE's internals
+        ("RETURN 'version()' // version()", []),                          # strings, comments
+        ("RETURN pg_catalog.version()", []),                              # qualified_calls' job
+    ],
+)
+def test_calls_that_are_not_cyphers_are_found(query: str, calls: list[str]) -> None:
+    assert unknown_calls(query) == calls
 
 
 @pytest.mark.parametrize(

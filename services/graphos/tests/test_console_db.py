@@ -236,8 +236,13 @@ async def test_writes_admin_functions_and_other_tenants_are_refused(
         refused = await _query(api, call)
         assert refused.status_code == HTTPStatus.BAD_REQUEST, call
         assert "not database functions" in refused.json()["detail"]
-    unqualified = await _query(api, "RETURN version()")  # not one of AGE's: AGE refuses it
-    assert unqualified.status_code == HTTPStatus.BAD_REQUEST
+    # Not Cypher's, unqualified: AGE 1.6 resolves other extensions' functions
+    # (pg_trgm's similarity()) and 1.7+ any on the search path (version()), so
+    # graphos refuses them before the database, whichever AGE runs.
+    for call in ("RETURN version()", "RETURN similarity('graph', 'graphs')", "RETURN `version`()"):
+        refused = await _query(api, call)
+        assert refused.status_code == HTTPStatus.BAD_REQUEST, call
+        assert "not one of them" in refused.json()["detail"], call
     own = await _query(api, "MATCH (d:Doc {id: 'd1'}) RETURN toUpper(d.title), size(d.title)")
     assert own.json()["rows"] == [["ONE", 3]]
     syntax = await _query(api, "MATCH (d:Doc RETURN d")

@@ -6,9 +6,13 @@ exports", §6):
 
 - **Only Cypher's own functions.**  AGE lets a Cypher expression call a
   PostgreSQL function by its schema-qualified name (``pg_catalog.x()``), and
-  only so: an unqualified name resolves to AGE's own functions.  A query
-  with a qualified call is refused before it reaches the database
-  (:func:`qualified_calls`), whatever the database user may do.
+  an unqualified name that is not one of AGE's falls through to other
+  functions: other extensions' already on AGE 1.6 (``pg_trgm``'s), any on
+  the search path from 1.7 (PostgreSQL's built-ins included).  So a query
+  is refused before it reaches the database when it calls a function by a
+  qualified name (:func:`qualified_calls`) or one that is not Cypher's
+  (:func:`unknown_calls`, against :data:`CYPHER_FUNCTIONS`), whatever the
+  database user may do and whichever AGE runs.
 - **Read-only, one tenant.**  ``BEGIN READ ONLY``; graphos writes the graph
   name; the user's text goes inside a random dollar tag it does not
   contain; parameters go as one agtype map.  Writes stay on the API, which
@@ -145,8 +149,60 @@ def qualified_calls(query: str) -> list[str]:
     return found
 
 
-# AGE's Cypher functions that load AGE's in-memory copy of the graph.
-_GRAPH_LOADING_FUNCTIONS = frozenset({"vertex_stats"})
+# Cypher's functions as AGE documents them, by the lower-case name it
+# resolves (``ag_catalog.age_<name>``), with ``count`` and ``coalesce``, which
+# AGE hands to PostgreSQL by design.  AGE's other ``age_*`` functions are its
+# internals (``vle``, ``prepare_cypher``, ``delete_global_graphs``, ...).
+CYPHER_FUNCTIONS = frozenset({
+    # predicates and scalars
+    "exists", "isempty", "id", "start_id", "end_id", "type", "label", "properties",
+    "head", "last", "length", "size", "startnode", "endnode", "timestamp", "coalesce",
+    "toboolean", "tofloat", "tointeger", "tostring",
+    # lists
+    "keys", "labels", "nodes", "relationships", "range", "reverse", "tail",
+    "tobooleanlist", "tofloatlist", "tointegerlist", "tostringlist",
+    # numbers
+    "rand", "abs", "ceil", "floor", "round", "sign", "e", "sqrt", "exp", "log", "log10",
+    "degrees", "radians", "pi", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "cot",
+    # strings
+    "replace", "split", "left", "right", "substring", "ltrim", "rtrim", "trim",
+    "tolower", "toupper",
+    # aggregation
+    "count", "avg", "sum", "min", "max", "collect", "stdev", "stdevp",
+    "percentilecont", "percentiledisc",
+})
+
+# Words a "(" follows in Cypher's own syntax, not in a call.
+_SYNTAX_BEFORE_PAREN = frozenset({
+    "match", "optional", "where", "return", "with", "unwind", "as", "and", "or", "xor",
+    "not", "in", "is", "create", "merge", "set", "delete", "detach", "remove", "order",
+    "by", "skip", "limit", "distinct", "case", "when", "then", "else", "end", "union",
+    "call", "yield", "starts", "ends", "contains", "on", "all", "any", "none", "single",
+})
+
+# AGE's Cypher functions that load AGE's in-memory copy of the graph
+# (``shortest_path`` and ``all_shortest_paths`` from AGE 1.8).
+_GRAPH_LOADING_FUNCTIONS = frozenset({"vertex_stats", "shortest_path", "all_shortest_paths"})
+
+
+def unknown_calls(query: str) -> list[str]:
+    """The functions ``query`` calls without a schema that are not Cypher's
+    (:data:`CYPHER_FUNCTIONS`), outside strings and comments, as written."""
+    tokens = [
+        (m.lastgroup or "", m.group())
+        for m in _TOKEN.finditer(query)
+        if m.lastgroup not in ("ws", "comment")
+    ]
+    found = []
+    for i, (kind, text) in enumerate(tokens[:-1]):
+        if kind not in ("word", "tick") or tokens[i + 1][1] != "(":
+            continue
+        if i and tokens[i - 1][1] == ".":
+            continue  # a qualified call: qualified_calls refuses it
+        name = text.strip("`")
+        if name.lower() not in CYPHER_FUNCTIONS and name.lower() not in _SYNTAX_BEFORE_PAREN:
+            found.append(name)
+    return found
 
 
 def needs_age_graph(query: str) -> str | None:
@@ -330,6 +386,14 @@ class Console:
                 + ", ".join(sorted(set(calls))),
             )
         needs = needs_age_graph(text)
+        unknown = [name for name in unknown_calls(text)
+                   if name.lower() not in _GRAPH_LOADING_FUNCTIONS]
+        if unknown and not needs:
+            raise ConsoleError(
+                400,
+                "the console runs Cypher's own functions only; not one of them: "
+                + ", ".join(sorted(set(unknown))),
+            )
         if needs:
             raise ConsoleError(
                 400,
