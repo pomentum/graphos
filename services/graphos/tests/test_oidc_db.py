@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from http import HTTPStatus
 from pathlib import Path
@@ -203,6 +204,29 @@ async def test_a_program_sends_the_providers_token(sso) -> None:  # noqa: ANN001
     assert (await api.get("/v1/me", headers=_auth(other))).status_code == HTTPStatus.UNAUTHORIZED
     forged = FakeIdp().access_token(sub="svc-loader", azp="loader")
     assert (await api.get("/v1/me", headers=_auth(forged))).status_code == HTTPStatus.UNAUTHORIZED
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_an_analysts_token_passed_on_is_audited_as_the_analyst(  # noqa: ANN001
+    sso, caplog,
+) -> None:
+    """An application that forwards its user's provider token (for graphos's
+    audience) has its calls audited as that person, not as the application."""
+    api, idp = sso
+    admin = await _admin(api)
+    await _grant(api, admin, "oidc-group:analysts", "ana_*", "create_tenants")
+    token = idp.access_token(sub="u-7", preferred_username="a.nalyst", groups=["analysts"],
+                             azp="acme-api")
+    me = (await api.get("/v1/me", headers=_auth(token))).json()
+    assert (me["consumer"], me["kind"], me["via"]) == ("a.nalyst", "person", "oidc")
+    with caplog.at_level(logging.INFO, logger="graphos.audit"):
+        resp = await api.post("/v1/tenants", params={"dry_run": "true"}, headers=_auth(token),
+                              json={"name": "ana_probe", "vertex_labels": ["A"], "edge_labels": []})
+    assert resp.status_code == HTTPStatus.OK, resp.text
+    lines = [(r.consumer, r.status) for r in caplog.records
+             if r.name == "graphos.audit" and getattr(r, "path", None) == "/v1/tenants"]
+    assert lines == [("a.nalyst", 200)]
 
 
 @requires_db
