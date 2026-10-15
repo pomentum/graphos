@@ -7,6 +7,7 @@ import gzip as gzip_module
 import json
 import logging
 import os
+import warnings
 from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from http import HTTPStatus
 from pathlib import Path
@@ -1100,19 +1101,24 @@ class GraphosClient:
         group_by: str,
         values: list[str] | None = None,
         limit: int = 200,
+        missing: bool = False,
     ) -> NodesAggregateResponse:
         """Group vertices of ``label`` by a property and count.
 
         Inheritance-aware: passing the parent label (e.g. ``Document``)
         matches all descendant labels via postgres table inheritance.
         Useful for live summary views (e.g. counts per ``type``) when
-        no materialised snapshot exists.
+        no materialised snapshot exists. ``missing`` also counts the nodes
+        without the property, under ``""``; ``total`` is every node counted
+        (``None`` from a server older than the field).
         """
         body: dict[str, Any] = {
             "label": label, "group_by": group_by, "limit": limit,
         }
         if values:
             body["values"] = values
+        if missing:
+            body["missing"] = True
         resp = await self._request(
             "POST", f"/v1/{self._tenant}/graph/nodes/aggregate", json_body=body,
         )
@@ -1312,10 +1318,13 @@ class GraphosClient:
     ) -> HistogramResponse:
         """Property-value histogram for one label — one SQL GROUP BY.
 
-        Closes the N-sequential-aggregate pattern on the caller side.
-        Schema-agnostic — any registered label
-        + any property name.
+        Deprecated: ``aggregate_nodes(label=..., group_by=..., missing=True)``
+        returns the same counts (``total`` for ``n_total``).
         """
+        warnings.warn(
+            "label_histogram is deprecated; use aggregate_nodes(..., missing=True)",
+            DeprecationWarning, stacklevel=2,
+        )
         resp = await self._request(
             "GET",
             f"/v1/{self._tenant}/graph/labels/{label}/histogram",

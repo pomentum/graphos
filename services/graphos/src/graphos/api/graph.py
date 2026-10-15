@@ -2162,7 +2162,10 @@ async def _aggregate_edge_groups(
         "child labels via postgres table inheritance — the same "
         "semantic as Cypher `MATCH (n:Document)`. Useful for live "
         "histograms (e.g. count per `language` or per `type`) "
-        "without precomputing a summary."
+        "without precomputing a summary. `missing` also counts the nodes "
+        "without the property, under `\"\"`; `total` is every node counted, "
+        "`limit` aside. A string value is returned as it is, any other "
+        "value as JSON."
     ),
 )
 async def aggregate_nodes(
@@ -2182,11 +2185,12 @@ async def aggregate_nodes(
     label = body.label
     value = f"""(n.properties -> '"{body.group_by}"'::agtype)"""
     sql = f"""
-        SELECT {value}::text AS v, count(*) AS c
+        SELECT {value}::text AS v, count(*) AS c, sum(count(*)) OVER ()::bigint AS total
         FROM "{tenant}"."{label}" n
-        WHERE {value} IS NOT NULL
-          AND ($2::text[] IS NULL
-               OR {value} IN (SELECT x::agtype FROM unnest($2::text[]) AS x))
+        WHERE CASE WHEN {value} IS NULL THEN $3
+                   ELSE $2::text[] IS NULL
+                        OR {value} IN (SELECT x::agtype FROM unnest($2::text[]) AS x)
+              END
         GROUP BY {value}
         ORDER BY count(*) DESC, {value}
         LIMIT $1
@@ -2196,7 +2200,7 @@ async def aggregate_nodes(
     started = time.perf_counter()
     try:
         async with request.app.state.pool.acquire() as conn:
-            rows = await conn.fetch(sql, body.limit, wanted)
+            rows = await conn.fetch(sql, body.limit, wanted, body.missing)
     except asyncpg.exceptions.UndefinedTableError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2205,7 +2209,7 @@ async def aggregate_nodes(
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     groups = [
-        NodeAggregateRow(value=str(parse_agtype(row["v"])), count=int(row["c"]))
+        NodeAggregateRow(value=_group_value(row["v"]), count=int(row["c"]))
         for row in rows
     ]
     return NodesAggregateResponse(
@@ -2214,8 +2218,17 @@ async def aggregate_nodes(
         group_by=body.group_by,
         truncated=len(groups) == body.limit,
         elapsed_ms=elapsed_ms,
+        total=int(rows[0]["total"]) if rows else 0,
         groups=groups,
     )
+
+
+def _group_value(text: str | None) -> str:
+    """A group's value: ``""`` when missing, a string as it is, anything else as JSON."""
+    if text is None:
+        return ""
+    value = parse_agtype(text)
+    return value if isinstance(value, str) else _json.dumps(value, ensure_ascii=False)
 
 
 @router.post(

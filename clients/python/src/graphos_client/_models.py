@@ -316,6 +316,7 @@ class NodesAggregateResponse(BaseModel):
     group_by: str
     truncated: bool
     elapsed_ms: int
+    total: int | None = None
     groups: list[NodeAggregateRow] = Field(default_factory=list)
 
 

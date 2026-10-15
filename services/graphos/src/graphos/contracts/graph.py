@@ -648,6 +648,10 @@ class NodesAggregateRequest(BaseModel):
         description="If set, only count nodes whose `n.<group_by>` is in this list.",
     )
     limit: int = Field(default=DEFAULT_AGGREGATE_LIMIT, ge=1, le=MAX_AGGREGATE_LIMIT)
+    missing: bool = Field(
+        default=False,
+        description="Also count the nodes without `group_by`, under the value `\"\"`.",
+    )
 
     @field_validator("label", "group_by")
     @classmethod
@@ -656,7 +660,9 @@ class NodesAggregateRequest(BaseModel):
 
 
 class NodeAggregateRow(BaseModel):
-    value: str
+    value: str = Field(
+        ..., description="The property's value: a string as it is, any other value as JSON.",
+    )
     count: int
 
 
@@ -666,6 +672,7 @@ class NodesAggregateResponse(BaseModel):
     group_by: str
     truncated: bool
     elapsed_ms: int
+    total: int = Field(..., description="Nodes counted in every group, `limit` aside.")
     groups: list[NodeAggregateRow] = Field(default_factory=list)
 
 

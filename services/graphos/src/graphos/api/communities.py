@@ -535,8 +535,11 @@ def _check_label(tenant: str, label: str, *, kind: str) -> None:
     "/labels/{label}/histogram",
     response_model=HistogramResponse,
     tags=["communities"],
+    deprecated=True,
     summary="Property-value histogram for one label",
     description=(
+        "Deprecated: `POST /v1/{tenant}/graph/nodes/aggregate` with `missing: true` "
+        "returns the same counts, with `total` for `n_total`.  "
         "Count nodes of ``label`` grouped by a property value.  Replaces "
         "a pattern of N sequential Cypher queries (one per value) "
         "with one SQL ``GROUP BY`` against the per-label storage table — "

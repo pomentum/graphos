@@ -15,7 +15,7 @@ import asyncpg
 import pytest
 
 from graphos import writes
-from graphos.api.communities import list_communities
+from graphos.api.communities import label_histogram, list_communities
 from graphos.api.graph import aggregate_nodes, export_graph
 from graphos.bootstrap import TenantSpec, register_tenant
 from graphos.contracts.graph import NodesAggregateRequest
@@ -86,8 +86,49 @@ async def test_nodes_aggregate_matches_cypher(db_pool: asyncpg.Pool, label, valu
         _request(db_pool), ADMIN,
     )
     got = [(g.value, g.count) for g in resp.groups]
-    assert sorted(got) == sorted((str(r["v"]), int(r["c"])) for r in ref)
+    assert sorted(got) == sorted((_as_text(r["v"]), int(r["c"])) for r in ref)
     assert [c for _, c in got] == sorted((c for _, c in got), reverse=True)
+    assert resp.total == sum(c for _, c in got)
+
+
+def _as_text(value) -> str:  # noqa: ANN001
+    return value if isinstance(value, str) else json.dumps(value)
+
+
+@requires_db
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("values", "limit", "groups", "total"), [
+    (None, 100, {"red": 4, "blue": 2, "5": 1, '["red", "blue"]': 1, "green": 1, "": 1}, 10),
+    (["red"], 100, {"red": 4, "": 1}, 5),
+    (None, 1, {"red": 4}, 10),
+])
+async def test_nodes_aggregate_counts_the_missing(  # noqa: PLR0913
+    db_pool: asyncpg.Pool, values, limit, groups, total,  # noqa: ANN001
+) -> None:
+    await _seed(db_pool)
+    resp = await aggregate_nodes(
+        T, NodesAggregateRequest(label="Document", group_by="team", values=values, limit=limit,
+                                 missing=True),
+        _request(db_pool), ADMIN,
+    )
+    assert {g.value: g.count for g in resp.groups} == groups
+    assert resp.total == total
+    assert resp.truncated is (limit == 1)
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_nodes_aggregate_gives_what_the_histogram_gave(db_pool: asyncpg.Pool) -> None:
+    await _seed(db_pool)
+    hist = await label_histogram(
+        T, "Document", _request(db_pool), ADMIN, property="team", limit=100,
+    )
+    resp = await aggregate_nodes(
+        T, NodesAggregateRequest(label="Document", group_by="team", missing=True, limit=100),
+        _request(db_pool), ADMIN,
+    )
+    assert {g.value: g.count for g in resp.groups} == {b.value: b.count for b in hist.bins}
+    assert resp.total == hist.n_total
 
 
 @requires_db
