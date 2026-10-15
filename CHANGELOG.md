@@ -27,6 +27,14 @@ runs on either database: CI runs the server's tests against both.
   another database image, on a volume of its own.
 - **asyncpg 0.31 or newer** (the first tested against PostgreSQL 18).
 
+### Fixed
+
+- **Dataset export of large tenants took hours.** `GET /v1/{tenant}/graph/snapshot` reads each edge
+  type through a cursor joined to a table of every vertex's ends. PostgreSQL plans a cursor for
+  its first rows, and with no index on that table it chose to compare every edge with every vertex:
+  about 19 billion comparisons for one type of 75,000 edges on a 251,000-node tenant, where the
+  same read takes 2 s. The table is now indexed; that read takes 2.8 s through the cursor.
+
 ### Upgrading from 0.9.0
 
 - **Compose:** update the files and run `docker compose -f docker-compose.graphos.yml up -d`. The

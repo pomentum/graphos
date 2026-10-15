@@ -143,6 +143,9 @@ async def lines(
                     "WHERE c.relname = ANY($1::text[]);",
                     vertex_labels,
                 )
+                # A cursor is planned for its first rows: without an index the
+                # planner joins each edge against a scan of every vertex.
+                await conn.execute(f"CREATE UNIQUE INDEX ON {_ENDS} (id);")
                 await conn.execute(f"ANALYZE {_ENDS};")
                 edge_props = _props_sql("e.properties", computed=computed)
                 for edge_type in edge_types:
