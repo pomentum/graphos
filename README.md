@@ -38,7 +38,7 @@ Your services send JSON over HTTP. graphos owns the database, writes the SQL aga
 
 *Explore, on the [demo tenant](clients/python/examples/08_demo_ecosystem.py): coloured by community, a core library selected with the metrics graphos computed for it.*
 
-<img src="docs/images/ui-schema-editor-dark.png" width="100%" alt="The schema diagram of the demo tenant: Library, Framework and Tool in a block under their parent label Package, the selected label's relationships, its properties in a panel, and the Add menu for a new label, relationship type or search index.">
+<img src="docs/images/ui-schema-editor-dark.png" width="100%" alt="The schema diagram of the demo tenant: Library, Framework and Tool in a block under their parent label Package, the selected label's relationships, its properties in a panel (declared, or carried without a definition), and the Add menu for a new label, relationship type, search index or property.">
 
 *The schema editor: labels with their kinds, relationship types, and adding to the schema in place.*
 

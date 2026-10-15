@@ -77,10 +77,12 @@ def explore_map(page: Page) -> None:
 
 
 def schema_editor(page: Page) -> None:
-    """The schema diagram: a label selected (its lines, its panel), the Add menu open."""
+    """The schema diagram: a label selected (its lines, its panel), the Add menu open over
+    where the legend was."""
     _go(page, "/schema")
     page.get_by_text("Diagram", exact=True).click()
     page.wait_for_timeout(SETTLE_MS)
+    page.get_by_role("button", name="Hide the legend").click()
     page.get_by_text("Selected", exact=True).click()
     page.get_by_text("Library", exact=True).first.click()
     page.wait_for_timeout(SETTLE_MS)
