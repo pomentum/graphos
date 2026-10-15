@@ -148,7 +148,7 @@ export function PropertyPanel({
           {names.map((name) => (
             <div key={name} className={classes.item}>
               <Group gap={6} wrap="nowrap">
-                <Text size="xs" className={classes.name}>
+                <Text size="xs" className={classes.itemName}>
                   {name}
                 </Text>
                 <Text size="xs" c="dimmed" className={classes.itemSource} truncate>
@@ -249,7 +249,10 @@ export function PropertyPanel({
 
 const MODE_COLOR: Record<PropertyMode, string> = { off: "gray", warn: "yellow", strict: "red" };
 
-/** A definition's rules as chips; each says all of itself on hover (a long list of values). */
+/** Chip text longer than this may be cut by the chip's width (`.rule`). */
+const CLIPPED_AT = 40;
+
+/** A definition's rules as chips; one shortened or cut says all of itself on hover. */
 function Rules({ definition }: { definition: PropertySpec }) {
   const { t } = useTranslation();
   const short = rulesOf(definition);
@@ -258,7 +261,14 @@ function Rules({ definition }: { definition: PropertySpec }) {
     <Group gap={4}>
       {short.length ? (
         short.map((rule, i) => (
-          <Tooltip key={rule} label={full[i]} disabled={full[i] === rule} withArrow multiline maw={360}>
+          <Tooltip
+            key={rule}
+            label={full[i]}
+            disabled={full[i] === rule && rule.length <= CLIPPED_AT}
+            withArrow
+            multiline
+            maw={360}
+          >
             <Badge size="xs" variant="default" radius="sm" tt="none" className={classes.rule}>
               {rule}
             </Badge>

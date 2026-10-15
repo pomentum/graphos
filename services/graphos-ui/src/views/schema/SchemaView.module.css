@@ -87,6 +87,10 @@ button.row:hover {
 .styledRow > .row {
   border-top: 0;
   padding-left: 8px;
+  /* The rest of the row beside the swatch, not the row's whole width. */
+  flex: 1;
+  min-width: 0;
+  width: auto;
 }
 
 .swatchButton,

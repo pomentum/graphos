@@ -60,6 +60,12 @@
   border-top: 0;
 }
 
+/* Its own width: the table's name cell shrinks to fit its column instead. */
+.itemName {
+  flex: none;
+  font-family: var(--mantine-font-family-monospace);
+}
+
 .itemSource {
   flex: 1;
   min-width: 0;
