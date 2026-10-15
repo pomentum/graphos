@@ -338,5 +338,21 @@ async def test_a_caller_who_goes_away_stops_the_query(api: httpx.AsyncClient) ->
             gone=gone,
         )
     assert refused.value.status == 499
-    # Cancelled at once, or terminated by the watchdog when AGE is slow to see it.
-    assert asyncio.get_running_loop().time() - started < 6.0
+    # Cancelled at once, or terminated by the watchdog when AGE is slow to see
+    # it, or, when AGE sees neither, answered once the watchdog closes the
+    # connection: noticed within a poll, then a wait after each of the two.
+    worst = 1.0 + 2 * console_mod.WATCHDOG_TERMINATE_AFTER_S
+    assert asyncio.get_running_loop().time() - started < worst + 1.0
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_console_connection_bounds_its_temporary_files(db_pool: asyncpg.Pool) -> None:
+    console = await console_mod.start(_settings(cypher_temp_file_limit="64MB"), db_pool)
+    assert console is not None
+    try:
+        for _ in range(2):  # a reused connection keeps it: asyncpg's RESET ALL does not undo it
+            async with console.pool.acquire() as conn:
+                assert await conn.fetchval("SHOW temp_file_limit;") == "64MB"
+    finally:
+        await console.pool.close()

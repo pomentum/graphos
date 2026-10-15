@@ -413,7 +413,9 @@ class Console:
         self._running[consumer] = self._running.get(consumer, 0) + 1
         try:
             try:
-                conn = await asyncio.wait_for(self.pool.acquire(), timeout=1.0)
+                conn = await asyncio.wait_for(
+                    self.pool.acquire(), timeout=self.settings.cypher_wait_s,
+                )
             except TimeoutError as exc:
                 raise ConsoleError(429, "the console is busy; try again in a moment") from exc
             try:
@@ -481,8 +483,13 @@ class Console:
             raise ConsoleError(400, str(exc)) from exc
         finally:
             watchdog.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            try:
                 await watchdog
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                # The watchdog's own trouble is not the query's answer.
+                log.exception("cypher console: the watchdog failed")
 
         graph = _Graph()
         truncated = len(rows) > cap
@@ -519,12 +526,15 @@ class Console:
             await asyncio.sleep(WATCHDOG_TERMINATE_AFTER_S)
             # Still here: the backend has not seen either (AGE checks for them
             # only now and then). Close the connection, so the caller is answered
-            # and the slot is freed; the backend ends when it next checks.
+            # and the slot is freed; the backend ends when it next checks. When
+            # the terminate did reach it, asyncpg has closed and released the
+            # connection already, and refuses the call.
             log.warning(
                 "cypher console: a backend did not stop; its connection is closed",
                 extra={"pid": pid},
             )
-            conn.terminate()
+            with contextlib.suppress(asyncpg.InterfaceError):
+                conn.terminate()
             return
 
 
@@ -534,20 +544,47 @@ async def start(settings: Settings, owner: asyncpg.Pool) -> Console | None:
     connections."""
     if not settings.cypher:
         return None
+    # Set when each connection opens, so the RESET ALL of a release keeps them.
+    server_settings = {
+        "statement_timeout": str(int(settings.cypher_timeout_s * 1000)),
+        "jit": "off",
+        # Its backends, told apart in pg_stat_activity.
+        "application_name": APPLICATION_NAME,
+    }
+    temp_limit = settings.cypher_temp_file_limit
+    if temp_limit != "-1":
+        if await _may_set(owner, "temp_file_limit", temp_limit):
+            server_settings["temp_file_limit"] = temp_limit
+        else:
+            log.warning(
+                "cypher console: temp_file_limit not applied (graphos's role may not set it); "
+                "a console query's temporary files are bounded only by the disk. "
+                "As a superuser: GRANT SET ON PARAMETER temp_file_limit TO <graphos's role>",
+            )
     pool = await asyncpg.create_pool(
         dsn=settings.dsn(),
         min_size=0,
         max_size=settings.cypher_pool_size,
         init=_on_connect,
         setup=_on_acquire,
-        server_settings={
-            "statement_timeout": str(int(settings.cypher_timeout_s * 1000)),
-            "jit": "off",
-            # Its backends, told apart in pg_stat_activity.
-            "application_name": APPLICATION_NAME,
-        },
+        server_settings=server_settings,
         command_timeout=None,
     )
     assert pool is not None
-    log.info("cypher console on", extra={"pool": settings.cypher_pool_size})
+    log.info(
+        "cypher console on",
+        extra={"pool": settings.cypher_pool_size, "temp_file_limit": server_settings.get(
+            "temp_file_limit", "unbounded")},
+    )
     return Console(pool=pool, owner=owner, settings=settings)
+
+
+async def _may_set(owner: asyncpg.Pool, name: str, value: str) -> bool:
+    """Whether graphos's role may set a superuser-level parameter (and the
+    value is one PostgreSQL takes), tried in a transaction that is rolled back."""
+    try:
+        async with owner.acquire() as conn, conn.transaction():
+            await conn.execute(f"SET LOCAL {name} = '{value}';")
+    except asyncpg.InsufficientPrivilegeError:
+        return False
+    return True

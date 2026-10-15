@@ -177,7 +177,14 @@ class Settings(BaseSettings):
     cypher_timeout_s: float = Field(default=30.0, gt=0)
     cypher_max_rows: int = Field(default=5000, ge=1, le=100_000)
     # Connections of the console's pool: also how many queries run at once.
-    cypher_pool_size: int = Field(default=2, ge=1, le=32)
+    cypher_pool_size: int = Field(default=5, ge=1, le=32)
+    # How long a query waits for one of them before it is refused (429).
+    cypher_wait_s: float = Field(default=10.0, ge=0, le=300)
+    # Temporary files one console query may write (PostgreSQL's
+    # temp_file_limit, e.g. "1GB"; "-1" for none): a query with many hops can
+    # spill sorts until the disk is full. Applied when graphos's role may set
+    # it (a superuser, or GRANT SET ON PARAMETER temp_file_limit).
+    cypher_temp_file_limit: str = Field(default="1GB", pattern=r"^(-1|\d+\s*(kB|MB|GB|TB)?)$")
     # Queries one user may run at once.
     cypher_per_user: int = Field(default=1, ge=1)
 

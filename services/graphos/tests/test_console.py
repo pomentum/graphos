@@ -4,12 +4,15 @@ result makes, tenant roles, and the routes while the console is off."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from http import HTTPStatus
 from typing import Any
 
+import asyncpg
 import pytest
 from fastapi.testclient import TestClient
 
+from graphos import console as console_mod
 from graphos.app import create_app
 from graphos.auth import StaticAuthenticator
 from graphos.config import Settings
@@ -207,6 +210,55 @@ async def test_the_watchdog_closes_a_connection_whose_backend_does_not_stop(
     assert sent == ["pg_cancel_backend", "pg_terminate_backend"]
     assert conn.closed and stopped == {"why": "gone"}
 
+
+
+@pytest.mark.asyncio
+async def test_the_watchdog_does_not_fail_on_a_connection_the_terminate_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # When pg_terminate_backend did reach the backend, asyncpg has closed the
+    # connection and released it to the pool: closing it again is refused,
+    # and that must not become the query's answer (it was a 500 after 41 s).
+    monkeypatch.setattr("graphos.console.WATCHDOG_TERMINATE_AFTER_S", 0.01)
+
+    class Owner:
+        async def execute(self, sql: str, pid: int) -> None:
+            pass
+
+    class Released:
+        def get_server_pid(self) -> int:
+            return 42
+
+        def terminate(self) -> None:
+            raise asyncpg.InterfaceError(
+                "cannot call Connection.terminate(): connection has been released back to the pool",
+            )
+
+    async def gone() -> bool:
+        return True
+
+    console = Console(pool=None, owner=Owner(), settings=Settings(db_password="x"))  # type: ignore[arg-type]
+    stopped: dict[str, Any] = {}
+    await asyncio.wait_for(console._watch(Released(), gone, stopped), 5)  # type: ignore[arg-type]
+    assert stopped == {"why": "gone"}
+
+
+@pytest.mark.asyncio
+async def test_a_role_that_may_not_bound_temporary_files_is_told_not_stopped() -> None:
+    class Refusing:
+        async def execute(self, sql: str) -> None:
+            raise asyncpg.InsufficientPrivilegeError(
+                'permission denied to set parameter "temp_file_limit"',
+            )
+
+        def transaction(self) -> contextlib.AbstractAsyncContextManager[None]:
+            return contextlib.nullcontext()
+
+    class Owner:
+        def acquire(self) -> contextlib.AbstractAsyncContextManager[Refusing]:
+            return contextlib.nullcontext(Refusing())
+
+    assert await console_mod._may_set(Owner(), "temp_file_limit", "1GB") is False  # type: ignore[arg-type]
 
 def test_every_console_route_answers_404_while_it_is_off() -> None:
     app = create_app(Settings(db_password="placeholder"))

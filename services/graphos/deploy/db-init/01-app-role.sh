@@ -33,4 +33,8 @@ ALTER TABLE graphos_meta.tenants OWNER TO graphos_app;
 
 -- /v1/db/slow-queries and /v1/db/stats.
 GRANT pg_read_all_stats TO graphos_app;
+
+-- The Cypher console bounds each query's temporary files (a superuser-level
+-- setting; GRAPHOS_CYPHER_TEMP_FILE_LIMIT).
+GRANT SET ON PARAMETER temp_file_limit TO graphos_app;
 SQL
