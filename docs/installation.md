@@ -22,7 +22,7 @@ once it runs is in the [usage guide](usage.md).
 
 | Part | Image | Role |
 |---|---|---|
-| `graphos-db` | `apache/age:release_PG18_1.8.0` (pinned by digest) | PostgreSQL 18 with Apache AGE 1.8. On an internal network: nothing but graphos-api reaches it. |
+| `graphos-db` | `apache/age:release_PG18_1.8.0` (pinned by digest) | PostgreSQL 18 with Apache AGE 1.8 (PostgreSQL 16 / AGE 1.6 is deprecated). On an internal network: nothing but graphos-api reaches it. |
 | `graphos-db-export`, `graphos-db-import` | `apache/age` for PostgreSQL 16 and 18 | One-shot: move a PostgreSQL 16 database to PostgreSQL 18 on the first start after an upgrade ([§11](#11-upgrading-from-postgresql-16)); otherwise they exit at once. |
 | `graphos-api` | built from `services/graphos` (published: `ghcr.io/<owner>/graphos-api`) | The REST API, sign-in and the background jobs. Listens on `127.0.0.1:8080`. |
 | `graphos-ui` (optional) | built from `services/graphos-ui` (published: `ghcr.io/<owner>/graphos-ui`) | The web UI: static files and a same-origin proxy to the API, no state of its own. Listens on `127.0.0.1:8081`. |
@@ -290,8 +290,9 @@ lists every one; the README the most common). Those for sign-in, besides the OID
 ## 10. Other ways to run it
 
 - **The published images.** `ghcr.io/<owner>/graphos-api` and `ghcr.io/<owner>/graphos-ui`, tagged
-  by version, take the same settings. The API needs PostgreSQL 18 with Apache AGE 1.8 (or PostgreSQL
-  16 with AGE 1.6; CI runs the server's tests against both), loaded with
+  by version, take the same settings. The API needs PostgreSQL 18 with Apache AGE 1.8
+  (PostgreSQL 16 with AGE 1.6 still runs but is deprecated: [upgrade](upgrade-postgresql-18.md);
+  CI runs the server's tests against both), loaded with
   `shared_preload_libraries=age,pg_stat_statements`, and a database role for itself: the compose
   file and `services/graphos/deploy/db-init/` show the set-up to copy. The published API image has
   no Louvain; with the compose file, run the published images and add Louvain as in
@@ -301,43 +302,24 @@ lists every one; the README the most common). Those for sign-in, besides the OID
 
 ## 11. Upgrading from PostgreSQL 16
 
-graphos 0.9 and earlier ran PostgreSQL 16 with AGE 1.6 on the volume `graphos_data`. The compose
-now runs PostgreSQL 18 with AGE 1.8 on a new volume, `graphos_data_pg18`, and moves the data by
-itself: update the files and run `docker compose -f docker-compose.graphos.yml up -d` as for any
-upgrade. On that first start:
-
-1. `graphos-db` starts on PostgreSQL 18, on the new, empty volume (its init creates the roles).
-2. `graphos-db-export` starts PostgreSQL 16 on `graphos_data`, with no network, dumps the
-   database to the volume `graphos_upgrade` and stops it cleanly.
-3. `graphos-db-import` loads the dump into `graphos-db`: tenants and their graphs, users and
-   grants, saved queries, the change feed and revisions, all of it.
-4. `graphos-api` starts once the import has succeeded.
-
-It takes about as long as a dump and a restore of the database. Every later start finds the move
-made and goes on at once; a new install has nothing to move. The dump is never loaded over a
-database graphos has already used, so what is written after the move is never replaced by older
-data. The dump is restored beside the new database and put in its place only once complete, so a
-failed import leaves nothing behind: it stops `graphos-api` from starting, and the next `up` runs
-it again from the start. The logs say what failed:
+graphos 0.9 and earlier ran PostgreSQL 16 with AGE 1.6 on the volume `graphos_data`; that
+database is now **deprecated** (graphos logs `database deprecated` and `GET /v1/info` reports
+`database_deprecated`). The compose file runs PostgreSQL 18 with AGE 1.8 on a new volume,
+`graphos_data_pg18`, and moves the data by itself on the first start:
 
 ```bash
-docker logs graphos-db-export
-docker logs graphos-db-import
+git pull
+docker compose -f docker-compose.graphos.yml up -d
+docker compose -f docker-compose.graphos.yml logs -f graphos-db-export graphos-db-import
 ```
 
-`graphos_data` is not changed and is kept: it is the way back (the previous release's compose runs
-on it as before, without what was written since the move). Once you are content with the move,
-remove it and the dump:
+Everything moves: tenants and their graphs, users and grants, saved queries, the change feed,
+revisions and sessions. `graphos_data` is only read and kept as the way back; remove it and the
+dump (`docker volume rm graphos_data graphos_upgrade`) once you are content.
 
-```bash
-docker volume rm graphos_data graphos_upgrade
-```
-
-Sessions survive the move (the token signing key is in the database). A database you run yourself
-rather than the bundled one moves the same way: `pg_dump -Fc` from PostgreSQL 16, `pg_restore`
-into PostgreSQL 18 with AGE 1.8 and graphos's roles, then the catalogue fix in
-[`deploy/db-upgrade/import-pg18.sh`](../services/graphos/deploy/db-upgrade/import-pg18.sh) (AGE
-records each graph by its schema's OID, which a restore changes).
+**[The upgrade guide](upgrade-postgresql-18.md)** has the details: what each one-shot does, how
+long it takes, how to check the result, how to go back, troubleshooting, and the same move for a
+database you run yourself.
 
 ## 12. Upgrading from 0.4 (static tokens)
 

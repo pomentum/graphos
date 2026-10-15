@@ -3,6 +3,7 @@
 Start with **[`concept.md`](concept.md)** — the standing reference. It describes graphos as a service: architecture and deployment (including the unprivileged database role the API runs as), the two-layer schema setup, the REST surface (auth, timeouts, observability), the Cypher / SQL boundary, write paths, community detection (Louvain), export, sizing, and known limitations.
 
 - **[`installation.md`](installation.md)** — installing, the first sign-in, users, single sign-on, production settings, upgrading.
+- **[`upgrade-postgresql-18.md`](upgrade-postgresql-18.md)** — moving a PostgreSQL 16 / AGE 1.6 stack (deprecated) to PostgreSQL 18 / AGE 1.8 with `docker compose up`, checking it, going back.
 - **[`features.md`](features.md)** — capabilities at a glance.
 - **[`algorithms.md`](algorithms.md)** — the graph algorithms (Louvain, PageRank, betweenness, components, degree): what each finds and what it is for.
 - **[`usage.md`](usage.md)** — worked requests for every endpoint group, limits and errors.

@@ -34,6 +34,12 @@ runs on either database: CI runs the server's tests against both.
 
 ### Deprecated
 
+- **PostgreSQL 16 with AGE 1.6.** It still runs, and CI still tests it, but support will be removed
+  in a later release: AGE has no release after 1.6 for PostgreSQL 16, and 1.6 carries out some
+  Cypher writes in a read-only transaction and can wedge a database process on a variable-length
+  pattern. graphos logs `database deprecated` at start, and `GET /v1/info` reports
+  `database_deprecated` (the reason, or `null`). Move with `docker compose up`: see
+  [Upgrading the database](docs/upgrade-postgresql-18.md).
 - **`GET /v1/{tenant}/graph/labels/{label}/histogram`**: `nodes/aggregate` with `missing: true`
   gives the same counts (`total` for `n_total`). The client's `label_histogram` warns. Both stay
   until a later release.
@@ -76,7 +82,7 @@ runs on either database: CI runs the server's tests against both.
 
 - **Compose:** update the files and run `docker compose -f docker-compose.graphos.yml up -d`. The
   first start moves the data (about as long as a dump and a restore); see
-  [installation §11](docs/installation.md#11-upgrading-from-postgresql-16). Once content, remove
+  [Upgrading the database](docs/upgrade-postgresql-18.md). Once content, remove
   the old data: `docker volume rm graphos_data graphos_upgrade`.
 - **Your own database:** graphos still runs on PostgreSQL 16 with AGE 1.6; to move it to 18, see
   the same section.

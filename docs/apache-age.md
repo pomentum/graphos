@@ -256,8 +256,14 @@ large graph cannot be cancelled.
 
 Upstream, AGE 1.8.0 removed the mutex (apache/age#2433) and checks for
 interrupts in the variable-length search (apache/age#2430), though not in the
-graph load. The column-count check is still there (apache/age#2583, open), so
-variable-length patterns still fail on graphos's tables (§11).
+graph load. The column-count check is still there (apache/age#2583, open;
+`tupdesc->natts != 2` for vertices and `!= 4` for edges in
+`age_global_graph.c`), so variable-length patterns still fail on graphos's
+tables, but harmlessly: measured on AGE 1.8.0 / PostgreSQL 18, the query fails
+in about 50 ms, the same query again in that session fails at once ("age_vle:
+empty graph"), and the session stays usable. On 1.6.0 the second one hung
+until the process was killed. This is a limit of the console, not a defect in
+graphos: no API read needs AGE's in-memory graph (§11).
 
 graphos runs neither: its paths, expand and other reads are plain SQL. The
 Cypher console refuses variable-length patterns and `vertex_stats()` before
@@ -265,6 +271,20 @@ they reach the database, and closes, rather than reuses, a connection on
 which a query failed. Write the hops out instead
 (`-[:R]->()-[:R]->()`, `OPTIONAL MATCH` for the optional ones), or use
 `POST /v1/{tenant}/graph/paths`.
+
+### Pitfall: a read-only transaction does not stop AGE 1.6's writes
+
+AGE 1.6 carries out Cypher `SET`, `REMOVE` and `DELETE` (`DETACH DELETE`
+too) itself, where PostgreSQL's read-only check does not see them: inside
+`BEGIN READ ONLY` they change and delete rows. Only `CREATE` and `MERGE` are
+stopped (`cannot execute SELECT in a read-only transaction`). Verified on
+AGE 1.6.0 on a scratch graph: `SET` and `REMOVE` changed a node, `DELETE`
+and `DETACH DELETE` removed nodes and an edge. AGE 1.8.0 stops all of them.
+
+So a read-only transaction, or a read-only role, is not a guard against
+Cypher writes on AGE 1.6. graphos's console refuses the write clauses
+before the query reaches the database, whichever AGE runs; a direct-SQL user
+on AGE 1.6 is not protected.
 
 ---
 
@@ -517,6 +537,27 @@ aggregates back.
   such as an export (message `read`), with `method`, `path`, `tenant`,
   `consumer`, `args_hash`, `status` and `elapsed_ms`. Turn it off with
   `GRAPHOS_AUDIT_ENABLED=false` if it is unwanted.
+- **Generic plans (PostgreSQL 18).** asyncpg prepares each statement on a
+  connection; after five runs PostgreSQL may keep a generic plan, made
+  without the values. For a scan on two property filters PostgreSQL 18 kept
+  one that walked the id index and dropped 34,702 rows to return 100
+  (50 ms became about 1 s). graphos's connections set
+  `plan_cache_mode = force_custom_plan`.
+- **Property filters are priced as cheap (PostgreSQL 18, compact tables).**
+  A filter on `properties` converts each row (agtype to text to jsonb), which
+  the planner counts as one cheap operator. On a compact table (a fresh load,
+  or a restore) it walked the id index in order for a selective filter:
+  649 matches of 100,000 rows in 334 ms, against 28 ms through the property
+  indexes and a sort. graphos's filtered `nodes:scan` raises
+  `cpu_operator_cost` to 0.025 in its own transaction.
+- **A cursor over an unindexed temporary table.** PostgreSQL plans a cursor
+  for its first rows; joined to a temporary table without an index, it
+  compared every edge with every vertex (76.6 s for the first 2,000 rows,
+  where the same statement runs in 2.1 s). Index temporary tables a cursor
+  joins.
+- **After a restore, gather statistics.** A dump carries no planner
+  statistics; run `vacuumdb --analyze-only --jobs N` before traffic (the
+  compose's PostgreSQL 18 import does).
 - **`pg_stat_activity`** shows a backend as `active` only while a
   statement runs; between the statements of one transaction (the
   `CREATE TEMP TABLE`, `COPY` and `INSERT` of a staged flush) it is briefly
@@ -527,15 +568,17 @@ aggregates back.
 ## 11. Upstream status
 
 Checked 2026-10-15 against `apache/age`. The bundled database is AGE 1.8.0
-on PostgreSQL 18; graphos also runs on AGE 1.6.0 on PostgreSQL 16, which has
-no AGE release after 1.6.0 (the fixes below ship in 1.8.0 for PostgreSQL 15,
-17 and 18). CI runs the server's tests against both.
+on PostgreSQL 18. AGE 1.6.0 on PostgreSQL 16, which has no AGE release after
+1.6.0 (the fixes below ship in 1.8.0 for PostgreSQL 15, 17 and 18), still runs
+but is **deprecated** for graphos: it logs `database deprecated` at start
+and reports it in `GET /v1/info`. CI runs the server's tests against both.
 
 | Pitfall | Upstream |
 |---|---|
 | Cypher write on a label table with extra columns segfaults (§5) | No crash from 1.8.0 (apache/age#2458), but the extra columns are written NULL: graphos still writes with SQL only |
-| Variable-length patterns and `vertex_stats()`: the mutex left locked (§5) | Fixed in 1.8.0 (apache/age#2433) |
-| Variable-length patterns and `vertex_stats()`: the column-count check (§5) | Open (apache/age#2583) |
+| Variable-length patterns and `vertex_stats()`: the mutex left locked (§5) | Fixed in 1.8.0 (apache/age#2433); verified: the session stays usable |
+| Variable-length patterns and `vertex_stats()`: the column-count check (§5) | Open (apache/age#2583): the console refuses them; the API never needs them |
+| Cypher `SET` / `REMOVE` / `DELETE` carried out in a read-only transaction (§5) | Stopped from 1.8.0 (verified); graphos's console refuses write clauses on every version |
 | No interrupt checks in the variable-length search (§5) | Added in 1.8.0 (apache/age#2430); still none in the graph load |
 | `>=` and `>` swapped in `agtype_ops_btree` (§4) | Fixed on master (apache/age#2577), in no release yet; reported as apache/age#2587 |
 | `ON CREATE SET` / `ON MATCH SET` rejected (§1) | Supported from 1.8.0 (apache/age#2347) |
@@ -545,8 +588,12 @@ no AGE release after 1.6.0 (the fixes below ship in 1.8.0 for PostgreSQL 15,
 | GIN key-exists `?` missing rows (§4) | No matching issue found; apache/age#2322 reports missing rows with a GIN index |
 
 Moving from AGE 1.6 to 1.8 therefore means moving from PostgreSQL 16 to 18
-as well: the compose does it by itself
-([installation §11](installation.md#11-upgrading-from-postgresql-16)).
+as well: the compose does it by itself with a dump and a restore
+([upgrade guide](upgrade-postgresql-18.md)). `pg_upgrade` does not fit: it
+refuses AGE's `ag_graph.namespace` (type `regnamespace`), and AGE's
+`age_prepare_pg_upgrade()` exists from 1.8 only. A restore gives every schema
+a new OID, which AGE's catalogue records: point `ag_graph.graphid` and
+`ag_label.graph` at `ag_graph.namespace`, as `age_finish_pg_upgrade()` does.
 
 ---
 
