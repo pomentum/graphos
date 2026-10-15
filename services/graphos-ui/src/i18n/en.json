@@ -135,7 +135,8 @@
         "recompute_communities": "Group recompute",
         "compute_metrics": "Graph metrics",
         "resolve_edges": "Edge resolution",
-        "vacuum": "Vacuum"
+        "vacuum": "Vacuum",
+        "check_properties": "Property check"
       },
       "queued": "Queued",
       "runningFor": "Running for {{duration}}",
@@ -543,7 +544,7 @@
         "source": "Exported from {{tenant}}, {{date}}: {{nodes}} nodes, {{edges}} relationships",
         "noHeader": "No header line: read as plain nodes and relationships",
         "notDataset": "Not a graphos dataset file",
-        "newerVersion": "Exported by a newer graphos (format version {{version}}); this one reads version 1",
+        "newerVersion": "Exported by a newer graphos (format version {{version}}); this one reads up to version {{supported}}",
         "merge": "Add to this tenant",
         "empty": "Restore into this empty tenant",
         "applySchema": "Register the file's schema first",
@@ -692,6 +693,7 @@
       "addLabel": "Label",
       "addRelationship": "Relationship type",
       "addIndex": "Search index",
+      "addProperty": "Property",
       "file": {
         "export": "Export",
         "exportTooltip": "Download the whole schema as a file, to import here or into another tenant",
@@ -702,7 +704,7 @@
         "fileHint": "A .schema.json file exported by graphos",
         "notJson": "Not a JSON file",
         "notSchema": "Not a graphos schema file",
-        "newerVersion": "Exported by a newer graphos (format version {{version}}); this one reads version 1",
+        "newerVersion": "Exported by a newer graphos (format version {{version}}); this one reads up to version {{supported}}",
         "source": "Exported from {{tenant}} by graphos {{graphos}}, {{date}}",
         "sourceUnknown": "No export header: read as a registration body",
         "target": "Into",
@@ -734,7 +736,9 @@
         "properties_one": "{{count}} property",
         "properties_other": "{{count}} properties",
         "noProperties": "No properties yet",
-        "browse": "Browse"
+        "browse": "Browse",
+        "defined_one": "{{count}} defined",
+        "defined_other": "{{count}} defined"
       },
       "relationships": {
         "derived": "derived",
@@ -807,7 +811,8 @@
           "incoming": "Incoming",
           "types": "Relationship types",
           "inheritsNote": "Nodes of {{child}} also count as {{parent}}: a search or a filter on {{parent}} finds them too.",
-          "newNode": "New node"
+          "newNode": "New node",
+          "hideProperties": "Hide properties"
         },
         "a11y": {
           "node": "Press enter or space to select this label. Arrow keys then move it.",
@@ -880,6 +885,147 @@
         "captionIs": "caption: {{property}}",
         "sizeIs": "size by {{property}}",
         "hex": "Colour as #RRGGBB"
+      },
+      "properties": {
+        "allLabels": "Every label",
+        "allTypes": "Every relationship type",
+        "definitions_one": "{{count}} definition",
+        "definitions_other": "{{count}} definitions",
+        "none": "No property definitions.",
+        "noDescription": "No description.",
+        "carried": "Carried, not declared:",
+        "declare": "Declare {{name}}",
+        "add": "Define a property",
+        "edit": "Edit",
+        "editOf": "Edit {{name}}",
+        "narrow": "Add rules here (inherited)",
+        "remove": "Remove the definition",
+        "removeOf": "Remove {{name}}",
+        "from": "from {{source}}",
+        "settings": "Description, mode and undeclared properties",
+        "settingsOf": "Settings of {{owner}}",
+        "settingsTitle": "{{owner}}",
+        "description": "Description",
+        "descriptionHint": "What the label or type stands for; shown on the Schema page, never checked",
+        "ownMode": "Mode",
+        "ownModeHint": "Overrides the tenant's mode for these writes",
+        "inherit": "As the tenant (or parent)",
+        "undeclared": "Undeclared properties",
+        "undeclaredHint": "Properties no definition names",
+        "undeclaredPolicies": {
+          "allow": "Allowed",
+          "warn": "Counted as warnings",
+          "reject": "Refused"
+        },
+        "undeclaredIs": {
+          "allow": "undeclared allowed",
+          "warn": "undeclared warned",
+          "reject": "undeclared refused"
+        },
+        "modeTooltip": "How this label's or type's writes are checked",
+        "modeLabel": "Writes are checked",
+        "modes": {
+          "off": "off",
+          "warn": "warn",
+          "strict": "strict"
+        },
+        "modeHints": {
+          "off": "Definitions are kept and shown; nothing is checked",
+          "warn": "Every write is checked and written; problems are counted",
+          "strict": "A write that breaks a rule is refused"
+        },
+        "checksAre": "Property checks: {{mode}}",
+        "check": "Check the stored rows…",
+        "checking": "Checking the stored rows…",
+        "checked": "Stored rows checked: {{errors}} of {{rows}} break a rule",
+        "checkFailed": "The check did not finish",
+        "lastCheck": "Last check: {{errors}} of {{rows}} rows break a rule",
+        "strictTitle": "Refuse writes that break a rule?",
+        "strictBody": "Every write is then checked against the definitions, and one that breaks a rule is refused: a batch whole, a bulk or snapshot line as invalid, a patch as the row it leaves. Rows already stored stay as they are.",
+        "strictLast": "The last check: {{errors}} of {{rows}} stored rows break a rule",
+        "strictNoCheck": "The stored rows have not been checked. Check them first to see what strict would refuse.",
+        "strictEnable": "Turn strict on",
+        "report": {
+          "title": "Stored rows against the property schema",
+          "summary": "{{rows}} rows read as if every rule applied: {{errors}} break a rule (strict would refuse them), {{warnings}} have warnings. {{seconds}} s.",
+          "labelLine": "{{rows}} rows · {{errors}} with errors · {{warnings}} with warnings",
+          "undeclared": "Carried, not declared: {{names}}",
+          "clean_one": "{{count}} more label or type breaks nothing.",
+          "clean_other": "{{count}} more labels and types break nothing."
+        },
+        "rules": {
+          "anything": "anything",
+          "required": "required",
+          "recommended": "recommended",
+          "oneOf": "one of {{values}}",
+          "more_one": "and {{count}} more",
+          "more_other": "and {{count}} more",
+          "matches": "matches {{pattern}}",
+          "between": "{{min}} to {{max}}",
+          "atLeast": "at least {{min}}",
+          "atMost": "at most {{max}}",
+          "items": "items: {{rules}}",
+          "types": {
+            "string": "text",
+            "number": "number",
+            "integer": "integer",
+            "boolean": "true/false",
+            "array": "list",
+            "object": "object"
+          },
+          "typeNames": {
+            "any": "Any",
+            "string": "Text",
+            "number": "Number",
+            "integer": "Integer",
+            "boolean": "True/false",
+            "array": "List",
+            "object": "Object"
+          },
+          "formats": {
+            "date": "a date",
+            "date-time": "a date and time"
+          },
+          "always": "always {{value}}"
+        },
+        "dialog": {
+          "newTitle": "New property of {{owner}}",
+          "editTitle": "{{name}} of {{owner}}",
+          "name": "Property",
+          "nameHint": "As the rows carry it, e.g. country_code",
+          "invalidName": "Not a valid property name",
+          "reserved": "graphos writes this property itself",
+          "taken": "Already defined here",
+          "inherits": "From {{source}}: {{rules}}. Rules added here narrow it.",
+          "idOnly": "The id is every row's key: only its shape (a pattern) can be declared.",
+          "type": "Type",
+          "typeInherited": "Inherited: a definition narrows it, it cannot change it",
+          "presence": "Presence",
+          "presences": {
+            "optional": "Optional",
+            "recommended": "Recommended",
+            "required": "Required"
+          },
+          "enum": "Allowed values",
+          "enumHint": "Leave empty for any value; press Enter after each",
+          "badEnum": "Every value must be of type {{type}}",
+          "pattern": "Pattern",
+          "patternHint": "A full match (regular expression)",
+          "format": "Format",
+          "noFormat": "Any text",
+          "minimum": "Minimum",
+          "maximum": "Maximum",
+          "badRange": "The minimum is above the maximum",
+          "items": "Every item of the list",
+          "itemType": "Item type",
+          "itemPattern": "Item pattern",
+          "itemEnum": "Allowed item values",
+          "description": "Description",
+          "save": "Save",
+          "addTitle": "New property",
+          "target": "Label or relationship type",
+          "targetPlaceholder": "Where the definition goes"
+        }
       }
     },
     "access": {

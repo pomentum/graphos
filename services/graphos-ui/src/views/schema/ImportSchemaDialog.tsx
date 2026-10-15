@@ -5,7 +5,13 @@ import { useTranslation } from "react-i18next";
 import type { ImportOptions } from "../../api/graphosApi";
 import type { SchemaDocument, SchemaDryRun } from "../../api/types";
 import { describeSchema } from "../../lib/changes";
-import { readFileText, readSchemaFile, TENANT_NAME, type SchemaFileProblem } from "../../lib/schemaFile";
+import {
+  readFileText,
+  readSchemaFile,
+  SCHEMA_VERSION,
+  TENANT_NAME,
+  type SchemaFileProblem,
+} from "../../lib/schemaFile";
 
 export interface ImportSchemaDialogProps {
   /** The tenant the page shows: the default target. */
@@ -91,7 +97,7 @@ export function ImportSchemaDialog({
   const problemText = !problem
     ? null
     : problem.kind === "newerVersion"
-      ? t("views.schema.file.newerVersion", { version: problem.version })
+      ? t("views.schema.file.newerVersion", { version: problem.version, supported: SCHEMA_VERSION })
       : problem.kind === "notJson"
         ? t("views.schema.file.notJson")
         : t("views.schema.file.notSchema");

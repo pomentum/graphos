@@ -155,8 +155,8 @@ describe("the import dialog", () => {
     const { choose } = open();
     choose("{oops");
     expect(await screen.findByText("Not a JSON file")).toBeInTheDocument();
-    choose('{"_export": {"format": "graphos.schema", "version": 2}, "name": "acme"}');
-    expect(await screen.findByText(/newer graphos \(format version 2\)/)).toBeInTheDocument();
+    choose('{"_export": {"format": "graphos.schema", "version": 3}, "name": "acme"}');
+    expect(await screen.findByText(/newer graphos \(format version 3\)/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
   });
 });

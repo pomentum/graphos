@@ -31,6 +31,7 @@ import type {
   NodesScanRequest,
   EdgesScanResponse,
   NodesScanResponse,
+  PropertyDefinitions,
   NodeUpsert,
   PathsRequest,
   PathsResponse,
@@ -161,6 +162,24 @@ export class GraphosApi {
   /** The first `limit` nodes of a label with all their properties. */
   sampleNodes(label: string, limit: number): Promise<NodesScanResponse> {
     return this.scanNodes({ labels: [label], project: ["*"], limit });
+  }
+
+  /** The definitions every label and type is checked against, combined down the hierarchy. */
+  propertyDefinitions(): Promise<PropertyDefinitions> {
+    return this.http.get(`${this.graph}/properties`);
+  }
+
+  /**
+   * Starts checking the stored rows against the property schema, as if every
+   * rule applied, as a background job (`maintain`); follow it with `jobs`.
+   */
+  async checkProperties(examples = 10): Promise<Job> {
+    return (
+      await this.http.request<Job>("POST", `${this.graph}/properties:check`, {
+        body: { examples },
+        headers: { Prefer: "respond-async" },
+      })
+    ).data;
   }
 
   /** The first `limit` edges of a type with all their properties. */

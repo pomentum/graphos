@@ -2,7 +2,7 @@ import type { SchemaDocument } from "../api/types";
 
 /** The schema file format graphos exports, and the newest version this UI reads. */
 export const SCHEMA_FORMAT = "graphos.schema";
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /** A tenant name as graphos accepts it. */
 export const TENANT_NAME = /^[A-Za-z][A-Za-z0-9_]{0,62}$/;

@@ -16,7 +16,7 @@ import { IconFileUpload, IconRestore, IconTrash } from "@tabler/icons-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { SchemaDocument, UnregisteredTenant } from "../api/types";
-import { mayCreate, readFileText, readSchemaFile, TENANT_NAME } from "../lib/schemaFile";
+import { mayCreate, readFileText, readSchemaFile, SCHEMA_VERSION, TENANT_NAME } from "../lib/schemaFile";
 import { relativeTime } from "../lib/time";
 import { isActive, useTransfers } from "../lib/transfers";
 import { useSessionContext } from "../session/SessionProvider";
@@ -76,7 +76,7 @@ export function NewTenantDialog({ opened, onClose }: { opened: boolean; onClose:
       // The file's own tenant name is a good start for a new one.
       if (!trimmed && TENANT_NAME.test(read.doc.name)) setName(read.doc.name);
     } else if (read.problem.kind === "newerVersion") {
-      setFileProblem(t("views.schema.file.newerVersion", { version: read.problem.version }));
+      setFileProblem(t("views.schema.file.newerVersion", { version: read.problem.version, supported: SCHEMA_VERSION }));
     } else {
       setFileProblem(t(`views.schema.file.${read.problem.kind}`));
     }

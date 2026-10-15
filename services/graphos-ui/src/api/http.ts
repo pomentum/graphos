@@ -34,9 +34,29 @@ export class ApiError extends Error {
   }
 }
 
-/** Turns graphos's `detail` (a string, or a list of validation errors) into one sentence. */
+/** Property violations named in a refusal; the rest are counted. */
+const VIOLATIONS_SHOWN = 3;
+
+interface Violation {
+  label?: string;
+  type?: string;
+  property: string;
+  message: string;
+}
+
+/**
+ * Turns graphos's `detail` (a string, or a list of validation errors) into one
+ * sentence; a property-schema refusal also names its first violations.
+ */
 export function describeError(status: number, body: unknown): string {
   const detail = (body as { detail?: unknown } | null)?.detail;
+  const violations = (body as { violations?: Violation[] } | null)?.violations;
+  if (typeof detail === "string" && Array.isArray(violations) && violations.length) {
+    const named = violations
+      .slice(0, VIOLATIONS_SHOWN)
+      .map((v) => `${v.label ?? v.type ?? "?"}.${v.property}: ${v.message}`);
+    return `${detail}: ${named.join("; ")}${violations.length > VIOLATIONS_SHOWN ? "; …" : ""}`;
+  }
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail)) {
     return detail.map((d) => (typeof d === "object" && d && "msg" in d ? String(d.msg) : String(d))).join("; ");

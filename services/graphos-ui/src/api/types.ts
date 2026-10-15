@@ -168,6 +168,93 @@ export interface TenantSchema {
   strict_endpoints?: boolean;
   /** How labels and edge types are drawn, as the tenant declared (absent from older servers). */
   display?: DisplaySpec;
+  /** The properties labels and types carry, as declared (absent from older servers). */
+  property_schema?: PropertySchema;
+}
+
+export type PropertyType = "string" | "number" | "integer" | "boolean" | "array" | "object" | "any";
+export type ItemType = "string" | "number" | "integer" | "boolean" | "any";
+export type PropertyMode = "off" | "warn" | "strict";
+export type UndeclaredPolicy = "allow" | "warn" | "reject";
+export type Scalar = string | number | boolean;
+
+/** What every item of an `array` property must be. */
+export interface ItemSpec {
+  type?: ItemType;
+  enum?: Scalar[];
+  pattern?: string;
+}
+
+/** One property's definition: only the keywords it states. */
+export interface PropertySpec {
+  type?: PropertyType;
+  required?: boolean;
+  recommended?: boolean;
+  enum?: Scalar[];
+  /** A full match, Python `re` syntax. */
+  pattern?: string;
+  format?: "date" | "date-time";
+  minimum?: number;
+  maximum?: number;
+  items?: ItemSpec;
+  description?: string;
+}
+
+/** The properties of one label or type (or of every one: `*`). */
+export interface PropertyEntry {
+  description?: string;
+  mode?: PropertyMode;
+  undeclared?: UndeclaredPolicy;
+  properties?: Record<string, PropertySpec>;
+}
+
+export interface PropertySchema {
+  mode?: PropertyMode;
+  vertex?: Record<string, PropertyEntry>;
+  edge?: Record<string, PropertyEntry>;
+}
+
+/** How one label's or type's writes are checked: definitions combined down the hierarchy. */
+export interface EffectivePolicy {
+  mode: PropertyMode;
+  undeclared: UndeclaredPolicy;
+  undeclared_source: string;
+  /** Per property: the combined definition and the entry it comes from last. */
+  properties: Record<string, { source: string; definition: PropertySpec }>;
+}
+
+/** `GET /v1/{tenant}/graph/properties`. */
+export interface PropertyDefinitions {
+  tenant: string;
+  mode: PropertyMode;
+  vertex: Record<string, EffectivePolicy>;
+  edge: Record<string, EffectivePolicy>;
+}
+
+/** One label's or type's stored rows checked (`properties:check`). */
+export interface LabelCheck {
+  kind: "vertex" | "edge";
+  name: string;
+  rows: number;
+  rows_with_errors: number;
+  rows_with_warnings: number;
+  /** By `<label or *>.<property>:<rule>`. */
+  errors: Record<string, number>;
+  warnings: Record<string, number>;
+  /** Per rule broken, some rows: a node's id, an edge as `src -> dst`. */
+  examples: Record<string, string[]>;
+  undeclared: Record<string, number>;
+}
+
+/** `POST /v1/{tenant}/graph/properties:check`: the stored rows as if every rule applied. */
+export interface PropertiesCheck {
+  tenant: string;
+  mode: PropertyMode;
+  rows: number;
+  rows_with_errors: number;
+  rows_with_warnings: number;
+  labels: LabelCheck[];
+  elapsed_ms: number;
 }
 
 /** The pictograms a label may be drawn with (graphos's fixed list). */
@@ -515,6 +602,12 @@ export interface SchemaAddition {
   strict_endpoints?: boolean;
   /** Styles to declare (an entry replaces the stored one; `null` removes it). */
   display?: DisplaySpec;
+  /** Property definitions to declare (an entry replaces the stored one; `null` removes it). */
+  property_schema?: {
+    mode?: PropertyMode;
+    vertex?: Record<string, PropertyEntry | null>;
+    edge?: Record<string, PropertyEntry | null>;
+  };
 }
 
 export interface TenantStats {

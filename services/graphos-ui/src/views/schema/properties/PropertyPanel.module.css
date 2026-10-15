@@ -1,0 +1,70 @@
+.description {
+  flex: 1;
+  min-width: 0;
+}
+
+.table td {
+  vertical-align: top;
+}
+
+.name {
+  font-family: var(--mantine-font-family-monospace);
+  white-space: nowrap;
+  width: 1%;
+}
+
+.rule {
+  font-weight: 400;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source {
+  color: var(--mantine-color-dimmed);
+  white-space: nowrap;
+  width: 1%;
+}
+
+.actions {
+  width: 1%;
+}
+
+.carried {
+  font-family: var(--mantine-font-family-monospace);
+  font-weight: 400;
+  cursor: pointer;
+}
+
+@media (max-width: 600px) {
+  .source {
+    display: none;
+  }
+}
+
+/* The compact layout: one block per property, its rules under its name. */
+.list {
+  display: flex;
+  flex-direction: column;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+  border-top: 0.5px solid var(--gx-separator);
+}
+
+.item:first-child {
+  border-top: 0;
+}
+
+.itemSource {
+  flex: 1;
+  min-width: 0;
+}
+
+.rowActions {
+  margin-left: auto;
+}

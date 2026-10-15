@@ -13,7 +13,7 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import { IconChevronDown, IconDownload, IconPlus, IconUpload } from "@tabler/icons-react";
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
@@ -23,14 +23,19 @@ import {
   useExportSchema,
   useGraphMap,
   useImportSchema,
+  usePropertyDefinitions,
   useSchema,
 } from "../../data/queries";
+import { ALL, entryOf, type SchemaPart } from "../../lib/propertySchema";
 import { mayCreate } from "../../lib/schemaFile";
 import { formatCount } from "../../lib/time";
 import { useSessionContext, useTenantSession } from "../../session/SessionProvider";
 import { browseParams } from "../browse/browseState";
 import { AddToSchemaDialog, type AdditionKind } from "./AddToSchemaDialog";
 import { ImportSchemaDialog } from "./ImportSchemaDialog";
+import { PropertyChecks } from "./properties/PropertyChecks";
+import { AddPropertyDialog } from "./properties/AddPropertyDialog";
+import { EdgeProperties, SchemaProperties } from "./properties/SchemaProperties";
 import { labelTree, propertiesByLabel, relationshipRows } from "./schemaModel";
 import { StrictEndpoints } from "./StrictEndpoints";
 import { StyleSwatch } from "./StyleSwatch";
@@ -54,9 +59,12 @@ const SHOWN_PAIRS = 3;
  * diagram (`?view=diagram`), where labels are added and a relationship
  * type's label pairs declared by drawing from one label to another. Declared
  * pairs are the schema's associations; administrators can have graphos
- * refuse writes outside them (strict). Maintainers can export the whole
- * schema as a file and import one (here or into another tenant), after a
- * preview of what it changes.
+ * refuse writes outside them (strict). A label or type opens to its property
+ * definitions (its own, every label's or every type's, its parents') and the
+ * properties its rows carry that nothing declares; maintainers declare them
+ * there, set how strictly writes are held to them, and check the stored rows.
+ * Maintainers can export the whole schema as a file and import one (here or
+ * into another tenant), after a preview of what it changes.
  */
 export function SchemaView() {
   const { t } = useTranslation();
@@ -65,11 +73,13 @@ export function SchemaView() {
   const schema = useSchema();
   const map = useGraphMap();
   const catalogue = useCatalogue();
+  const definitions = usePropertyDefinitions();
   const add = useAddToSchema();
   const exportSchema = useExportSchema();
   const importSchema = useImportSchema();
   const [importing, setImporting] = useState(false);
   const [adding, setAdding] = useState<AdditionKind | null>(null);
+  const [addingProperty, setAddingProperty] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [params, setParams] = useSearchParams();
   const view = params.get("view") === "diagram" ? "diagram" : "list";
@@ -89,6 +99,21 @@ export function SchemaView() {
   const styles = useMemo(() => labelStyles(schema.data), [schema.data]);
   const saveStyle = (kind: "vertex" | "edge", name: string, entry: VertexDisplay | null, done: () => void) =>
     add.mutate({ display: { [kind]: { [name]: entry } } }, { onSuccess: done });
+  const toggle = (key: string) => setOpen(open === key ? null : key);
+
+  const declaresProperties = Boolean(
+    Object.keys(schema.data?.property_schema?.vertex ?? {}).length ||
+    Object.keys(schema.data?.property_schema?.edge ?? {}).length,
+  );
+  /** How many properties a label or type has definitions for; null while the tenant declares none. */
+  const definedCount = (part: SchemaPart, name: string): number | null => {
+    const policy = definitions.data?.[part]?.[name];
+    return policy && declaresProperties ? Object.keys(policy.properties).length : null;
+  };
+  const panel = (part: SchemaPart, owner: string, carried: string[], actions?: ReactNode) =>
+    schema.data ? (
+      <SchemaProperties schema={schema.data} part={part} owner={owner} carried={carried} actions={actions} />
+    ) : null;
 
   if (schema.error) {
     return (
@@ -121,6 +146,7 @@ export function SchemaView() {
           </Text>
         </div>
         <Group gap="md">
+          {schema.data ? <PropertyChecks schema={schema.data} editable={canMaintain} /> : null}
           {schema.data ? <StrictEndpoints schema={schema.data} map={map.data} editable={canMaintain} /> : null}
           <SegmentedControl
             size="xs"
@@ -168,6 +194,7 @@ export function SchemaView() {
                 <Menu.Item onClick={() => setAdding("label")}>{t("views.schema.addLabel")}</Menu.Item>
                 <Menu.Item onClick={() => setAdding("relationship")}>{t("views.schema.addRelationship")}</Menu.Item>
                 <Menu.Item onClick={() => setAdding("index")}>{t("views.schema.addIndex")}</Menu.Item>
+                <Menu.Item onClick={() => setAddingProperty(true)}>{t("views.schema.addProperty")}</Menu.Item>
               </Menu.Dropdown>
             </Menu>
           ) : null}
@@ -199,6 +226,13 @@ export function SchemaView() {
               {t("views.schema.sections.labels")} · {schema.data.vertex_labels.length}
             </Title>
             <div className={classes.group}>
+              <AllRow
+                part="vertex"
+                open={open === "vertex:*"}
+                onToggle={() => toggle("vertex:*")}
+                count={Object.keys(entryOf(schema.data, "vertex", ALL)?.properties ?? {}).length}
+              />
+              {open === "vertex:*" ? <div className={classes.detail}>{panel("vertex", ALL, [])}</div> : null}
               {labels.map((row) => (
                 <div key={row.label}>
                   <div className={classes.styledRow} style={{ paddingLeft: 12 + row.depth * 18 }}>
@@ -214,8 +248,8 @@ export function SchemaView() {
                     />
                     <UnstyledButton
                       className={classes.row}
-                      onClick={() => setOpen(open === row.label ? null : row.label)}
-                      aria-expanded={open === row.label}
+                      onClick={() => toggle(`vertex:${row.label}`)}
+                      aria-expanded={open === `vertex:${row.label}`}
                     >
                       <Text size="sm" fw={500} className={classes.name}>
                         {row.label}
@@ -225,39 +259,35 @@ export function SchemaView() {
                           {t("views.schema.labels.inherits", { parent: row.parent })}
                         </Text>
                       ) : null}
+                      <Text size="xs" c="dimmed" className={classes.pairs} truncate>
+                        {entryOf(schema.data, "vertex", row.label)?.description ?? ""}
+                      </Text>
                       <Text size="xs" c="dimmed" className={classes.end}>
                         {row.count === null
                           ? ""
                           : t("common.counts.nodes", { count: row.count, formatted: formatCount(row.count) })}
                         {" · "}
-                        {t("views.schema.labels.properties", { count: row.properties.length })}
+                        {definedCount("vertex", row.label) === null
+                          ? t("views.schema.labels.properties", { count: row.properties.length })
+                          : t("views.schema.labels.defined", { count: definedCount("vertex", row.label)! })}
                       </Text>
                     </UnstyledButton>
                   </div>
-                  {open === row.label ? (
+                  {open === `vertex:${row.label}` ? (
                     <div className={classes.detail} style={{ paddingLeft: 12 + row.depth * 18 }}>
-                      {row.properties.length ? (
-                        <Group gap={4}>
-                          {row.properties.map((name) => (
-                            <Badge key={name} variant="default" radius="sm" tt="none" size="sm">
-                              {name}
-                            </Badge>
-                          ))}
-                        </Group>
-                      ) : (
-                        <Text size="xs" c="dimmed">
-                          {t("views.schema.labels.noProperties")}
-                        </Text>
+                      {panel(
+                        "vertex",
+                        row.label,
+                        row.properties,
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          component={Link}
+                          to={`/browse?${browseParams({ label: row.label, filter: null }).toString()}`}
+                        >
+                          {t("views.schema.labels.browse")}
+                        </Button>,
                       )}
-                      <Button
-                        size="compact-xs"
-                        variant="subtle"
-                        mt={6}
-                        component={Link}
-                        to={`/browse?${browseParams({ label: row.label, filter: null }).toString()}`}
-                      >
-                        {t("views.schema.labels.browse")}
-                      </Button>
                     </div>
                   ) : null}
                 </div>
@@ -270,45 +300,74 @@ export function SchemaView() {
               {t("views.schema.sections.relationships")} · {relationships.length}
             </Title>
             <div className={classes.group}>
+              <AllRow
+                part="edge"
+                open={open === "edge:*"}
+                onToggle={() => toggle("edge:*")}
+                count={Object.keys(entryOf(schema.data, "edge", ALL)?.properties ?? {}).length}
+              />
+              {open === "edge:*" ? <div className={classes.detail}>{panel("edge", ALL, [])}</div> : null}
               {relationships.map((row) => (
-                <div key={row.type} className={classes.row}>
-                  <StyleSwatch
-                    kind="edge"
-                    name={row.type}
-                    own={ownStyle(schema.data?.display?.edge?.[row.type])}
-                    shown={styles.edge.get(row.type) ?? null}
-                    editable={canMaintain}
-                    saving={add.isPending}
-                    onSave={(entry, done) => saveStyle("edge", row.type, entry, done)}
-                  />
-                  <Text size="sm" fw={500} className={classes.name}>
-                    {row.type}
-                  </Text>
-                  {row.derived ? (
-                    <Tooltip label={t("views.schema.relationships.derivedTooltip")} withArrow>
-                      <Badge size="xs" variant="light" radius="sm" tt="none">
-                        {t("views.schema.relationships.derived")}
-                      </Badge>
-                    </Tooltip>
+                <div key={row.type}>
+                  <div className={classes.styledRow} style={{ paddingLeft: 12 }}>
+                    <StyleSwatch
+                      kind="edge"
+                      name={row.type}
+                      own={ownStyle(schema.data?.display?.edge?.[row.type])}
+                      shown={styles.edge.get(row.type) ?? null}
+                      editable={canMaintain}
+                      saving={add.isPending}
+                      onSave={(entry, done) => saveStyle("edge", row.type, entry, done)}
+                    />
+                    <UnstyledButton
+                      className={classes.row}
+                      onClick={() => toggle(`edge:${row.type}`)}
+                      aria-expanded={open === `edge:${row.type}`}
+                    >
+                      <Text size="sm" fw={500} className={classes.name}>
+                        {row.type}
+                      </Text>
+                      {row.derived ? (
+                        <Tooltip label={t("views.schema.relationships.derivedTooltip")} withArrow>
+                          <Badge size="xs" variant="light" radius="sm" tt="none">
+                            {t("views.schema.relationships.derived")}
+                          </Badge>
+                        </Tooltip>
+                      ) : null}
+                      {row.undeclared ? (
+                        <Tooltip label={t("views.schema.relationships.undeclaredTooltip")} withArrow multiline w={260}>
+                          <Badge size="xs" variant="light" color="red" radius="sm" tt="none">
+                            {t("views.schema.relationships.undeclared", { count: row.undeclared })}
+                          </Badge>
+                        </Tooltip>
+                      ) : null}
+                      <Text size="xs" c="dimmed" className={classes.pairs} truncate>
+                        {entryOf(schema.data, "edge", row.type)?.description ??
+                          (row.declared.length
+                            ? t("views.schema.relationships.declared", { pairs: pairList(row.declared, t) })
+                            : row.pairs.length === 0
+                              ? t("views.schema.relationships.none")
+                              : pairList(row.pairs, t))}
+                      </Text>
+                      <Text size="xs" c="dimmed" className={classes.end}>
+                        {row.estimated ? "≈ " : ""}
+                        {t("common.counts.edges", { count: row.count, formatted: formatCount(row.count) })}
+                        {definedCount("edge", row.type) === null
+                          ? ""
+                          : ` · ${t("views.schema.labels.defined", { count: definedCount("edge", row.type)! })}`}
+                      </Text>
+                    </UnstyledButton>
+                  </div>
+                  {open === `edge:${row.type}` ? (
+                    <div className={classes.detail} style={{ paddingLeft: 12 }}>
+                      <EdgeProperties type={row.type}>{(carried) => panel("edge", row.type, carried)}</EdgeProperties>
+                      {row.declared.length ? (
+                        <Text size="xs" c="dimmed" mt={6}>
+                          {t("views.schema.relationships.declared", { pairs: pairList(row.declared, t) })}
+                        </Text>
+                      ) : null}
+                    </div>
                   ) : null}
-                  {row.undeclared ? (
-                    <Tooltip label={t("views.schema.relationships.undeclaredTooltip")} withArrow multiline w={260}>
-                      <Badge size="xs" variant="light" color="red" radius="sm" tt="none">
-                        {t("views.schema.relationships.undeclared", { count: row.undeclared })}
-                      </Badge>
-                    </Tooltip>
-                  ) : null}
-                  <Text size="xs" c="dimmed" className={classes.pairs} truncate>
-                    {row.declared.length
-                      ? t("views.schema.relationships.declared", { pairs: pairList(row.declared, t) })
-                      : row.pairs.length === 0
-                        ? t("views.schema.relationships.none")
-                        : pairList(row.pairs, t)}
-                  </Text>
-                  <Text size="xs" c="dimmed" className={classes.end}>
-                    {row.estimated ? "≈ " : ""}
-                    {t("common.counts.edges", { count: row.count, formatted: formatCount(row.count) })}
-                  </Text>
                 </div>
               ))}
             </div>
@@ -360,6 +419,10 @@ export function SchemaView() {
         />
       ) : null}
 
+      {addingProperty && schema.data ? (
+        <AddPropertyDialog schema={schema.data} carriedByLabel={properties} onClose={() => setAddingProperty(false)} />
+      ) : null}
+
       {importing ? (
         <ImportSchemaDialog
           tenant={tenant}
@@ -401,4 +464,29 @@ function pairList(pairs: { src: string; dst: string }[], t: TFunction): string {
   return pairs.length > SHOWN_PAIRS
     ? `${shown} ${t("views.schema.relationships.pairsMore", { count: pairs.length - SHOWN_PAIRS })}`
     : shown;
+}
+
+/** The `*` row of a section: the definitions every label (or every relationship type) carries. */
+function AllRow({
+  part,
+  open,
+  onToggle,
+  count,
+}: {
+  part: SchemaPart;
+  open: boolean;
+  onToggle: () => void;
+  count: number;
+}) {
+  const { t } = useTranslation();
+  return (
+    <UnstyledButton className={classes.row} onClick={onToggle} aria-expanded={open}>
+      <Text size="sm" fw={500} fs="italic" className={classes.name}>
+        {part === "edge" ? t("views.schema.properties.allTypes") : t("views.schema.properties.allLabels")}
+      </Text>
+      <Text size="xs" c="dimmed" className={classes.end}>
+        {t("views.schema.properties.definitions", { count })}
+      </Text>
+    </UnstyledButton>
+  );
 }

@@ -1,9 +1,13 @@
 import { Badge, Button, CloseButton, Group, Stack, Text, Tooltip, UnstyledButton } from "@mantine/core";
 import { IconMap, IconPlus, IconTable } from "@tabler/icons-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import { useWorkspace } from "../../../graph/WorkspaceProvider";
-import { useAddToSchema, useRemoveEdgeEndpoint } from "../../../data/queries";
+import { useAddToSchema, useRemoveEdgeEndpoint, useSchema } from "../../../data/queries";
+import { entryOf } from "../../../lib/propertySchema";
+import { EdgeProperties, SchemaProperties } from "../properties/SchemaProperties";
+
 import { formatCount } from "../../../lib/time";
 import { useTenantSession } from "../../../session/SessionProvider";
 import { browseParams } from "../../browse/browseState";
@@ -59,6 +63,7 @@ function LabelDetail({
   const navigate = useNavigate();
   const { setMapLabel, setMode } = useWorkspace();
   const { canWrite } = useTenantSession();
+  const schema = useSchema();
   const box = diagram.boxes.find((b) => b.label === label);
   if (!box) return null;
   const children = diagram.boxes.filter((b) => b.parent === label).map((b) => b.label);
@@ -66,6 +71,7 @@ function LabelDetail({
   const outgoing = lines.filter((l) => l.src === label);
   const incoming = lines.filter((l) => l.dst === label && l.src !== label);
   const props = properties.get(label) ?? [];
+  const description = schema.data ? entryOf(schema.data, "vertex", label)?.description : undefined;
 
   const showOnMap = () => {
     setMapLabel(label);
@@ -79,6 +85,11 @@ function LabelDetail({
         <Text fw={600} size="md" truncate title={label}>
           {label}
         </Text>
+        {description ? (
+          <Text size="xs" c="dimmed" mt={2}>
+            {description}
+          </Text>
+        ) : null}
         <Group gap={6} mt={4}>
           {box.count !== null ? (
             <Badge variant="light" size="sm" radius="sm" tt="none">
@@ -135,19 +146,16 @@ function LabelDetail({
 
       <Section title={t("views.schema.diagram.panel.properties")}>
         <div className={classes.panelPad}>
-          {props.length ? (
-            <Group gap={4}>
-              {props.map((name) => (
-                <Badge key={name} variant="default" radius="sm" tt="none" size="sm">
-                  {name}
-                </Badge>
-              ))}
-            </Group>
-          ) : (
-            <Text size="xs" c="dimmed">
-              {t("views.schema.labels.noProperties")}
-            </Text>
-          )}
+          {schema.data ? (
+            <SchemaProperties
+              schema={schema.data}
+              part="vertex"
+              owner={label}
+              carried={props}
+              compact
+              showDescription={false}
+            />
+          ) : null}
         </div>
       </Section>
 
@@ -204,6 +212,9 @@ function LinkDetail({ diagram, id, onSelect }: { diagram: Diagram; id: string; o
 function TypeRow({ link, type }: { link: Link; type: LinkType }) {
   const { t } = useTranslation();
   const { canMaintain } = useTenantSession();
+  const schema = useSchema();
+  const [showProperties, setShowProperties] = useState(false);
+  const description = schema.data ? entryOf(schema.data, "edge", type.type)?.description : undefined;
   const declare = useAddToSchema();
   const remove = useRemoveEdgeEndpoint();
   const exact = type.via !== null && type.via.src === link.src && type.via.dst === link.dst;
@@ -264,6 +275,33 @@ function TypeRow({ link, type }: { link: Link; type: LinkType }) {
           </Button>
         ) : null}
       </Group>
+      {description ? (
+        <Text size="xs" c="dimmed">
+          {description}
+        </Text>
+      ) : null}
+      <Button
+        size="compact-xs"
+        variant="subtle"
+        aria-expanded={showProperties}
+        onClick={() => setShowProperties(!showProperties)}
+      >
+        {showProperties ? t("views.schema.diagram.panel.hideProperties") : t("views.schema.diagram.panel.properties")}
+      </Button>
+      {showProperties && schema.data ? (
+        <EdgeProperties type={type.type}>
+          {(carried) => (
+            <SchemaProperties
+              schema={schema.data!}
+              part="edge"
+              owner={type.type}
+              carried={carried}
+              compact
+              showDescription={false}
+            />
+          )}
+        </EdgeProperties>
+      ) : null}
     </div>
   );
 }

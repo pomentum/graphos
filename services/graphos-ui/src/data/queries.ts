@@ -48,6 +48,8 @@ export const keys = {
   groups: (tenant: string) => ["groups", tenant] as const,
   groupsJob: (tenant: string) => ["groupsJob", tenant] as const,
   metricsJob: (tenant: string) => ["metricsJob", tenant] as const,
+  propertyDefinitions: (tenant: string) => ["propertyDefinitions", tenant] as const,
+  propertyCheckJob: (tenant: string) => ["propertyCheckJob", tenant] as const,
   activeJobs: (tenant: string) => ["activeJobs", tenant] as const,
   recentJobs: (tenant: string) => ["recentJobs", tenant] as const,
   history: (tenant: string, category: ActivityCategory | "all") => ["history", tenant, category] as const,
@@ -113,6 +115,22 @@ export function useMetricsJob() {
     queryFn: async () => (await api.jobs()).find((job) => job.kind === "compute_metrics") ?? null,
     refetchInterval: (query) => (isActiveJob(query.state.data) ? JOB_POLL_MS : false),
   });
+}
+
+/** The tenant's latest check of its stored rows against the property schema, followed likewise. */
+export function usePropertyCheckJob() {
+  const { api, tenant } = useTenantSession();
+  return useQuery({
+    queryKey: keys.propertyCheckJob(tenant),
+    queryFn: async () => (await api.jobs()).find((job) => job.kind === "check_properties") ?? null,
+    refetchInterval: (query) => (isActiveJob(query.state.data) ? JOB_POLL_MS : false),
+  });
+}
+
+/** The definitions each label and type is checked against (read again when the schema changes). */
+export function usePropertyDefinitions() {
+  const { api, tenant } = useTenantSession();
+  return useQuery({ queryKey: keys.propertyDefinitions(tenant), queryFn: () => api.propertyDefinitions() });
 }
 
 /** How often the running jobs are checked: often while some run, otherwise to notice new ones. */
@@ -425,6 +443,7 @@ export function useAddToSchema() {
         client.invalidateQueries({ queryKey: keys.schema(tenant) }),
         client.invalidateQueries({ queryKey: ["map", tenant] }),
         client.invalidateQueries({ queryKey: keys.catalogue(tenant) }),
+        client.invalidateQueries({ queryKey: keys.propertyDefinitions(tenant) }),
       ]),
   });
 }
