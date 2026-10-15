@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, HTTPException, Path, Query, Request, Response, status
 
 from graphos import identity
 from graphos.api.auth import deps
@@ -33,6 +33,8 @@ from graphos.oidc import GRANT_SUBJECT_PREFIXES
 log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["access"])
+
+UserName = Annotated[str, Path(description="The user's name.")]
 
 
 def _user_info(user: identity.User) -> UserInfo:
@@ -75,7 +77,15 @@ def _keep_an_admin(store: identity.AccessStore, losing: str) -> None:
 # ── Users (admin) ────────────────────────────────────────────────────────
 
 
-@router.get("/users", response_model=UserList, summary="Users and service accounts")
+@router.get(
+    "/users",
+    response_model=UserList,
+    summary="Users and service accounts",
+    description=(
+        "Admin only. Every user, sorted by name: its kind, whether it is disabled or must "
+        "change its password, who created it and when it last signed in. No passwords."
+    ),
+)
 async def list_users(request: Request, principal: AdminPrincipal) -> UserList:  # noqa: ARG001 — auth
     return UserList(users=[_user_info(u) for u in deps(request).store.users()])
 
@@ -108,9 +118,18 @@ async def create_user(body: UserCreate, request: Request, principal: AdminPrinci
     return UserCreated(user=_user_info(user), password=password)
 
 
-@router.patch("/users/{name}", response_model=UserInfo, summary="Disable or enable a user")
+@router.patch(
+    "/users/{name}",
+    response_model=UserInfo,
+    summary="Disable or enable a user",
+    description=(
+        "Admin only. Either way, the user's tokens stop working; disabling also ends its "
+        "sessions, and a disabled user cannot sign in. 404 for an unknown user, 409 when "
+        "admins disable themselves or the only admin."
+    ),
+)
 async def update_user(
-    name: str, body: UserUpdate, request: Request, principal: AdminPrincipal,
+    name: UserName, body: UserUpdate, request: Request, principal: AdminPrincipal,
 ) -> UserInfo:
     store = deps(request).store
     if store.user(name) is None:
@@ -132,9 +151,15 @@ async def update_user(
 
 
 @router.delete(
-    "/users/{name}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a user and its grants",
+    "/users/{name}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a user and its grants",
+    description=(
+        "Admin only. Also ends the user's sessions and drops its preferences. 404 for an "
+        "unknown user, 409 when admins delete themselves or the only admin."
+    ),
 )
-async def delete_user(name: str, request: Request, principal: AdminPrincipal) -> None:
+async def delete_user(name: UserName, request: Request, principal: AdminPrincipal) -> None:
     store = deps(request).store
     if store.user(name) is None:
         raise _not_found(name)
@@ -156,7 +181,7 @@ async def delete_user(name: str, request: Request, principal: AdminPrincipal) ->
         "it at the next sign-in; a service account uses it as its new secret."
     ),
 )
-async def reset_secret(name: str, request: Request, principal: AdminPrincipal) -> UserCreated:
+async def reset_secret(name: UserName, request: Request, principal: AdminPrincipal) -> UserCreated:
     store = deps(request).store
     user = store.user(name)
     if user is None:
@@ -274,9 +299,9 @@ async def create_grant(
 async def revoke_grant(
     request: Request,
     principal: OwnerPrincipal,
-    subject: Annotated[str, Query()],
-    tenant: Annotated[str, Query()],
-    level: Annotated[GrantLevel, Query()],
+    subject: Annotated[str, Query(description="The grant's subject, as listed.")],
+    tenant: Annotated[str, Query(description="The grant's tenant name or pattern, as listed.")],
+    level: Annotated[GrantLevel, Query(description="The grant's level or right.")],
 ) -> None:
     store = deps(request).store
     spec = GrantSpec(subject=subject, tenant=tenant, level=level)

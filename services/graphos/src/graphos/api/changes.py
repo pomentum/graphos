@@ -26,7 +26,7 @@ from fastapi.responses import StreamingResponse
 
 from graphos import changes
 from graphos.api.graph import _check_tenant
-from graphos.auth import ReadPrincipal
+from graphos.auth import ReadPrincipal, Tenant
 from graphos.contracts.changes import (
     DEFAULT_CHANGES_LIMIT,
     MAX_CHANGES_LIMIT,
@@ -97,11 +97,13 @@ def item(change: changes.Change) -> ChangeItem:
     responses=_GONE_RESPONSE,
 )
 async def list_changes(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: ReadPrincipal,
     after: Annotated[str | None, Query(description="A cursor from an earlier page.")] = None,
-    limit: Annotated[int, Query(ge=1, le=MAX_CHANGES_LIMIT)] = DEFAULT_CHANGES_LIMIT,
+    limit: Annotated[
+        int, Query(ge=1, le=MAX_CHANGES_LIMIT, description="Max records per page."),
+    ] = DEFAULT_CHANGES_LIMIT,
 ) -> ChangesResponse:
     _check_tenant(tenant, principal)
     position = _cursor(after)
@@ -127,7 +129,9 @@ async def list_changes(
         "the head.  Changes the read already saw may come again; none is missed."
     ),
 )
-async def changes_head(tenant: str, request: Request, principal: ReadPrincipal) -> ChangesHead:
+async def changes_head(
+    tenant: Tenant, request: Request, principal: ReadPrincipal,
+) -> ChangesHead:
     _check_tenant(tenant, principal)
     async with request.app.state.pool.acquire() as conn:
         cursor = await changes.head(conn)
@@ -146,7 +150,7 @@ async def changes_head(tenant: str, request: Request, principal: ReadPrincipal) 
     ),
 )
 async def changes_history(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: ReadPrincipal,
     before: Annotated[
@@ -155,7 +159,9 @@ async def changes_history(
     op: Annotated[
         list[str] | None, Query(description="Only these ops (repeatable)."),
     ] = None,
-    limit: Annotated[int, Query(ge=1, le=MAX_CHANGES_LIMIT)] = DEFAULT_CHANGES_LIMIT,
+    limit: Annotated[
+        int, Query(ge=1, le=MAX_CHANGES_LIMIT, description="Max records per page."),
+    ] = DEFAULT_CHANGES_LIMIT,
 ) -> ChangesHistory:
     _check_tenant(tenant, principal)
     position = _cursor(before)
@@ -178,14 +184,34 @@ async def changes_history(
         "if the stream falls behind retention.  Starts after `Last-Event-ID`, else after "
         "`after`, else at the oldest record kept."
     ),
-    responses={200: {"content": {"text/event-stream": {}}}, **_GONE_RESPONSE},
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": (
+                "A Server-Sent Events stream that stays open: `change` events, `: keep-alive` "
+                "comments, and a last `gone` event (`data` with `status` 410 and `detail`) "
+                "when the stream falls behind retention."
+            ),
+            "content": {"text/event-stream": {}},
+        },
+        **_GONE_RESPONSE,
+    },
 )
 async def stream_changes(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: ReadPrincipal,
     after: Annotated[str | None, Query(description="Start after this cursor.")] = None,
-    last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
+    last_event_id: Annotated[
+        str | None,
+        Header(
+            alias="Last-Event-ID",
+            description=(
+                "The `id` of the last event received, which a browser sends when it "
+                "reconnects: the stream resumes after it. Wins over `after`."
+            ),
+        ),
+    ] = None,
 ) -> StreamingResponse:
     _check_tenant(tenant, principal)
     position = _cursor(last_event_id or after)

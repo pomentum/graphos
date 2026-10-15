@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, TypeVar
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -25,6 +25,8 @@ from graphos.identity import Level, Principal
 router = APIRouter(tags=["jobs"], prefix="/jobs")
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
+
+JobId = Annotated[UUID, Path(description="The job's `id`.")]
 
 # Shown on the endpoints that accept ``Prefer: respond-async``.
 ACCEPTED_RESPONSE: dict[int | str, dict[str, Any]] = {
@@ -112,15 +114,35 @@ def _not_found(job_id: UUID) -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"no job {job_id}")
 
 
-@router.get("/{job_id}", response_model=Job, summary="One job's status and outcome")
-async def get_job(job_id: UUID, request: Request, principal: ReadPrincipal) -> Job:
+@router.get(
+    "/{job_id}",
+    response_model=Job,
+    summary="One job's status and outcome",
+    description=(
+        "Its kind, tenant, status, the body it was submitted with, and once finished its "
+        "result or error. Visible to admins and to tokens with `read` on its tenant; "
+        "instance-wide jobs (vacuum) to admins only. 404 for a job the caller may not see, "
+        "as for one that does not exist or was deleted after the retention period."
+    ),
+)
+async def get_job(job_id: JobId, request: Request, principal: ReadPrincipal) -> Job:
     job = await jobs.get(request.app.state.pool, job_id)
     if job is None or not _visible(principal, job):
         raise _not_found(job_id)
     return job
 
 
-@router.get("", response_model=JobList, summary="Recent jobs, newest first")
+@router.get(
+    "",
+    response_model=JobList,
+    summary="Recent jobs, newest first",
+    description=(
+        "Admins see every job, instance-wide ones included; others the jobs of the registered "
+        "tenants they may read. Running synchronous calls are listed too (`sync`). Finished "
+        "jobs are deleted after the retention period (`GRAPHOS_JOB_RETENTION_H`, a week by "
+        "default)."
+    ),
+)
 async def list_jobs(
     request: Request,
     principal: ReadPrincipal,
@@ -129,7 +151,7 @@ async def list_jobs(
         list[JobStatus] | None,
         Query(alias="status", description="Only jobs in one of these states (repeatable)."),
     ] = None,
-    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+    limit: Annotated[int, Query(ge=1, le=500, description="Max jobs to return.")] = 50,
 ) -> JobList:
     if tenant is not None:
         if not principal.has(tenant, Level.READ):
@@ -155,7 +177,7 @@ async def list_jobs(
         "needs admin scope."
     ),
 )
-async def cancel_job(job_id: UUID, request: Request, principal: WritePrincipal) -> Job:
+async def cancel_job(job_id: JobId, request: Request, principal: WritePrincipal) -> Job:
     pool = request.app.state.pool
     runner: jobs.JobRunner = request.app.state.job_runner
     job = await jobs.get(pool, job_id)

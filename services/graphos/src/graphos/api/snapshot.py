@@ -51,7 +51,7 @@ from pydantic import ValidationError
 from graphos import dataset, properties, writes
 from graphos.api.bulk import iter_lines
 from graphos.api.graph import _check_tenant
-from graphos.auth import ReadPrincipal, WritePrincipal
+from graphos.auth import ReadPrincipal, Tenant, WritePrincipal
 from graphos.bootstrap import load_spec, registered_tenants
 from graphos.contracts.graph import EdgeUpsert, NodeUpsert
 from graphos.contracts.snapshot import (
@@ -82,16 +82,30 @@ _MAX_ERROR_LINES = 50
         "`computed=false` leaves out `graphos_*` and `community_id`; `gzip=true` "
         "compresses it. `read`; recorded in the audit log."
     ),
-    responses={200: {"content": {"application/x-ndjson": {}, "application/gzip": {}}}},
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": (
+                "A stream of NDJSON lines, sent as the attachment `<tenant>.ndjson` "
+                "(`application/x-ndjson`), or gzip-compressed as `<tenant>.ndjson.gz` "
+                "(`application/gzip`) with `gzip=true`. One JSON object per line."
+            ),
+            "content": {"application/x-ndjson": {}, "application/gzip": {}},
+        },
+        400: {"description": "A label or type in `labels` / `types` is not registered."},
+    },
 )
 async def snapshot_export(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: ReadPrincipal,
     labels: Annotated[list[str] | None, Query(description="Vertex labels to export.")] = None,
     types: Annotated[list[str] | None, Query(description="Edge types to export.")] = None,
-    computed: bool = True,
-    gzip: bool = False,
+    computed: Annotated[
+        bool,
+        Query(description="Include computed properties (`graphos_*`, `community_id`)."),
+    ] = True,
+    gzip: Annotated[bool, Query(description="Compress the file with gzip.")] = False,
 ) -> StreamingResponse:
     _check_tenant(tenant, principal)
     pool = request.app.state.pool
@@ -161,7 +175,7 @@ async def _restore_edge_communities(pool: asyncpg.Pool, tenant: str) -> int:
     ),
 )
 async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; splitting harms readability
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: WritePrincipal,
     mode: Annotated[Literal["merge", "empty"], Query(

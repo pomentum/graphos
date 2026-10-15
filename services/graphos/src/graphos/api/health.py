@@ -23,12 +23,25 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["health"])
 
 
-@router.get("/healthz")
+@router.get(
+    "/healthz",
+    summary="Liveness: the process answers",
+    description="Needs no token and does not touch the database. `status` is always `ok`.",
+)
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@router.get("/readyz")
+@router.get(
+    "/readyz",
+    summary="Readiness: the database answers",
+    description=(
+        "Needs no token. 200 with the number of registered tenants once the database answers "
+        "a round trip; 503 with a `reason` (`lifespan_not_complete`, `db_unreachable`) before. "
+        "Does not depend on any tenant being registered."
+    ),
+    responses={503: {"description": "Not ready yet, or the database does not answer."}},
+)
 async def readyz(request: Request, response: Response) -> dict[str, Any]:
     pool = getattr(request.app.state, "pool", None)
 

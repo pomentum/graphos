@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from graphos import properties
 from graphos.api.graph import _check_tenant
 from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, run_sync, wants_async
-from graphos.auth import MaintainPrincipal, ReadPrincipal
+from graphos.auth import MaintainPrincipal, ReadPrincipal, Tenant
 from graphos.bootstrap import registered_tenants
 from graphos.contracts.property_schema import (
     PropertiesCheckRequest,
@@ -34,7 +34,7 @@ router = APIRouter(tags=["properties"], prefix="/{tenant}/graph")
     ),
 )
 async def property_definitions(
-    tenant: str, principal: ReadPrincipal,
+    tenant: Tenant, principal: ReadPrincipal,
 ) -> PropertyDefinitionsResponse:
     _check_tenant(tenant, principal)
     spec = registered_tenants()[tenant]
@@ -65,7 +65,7 @@ async def property_definitions(
     responses=ACCEPTED_RESPONSE,
 )
 async def check_properties(
-    tenant: str,
+    tenant: Tenant,
     body: PropertiesCheckRequest,
     request: Request,
     principal: MaintainPrincipal,

@@ -413,7 +413,7 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `POST …/graph/snapshot-import` (NDJSON) | Mixed node + edge import (§4); reads a dataset export's header and end lines, gzip, `?mode=empty` | tenant |
 | `GET …/graph/snapshot` | Dataset export: header, nodes, edges, end, as NDJSON (gzip optional), one consistent snapshot | tenant (`read`, audited) |
 | `POST …/graph/edges:resolve` `{edge_types?}` | Run registered resolve rules | tenant |
-| `DELETE …/graph/nodes/{node_id}?label=` | Delete one node and its edges | tenant |
+| `DELETE …/graph/nodes/{external_id}?label=` | Delete one node and its edges | tenant |
 | `DELETE …/graph/edges/{type}?src=&dst=&src_label=&dst_label=` | Delete one edge | tenant |
 | `DELETE …/graph/nodes?property_key=&property_value=` | Delete every node with that property value, and their edges | tenant |
 | **Community detection** | | |

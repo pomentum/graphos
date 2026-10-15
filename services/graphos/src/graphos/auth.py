@@ -33,7 +33,7 @@ from collections.abc import Mapping
 from enum import StrEnum
 from typing import Annotated, Protocol
 
-from fastapi import Depends, HTTPException, Request, Security, status
+from fastapi import Depends, HTTPException, Path, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, SecurityScopes
 
 from graphos.changes import ACTOR, Actor
@@ -218,6 +218,8 @@ MaintainPrincipal = Annotated[
 ]
 OwnerPrincipal = Annotated[Principal, Security(require_principal, scopes=[Access.OWNER.value])]
 AdminPrincipal = Annotated[Principal, Security(require_principal, scopes=[Access.ADMIN.value])]
+
+Tenant = Annotated[str, Path(description="The tenant's name, as registered.")]
 
 
 def require_level(principal: Principal, tenant: str, needed: Level) -> None:

@@ -34,10 +34,10 @@ import json
 import logging
 from dataclasses import asdict
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 from fastapi.responses import Response
 
 from graphos import by_entry, declared, lifecycle, schema_changes, schema_document, sync
@@ -84,6 +84,28 @@ from graphos.resolver.indexer import ensure_resolve_rule_indexes
 log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["tenants"], prefix="/tenants")
+
+TenantName = Annotated[str, Path(description="The tenant's name.")]
+
+# The schema document: a registration body plus its ``_export`` header.
+_SCHEMA_DOCUMENT = {
+    "allOf": [{"$ref": "#/components/schemas/TenantSpecBody"}],
+    "type": "object",
+    "properties": {
+        "_export": {
+            "type": "object",
+            "description": "What the file is; a registration checks it and ignores it.",
+            "properties": {
+                "format": {"type": "string", "enum": [schema_document.FORMAT]},
+                "version": {"type": "integer", "enum": [1, 2]},
+                "graphos": {"type": "string", "description": "The exporting graphos version."},
+                "tenant": {"type": "string"},
+                "exported_at": {"type": "string", "format": "date-time"},
+            },
+        },
+    },
+    "required": ["_export", "name"],
+}
 
 
 async def _record_schema(pool: asyncpg.Pool, tenant: str, detail: dict[str, Any]) -> None:
@@ -212,10 +234,21 @@ def _may_maintain(principal: Principal, name: str) -> bool:
 
 @router.get(
     "", summary="List the registered tenants the caller may maintain",
+    description=(
+        "Any token. The registered tenants the caller may maintain (`maintain` on it, or "
+        "`create_tenants` on a pattern its name matches; every tenant for an admin), each "
+        "with its registered spec as `GET /v1/tenants/{name}` answers it. With "
+        "`unregistered=true`, also the tenants unregistered with their data kept that the "
+        "caller owns; an admin also sees orphan graphs."
+    ),
     response_model=TenantList, response_model_exclude_none=True,
 )
 async def list_tenants(
-    principal: ReadPrincipal, request: Request, unregistered: bool = False,
+    principal: ReadPrincipal,
+    request: Request,
+    unregistered: Annotated[
+        bool, Query(description="Also list the tenants unregistered with their data kept."),
+    ] = False,
 ) -> TenantList:
     out = TenantList(
         tenants=[
@@ -233,8 +266,18 @@ async def list_tenants(
     return out
 
 
-@router.get("/{name}", summary="Inspect one registered tenant")
-async def get_tenant(name: str, principal: MaintainPrincipal) -> TenantInfo:
+@router.get(
+    "/{name}",
+    summary="Inspect one registered tenant",
+    description=(
+        "`maintain` on the tenant, or `create_tenants` on a pattern its name matches. Its "
+        "registered spec: labels, property indexes, generated columns, the number of resolve "
+        "rules, label hierarchy, metadata, search indexes, display hints and property schema. "
+        "The whole schema as a file is `GET /v1/tenants/{name}/spec`."
+    ),
+    responses={404: {"description": "Not registered."}},
+)
+async def get_tenant(name: TenantName, principal: MaintainPrincipal) -> TenantInfo:
     if not _may_maintain(principal, name):
         require_level(principal, name, Level.MAINTAIN)
     specs = registered_tenants()
@@ -250,16 +293,25 @@ async def get_tenant(name: str, principal: MaintainPrincipal) -> TenantInfo:
     "/{name}/spec",
     summary="Export a tenant's schema",
     description=(
-        "The whole schema as a file (`graphos.schema`, version 1): a registration body, so "
+        "The whole schema as a file (`graphos.schema`, version 1, or 2 when it declares a "
+        "property schema): a registration body, so "
         "posting it to `POST /v1/tenants` registers that schema (rename `name` to copy it), "
         "plus an `_export` header that registration checks and ignores. Lossless (resolve "
         "rules, declared pairs and `strict_endpoints` included) and deterministic: two "
         "exports of the same schema differ only in `_export.exported_at`. No data, grants or "
         "computed values. `maintain`, as `GET /v1/tenants/{name}`."
     ),
-    responses={200: {"content": {"application/json": {}}}, 404: {"description": "Not registered."}},
+    responses={
+        200: {
+            "description": (
+                "The schema document, sent as the attachment `<name>.schema.json`."
+            ),
+            "content": {"application/json": {"schema": _SCHEMA_DOCUMENT}},
+        },
+        404: {"description": "Not registered."},
+    },
 )
-async def export_spec(name: str, request: Request, principal: MaintainPrincipal) -> Response:
+async def export_spec(name: TenantName, request: Request, principal: MaintainPrincipal) -> Response:
     if not _may_maintain(principal, name):
         require_level(principal, name, Level.MAINTAIN)
     spec = await load_spec(request.app.state.pool, name)
@@ -283,8 +335,16 @@ async def register(
     body: TenantSpecBody,
     request: Request,
     principal: WritePrincipal,
-    force_shrink: bool = False,
-    dry_run: bool = False,
+    force_shrink: Annotated[
+        bool,
+        Query(description=(
+            "Replace the stored schema with the one sent instead of merging into it. "
+            "Labels left out are not dropped from the graph."
+        )),
+    ] = False,
+    dry_run: Annotated[
+        bool, Query(description="Answer what the registration would change, writing nothing."),
+    ] = False,
 ) -> RegisterResponse | RegisterDryRunResponse:
     """Register or re-apply a tenant spec.
 
@@ -511,10 +571,12 @@ async def register(
     responses={404: {"description": "Tenant not registered, or the pair is not declared."}},
 )
 async def delete_edge_endpoint(
-    name: str,
-    type: str,  # noqa: A002 - the API's name for an edge type
-    src: str,
-    dst: str,
+    name: TenantName,
+    type: Annotated[  # noqa: A002 - the API's name for an edge type
+        str, Query(description="The edge type."),
+    ],
+    src: Annotated[str, Query(description="The pair's source vertex label.")],
+    dst: Annotated[str, Query(description="The pair's target vertex label.")],
     request: Request,
     principal: MaintainPrincipal,
 ) -> dict[str, object]:
@@ -557,10 +619,12 @@ async def delete_edge_endpoint(
     },
 )
 async def unregister(
-    name: str,
+    name: TenantName,
     request: Request,
     principal: OwnerPrincipal,
-    drop_data: bool = False,
+    drop_data: Annotated[
+        bool, Query(description="Delete the tenant with its data, for good."),
+    ] = False,
 ) -> dict[str, object]:
     if not drop_data:
         require_level(principal, name, Level.OWNER)
@@ -611,7 +675,9 @@ async def unregister(
         409: {"description": "It is registered, or an orphan graph with no kept registration."},
     },
 )
-async def restore(name: str, request: Request, principal: OwnerPrincipal) -> dict[str, object]:
+async def restore(
+    name: TenantName, request: Request, principal: OwnerPrincipal,
+) -> dict[str, object]:
     require_level(principal, name, Level.OWNER)
     pool = request.app.state.pool
     if not await lifecycle.restore_tenant(pool, name):

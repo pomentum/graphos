@@ -717,7 +717,7 @@ curl -s -X POST "$G/v1/acme_copy/graph/snapshot-import?mode=empty" \
 
 | Call | Effect |
 |---|---|
-| `DELETE /v1/{t}/graph/nodes/{node_id}[?label=]` | Delete the node(s) with that external id (in any label, or only in `label`) and their edges, in one transaction; idempotent (`nodes_deleted: 0` if absent) |
+| `DELETE /v1/{t}/graph/nodes/{external_id}[?label=]` | Delete the node(s) with that external id (in any label, or only in `label`) and their edges, in one transaction; idempotent (`nodes_deleted: 0` if absent) |
 | `DELETE /v1/{t}/graph/edges/{type}?src=&dst=[&src_label=&dst_label=]` | Delete one edge; its end nodes stay; idempotent (`edges_deleted: 0` if absent); 409 when several edges match |
 | `DELETE /v1/{t}/graph/nodes?property_key=team&property_value=core` | Delete every node whose property equals that string, and their edges, in one transaction; returns node and edge counts (each edge once) |
 

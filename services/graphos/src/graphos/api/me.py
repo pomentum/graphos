@@ -19,17 +19,28 @@ import asyncpg
 from fastapi import APIRouter, Body, HTTPException, Request, status
 
 from graphos import preferences
-from graphos.auth import ReadPrincipal
+from graphos.auth import ReadPrincipal, Tenant
 from graphos.bootstrap import registered_tenants
 from graphos.contracts.property_schema import PropertySchemaSpec
 from graphos.contracts.tenants import DisplaySpec, EdgeEndpointSpec, MeResponse, TenantSchema
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(tags=["tenants"])
+router = APIRouter()
 
 
-@router.get("/me", summary="Who is signed in: user, levels per tenant, rights")
+@router.get(
+    "/me",
+    tags=["auth"],
+    summary="Who is signed in: user, levels per tenant, rights",
+    description=(
+        "Any valid token, even one whose password must change first. The caller's user name "
+        "and kind, how it signed in, whether it is an admin or must change its password, the "
+        "registered tenants it may use with its level on each, the patterns of tenant names "
+        "it may create, and its web UI preferences. With authentication disabled, an "
+        "anonymous admin."
+    ),
+)
 async def me(principal: ReadPrincipal, request: Request) -> MeResponse:
     tenants = principal.visible(registered_tenants())
     prefs = await _preferences(request, principal.subject)
@@ -63,6 +74,7 @@ async def _preferences(request: Request, subject: str | None) -> dict[str, Any]:
 
 @router.patch(
     "/me/preferences",
+    tags=["auth"],
     summary="Change the caller's web UI preferences (JSON Merge Patch)",
     description=(
         "Only the preferences graphos knows are kept, each with the values it takes: "
@@ -91,13 +103,22 @@ async def update_preferences(
 
 @router.get(
     "/{tenant}/schema",
+    tags=["tenants"],
     summary="One tenant's labels, hierarchy, declared endpoints and search indexes",
+    description=(
+        "`read` on the tenant. What a client needs to work with it without an admin token: "
+        "its vertex and edge labels, the label hierarchy, the search indexes, the edge types "
+        "that have resolve rules, the declared edge endpoints and whether they are strict, "
+        "the display hints and the property schema (each definition with only the keywords it "
+        "states). The whole schema, rules and metadata included, is "
+        "`GET /v1/tenants/{name}/spec` (`maintain`)."
+    ),
     responses={404: {"description": "Tenant not registered."}},
     # Declarations as declared: a property definition lists only the keywords
     # it states, so a narrowing entry is not read as restating the defaults.
     response_model_exclude_unset=True,
 )
-async def tenant_schema(tenant: str, principal: ReadPrincipal) -> TenantSchema:  # noqa: ARG001 — auth
+async def tenant_schema(tenant: Tenant, principal: ReadPrincipal) -> TenantSchema:  # noqa: ARG001 — auth
     spec = registered_tenants().get(tenant)
     if spec is None:
         raise HTTPException(

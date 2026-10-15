@@ -24,7 +24,8 @@ class Job(BaseModel):
     id: UUID
     kind: str = Field(
         ..., description=(
-            "`recompute_communities`, `compute_metrics`, `resolve_edges` or `vacuum`."
+            "`recompute_communities`, `compute_metrics`, `resolve_edges`, `check_properties` "
+            "or `vacuum`."
         ),
     )
     tenant: str | None = Field(

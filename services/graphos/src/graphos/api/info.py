@@ -14,7 +14,15 @@ from graphos.louvain import LOUVAIN_AVAILABLE
 router = APIRouter(tags=["info"])
 
 
-@router.get("/info")
+@router.get(
+    "/info",
+    summary="Service version, database versions and features",
+    description=(
+        "Needs no token. The graphos, PostgreSQL and Apache AGE versions, the number of "
+        "registered tenants (not their names), and which optional features this server has: "
+        "`louvain`, `metrics`, `cypher` (the Cypher console)."
+    ),
+)
 async def info(request: Request) -> dict[str, Any]:
     pool = request.app.state.pool
     db = await fetch_db_version(pool)

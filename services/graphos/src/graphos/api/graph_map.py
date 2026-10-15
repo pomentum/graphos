@@ -29,7 +29,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from graphos.api.graph import _check_tenant, _safe_decode_props
-from graphos.auth import ReadPrincipal
+from graphos.auth import ReadPrincipal, Tenant
 from graphos.contracts.graph_map import (
     CommunityHub,
     CommunityLink,
@@ -43,7 +43,7 @@ from graphos.contracts.graph_map import (
     MapLinkType,
 )
 
-router = APIRouter(tags=["graph"], prefix="/{tenant}/graph")
+router = APIRouter(prefix="/{tenant}/graph")
 
 # Edge tables estimated larger than this are sampled unless `exact=true`.
 SAMPLE_ABOVE = 300_000
@@ -103,6 +103,7 @@ async def _gather(pool: asyncpg.Pool, jobs: list) -> list:
 @router.get(
     "/map",
     response_model=GraphMapResponse,
+    tags=["graph"],
     summary="Labels and the edge counts between them",
     description=(
         "One entry per vertex label with its node count, and one per "
@@ -114,7 +115,7 @@ async def _gather(pool: asyncpg.Pool, jobs: list) -> list:
     ),
 )
 async def graph_map(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: ReadPrincipal,
     exact: Annotated[
@@ -185,6 +186,7 @@ async def graph_map(
 @router.get(
     "/map/hubs",
     response_model=HubsResponse,
+    tags=["graph"],
     summary="A label's best-connected nodes",
     description=(
         "The nodes of `label` with the most edges (in and out, every type), "
@@ -193,11 +195,13 @@ async def graph_map(
     ),
 )
 async def graph_hubs(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: ReadPrincipal,
     label: Annotated[str, Query(description="A vertex label of the tenant.")],
-    limit: Annotated[int, Query(ge=1, le=MAX_HUBS)] = DEFAULT_HUBS,
+    limit: Annotated[
+        int, Query(ge=1, le=MAX_HUBS, description="How many nodes to return."),
+    ] = DEFAULT_HUBS,
 ) -> HubsResponse:
     _check_tenant(tenant, principal)
     started = time.perf_counter()
@@ -273,6 +277,7 @@ LABELS_PER_COMMUNITY = 5
 @router.get(
     "/communities/map",
     response_model=CommunityMapResponse,
+    tags=["communities"],
     summary="The communities and the edges between them",
     description=(
         "The communities of the last Louvain recompute, largest first: each "
@@ -285,10 +290,12 @@ LABELS_PER_COMMUNITY = 5
     ),
 )
 async def community_map(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: ReadPrincipal,
-    limit: Annotated[int, Query(ge=1, le=MAX_COMMUNITIES)] = DEFAULT_COMMUNITIES,
+    limit: Annotated[
+        int, Query(ge=1, le=MAX_COMMUNITIES, description="How many communities to return."),
+    ] = DEFAULT_COMMUNITIES,
 ) -> CommunityMapResponse:
     _check_tenant(tenant, principal)
     async with request.app.state.pool.acquire() as conn:

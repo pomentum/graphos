@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from graphos import analysis
 from graphos.api.graph import _check_tenant
 from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, run_sync, wants_async
-from graphos.auth import MaintainPrincipal
+from graphos.auth import MaintainPrincipal, Tenant
 from graphos.contracts.louvain import (
     RecomputeCommunitiesRequest,
     RecomputeCommunitiesResponse,
@@ -38,7 +38,7 @@ router = APIRouter(tags=["communities"], prefix="/{tenant}")
     responses=ACCEPTED_RESPONSE,
 )
 async def recompute(
-    tenant: str,
+    tenant: Tenant,
     body: RecomputeCommunitiesRequest,
     request: Request,
     principal: MaintainPrincipal,

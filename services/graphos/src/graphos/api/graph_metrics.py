@@ -10,7 +10,7 @@ from graphos import analysis
 from graphos.api.graph import _check_tenant
 from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, run_sync, wants_async
 from graphos.api.louvain import busy
-from graphos.auth import MaintainPrincipal
+from graphos.auth import MaintainPrincipal, Tenant
 from graphos.contracts.graph_metrics import ComputeMetricsRequest, ComputeMetricsResponse
 from graphos.graph_metrics import run_metrics
 
@@ -37,7 +37,7 @@ router = APIRouter(tags=["metrics"], prefix="/{tenant}/graph")
     responses=ACCEPTED_RESPONSE,
 )
 async def compute_metrics(
-    tenant: str,
+    tenant: Tenant,
     body: ComputeMetricsRequest,
     request: Request,
     principal: MaintainPrincipal,

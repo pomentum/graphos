@@ -16,10 +16,10 @@ import time
 from typing import Annotated
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 
 from graphos.api.graph import _check_tenant
-from graphos.auth import ReadPrincipal
+from graphos.auth import ReadPrincipal, Tenant
 from graphos.bootstrap import registered_tenants
 from graphos.contracts.communities import (
     CommunitiesResponse,
@@ -38,7 +38,7 @@ from graphos.contracts.communities import (
 # Upper bound on ``sample_labels``; larger requests fall back to the default.
 MAX_SAMPLE_LABELS = 100
 
-router = APIRouter(tags=["communities"], prefix="/{tenant}/graph")
+router = APIRouter(prefix="/{tenant}/graph")
 
 DEFAULT_MIN_COMMUNITY_READ_SIZE = 1
 DEFAULT_TOP_N = 10
@@ -157,6 +157,7 @@ async def _communities_with_labels(
 @router.get(
     "/communities",
     response_model=CommunitiesResponse,
+    tags=["communities"],
     summary="List communities + sizes from the last Louvain assignment",
     description=(
         "Reads `community_id` written by the most recent recompute. "
@@ -169,11 +170,18 @@ async def _communities_with_labels(
     ),
 )
 async def list_communities(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: ReadPrincipal,
-    min_size: Annotated[int, Query(ge=1)] = DEFAULT_MIN_COMMUNITY_READ_SIZE,
-    include_members: Annotated[bool, Query()] = False,
+    min_size: Annotated[
+        int, Query(ge=1, description="Leave out communities with fewer members."),
+    ] = DEFAULT_MIN_COMMUNITY_READ_SIZE,
+    include_members: Annotated[
+        bool,
+        Query(description=(
+            f"Add up to {MAX_INCLUDED_MEMBERS_PER_COMMUNITY} member ids to each community."
+        )),
+    ] = False,
     limit: Annotated[
         int, Query(ge=0, le=MAX_COMMUNITY_LIMIT,
                    description="Max communities to return; 0 = no cap."),
@@ -230,13 +238,22 @@ async def list_communities(
 @router.get(
     "/community-summary",
     response_model=CommunitySummary,
+    tags=["communities"],
     summary="Aggregate stats over the last Louvain output",
+    description=(
+        "Over the `community_id` written by the most recent recompute: the number of "
+        "communities, the assigned and unassigned node counts, the largest and smallest "
+        "community sizes, and the `top` largest communities with a few sample labels each. "
+        "400 when the tenant's graph does not exist."
+    ),
 )
 async def community_summary(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: ReadPrincipal,
-    top: Annotated[int, Query(ge=1, le=MAX_TOP_N)] = DEFAULT_TOP_N,
+    top: Annotated[
+        int, Query(ge=1, le=MAX_TOP_N, description="How many of the largest communities to list."),
+    ] = DEFAULT_TOP_N,
 ) -> CommunitySummary:
     _check_tenant(tenant, principal)
     started = time.perf_counter()
@@ -282,6 +299,7 @@ async def community_summary(
 @router.get(
     "/stats",
     response_model=TenantStatsResponse,
+    tags=["graph"],
     summary="Per-tenant graph stats — vertex/edge counts by label, total bytes",
     description=(
         "Exact `count(*)` per label over AGE's per-label storage tables "
@@ -291,7 +309,7 @@ async def community_summary(
     ),
 )
 async def tenant_stats(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: ReadPrincipal,
 ) -> TenantStatsResponse:
@@ -378,6 +396,7 @@ MAX_COMMUNITY_IDS_LOOKUP = 500
 @router.post(
     "/community-ids",
     response_model=CommunityIdsResponse,
+    tags=["communities"],
     summary="Batched external id → community_id lookup",
     description=(
         "Replaces an N+1 ``/search``-per-node loop.  One SQL round-trip "
@@ -387,7 +406,7 @@ MAX_COMMUNITY_IDS_LOOKUP = 500
     ),
 )
 async def community_ids(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: ReadPrincipal,
     body: CommunityIdsRequest,
@@ -482,6 +501,8 @@ DEFAULT_HISTOGRAM_LIMIT = 100
 MAX_TOP_K = 200
 DEFAULT_TOP_K = 20
 
+VertexLabel = Annotated[str, Path(description="A vertex label registered for the tenant.")]
+
 
 def _check_label(tenant: str, label: str, *, kind: str) -> None:
     """Validate that *label* is registered for *tenant*.
@@ -513,6 +534,7 @@ def _check_label(tenant: str, label: str, *, kind: str) -> None:
 @router.get(
     "/labels/{label}/histogram",
     response_model=HistogramResponse,
+    tags=["communities"],
     summary="Property-value histogram for one label",
     description=(
         "Count nodes of ``label`` grouped by a property value.  Replaces "
@@ -524,8 +546,8 @@ def _check_label(tenant: str, label: str, *, kind: str) -> None:
     ),
 )
 async def label_histogram(
-    tenant: str,
-    label: str,
+    tenant: Tenant,
+    label: VertexLabel,
     request: Request,
     principal: ReadPrincipal,
     property: Annotated[
@@ -533,7 +555,8 @@ async def label_histogram(
                    description="Property name to bucket on."),
     ],
     limit: Annotated[
-        int, Query(ge=1, le=MAX_HISTOGRAM_LIMIT),
+        int, Query(ge=1, le=MAX_HISTOGRAM_LIMIT,
+                   description="Max distinct values to return, most frequent first."),
     ] = DEFAULT_HISTOGRAM_LIMIT,
 ) -> HistogramResponse:
     _check_tenant(tenant, principal)
@@ -604,6 +627,7 @@ async def label_histogram(
 @router.get(
     "/labels/{label}/top",
     response_model=TopByEdgeResponse,
+    tags=["communities"],
     summary="Top-K nodes of a label by edge-degree on a relation",
     description=(
         "For each node of ``label``, count edges of type ``by_edge`` in "
@@ -615,8 +639,8 @@ async def label_histogram(
     ),
 )
 async def label_top_by_edge(
-    tenant: str,
-    label: str,
+    tenant: Tenant,
+    label: VertexLabel,
     request: Request,
     principal: ReadPrincipal,
     by_edge: Annotated[
@@ -624,9 +648,12 @@ async def label_top_by_edge(
                    description="Edge label / relationship type to count."),
     ],
     direction: Annotated[
-        str, Query(pattern="^(out|in|both)$"),
+        str, Query(pattern="^(out|in|both)$",
+                   description="Count edges leaving (`out`), entering (`in`) or both."),
     ] = "out",
-    k: Annotated[int, Query(ge=1, le=MAX_TOP_K)] = DEFAULT_TOP_K,
+    k: Annotated[
+        int, Query(ge=1, le=MAX_TOP_K, description="How many nodes to return."),
+    ] = DEFAULT_TOP_K,
 ) -> TopByEdgeResponse:
     _check_tenant(tenant, principal)
     _check_label(tenant, label, kind="vertex")

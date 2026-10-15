@@ -38,7 +38,7 @@ from pydantic import ValidationError
 
 from graphos import properties, reserved, writes
 from graphos.api.graph import _check_tenant
-from graphos.auth import WritePrincipal
+from graphos.auth import Tenant, WritePrincipal
 from graphos.bootstrap import registered_tenants
 from graphos.contracts.graph import (
     BULK_FLUSH_CHUNK,
@@ -107,7 +107,7 @@ async def iter_lines(chunks: AsyncIterator[bytes]) -> AsyncIterator[tuple[int, s
     ),
 )
 async def upsert_nodes_bulk(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: WritePrincipal,
 ) -> BulkNodesResponse:
@@ -248,7 +248,7 @@ def _validate_edge_labels(
     ),
 )
 async def upsert_edges_bulk(  # noqa: PLR0915 — streaming loop, splitting further harms readability
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: WritePrincipal,
 ) -> BulkEdgesResponse:

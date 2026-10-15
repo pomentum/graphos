@@ -57,6 +57,12 @@ _QUALIFIED_IDENT_RE = re.compile(
     "/stats",
     response_model=DbStatsResponse,
     summary="Database stats: sizes, dead-tuple counts, vacuum timestamps",
+    description=(
+        "Admin only. The PostgreSQL and Apache AGE versions, the database size, and the 200 "
+        "largest tables (every tenant's and graphos's own) with their live and dead tuple "
+        "counts, total and index sizes, and when they were last vacuumed, autovacuumed and "
+        "analyzed."
+    ),
 )
 async def db_stats(request: Request, principal: AdminPrincipal) -> DbStatsResponse:
 
@@ -120,11 +126,18 @@ async def db_stats(request: Request, principal: AdminPrincipal) -> DbStatsRespon
     "/slow-queries",
     response_model=SlowQueriesResponse,
     summary="Top slow queries from pg_stat_statements",
+    description=(
+        "Admin only. The statements with the highest mean execution time, with their calls, "
+        "total and mean time and rows. `available` is false, with a `note`, when the "
+        "`pg_stat_statements` extension is not installed."
+    ),
 )
 async def slow_queries(
     request: Request,
     principal: AdminPrincipal,
-    limit: Annotated[int, Query(ge=1, le=200)] = 25,
+    limit: Annotated[
+        int, Query(ge=1, le=200, description="How many statements to return."),
+    ] = 25,
 ) -> SlowQueriesResponse:
 
     pool = request.app.state.pool

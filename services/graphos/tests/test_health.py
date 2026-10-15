@@ -101,7 +101,7 @@ def test_openapi_routes() -> None:
     # Graph export
     assert "/v1/{tenant}/graph/export" in paths
     assert "/v1/{tenant}/graph/snapshot-import" in paths
-    assert "/v1/{tenant}/graph/nodes/{node_id}" in paths
+    assert "delete" in paths["/v1/{tenant}/graph/nodes/{external_id}"]
     # tombstone-by-property (DELETE on /nodes, distinguished from POST)
     assert "/v1/{tenant}/graph/nodes" in paths
     # Operational

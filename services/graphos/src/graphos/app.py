@@ -398,7 +398,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(changes.router, prefix="/v1")
     app.include_router(cypher_api.router, prefix="/v1")
 
-    @app.get("/")
+    @app.get("/", include_in_schema=False)
     async def _root() -> dict[str, Any]:
         return {
             "service": "graphos",

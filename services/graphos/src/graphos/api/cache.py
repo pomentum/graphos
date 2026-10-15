@@ -41,18 +41,22 @@ import time
 from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
 from threading import Lock
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Path, Request, status
 from pydantic import BaseModel, Field
 
 from graphos import sync
 from graphos.api.graph import _check_tenant
-from graphos.auth import ReadPrincipal, WritePrincipal
+from graphos.auth import ReadPrincipal, Tenant, WritePrincipal
 
 MAX_CACHE_KEY_LEN = 256
 
 router = APIRouter(tags=["cache"], prefix="/{tenant}/graph")
+
+CacheKey = Annotated[str, Path(description=(
+    f"Any string the caller chooses (at most {MAX_CACHE_KEY_LEN} characters on `PUT`)."
+))]
 
 
 # ── Wire models ────────────────────────────────────────────────────────────
@@ -224,10 +228,17 @@ def on_notification(payload: str) -> None:
     "/cache/{key}",
     response_model=CachePutResponse,
     summary="Upsert a JSON value into the per-tenant K/V cache",
+    description=(
+        "`write` on the tenant. Stores `value` as given, replacing any value under the key, "
+        "with an optional `ttl_seconds` (at most 30 days; none means no expiry). graphos "
+        "does not interpret the key or the value. The other replicas drop the key from "
+        "their in-process cache. 400 for an empty key or one longer than "
+        f"{MAX_CACHE_KEY_LEN} characters."
+    ),
 )
 async def cache_put(
-    tenant: str,
-    key: str,
+    tenant: Tenant,
+    key: CacheKey,
     body: CachePutRequest,
     request: Request,
     principal: WritePrincipal,
@@ -292,8 +303,8 @@ async def cache_put(
     ),
 )
 async def cache_get(
-    tenant: str,
-    key: str,
+    tenant: Tenant,
+    key: CacheKey,
     request: Request,
     principal: ReadPrincipal,
 ) -> CacheGetResponse:
@@ -360,10 +371,14 @@ async def cache_get(
     "/cache/{key}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Invalidate a cached value (LRU + PG)",
+    description=(
+        "`write` on the tenant. Deletes the key from the database and from every replica's "
+        "in-process cache. 204 whether or not the key was there."
+    ),
 )
 async def cache_delete(
-    tenant: str,
-    key: str,
+    tenant: Tenant,
+    key: CacheKey,
     request: Request,
     principal: WritePrincipal,
 ) -> None:

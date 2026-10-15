@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 
 from graphos import lookup, paths
 from graphos.api.graph import _check_tenant, _check_vertex_label, _node_ambiguous
-from graphos.auth import ReadPrincipal
+from graphos.auth import ReadPrincipal, Tenant
 from graphos.bootstrap import registered_tenants
 from graphos.contracts.paths import (
     MAX_PATH_LEVEL_EDGES,
@@ -56,7 +56,7 @@ _GIDS = "ARRAY(SELECT x::graphid FROM unnest($1::text[]) AS x)"
     },
 )
 async def find_paths(
-    tenant: str,
+    tenant: Tenant,
     body: PathsRequest,
     request: Request,
     principal: ReadPrincipal,

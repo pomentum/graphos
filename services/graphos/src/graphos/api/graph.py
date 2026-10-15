@@ -38,6 +38,7 @@ from fastapi import (
     Depends,
     Header,
     HTTPException,
+    Path,
     Query,
     Request,
     Response,
@@ -48,7 +49,7 @@ from fastapi.responses import JSONResponse
 from graphos import lookup, properties, reserved, writes
 from graphos import search as search_index
 from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, run_sync, wants_async
-from graphos.auth import ReadPrincipal, WritePrincipal, require_tenant
+from graphos.auth import ReadPrincipal, Tenant, WritePrincipal, require_tenant
 from graphos.bootstrap import registered_tenants
 from graphos.contracts.export import (
     DEFAULT_EXPORT_NODE_LIMIT,
@@ -149,6 +150,11 @@ def _read_failed(what: str, exc: asyncpg.exceptions.PostgresError) -> HTTPExcept
     )
 
 router = APIRouter(tags=["graph"], prefix="/{tenant}/graph")
+
+ExternalId = Annotated[str, Path(description=(
+    "The node's `id` (`properties.id`), in any label; it may contain `/`."
+))]
+EdgeType = Annotated[str, Path(description="The edge type, registered for the tenant.")]
 
 
 def _safe_decode_props(raw: str | None) -> dict[str, Any]:
@@ -277,7 +283,7 @@ def _node_response(
     responses={404: {"description": "No search index of that name."}},
 )
 async def search(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: ReadPrincipal,
     q: Annotated[str, Query(min_length=1, max_length=200, description="Substring to match")],
@@ -475,7 +481,7 @@ def _group_by_label(nodes: Iterable[NodeUpsert]) -> dict[str, list[dict[str, obj
     ),
 )
 async def upsert_nodes(
-    tenant: str,
+    tenant: Tenant,
     body: NodesUpsertRequest,
     request: Request,
     principal: WritePrincipal,
@@ -558,8 +564,8 @@ def _row_check(tenant: str, part: str) -> writes.RowCheck | None:
     responses={409: {"description": "The id exists in several labels; pass `label`."}},
 )
 async def get_node_by_external_id(  # noqa: PLR0913 — FastAPI route parameters
-    tenant: str,
-    external_id: str,
+    tenant: Tenant,
+    external_id: ExternalId,
     request: Request,
     response: Response,
     principal: ReadPrincipal,
@@ -606,8 +612,8 @@ async def get_node_by_external_id(  # noqa: PLR0913 — FastAPI route parameters
     },
 )
 async def patch_node(  # noqa: PLR0913 — FastAPI route parameters
-    tenant: str,
-    external_id: str,
+    tenant: Tenant,
+    external_id: ExternalId,
     request: Request,
     response: Response,
     principal: WritePrincipal,
@@ -673,8 +679,8 @@ async def patch_node(  # noqa: PLR0913 — FastAPI route parameters
     },
 )
 async def upsert_node_properties(  # noqa: PLR0913 — FastAPI route parameters
-    tenant: str,
-    external_id: str,
+    tenant: Tenant,
+    external_id: ExternalId,
     body: NodePropertiesUpsertRequest,
     request: Request,
     response: Response,
@@ -756,7 +762,7 @@ def _group_edges(edges: Iterable[EdgeUpsert]) -> dict[EdgeKey, list[dict[str, ob
     ),
 )
 async def upsert_edges(
-    tenant: str,
+    tenant: Tenant,
     body: EdgesUpsertRequest,
     request: Request,
     principal: WritePrincipal,
@@ -925,11 +931,17 @@ def _edge_response(  # noqa: PLR0913 — everything the response echoes
     "/edges/{edge_type}",
     response_model=EdgeGetResponse,
     summary="Fetch one edge by its type and the ids of its ends",
+    description=(
+        "An edge is named by its type and the ids of its two ends: there is at most one edge "
+        "of a type between two nodes. When an end id exists in several labels more than one "
+        "edge can match (409); `src_label` / `dst_label` pick one. Returns its properties, "
+        "the labels of its ends and its revision, with its `ETag` for a later `If-Match`."
+    ),
     responses=_EDGE_RESPONSES,
 )
 async def get_edge(  # noqa: PLR0913 — FastAPI route parameters
-    tenant: str,
-    edge_type: str,
+    tenant: Tenant,
+    edge_type: EdgeType,
     ref: EdgeRef,
     request: Request,
     response: Response,
@@ -966,8 +978,8 @@ async def get_edge(  # noqa: PLR0913 — FastAPI route parameters
     responses={**_EDGE_RESPONSES, **_PRECONDITION_RESPONSES},
 )
 async def patch_edge(  # noqa: PLR0913 — FastAPI route parameters
-    tenant: str,
-    edge_type: str,
+    tenant: Tenant,
+    edge_type: EdgeType,
     ref: EdgeRef,
     request: Request,
     response: Response,
@@ -1011,11 +1023,15 @@ async def patch_edge(  # noqa: PLR0913 — FastAPI route parameters
         "Idempotent: deleting an edge that does not exist returns `edges_deleted: 0` "
         "(with `If-Match`, 412)."
     ),
-    responses={409: _EDGE_RESPONSES[409], **_PRECONDITION_RESPONSES},
+    responses={
+        404: {"description": "Unregistered edge type."},
+        409: _EDGE_RESPONSES[409],
+        **_PRECONDITION_RESPONSES,
+    },
 )
 async def delete_edge(  # noqa: PLR0913 — FastAPI route parameters
-    tenant: str,
-    edge_type: str,
+    tenant: Tenant,
+    edge_type: EdgeType,
     ref: EdgeRef,
     request: Request,
     principal: WritePrincipal,
@@ -1064,7 +1080,7 @@ async def delete_edge(  # noqa: PLR0913 — FastAPI route parameters
     ),
 )
 async def neighbors(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: ReadPrincipal,
     node_id: Annotated[
@@ -1076,7 +1092,7 @@ async def neighbors(
         Query(description="If set, restrict to edges of these types."),
     ] = None,
     limit: Annotated[
-        int, Query(ge=1, le=MAX_NEIGHBORS_LIMIT)
+        int, Query(ge=1, le=MAX_NEIGHBORS_LIMIT, description="Max neighbors to return."),
     ] = DEFAULT_NEIGHBORS_LIMIT,
 ) -> NeighborsResponse:
     _check_tenant(tenant, principal)
@@ -1258,7 +1274,7 @@ async def neighbors(
     ),
 )
 async def induced_edges(
-    tenant: str,
+    tenant: Tenant,
     body: InducedEdgesRequest,
     request: Request,
     principal: ReadPrincipal,
@@ -1432,7 +1448,7 @@ def _agtype_scalar(raw: str | None) -> object:
     ),
 )
 async def scoped_subgraph(
-    tenant: str,
+    tenant: Tenant,
     body: ScopedSubgraphRequest,
     request: Request,
     principal: ReadPrincipal,
@@ -1577,7 +1593,7 @@ async def scoped_subgraph(
     ),
 )
 async def catalogue(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: ReadPrincipal,
     refresh: Annotated[
@@ -1622,7 +1638,7 @@ async def catalogue(
     ),
 )
 async def expand(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: ReadPrincipal,
     node_id: Annotated[
@@ -1656,7 +1672,7 @@ async def expand(
         Query(pattern="^(in|out|both)$", description="Edge direction relative to seed."),
     ] = "both",
     limit: Annotated[
-        int, Query(ge=1, le=MAX_EXPAND_LIMIT),
+        int, Query(ge=1, le=MAX_EXPAND_LIMIT, description="Max reached nodes to return."),
     ] = DEFAULT_EXPAND_LIMIT,
     communities: Annotated[
         list[str] | None,
@@ -1951,7 +1967,7 @@ async def expand(
     ),
 )
 async def aggregate_edges(
-    tenant: str,
+    tenant: Tenant,
     body: EdgesAggregateRequest,
     request: Request,
     principal: ReadPrincipal,
@@ -2150,7 +2166,7 @@ async def _aggregate_edge_groups(
     ),
 )
 async def aggregate_nodes(
-    tenant: str,
+    tenant: Tenant,
     body: NodesAggregateRequest,
     request: Request,
     principal: ReadPrincipal,
@@ -2218,7 +2234,7 @@ async def aggregate_nodes(
     ),
 )
 async def sample_subgraph(
-    tenant: str,
+    tenant: Tenant,
     body: SampleSubgraphRequest,
     request: Request,
     principal: ReadPrincipal,
@@ -2451,7 +2467,7 @@ async def sample_subgraph(
 
 
 @router.delete(
-    "/nodes/{node_id:path}",
+    "/nodes/{external_id:path}",
     response_model=DeleteNodeResponse,
     summary="Delete a node and its edges by its consumer-assigned id",
     description=(
@@ -2467,8 +2483,8 @@ async def sample_subgraph(
     },
 )
 async def delete_node(  # noqa: PLR0913 — FastAPI route parameters
-    tenant: str,
-    node_id: str,
+    tenant: Tenant,
+    external_id: ExternalId,
     request: Request,
     principal: WritePrincipal,
     label: Annotated[
@@ -2485,16 +2501,16 @@ async def delete_node(  # noqa: PLR0913 — FastAPI route parameters
     try:
         if precondition is None:
             nodes_n, edges_n = await writes.delete_nodes(
-                pool, tenant=tenant, property_key="id", property_value=node_id, label=label,
+                pool, tenant=tenant, property_key="id", property_value=external_id, label=label,
             )
         else:
             nodes_n, edges_n = await writes.delete_node(
-                pool, tenant=tenant, external_id=node_id, label=label, if_match=precondition,
+                pool, tenant=tenant, external_id=external_id, label=label, if_match=precondition,
             )
     except lookup.PreconditionFailedError as exc:
         raise _precondition_failed(exc) from exc
     except lookup.AmbiguousMatchError as exc:
-        raise _node_ambiguous(node_id, exc) from exc
+        raise _node_ambiguous(external_id, exc) from exc
     except CypherError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2504,7 +2520,7 @@ async def delete_node(  # noqa: PLR0913 — FastAPI route parameters
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     return DeleteNodeResponse(
         tenant=tenant,
-        node_id=node_id,
+        node_id=external_id,
         nodes_deleted=nodes_n,
         edges_deleted=edges_n,
         elapsed_ms=elapsed_ms,
@@ -2524,7 +2540,7 @@ async def delete_node(  # noqa: PLR0913 — FastAPI route parameters
     ),
 )
 async def delete_by_property(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: WritePrincipal,
     property_key: Annotated[
@@ -2591,7 +2607,7 @@ async def delete_by_property(
     ),
 )
 async def export_graph(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: ReadPrincipal,
     node_ids: Annotated[
@@ -2603,7 +2619,7 @@ async def export_graph(
         Query(description="Restrict edges to these types."),
     ] = None,
     limit_nodes: Annotated[
-        int, Query(ge=1, le=MAX_EXPORT_NODE_LIMIT),
+        int, Query(ge=1, le=MAX_EXPORT_NODE_LIMIT, description="Max nodes to export."),
     ] = DEFAULT_EXPORT_NODE_LIMIT,
 ) -> GraphologyExport:
     _check_tenant(tenant, principal)
@@ -3118,7 +3134,7 @@ def _project_properties(
     ),
 )
 async def scan_nodes(
-    tenant: str,
+    tenant: Tenant,
     body: NodesScanRequest,
     request: Request,
     principal: ReadPrincipal,
@@ -3549,7 +3565,7 @@ def _edge_scan_page_sql(
     ),
 )
 async def scan_edges(
-    tenant: str,
+    tenant: Tenant,
     body: EdgesScanRequest,
     request: Request,
     principal: ReadPrincipal,
@@ -3705,7 +3721,7 @@ async def scan_edges(
     responses=ACCEPTED_RESPONSE,
 )
 async def resolve_edges(
-    tenant: str,
+    tenant: Tenant,
     body: ResolveEdgesRequest,
     request: Request,
     principal: WritePrincipal,

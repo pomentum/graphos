@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Path, Request, status
 
-from graphos.auth import MaintainPrincipal, ReadPrincipal, require_level
+from graphos.auth import MaintainPrincipal, ReadPrincipal, Tenant, require_level
 from graphos.console import Console, ConsoleError
 from graphos.contracts.cypher import (
     SAVED_NAME,
@@ -42,6 +42,11 @@ _ERRORS: dict[int | str, dict[str, Any]] = {
     429: {"description": "You are running a query already, or the console is busy."},
     504: {"description": "The query ran past the console's timeout and was stopped."},
 }
+
+SavedName = Annotated[str, Path(
+    pattern=SAVED_NAME,
+    description="The saved query's name: a letter or digit, then up to 62 of those, `_` or `-`.",
+)]
 
 
 def _console(request: Request, principal: Principal, tenant: str) -> Console:
@@ -83,11 +88,21 @@ async def _run(  # noqa: PLR0913
 @router.post(
     "/{tenant}/cypher",
     summary="Run a read-only Cypher query on the tenant's graph",
+    description=(
+        "Off unless the server runs with `GRAPHOS_CYPHER=true` (404); needs "
+        "`GRAPHOS_CYPHER_LEVEL` on the tenant (`read` by default). The query runs in a "
+        "read-only transaction on the tenant's graph, with `params` as `$name`. Only "
+        "Cypher's own functions; no variable-length patterns (`-[*1..3]->`) or "
+        "`vertex_stats()`. At most `limit` rows, capped by `GRAPHOS_CYPHER_MAX_ROWS` (5000 "
+        "by default); `truncated` says more matched. Stopped after `GRAPHOS_CYPHER_TIMEOUT_S` "
+        "(30 s by default). One query at a time per user. Each run is written to the audit "
+        "log with its text."
+    ),
     response_model=CypherResult,
     responses=_ERRORS,
 )
 async def run_query(
-    tenant: str, body: CypherRequest, request: Request, principal: ReadPrincipal,
+    tenant: Tenant, body: CypherRequest, request: Request, principal: ReadPrincipal,
 ) -> CypherResult:
     console = _console(request, principal, tenant)
     return await _run(request, console, tenant, principal, body.query, body.params, body.limit)
@@ -107,9 +122,15 @@ def _saved(row: Any) -> SavedQuery:
 @router.get(
     "/{tenant}/cypher/saved",
     summary="The tenant's saved Cypher queries",
+    description=(
+        "By name: each one's text, description, parameters and how to show its result, and "
+        "who saved it last. Needs what running a query needs; 404 while the console is off."
+    ),
     responses={404: _ERRORS[404]},
 )
-async def list_saved(tenant: str, request: Request, principal: ReadPrincipal) -> list[SavedQuery]:
+async def list_saved(
+    tenant: Tenant, request: Request, principal: ReadPrincipal,
+) -> list[SavedQuery]:
     _console(request, principal, tenant)
     rows = await request.app.state.pool.fetch(
         "SELECT name, definition::text AS definition, created_by, updated_at "
@@ -122,14 +143,18 @@ async def list_saved(tenant: str, request: Request, principal: ReadPrincipal) ->
 @router.put(
     "/{tenant}/cypher/saved/{name}",
     summary="Save a Cypher query under a name (replaces one of that name)",
+    description=(
+        "`maintain` on the tenant, and the console on (404). The query is not run or checked "
+        "until it is run. Replacing a saved query makes the caller its `created_by`."
+    ),
     responses={404: _ERRORS[404]},
 )
 async def save(
-    tenant: str,
+    tenant: Tenant,
     body: SavedQueryBody,
     request: Request,
     principal: MaintainPrincipal,
-    name: str = Path(..., pattern=SAVED_NAME),
+    name: SavedName,
 ) -> SavedQuery:
     _console(request, principal, tenant)
     row = await request.app.state.pool.fetchrow(
@@ -148,14 +173,15 @@ async def save(
 @router.delete(
     "/{tenant}/cypher/saved/{name}",
     summary="Delete a saved Cypher query",
+    description="`maintain` on the tenant, and the console on (404).",
     status_code=status.HTTP_204_NO_CONTENT,
     responses={404: _ERRORS[404]},
 )
 async def delete_saved(
-    tenant: str,
+    tenant: Tenant,
     request: Request,
     principal: MaintainPrincipal,
-    name: str = Path(..., pattern=SAVED_NAME),
+    name: SavedName,
 ) -> None:
     _console(request, principal, tenant)
     done = await request.app.state.pool.execute(
@@ -173,15 +199,20 @@ _TYPES = {"string": (str,), "number": (int, float), "boolean": (bool,), "list": 
 @router.post(
     "/{tenant}/cypher/saved/{name}:run",
     summary="Run a saved Cypher query with its parameters",
+    description=(
+        "Every parameter the saved query declares must be sent in `params`, with a value of "
+        "its type (`string`, `number`, `boolean`, `list`), and no other (422). Otherwise as "
+        "`POST /v1/{tenant}/cypher`: the same access, limits and audit."
+    ),
     response_model=CypherResult,
     responses=_ERRORS,
 )
 async def run_saved(
-    tenant: str,
+    tenant: Tenant,
     body: SavedQueryRun,
     request: Request,
     principal: ReadPrincipal,
-    name: str = Path(..., pattern=SAVED_NAME),
+    name: SavedName,
 ) -> CypherResult:
     console = _console(request, principal, tenant)
     row = await request.app.state.pool.fetchrow(
