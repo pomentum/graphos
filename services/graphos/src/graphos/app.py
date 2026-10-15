@@ -399,6 +399,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "service": "graphos",
             "version": __version__,
             "docs": "/docs",
+            "redoc": "/redoc",
             "openapi": "/openapi.json",
         }
 

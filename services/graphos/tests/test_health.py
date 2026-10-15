@@ -31,6 +31,14 @@ def test_root_returns_metadata() -> None:
     assert "version" in body
 
 
+def test_the_api_documentation_is_served_and_listed() -> None:
+    app = _bare_app()
+    client = TestClient(app, raise_server_exceptions=False)
+    links = client.get("/").json()
+    for page in ("docs", "redoc", "openapi"):
+        assert client.get(links[page]).status_code == HTTPStatus.OK, page
+
+
 def test_healthz_returns_ok() -> None:
     app = _bare_app()
     client = TestClient(app, raise_server_exceptions=False)

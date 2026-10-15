@@ -127,7 +127,8 @@ curl -s -X POST http://127.0.0.1:8080/v1/acme/graph/metrics:compute \
   -d '{"metrics": ["degree", "pagerank", "components"]}'
 ```
 
-The full, live API contract is at `http://127.0.0.1:8080/docs` (OpenAPI: `/openapi.json`).
+The full, live API contract is at `http://127.0.0.1:8080/docs` (Swagger UI), `/redoc` (ReDoc) and
+`/openapi.json`.
 
 **A tenant to explore:** `GRAPHOS_URL=http://127.0.0.1:8080 GRAPHOS_USER=graphos GRAPHOS_PASSWORD=<yours> python clients/python/examples/08_demo_ecosystem.py` loads the demo tenant (an invented software ecosystem, about 450 nodes) and runs the algorithms on it; then open the UI.
 

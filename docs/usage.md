@@ -3,7 +3,9 @@
 A practical guide to integrating with graphos, a multi-tenant property-graph service (FastAPI on
 PostgreSQL 16 + Apache AGE 1.6). The service code is the reference: routers live in
 `services/graphos/src/graphos/api/` and wire contracts in `services/graphos/src/graphos/contracts/`.
-The live OpenAPI schema is served at `/docs` and `/openapi.json`.
+The live OpenAPI schema is served at `/openapi.json`, and read as Swagger UI at `/docs` or as
+ReDoc at `/redoc` (both pages load their scripts from cdn.jsdelivr.net, so they need internet
+access in the browser; `/openapi.json` does not).
 
 Examples use tenant `acme`, vertex labels `User`, `Document` and `Tag`, and edge labels `AUTHORED`,
 `FOLLOWS`, `TAGGED_WITH` and `WRITTEN_BY`.
@@ -192,7 +194,8 @@ curl -s -X POST "$G/v1/grants" -H "Authorization: Bearer $TOKEN" -H "Content-Typ
 # The service: GRAPHOS_USER=loader GRAPHOS_PASSWORD=<secret>; its client signs in and renews.
 ```
 
-These endpoints need no token: `/healthz`, `/readyz`, `/metrics`, `/v1/info`, `/`, `/docs`, and
+These endpoints need no token: `/healthz`, `/readyz`, `/metrics`, `/v1/info`, `/`, `/docs`, `/redoc`,
+`/openapi.json`, and
 `/v1/auth/login`, `/refresh`, `/logout`, `/config`, `/oidc/start`, `/oidc/callback`.
 
 `GET /v1/me` tells a signed-in user who it is: `{"consumer", "kind", "via", "admin",
