@@ -4,7 +4,7 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.9.1 — 2026-10-15
 
 A security fix for the Cypher console on AGE 1.6, and a fix for exports of large tenants. No
 database migration; nothing else changes.
