@@ -4,7 +4,7 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.10.0 — 2026-10-15
 
 The bundled database moves to PostgreSQL 18 with Apache AGE 1.8, and `docker compose up` moves an
 existing PostgreSQL 16 stack's data there by itself; PostgreSQL 16 with AGE 1.6 is deprecated.
