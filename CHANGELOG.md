@@ -10,8 +10,24 @@ The bundled database moves to PostgreSQL 18 with Apache AGE 1.8, and `docker com
 existing PostgreSQL 16 stack's data there by itself. graphos itself is one image, as before, and
 runs on either database: CI runs the server's tests against both.
 
+### Added
+
+- **`tools/export/ndjson_to_age.py`**: loads a dataset export into a plain Apache AGE graph,
+  without graphos: one label table per label and type, with AGE's own columns only, so AGE's
+  variable-length patterns work on it. For leaving graphos, or for analysis in plain AGE. See
+  [Reading graphos's data without graphos](docs/without-graphos.md).
+- **Docs:** direct SQL readers (a read-only role per tenant, AGE 1.8 required; installation §8);
+  an application that forwards its users' tokens, so the audit names the person (sso §4a);
+  measurements on PostgreSQL 18 / AGE 1.8 (apache-age.md §12).
+
 ### Changed
 
+- **Capped `neighbors` and `expand` answer the same rows however the table is stored.** When the
+  cap cuts a result, the rows returned are the first in graph-id order (the order nodes were
+  loaded in), not the first the table happens to hold: a dump and a restore, the move to
+  PostgreSQL 18, or rows moved by updates give the same answer (measured: identical on PostgreSQL
+  16 and its PostgreSQL 18 restore, where all four capped reads differed before). Below the cap
+  nothing changes.
 - **PostgreSQL 18 with AGE 1.8.** `graphos-db` runs `apache/age:release_PG18_1.8.0`, pinned by
   digest, on a new volume, `graphos_data_pg18` (the data where it is mounted, `PGDATA` set as
   before PostgreSQL 18's images moved it). PostgreSQL 16 with AGE 1.6 is still supported.

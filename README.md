@@ -222,6 +222,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 |---|---|
 | [Whitepaper](https://graphos-pomentum.vercel.app) ([source](docs/whitepaper.html)) | The problem, the approach, the benefits |
 | [Installation guide](docs/installation.md) | Installing, the first sign-in, users, single sign-on, production settings, upgrading |
+| [Reading graphos's data without graphos](docs/without-graphos.md) | The table layout, reading it with SQL or Cypher, taking it out, loading an export into plain AGE |
 | [Upgrading the database](docs/upgrade-postgresql-18.md) | Moving from PostgreSQL 16 / AGE 1.6 (deprecated) to PostgreSQL 18 / AGE 1.8 with `docker compose up` |
 | [Single sign-on](docs/sso.md) | Registering graphos at an OpenID Connect provider, a Keycloak example, troubleshooting |
 | [Graph algorithms](docs/algorithms.md) | What Louvain, PageRank, betweenness, components and degree find, and what they are for |

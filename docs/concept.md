@@ -1014,8 +1014,9 @@ reasons:
 - **Stability.** When an AGE label table has any column beyond AGE's own
   (bootstrap's `end_community_id` on edge tables, §2.3, or a declared
   generated column on a vertex label), AGE 1.6 segfaults the
-  Postgres backend on a Cypher `SET` / `MERGE … SET` that writes a row into
-  that table, which restarts the server and drops every connection. Plain SQL
+  Postgres backend on a Cypher `SET` / `MERGE … SET` into an edge table, which
+  restarts the server and drops every connection, and AGE 1.8 refuses such
+  writes. Plain SQL
   never enters AGE's tuple-building code, so generated columns on vertex
   labels are safe and are filled correctly by these writes.
 

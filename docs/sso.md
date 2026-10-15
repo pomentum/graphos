@@ -95,6 +95,41 @@ bearer. Its `aud` must be `GRAPHOS_OIDC_AUDIENCE` (default: the client id), and 
 from `oidc-client:<its client id>` (and its subject, groups and roles). The Python client takes
 such tokens with `BearerAuth(source)`.
 
+## 4a. An application that calls graphos for its users
+
+When people use graphos through another application (a portal or an API in front of graphos),
+the audit log and the access checks can still be per person: the application **forwards the
+person's own access token** from the identity provider, instead of calling graphos with its own
+service account.
+
+- **What the application sends:** `Authorization: Bearer <the person's access token>` on every
+  call to graphos. graphos validates it at the provider (signature, issuer, expiry) and takes the
+  person's grants from their subject, groups and roles, as for a sign-in. No graphos session is
+  created and nothing else is needed.
+- **Audience:** the token must be issued for graphos's API: its `aud` must be
+  `GRAPHOS_OIDC_AUDIENCE` (by default graphos's client id). At most providers this means
+  requesting a token for graphos's API scope, or an on-behalf-of exchange of the application's
+  own user token for one with graphos's audience. A token for another audience is refused (401).
+- **Name in the audit log:** the claim `GRAPHOS_OIDC_CONSUMER_CLAIM` (default
+  `preferred_username`). A token carrying a name (`preferred_username`, `email` or `name`) is a
+  person; one without is a program and is recorded by its client (`azp`).
+- **Groups:** read from `GRAPHOS_OIDC_GROUPS_CLAIM` (default `groups`) in the access token; grant
+  access to `oidc-group:<group>` (§4).
+- **Lifetime and revocation:** graphos checks each token as it comes, so it is valid until it
+  expires at the provider (often 5–60 minutes); revoking it at the provider takes effect at its
+  expiry. Disabling the person or removing a grant in graphos takes effect at once.
+
+An audit line for such a call (`graphos.audit`, one JSON line on stdout):
+
+```json
+{"event": "write", "logger": "graphos.audit", "method": "POST", "path": "/v1/tenants",
+ "consumer": "a.nalyst", "args_hash": "…", "status": 200, "elapsed_ms": 12}
+```
+
+With a service account instead, every line carries that account's name, and the application
+must keep its own record of who asked. Tested in `tests/test_oidc_db.py`
+(`test_an_analysts_token_passed_on_is_audited_as_the_analyst`).
+
 ## 5. Checking it works
 
 1. `curl -s $G/v1/auth/config` shows the issuer and client id.

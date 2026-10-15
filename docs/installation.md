@@ -259,10 +259,38 @@ the communities. Then open the UI, pick `demo`, and use *Explore → Graph → C
 - **Several deployments, one provider.** Give each its own `GRAPHOS_AUTH_ISSUER`, so a token from
   one is never accepted by another.
 - **Sizing and backups.** Raise the database's memory settings for large graphs
-  ([tuning](apache-age.md)); back up the `graphos_data` volume or the database with the tools you
-  use for any PostgreSQL.
+  ([tuning](apache-age.md)); back up the `graphos_data_pg18` volume or the database with the tools
+  you use for any PostgreSQL (`pg_dump -Fc` and a restore are what the
+  [upgrade](upgrade-postgresql-18.md) itself runs, then AGE's catalogue fix).
 - **Several replicas** of graphos-api can share one database behind a load balancer
   ([usage §11](usage.md#several-replicas)).
+
+### Direct SQL readers
+
+Reports, notebooks or a DBA may read graphos's tables directly (they are plain AGE tables, see
+[apache-age.md](apache-age.md) §2). Give them a role of their own that can only read, per tenant
+schema, with a statement timeout. **This needs AGE 1.8:** on AGE 1.6 a role with only `SELECT`
+can still change and delete rows through Cypher `SET`, `REMOVE` and `DELETE` (only `CREATE` and
+`MERGE` are refused), so do not give direct Cypher access on AGE 1.6. On AGE 1.8 every Cypher write
+from such a role is refused ("permission denied"; both verified).
+
+```sql
+CREATE ROLE report_reader LOGIN PASSWORD '...';
+ALTER ROLE report_reader SET search_path = ag_catalog, "$user", public;
+ALTER ROLE report_reader SET statement_timeout = '30s';
+ALTER ROLE report_reader SET default_transaction_read_only = on;
+GRANT CONNECT ON DATABASE graphos TO report_reader;
+-- per tenant: its schema is its name
+GRANT USAGE ON SCHEMA ag_catalog, "sales" TO report_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA ag_catalog, "sales" TO report_reader;
+-- label tables graphos creates later, for new labels
+ALTER DEFAULT PRIVILEGES FOR ROLE graphos_app IN SCHEMA "sales" GRANT SELECT ON TABLES TO report_reader;
+```
+
+Grant nothing on `graphos_meta`: it holds users, grants and the token signing key. Such a reader
+cannot run variable-length patterns (`-[*1..3]->`) either: AGE refuses graphos's tables for them
+([apache-age.md](apache-age.md) §5), at once and harmlessly on 1.8. Reads by these roles are not
+in graphos's audit log; use PostgreSQL's logging (`log_statement`, `pgaudit`) if they must be.
 
 ## 9. Settings for sign-in and access
 

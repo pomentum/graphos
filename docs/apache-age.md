@@ -9,17 +9,22 @@ For the write-path templates in more detail see
 
 ---
 
-## 1. Cypher syntax — what AGE 1.6 rejects
+## 1. Cypher syntax — what AGE rejects
 
-| Pattern | Status | Workaround |
-|---|---|---|
-| `SET n += $param` (parametric map) | ❌ rejected | Inline as Cypher map literal: `SET n += {k: 'v', …}` |
-| `SET n += row.props` (UNWIND projection) | ❌ rejected | Same — inline literal, one `cypher()` call per row |
-| `ON CREATE SET … ON MATCH SET …` | ❌ rejected at parse | Always plain `SET` after `MERGE` |
-| Multi-label `(:L1:L2 …)` in `CREATE/MERGE/MATCH` | ❌ parse error | Postgres `INHERIT` between label tables (see §3) |
-| Multiple `;`-separated statements inside one `cypher(...)` call | ❌ rejected | One statement per cypher() call |
-| `WITH …`-chained `MERGE`s for batched writes | ⚠️ super-linear | Never chain >1 MERGE — issue separate cypher() calls or use COPY (see §5) |
-| Cypher `SET` on a label whose table has extra (non-AGE) columns | 💥 backend segfault (1.6); 1.8 writes NULL into those columns | Write that label with plain SQL only (see §5) |
+Checked row by row on 2026-10-15, on AGE 1.6.0 (PostgreSQL 16) and AGE 1.8.0 (PostgreSQL 18), on
+scratch graphs shaped like graphos's (`graphos_rev` on both parent tables, the two community
+columns on edges).
+
+| Pattern | AGE 1.6.0 | AGE 1.8.0 | Workaround |
+|---|---|---|---|
+| `SET n += $param` (parametric map) | ❌ "SET clause expects a map" | ❌ same | Inline a map literal: `SET n += {k: 'v', …}` (works on both) |
+| `SET n += row.props` (`UNWIND` projection) | ❌ "SET clause expects a map" | ❌ same | Same: inline literal, one `cypher()` call per row |
+| `ON CREATE SET … ON MATCH SET …` | ❌ syntax error at `ON` | ✅ works | On 1.6: plain `SET` after `MERGE` |
+| Multi-label `(:L1:L2 …)` in `CREATE/MERGE/MATCH` | ❌ syntax error | ❌ syntax error | Postgres `INHERIT` between label tables (§3) |
+| Several `;`-separated statements in one `cypher(...)` call | ❌ syntax error | ❌ syntax error | One statement per `cypher()` call |
+| `WITH …`-chained `MERGE`s for batched writes | ⚠️ super-linear (measured earlier) | not measured | Never chain >1 `MERGE`; separate calls, or COPY (§5) |
+| Cypher `SET` / `MERGE … SET` on an **edge** table with extra columns | 💥 backend segfault: the server restarts, every connection drops (reproduced) | ❌ "null value in column graphos_rev" (the row is rebuilt without the extra columns) | Write with plain SQL only (§5) |
+| Cypher `SET` / `CREATE` / `MERGE … SET` on a **vertex** table with an extra column | ⚠️ carried out, but the extra columns are not kept up (`graphos_rev` not bumped) | ❌ `SET`, `MERGE … SET`: "null value in column graphos_rev"; `CREATE`: "invalid perminfoindex" | Same |
 
 The right mental model: AGE is a **Postgres extension that transpiles
 openCypher to SQL**. Anything that doesn't have a clean SQL lowering
@@ -203,19 +208,22 @@ transaction. `snapshot-import` buffers up to 5,000 rows per group, flushes
 buffered nodes before every edge flush, and commits each batch on its own;
 it has the same write path and throughput as the `:bulk` endpoints.
 
-### Pitfall: extra columns on a label table + Cypher `SET` → backend segfault
+### Pitfall: extra columns on a label table + Cypher writes → a segfault (1.6) or a refusal (1.8)
 
 AGE builds the tuple for a Cypher write from its own idea of the label
-table's columns. If a label table carries an **extra column** that AGE did
-not create, AGE 1.6.0 segfaults the Postgres backend on any Cypher `SET` or
-`MERGE … SET` that writes a row of that label, new or existing. The
-postmaster then restarts the whole server and every connection drops.
+table's columns. On AGE 1.6.0, a Cypher `SET` or `MERGE … SET` on an
+**edge** table that carries extra columns segfaults the Postgres backend;
+the postmaster then restarts the whole server and every connection drops
+(reproduced 2026-10-15). On a **vertex** table with one extra column the
+same writes, and `CREATE`, are carried out but leave the extra columns as
+they were, so graphos's revision is not bumped and the change feed misses
+the write.
 
 graphos label tables always carry such columns: bootstrap adds
 `graphos_rev` to every label table (through AGE's two parent tables), and
 `end_community_id` and `start_community_id` to every edge table (§9,
 community-scoped traversal); declared `generated_columns` add more to vertex
-labels. Verified live on AGE 1.6.0. AGE 1.8.0 no longer crashes
+labels. AGE 1.8.0 no longer crashes
 (apache/age#2458) but rebuilds the row from `id` and `properties` only: a
 `SET` writes NULL into the extra columns, which fails on `graphos_rev` (NOT
 NULL), and a `CREATE` on a graphos label table fails with `invalid
@@ -555,6 +563,17 @@ aggregates back.
   compared every edge with every vertex (76.6 s for the first 2,000 rows,
   where the same statement runs in 2.1 s). Index temporary tables a cursor
   joins.
+- **More than 128 graphs on AGE 1.8: a warning per write.** AGE 1.8 keeps a
+  shared-memory version counter per graph, to invalidate its in-memory graph
+  (the one variable-length patterns use), for at most 128 graphs since the
+  server started; slots are not reused when a graph is dropped. Past that,
+  each write statement to another graph logs `AGE: graph version counter
+  table full (128 graphs)` and AGE falls back to its older check. graphos
+  never uses that in-memory graph, so nothing else changes: on a server with
+  many tenants (or after a test suite) expect the warning in PostgreSQL's
+  log until a restart. The statement-level trigger behind it
+  (`_age_cache_invalidate`) is on label tables AGE 1.8 creates, not on tables
+  restored from 1.6.
 - **After a restore, gather statistics.** A dump carries no planner
   statistics; run `vacuumdb --analyze-only --jobs N` before traffic (the
   compose's PostgreSQL 18 import does).
@@ -575,7 +594,7 @@ and reports it in `GET /v1/info`. CI runs the server's tests against both.
 
 | Pitfall | Upstream |
 |---|---|
-| Cypher write on a label table with extra columns segfaults (§5) | No crash from 1.8.0 (apache/age#2458), but the extra columns are written NULL: graphos still writes with SQL only |
+| Cypher `SET` on an edge table with extra columns segfaults (§5) | No crash from 1.8.0 (apache/age#2458); the write is refused (the extra columns would be NULL): graphos still writes with SQL only |
 | Variable-length patterns and `vertex_stats()`: the mutex left locked (§5) | Fixed in 1.8.0 (apache/age#2433); verified: the session stays usable |
 | Variable-length patterns and `vertex_stats()`: the column-count check (§5) | Open (apache/age#2583): the console refuses them; the API never needs them |
 | Cypher `SET` / `REMOVE` / `DELETE` carried out in a read-only transaction (§5) | Stopped from 1.8.0 (verified); graphos's console refuses write clauses on every version |
@@ -597,7 +616,57 @@ a new OID, which AGE's catalogue records: point `ag_graph.graphid` and
 
 ---
 
-## 12. References
+## 12. Measured on PostgreSQL 18 / AGE 1.8
+
+Measured 2026-10-15 on a laptop (8 cores, Docker VM with 16 vCPUs and 31 GB), with the image's
+default PostgreSQL settings (128 MB `shared_buffers`) on both databases, one graphos worker, on
+a 251,246-node, 940,144-edge graph (24 labels; computed metrics and communities), against the
+same graph on PostgreSQL 16.10 / AGE 1.6.0 and on its PostgreSQL 18.6 / AGE 1.8.0 restore.
+
+**A mix of 12 reads** (node by id, neighbours, expand 2 hops, paths ≤ 4 hops, search, a
+filtered `nodes:scan` page, community ids, a histogram, four console queries), 30 warm runs
+each, no think time:
+
+| | PostgreSQL 16 / AGE 1.6 | PostgreSQL 18 / AGE 1.8 |
+|---|---:|---:|
+| 1 user, 360 requests | 85 s | **67 s** |
+| 5 users, 360 requests | 57 s | **35 s** |
+| paths ≤ 4 hops, p50, 1 / 5 users | 305 / 1233 ms | **154 / 529 ms** |
+| neighbours (200), p50, 5 users | 784 ms | **350 ms** |
+| console aggregate over every institution, p50, 1 / 5 users | 1035 / 2709 ms | **621 / 1397 ms** |
+| errors | 0 of 840 | 0 of 840 |
+
+PostgreSQL 18's tables were compact after the restore, while the PostgreSQL 16 copy carried
+about 3× dead space; that favours PostgreSQL 18.
+
+**Dataset export and import** (PostgreSQL 18, under a five-user read load with 0.5 s think
+time; 3,842 concurrent requests, all answered):
+
+| | Time | graphos memory, peak |
+|---|---:|---:|
+| export, every node and edge with computed values, gzip (32 MB) | 71 s | 105 MiB |
+| import into an empty tenant (`mode=empty`) | 470 s | 158 MiB |
+
+The copy's content checksum matched the source's. An import writes about 2,500 rows/s here: each
+row goes through the tenant's indexes (13 property, trigram and search indexes on this graph), and
+the edge community columns are restored after the edges.
+
+**Recompute** (PostgreSQL 18): degree, PageRank and components 19 s; Louvain 52 s (144
+communities); betweenness skipped (`GRAPHOS_BETWEENNESS_MAX_NODES`, 20,000).
+
+**Moving PostgreSQL 16 to 18** (dump and restore, as the compose does): a 9.5 GB database with
+five tenants in 12 minutes, 4.3 GB afterwards; a 2 GB tenant's restore in 72 s plus 36 s of
+statistics.
+
+**Fixed after these measurements showed them:**
+
+| | Before | After |
+|---|---:|---:|
+| full dataset export (the cursor over an unindexed table, §10) | not done after 33 min | 71 s |
+| a filtered `nodes:scan` on PostgreSQL 18 (filter costing, §10) | 350 ms | 37 ms |
+| the same scan after its fifth run on a connection (generic plan, §10) | about 1 s | 50 ms |
+
+## 13. References
 
 - AGE source — `apache/age` on GitHub
 - apache/age#2177 — performance of upserting 10k+ edges with `MERGE`:

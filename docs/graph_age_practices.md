@@ -19,7 +19,7 @@ What Neo4j-style Cypher accepts that AGE 1.6 does not:
 | `ON CREATE SET … ON MATCH SET …` | rejected — parse error |
 | Multi-label syntax `(:L1:L2 …)` in CREATE / MERGE / MATCH | rejected — parse error at second `:` |
 | `;` between cypher statements inside one `cypher(...)` call | rejected — one statement per call |
-| Cypher `SET` on a label whose table has extra (non-AGE) columns | backend segfault (AGE 1.6.0) |
+| Cypher `SET` on an edge table with extra (non-AGE) columns | backend segfault (AGE 1.6.0); on a vertex table it writes but skips graphos's revision |
 
 AGE 1.8.0 accepts `ON CREATE SET` / `ON MATCH SET` and no longer segfaults,
 but its Cypher writes still break graphos's label tables: a `SET` writes NULL
@@ -50,8 +50,9 @@ plus the workaround a per-row Cypher write would need:
   (bootstrap's `graphos_rev` on every table, `end_community_id` and
   `start_community_id` on every edge table, declared generated columns on
   vertex labels), AGE 1.6 segfaults the Postgres backend on a Cypher `SET` /
-  `MERGE … SET` that writes a row into that table (verified live; the
-  server restarts and every connection drops). `graphos.writes`
+  `MERGE … SET` into an edge table (verified live; the server restarts and
+  every connection drops), and writes vertex rows without keeping graphos's
+  columns up; AGE 1.8 refuses both. `graphos.writes`
   therefore upserts nodes and edges with SQL only (§3): `INSERT …
   ON CONFLICT ((properties->'"id"'))` for nodes and `ON CONFLICT
   (start_id, end_id)` for edges, both `DO UPDATE SET properties =
