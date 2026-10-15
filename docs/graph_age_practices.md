@@ -21,7 +21,8 @@ What Neo4j-style Cypher accepts that AGE 1.6 does not:
 | `;` between cypher statements inside one `cypher(...)` call | rejected — one statement per call |
 | Cypher `SET` on an edge table with extra (non-AGE) columns | backend segfault (AGE 1.6.0); on a vertex table it writes but skips graphos's revision |
 
-AGE 1.8.0 accepts `ON CREATE SET` / `ON MATCH SET` and no longer segfaults,
+AGE 1.8.0 accepts `ON CREATE SET` / `ON MATCH SET` (the other rejections hold
+on 1.8.0 too) and no longer segfaults,
 but its Cypher writes still break graphos's label tables: a `SET` writes NULL
 into the extra columns (`graphos_rev` is NOT NULL) and a `CREATE` fails with
 `invalid perminfoindex` (see [`apache-age.md` §11](./apache-age.md#11-upstream-status)).
@@ -111,8 +112,8 @@ creates these indexes automatically; see `graphos.bootstrap.bootstrap_tenant`.
 Because the unique index is per label table and Postgres unique indexes
 are not inherited, the same id may exist once per label.
 
-**Never range-scan an agtype index with `>=`.** AGE 1.6.0's btree operator
-class (`agtype_ops_btree`) registers `>` under strategy 4 and `>=` under
+**Never range-scan an agtype index with `>=`.** AGE's btree operator
+class (`agtype_ops_btree`, in 1.6.0 and 1.8.0) registers `>` under strategy 4 and `>=` under
 strategy 5, the other way round from Postgres's btree convention (4 is
 `>=`, 5 is `>`). An index scan for `key >= v` therefore starts *after* the
 entries equal to `v` and silently returns fewer rows; a sequential scan, or
@@ -134,8 +135,8 @@ WHERE f.opfname = 'agtype_ops_btree' ORDER BY 1;
 ### Per-row MERGE inside one transaction — not used
 
 The simplest correct Cypher shape. graphos does **not** use it for nodes
-or edges: it is slow, and it crashes the backend on any label table
-carrying extra columns (§1). Each row is a separate `cypher(...)`
+or edges: it is slow, and on any label table carrying extra columns it
+crashes the backend on AGE 1.6 and is refused on AGE 1.8 (§1). Each row is a separate `cypher(...)`
 invocation; a surrounding transaction keeps each batch atomic.
 
 ```sql
@@ -291,8 +292,9 @@ escaping `'` in the name.
 The COPY numbers are from `scripts/bench_bulk_write.py` (13k nodes, 44k
 edges, single host); the per-row number from an earlier graphos with a
 Cypher write path. There is no choice to make: the COPY-staged SQL path is
-graphos's only write path, for throughput and because Cypher writes crash
-the backend on label tables with extra columns (§1). The contract surface
+graphos's only write path, for throughput and because Cypher writes on
+label tables with extra columns crash the backend on AGE 1.6 and are
+refused on AGE 1.8 (§1). The contract surface
 is thinner on the COPY path (AGE's invariants shift to the writer), which
 graphos covers by validating labels and by the endpoint JOIN.
 

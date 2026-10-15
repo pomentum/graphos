@@ -35,16 +35,17 @@ long it takes, how to check it and how to go back.
   Paths and aggregate queries ran 1.7–2.3× faster.
 
 graphos's API and data do not change: the same tenants, users, grants, saved queries, change
-feed, revisions and sessions, the same requests and answers.
+feed, revisions and sessions, the same requests and answers. (What else the release that brings
+the move changes is in the [changelog](../CHANGELOG.md).)
 
 ## Before you start
 
 - **Back up.** The move leaves the PostgreSQL 16 volume `graphos_data` as it was, but take your
   usual backup anyway (a snapshot of the volume, or `pg_dump`).
 - **Disk.** The new volume needs about the size of the restored database, which is usually
-  *smaller* than today's (a restore leaves dead rows behind: a 9.5 GB database came back as
-  4.3 GB). The dump in between is compressed; plan for the size of the database again, free, to
-  be safe.
+  *smaller* than today's (a restore does not carry the old database's dead rows: a 9.5 GB
+  database came back as 4.3 GB). The dump in between is compressed; plan for the size of the
+  database again, free, to be safe.
 - **Downtime.** graphos-api is down from the start of the move until it is ready again. The move
   takes about as long as a dump and a restore of the database, plus the statistics: measured on
   a laptop, a 9.5 GB database with five tenants in about 12 minutes; a 2 GB tenant restore in
@@ -91,8 +92,8 @@ Rules that keep the move safe:
 
 - **Every later start has nothing to do.** Both one-shots find the move made and exit at once;
   so do they on a new install.
-- **A failed import leaves nothing behind**, keeps `graphos-api` from starting, and runs again
-  from the start on the next `up`.
+- **A failed import changes nothing graphos uses** (its half-restored copy is dropped by the next
+  try), keeps `graphos-api` from starting, and runs again from the start on the next `up`.
 - **The dump is never loaded over a database graphos has used**, so data written after the move
   is never replaced by older data, even if `graphos_upgrade` is removed while `graphos_data` is
   kept.
@@ -133,7 +134,7 @@ docker compose -f docker-compose.graphos.yml up -d
 
 It comes back as it was before the move: **what was written on PostgreSQL 18 since is not in
 it.** To keep that, export the tenants first (`GET /v1/{tenant}/graph/snapshot`) and import them
-after going back.
+(`POST /v1/{tenant}/graph/snapshot-import`) after going back.
 
 ## Clean up
 
@@ -169,7 +170,7 @@ pg_dump -h OLD -U graphos -d graphos -Fc -f graphos.dump
 # 2. On PostgreSQL 18 with AGE 1.8 (shared_preload_libraries=age,pg_stat_statements),
 #    with graphos's roles created as in services/graphos/deploy/db-init/01-app-role.sh:
 createdb -h NEW -U graphos graphos
-pg_restore -h NEW -U graphos -d graphos --exit-on-error graphos.dump
+pg_restore -h NEW -U graphos -d graphos --exit-on-error graphos.dump   # serial: no -j / --jobs
 
 # 3. AGE's catalogue, then planner statistics
 psql -h NEW -U graphos -d graphos -v ON_ERROR_STOP=1 <<'SQL'
@@ -187,6 +188,13 @@ vacuumdb -h NEW -U graphos -d graphos --analyze-only --jobs 4
 
 # 4. Point graphos-api at NEW (GRAPHOS_DB_HOST ...) and start it.
 ```
+
+**Restore serially.** Do not pass `-j` / `--jobs` to `pg_restore`: AGE's catalogue tables
+`ag_graph` and `ag_label` are then restored in parallel, `ag_label` can load first, and the restore
+fails (`COPY failed for table "ag_label"` … `violates foreign key constraint "fk_graph_oid"`, and
+a worker dies). The same dump restores correctly without `-j` (checked on PostgreSQL 18 / AGE 1.8:
+the contents matched by checksum). Only the restore must be serial: a parallel dump
+(`pg_dump -Fd -j N`) is fine.
 
 [`deploy/db-upgrade/import-pg18.sh`](../services/graphos/deploy/db-upgrade/import-pg18.sh) is the
 same procedure as the compose runs it. Managed services (Azure, AWS, …) that offer AGE 1.8 on

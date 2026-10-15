@@ -22,12 +22,12 @@ once it runs is in the [usage guide](usage.md).
 
 | Part | Image | Role |
 |---|---|---|
-| `graphos-db` | `apache/age:release_PG18_1.8.0` (pinned by digest) | PostgreSQL 18 with Apache AGE 1.8 (PostgreSQL 16 / AGE 1.6 is deprecated). On an internal network: nothing but graphos-api reaches it. |
+| `graphos-db` | `apache/age:release_PG18_1.8.0` (pinned by digest) | PostgreSQL 18 with Apache AGE 1.8 (PostgreSQL 16 / AGE 1.6 is deprecated). On an internal network: nothing but graphos-api (and, for an upgrade, graphos-db-import) reaches it. |
 | `graphos-db-export`, `graphos-db-import` | `apache/age` for PostgreSQL 16 and 18 | One-shot: move a PostgreSQL 16 database to PostgreSQL 18 on the first start after an upgrade ([§11](#11-upgrading-from-postgresql-16)); otherwise they exit at once. |
 | `graphos-api` | built from `services/graphos` (published: `ghcr.io/<owner>/graphos-api`) | The REST API, sign-in and the background jobs. Listens on `127.0.0.1:8080`. |
 | `graphos-ui` (optional) | built from `services/graphos-ui` (published: `ghcr.io/<owner>/graphos-ui`) | The web UI: static files and a same-origin proxy to the API, no state of its own. Listens on `127.0.0.1:8081`. |
 
-[`docker-compose.graphos.yml`](../docker-compose.graphos.yml) runs all three.
+[`docker-compose.graphos.yml`](../docker-compose.graphos.yml) runs all of them.
 
 **Requirements:** Docker with Compose v2, and about 4 GB of memory for Docker (the defaults are
 laptop-sized; [tuning](apache-age.md) covers graphs of millions of edges). For single sign-on, an
@@ -53,7 +53,9 @@ curl -s http://127.0.0.1:8080/readyz    # {"status":"ready",...}
 - Consumers in other compose projects attach to the `graphos-net` network and call
   `http://graphos-api:8080`.
 
-The data lives in the `graphos_data` volume. `docker compose ... down` keeps it; `down -v` deletes it.
+The data lives in the `graphos_data_pg18` volume (`graphos_data` and `graphos_upgrade` matter only
+after an upgrade from PostgreSQL 16, [§11](#11-upgrading-from-postgresql-16)). `docker compose ... down`
+keeps them; `down -v` deletes all three.
 
 ## 3. The first sign-in
 

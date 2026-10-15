@@ -144,7 +144,7 @@ Plan shape for `MATCH (n:Person {id: …})`:
 ```
 
 **Do not use `>=` against a btree index on an agtype expression.** AGE
-1.6 registers `>=` and `>` under each other's btree strategy numbers in
+1.6.0 and 1.8.0 register `>=` and `>` under each other's btree strategy numbers in
 `agtype_ops_btree` (4 is `>`, 5 is `>=`; PostgreSQL's are the other way
 round), so an index scan for `expr >= v` starts after the entries equal to
 `v` and silently loses them; a sequential scan of the same query returns
@@ -478,7 +478,7 @@ MVCC and GIN page-lock overhead.
 
 ## 9. Community detection (Louvain)
 
-`POST /v1/{tenant}/recompute-communities` (admin; needs the optional
+`POST /v1/{tenant}/recompute-communities` (`maintain` on the tenant; needs the optional
 `louvain` extra, otherwise 501) runs in three phases. The response
 reports each phase's duration (`edge_stream_ms`, `writeback_ms`, …).
 
@@ -624,7 +624,7 @@ a 251,246-node, 940,144-edge graph (24 labels; computed metrics and communities)
 same graph on PostgreSQL 16.10 / AGE 1.6.0 and on its PostgreSQL 18.6 / AGE 1.8.0 restore.
 
 **A mix of 12 reads** (node by id, neighbours, expand 2 hops, paths ≤ 4 hops, search, a
-filtered `nodes:scan` page, community ids, a histogram, four console queries), 30 warm runs
+filtered `nodes:scan` page, community ids, a label histogram (since replaced by `nodes/aggregate`), four console queries), 30 warm runs
 each, no think time:
 
 | | PostgreSQL 16 / AGE 1.6 | PostgreSQL 18 / AGE 1.8 |
@@ -633,7 +633,7 @@ each, no think time:
 | 5 users, 360 requests | 57 s | **35 s** |
 | paths ≤ 4 hops, p50, 1 / 5 users | 305 / 1233 ms | **154 / 529 ms** |
 | neighbours (200), p50, 5 users | 784 ms | **350 ms** |
-| console aggregate over every institution, p50, 1 / 5 users | 1035 / 2709 ms | **621 / 1397 ms** |
+| console aggregate over a whole label, p50, 1 / 5 users | 1035 / 2709 ms | **621 / 1397 ms** |
 | errors | 0 of 840 | 0 of 840 |
 
 PostgreSQL 18's tables were compact after the restore, while the PostgreSQL 16 copy carried

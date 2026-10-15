@@ -237,35 +237,38 @@ the best hit per community, and the bridges among the nodes reached.
 
 ### On a large graph
 
-The same steps on a code graph of about 570,000 nodes and 10 million edges:
+The same steps on a large code graph (about ten million edges):
 
-- **Communities.** The recompute kept 258 communities, modularity 0.85. Two hops from the hubs of
-  the eight largest reached 7,999 nodes, 1,154 of them (14%) outside the starting community;
-  scoped, none. The first recompute after upgrading to a version with `start_community_id` fills
-  that column on every edge and took about 16 minutes; later ones write only what moved.
+- **Communities.** The recompute kept 258 communities. Two hops from the hubs of the largest ones
+  reached many nodes outside the starting community; scoped, none. The first recompute after
+  upgrading to a version with `start_community_id` fills that column on every edge, so it takes
+  much longer than later ones, which write only what moved.
 - **PageRank needs the right relationships.** Computed over every relationship type, the name hits
   of a search (mostly folders and files) all had the same base value, so weighting by it changed
   nothing. Computed over the code relationships only (calls, imports, inheritance, type
-  references, dependencies), it covered 302,989 nodes in 1,891 components and took about 16
-  minutes. Nodes outside those relationships get no PageRank, so leave their score as it is.
+  references, dependencies), it told them apart. Nodes outside those relationships get no
+  PageRank, so leave their score as it is.
 - **Generic hubs dominate functions.** The most central functions were `equals`, `toString`,
-  `add` and the like, with a degree up to 26,099. Weigh a very high `graphos_degree` down, or
-  compute on a subgraph that leaves them out.
-- **Diversify works.** Keeping the best hit per community put 4 to 7 communities in each top 10.
+  `add` and the like, with very high degrees. Weigh a very high `graphos_degree` down, or compute
+  on a subgraph that leaves them out.
+- **Diversify works.** Keeping the best hit per community put several communities in each top 10.
 
 ## Reserved properties
 
 graphos writes `graphos_*` properties itself, so any write that uses one (node or edge, single,
 batch or bulk, a merge-patch removing one included) is refused with `400`: computed values never
-collide with a consumer's own data. `community_id` is written by the community recompute only.
+collide with a consumer's own data. `community_id` is written by the community recompute only:
+a write that sets or removes it is refused the same way.
 Snapshot import is the exception: it writes both as the file has them, so a dataset export
 (`GET …/graph/snapshot`) restores with them.
 
 ## Sizing
 
 The first metrics run writes every node taking part, in statements of 25,000 nodes in one
-transaction (all or nothing); on about 500,000 nodes and 10 million edges it takes minutes, most of
-it updating the nodes' indexes. A later run on an unchanged graph reads the edges, computes,
-compares and writes nothing. A community recompute on the same graph reads the edges once more
+transaction (all or nothing); a first run of degree, PageRank and components took 51 s on 270,000
+nodes and 1 million edges, and 152 s on 810,000 nodes and 3 million edges
+([measurements](apache-age.md#12-measured-on-postgresql-18--age-18)), most of it updating the
+nodes' indexes. A later run on an unchanged graph reads the edges, computes, compares and writes
+nothing. A community recompute on the same graph reads the edges once more
 and writes only the nodes whose community changed. Both hold the edges as compact integer arrays,
 so memory grows with the number of edges, not with their properties.

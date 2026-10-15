@@ -4,6 +4,51 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+The label histogram, deprecated in 0.10.0, is removed: `nodes/aggregate` now counts the distinct
+values too, and the web UI uses it. The Python client catches up with the server: property
+definitions and checks, and the parameters and fields it was missing. The documentation is brought
+in line with the code throughout.
+
+### Removed
+
+- **`GET /v1/{tenant}/graph/labels/{label}/histogram`**, the client's `label_histogram` and the
+  `HistogramResponse` / `HistogramRow` models. Use `POST /v1/{tenant}/graph/nodes/aggregate` with
+  `missing: true` (client: `aggregate_nodes(label=..., group_by=..., missing=True)`): the same
+  counts, nodes without the property under `""`, `total` for `n_total` and `distinct` for
+  `n_distinct`.
+
+### Added
+
+- **`distinct` on `nodes/aggregate`**: the number of groups (distinct values), `limit` aside, exact
+  even when the groups are cut (the histogram reported `-1` then). Client: `distinct` is `None`
+  from older servers.
+- **Client: property definitions.** `property_definitions()` (`GET …/graph/properties`),
+  `check_properties()` and `submit_check_properties()` (`POST …/graph/properties:check`, as a call
+  or a background job), with the `PropertyDefinitionsResponse`, `PropertyPolicy`,
+  `PropertiesCheckResponse` and `LabelCheck` models.
+- **Client: what the server already returned or accepted.**
+  - `property_warnings` on the upsert responses, and `property_violations` and
+    `property_warnings` on the bulk ones.
+  - `preferences` on `me()`.
+  - `limit` on `list_communities` (the server's default, 50, applied before).
+  - `mode` and `properties` (`"report"` to restore data older than its definitions) on
+    `snapshot_import`, and `properties` on `import_dataset`.
+  - `properties` and `refresh` on `catalogue`.
+- **A test that replacing a run leaves no stale derived edge**: deleting the run's nodes, loading
+  the run and resolving again gives exactly what a fresh load gives
+  (`tests/test_run_replace_db.py`).
+
+### Changed
+
+- **Web UI:** the Overview's value counts and the Components view read `nodes/aggregate`. The
+  Overview's count of distinct values is exact when the list is cut, where it showed `-1`.
+- **Docs**, checked against the code: the configuration table lists every setting; status codes,
+  permissions, the Cypher console's refusals, the move to PostgreSQL 18 and the client's coverage
+  are brought up to date. A logical restore must be serial: `pg_restore -j` fails on AGE's catalog
+  tables ([Upgrading the database](docs/upgrade-postgresql-18.md)).
+
 ## 0.10.0 — 2026-10-15
 
 The bundled database moves to PostgreSQL 18 with Apache AGE 1.8, and `docker compose up` moves an

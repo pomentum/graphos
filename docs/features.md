@@ -10,14 +10,17 @@ in [concept.md](concept.md); request/response models are in
 ## 1. What graphos is
 
 graphos is a generic, multi-tenant property-graph service: PostgreSQL 18 with
-Apache AGE 1.8 (or 16 with 1.6) behind a typed FastAPI REST surface. Storage is ordinary
+Apache AGE 1.8 behind a typed FastAPI REST surface. PostgreSQL 16 with AGE 1.6,
+bundled up to 0.9, still runs but is deprecated (§10). Storage is ordinary
 Postgres (MVCC, WAL, standard backup tooling). Requests are JSON, with NDJSON
-for bulk writes. Internally graphos runs plain SQL against AGE's per-label
-tables, never Cypher ([concept §3.1](concept.md#31-cypher--sql-boundary)).
+for bulk writes. Every API read and write is plain SQL against AGE's per-label
+tables; Cypher runs only in the opt-in, read-only console (§4,
+[concept §3.1](concept.md#31-cypher--sql-boundary)).
 
 graphos ships no labels, property keys, or relationship types. Every analytics
 endpoint takes label, property, and edge names as request parameters.
-Consumers never see a Postgres DSN and cannot submit Cypher or SQL. In the
+Consumers never see a Postgres DSN and cannot submit SQL, nor Cypher outside
+that console. In the
 bundled compose the API itself connects as `graphos_app`, an unprivileged
 role (no superuser, no role or database creation); the superuser is used only
 by the database init scripts.
@@ -31,7 +34,8 @@ built-in tenants. An admin, or a user with `create_tenants` on a matching name
 pattern (who then owns it), registers each one with `POST /v1/tenants`:
 `vertex_labels`, `edge_labels` (optionally with a `resolve_rule`, §7),
 `property_indexes`, `generated_columns`, `label_hierarchy` (child → parent
-label inheritance), free-form `meta`, `display` (how the web UI draws
+label inheritance), `search_indexes` (§4), `edge_endpoints` and
+`strict_endpoints` (§10), free-form `meta`, `display` (how the web UI draws
 each label and relationship type) and `property_schema` (the properties each
 carries).
 
@@ -46,9 +50,18 @@ carries).
   recommended, and its allowed values (enum, pattern, date formats, numeric
   bounds, array items), combined down the label hierarchy. `off` only records
   it, `warn` writes and counts, `strict` refuses: a batch with 422, a bulk or
-  snapshot line as invalid, a patch checked on the row it leaves. A report
-  (`properties:check`) reads the stored rows as if every rule applied, so a
-  schema can be tried before it is turned on.
+  snapshot line as invalid, a patch checked on the row it leaves. Each entry
+  may override the tenant's mode and says what happens to undeclared keys
+  (`allow`, `warn` or `reject`). `warn` and `strict` results
+  are counted in the write's response and in
+  `graphos_property_violations_total`; `snapshot-import?properties=report`
+  restores older data without refusing it. `GET …/graph/properties` serves
+  each label's and type's definitions as combined, with the entry each comes
+  from. A report (`POST …/graph/properties:check`, `maintain`, or as a job)
+  reads the stored rows as if every rule applied: per label and type, the rows
+  `strict` would refuse, counts by rule, example ids and the undeclared names
+  the rows carry, so a schema can be tried before it is turned on. The web UI's
+  Schema page edits the definitions (§10).
 
 - **Idempotent.** Re-posting is safe. By default the stored spec is merged
   (labels and declarations unioned); `?force_shrink=true` replaces it. graphos
@@ -125,9 +138,11 @@ one id (or one src/dst pair) in a batch collapse into one row.
   ((properties->'"id"'))` for nodes, `ON CONFLICT (start_id, end_id)` for
   edges). graphos writes no rows through Cypher, for two reasons: the
   COPY-staged upsert is far faster than per-row Cypher `MERGE` in our
-  benchmark, and AGE 1.6 crashes the Postgres backend on a Cypher `SET` into a
-  label table that carries extra columns (graphos's `end_community_id` and
-  `start_community_id` on edges, or any registered generated column)
+  benchmark, and AGE handles label tables that carry extra columns
+  (graphos's `graphos_rev` on every table, `end_community_id` and
+  `start_community_id` on edges, or any registered generated column) badly:
+  AGE 1.6 crashes the Postgres backend on a Cypher `SET` into such an edge
+  table, and AGE 1.8 refuses the write
   ([concept §4](concept.md#4-write-paths)).
 - **Small batch** (`POST …/graph/nodes`, `…/graph/edges`): JSON, up to 1000
   rows.
@@ -153,9 +168,15 @@ one id (or one src/dst pair) in a batch collapse into one row.
 - **Dataset export** (`GET …/graph/snapshot`): the whole tenant as one NDJSON
   file (gzip optional), framed by a header (format, counts, the schema) and an
   end line; each node once with its own label, nodes before edges; one
-  consistent snapshot, flat memory. `snapshot-import` reads it back, into an
+  consistent snapshot, flat memory (a 251,000-node, 940,000-edge tenant in
+  about 70 s, gzip, measured). `labels` / `types` narrow it, `computed=false`
+  leaves out `graphos_*` and `community_id`. `snapshot-import` reads it back,
+  into an
   empty tenant (`mode=empty`) for an exact restore, gzip or not, and says
-  whether the file was complete.
+  whether the file was complete. `tools/export/ndjson_to_age.py` loads the
+  same file into a plain AGE graph, without graphos, where AGE's
+  variable-length patterns work
+  ([without-graphos.md](without-graphos.md)).
 - **Snapshot import** (`POST …/graph/snapshot-import`): one NDJSON stream
   mixing nodes and edges (`"_kind": "node" | "edge"`). Buffers up to 5,000
   rows per group, written through the same COPY-staged upsert as the `:bulk`
@@ -195,6 +216,9 @@ reported in the response.
 - **Neighbors** (`GET …/graph/neighbors`): one hop, outgoing and incoming, with
   direction, edge type, and both property bags; the neighbor is identified by
   external id (`neighbor_id`). Optional `rel_types`. Limit default 50, max 500.
+  When the limit cuts the result, the rows kept are the first in graph-id
+  order (outgoing before incoming), so a dump and restore or a rewrite of the
+  table returns the same rows.
 - **Shortest paths** (`POST …/graph/paths`): every shortest path between two
   nodes, up to `limit` (≤100) and `max_hops` (≤8), by a bidirectional
   breadth-first search that issues one batched SQL statement per level.
@@ -210,7 +234,11 @@ reported in the response.
     denormalised onto it (`end_community_id`, `start_community_id`).
   - Returns each reached node (external id in `end_id`) with its hop count
     and edge-type path.
-  - Runs as direct SQL, one query per direction per hop.
+  - Runs as direct SQL, one query per direction per hop. Each hop reads its
+    edges in graph-id order, so a capped result is the same however the
+    table is stored.
+  - A database error answers 500; it never shows as a smaller result (the
+    same for `neighbors` and `sample_subgraph`).
 
   ```mermaid
   flowchart LR
@@ -254,6 +282,28 @@ reported in the response.
   graphology `Graph.from()`), bounded by `limit_nodes` (default 5000, max
   50000). This is the only export format; converting to other formats is up
   to the caller.
+- **Cypher console** (opt-in, `GRAPHOS_CYPHER=true`; `POST /v1/{tenant}/cypher`):
+  read-only Cypher on one tenant's graph for people who know Cypher, with
+  `$name` parameters; it answers a table and the graph its nodes and edges
+  make. Before the query reaches the database graphos refuses:
+  - write clauses (`CREATE`, `MERGE`, `SET`, `DELETE`, `DETACH`, `REMOVE`):
+    AGE 1.6 carries out `SET`, `REMOVE` and `DELETE` inside a read-only
+    transaction, so the transaction alone is no guard there (AGE 1.8 stops
+    them);
+  - database functions: a schema-qualified call, or any function that is not
+    one of Cypher's;
+  - variable-length patterns, `vertex_stats()`, `shortest_path()` and
+    `all_shortest_paths()`: AGE serves them from an in-memory graph it cannot
+    build from graphos's tables (§11).
+
+  The query then runs in a read-only transaction on a small pool of its own
+  (`GRAPHOS_CYPHER_POOL_SIZE`, 5), one per user, with a row cap
+  (`GRAPHOS_CYPHER_MAX_ROWS`), a timeout (`GRAPHOS_CYPHER_TIMEOUT_S`, a
+  watchdog behind it) and a temporary-file limit
+  (`GRAPHOS_CYPHER_TEMP_FILE_LIMIT`); a connection on which a query failed is
+  closed. `GRAPHOS_CYPHER_LEVEL` sets the level it needs (`read`). Saved
+  queries (`/v1/{tenant}/cypher/saved`) keep named, parameterised queries
+  that maintainers save and readers run.
 
 ---
 
@@ -329,15 +379,14 @@ pattern.
 
 - **Node aggregate** (`POST …/graph/nodes/aggregate`): group one label (parent
   labels include their children) by a property, optionally restricted to
-  given values, optionally counting the nodes without it (`missing`), with
-  the `total` counted.
+  given values: `{value, count}` groups, highest count first. `missing: true`
+  also counts the nodes without the property, under `""`. `total` is every
+  node counted and `distinct` the number of distinct values, both before
+  `limit` cuts the groups. A string value comes as it is, any other as JSON.
 - **Edge aggregate** (`POST …/graph/edges/aggregate`): group edges by a
   source-node property, a destination-node property, and type. Options:
   `src_values` / `dst_values` filters and `require_different`. Edge types are
   queried one after another.
-- **Histogram** (`GET …/graph/labels/{label}/histogram`, deprecated: the node
-  aggregate with `missing` gives the same): `{value, count}` bins plus
-  `n_total`, and `n_distinct` (`-1` when truncated).
 - **Top by degree** (`GET …/graph/labels/{label}/top`): top-k nodes by number
   of edges of one type (`out|in|both`).
 - **Tenant stats** (`GET …/graph/stats`): exact row count and total bytes per
@@ -485,8 +534,23 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
 
 - **Health:** `GET /healthz` (process alive, no DB), `GET /readyz` (DB
   round-trip; 503 with only a reason code if not ready), `GET /v1/info`
-  (versions, tenant count, `features.louvain`). These and `/metrics` need no
+  (versions, tenant count, `features.louvain`, `features.metrics`,
+  `features.cypher`, and `database_deprecated`: why the database is
+  deprecated, or `null`). These and `/metrics` need no
   token and never list tenant names (admins use `GET /v1/tenants`).
+- **Database:** the bundled `graphos-db` is PostgreSQL 18 with AGE 1.8,
+  pinned by digest. PostgreSQL 16 with AGE 1.6 still runs, and CI tests the
+  server on both, but it is deprecated: graphos logs `database deprecated` at
+  start. On the first `docker compose up` after the upgrade, two one-shot
+  services move a PostgreSQL 16 stack's data by themselves:
+  `graphos-db-export` (PostgreSQL 16, no network) dumps the old volume, and
+  `graphos-db-import` restores it into PostgreSQL 18, repoints AGE's catalogue
+  at the restored schemas (a restore changes their OIDs) and gathers planner
+  statistics; `graphos-api` waits for them. A failed import leaves nothing
+  behind and runs again on the next `up`; the dump is never loaded over a
+  database graphos has used; the PostgreSQL 16 volume `graphos_data` is kept
+  unchanged, as the way back
+  ([upgrade-postgresql-18.md](upgrade-postgresql-18.md)).
 - **Postgres introspection (admin):**
   - `GET /v1/db/stats`: DB size and the 200 largest tables with live/dead
     tuples, total and index bytes, and last vacuum/autovacuum/analyze.
@@ -497,12 +561,20 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
 - **Web UI** (`services/graphos-ui`, optional): Explore opens a large tenant
   on its graph map or its communities and a small one on its whole graph; a
   canvas that adds neighbours a page at a time with undo, focus and collapse;
-  inspect and edit (saved with `If-Match`); shortest paths; counts per label;
+  inspect and edit (saved with `If-Match`); shortest paths; where the console
+  is on, a Query page (Cypher coloured and suggested from the tenant's labels
+  and properties, results as a table and on the canvas, saved queries run
+  with a form); counts per label; the graph algorithms, run by maintainers;
+  the tenant's data downloaded and uploaded as one dataset file;
   activity (what runs now, with cancel, and the writes, computations and
   schema changes of the last days, filterable, with a running indicator in
   the toolbar on every page); a label as a table; the schema as a list or a diagram (laid out
   along the relationships, lines routed between the boxes with their captions; a large schema as
-  a grid), which maintainers can extend (labels, relationship types, declared label pairs);
+  a grid), which maintainers can extend (labels, relationship types, search indexes, declared
+  label pairs, and properties from *Add → Property*); each label and relationship type opens to
+  its property definitions, where each comes from and the properties its rows carry undeclared,
+  which maintainers declare, narrow and remove, with the tenant's property-check mode (`off`,
+  `warn`, `strict`, which asks first) and a check of the stored rows run as a job with its report;
   creating a tenant (empty or from a schema file), unregistering it, restoring it, and deleting it
   with its data; exports of what is on screen: the canvas as PNG, SVG or JSON, a label's nodes and
   the overview's counts as CSV; the tenant's label styles (colour, caption, size, icon per label,
@@ -515,15 +587,16 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   session is one HttpOnly cookie no page script can read (nothing in browser
   storage), so a reload or a new tab stays signed in until the session ends; the theme and the
   last tenant are kept by graphos as the user's preferences.
-  It reads labels and search indexes from `GET /v1/{tenant}/schema`, which
-  anyone on the tenant may call, and `GET /v1/me` lists the user's tenants and
-  levels. All its text is in one i18n JSON file.
+  It reads labels, search indexes, label styles and the property schema from
+  `GET /v1/{tenant}/schema`, which anyone on the tenant may call;
+  `GET /v1/me` lists the user's tenants and levels, and `GET /v1/info` says
+  whether the console and Louvain are on. All its text is in one i18n JSON file.
 - **Declared relationship endpoints:** each relationship type can declare the
   label pairs it joins (`edge_endpoints`), the schema's associations; a child
   label satisfies its parent's pair. With `strict_endpoints` on, graphos
   refuses edge writes outside them (types that declare none stay open).
-- **Background jobs:** community recompute, graph metrics, `edges:resolve` and
-  vacuum accept `Prefer: respond-async` and answer 202 with a job
+- **Background jobs:** community recompute, graph metrics, `edges:resolve`,
+  the property report (`properties:check`) and vacuum accept `Prefer: respond-async` and answer 202 with a job
   (`Location: /v1/jobs/{id}`). Called directly they are listed as jobs too
   (`sync: true`) while they run, so others see them and can cancel them.
   `GET /v1/jobs/{id}` returns its status and, when done, the synchronous
@@ -533,26 +606,34 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
 - **Timeouts:** every statement runs under a server-side `statement_timeout`
   (`GRAPHOS_STATEMENT_TIMEOUT_S`, default 60 s); it is the only per-statement
   limit (no client-side command timeout). Tenant bootstrap and the startup
-  reload (1800 s), Louvain stages, `edges:resolve`, and vacuum raise it for
-  their own statements. A timeout, on a read or a write (including `:bulk`
+  reload (1800 s), Louvain stages, graph metrics, `edges:resolve`, the
+  dataset export (900 s) and vacuum raise it for their own statements; the
+  Cypher console has its own (`GRAPHOS_CYPHER_TIMEOUT_S`, 30 s). A timeout,
+  on a read or a write (including `:bulk`
   and `snapshot-import`), returns 504 `application/problem+json`. Other errors use FastAPI's
-  `{"detail": ...}` body with 400/401/403/404/409/413/422 (and 429 when rate
-  limiting is on); a missing Louvain extra returns 501.
+  `{"detail": ...}` body with 400/401/403/404/409/410/412/413/422/428 (and 429
+  when rate limiting is on or the console is busy); a missing Louvain extra
+  returns 501.
 - **Metrics** (`GET /metrics`):
   - `graphos_requests_total` (method, route template, status);
   - `graphos_request_duration_seconds` (histogram by method and route);
   - `graphos_db_pool_size` (total/idle/active);
   - `graphos_registered_tenants`;
   - `graphos_rate_limited_total` (`token_id` = first 12 hex characters of the
-    SHA-256 of the user name).
+    SHA-256 of the user name);
+  - `graphos_property_violations_total` (tenant, kind, outcome, rule): rows
+    the property schema refused or warned about.
 - **Logging:** structured JSON. Each request's lines carry `method`, `route`,
   and `trace_id` taken from an inbound W3C `traceparent` (echoed back). No
   spans are produced.
 - **Audit:** on by default for writes: the operations declared `write`,
-  whatever their method (a `POST` read such as `nodes:scan` is not audited).
+  whatever their method. Reads are added by `GRAPHOS_AUDIT_READS`: `exports`
+  (the default) logs the dataset export, the graph export and every console
+  query; `data` logs every read of a tenant's data too, `POST` reads such as
+  `nodes:scan` included, with its query string.
   One JSON log line per request with `method`, `path`, `tenant`, `consumer` (the user
   name), `args_hash` (truncated SHA-256 of the body), `status`, and
-  `elapsed_ms`.
+  `elapsed_ms`; `read` lines also carry `query`.
 - **Rate limiting:** per-user in-memory sliding window keyed by a SHA-256
   hash of the user name, off by default (`GRAPHOS_RATE_LIMIT_ENABLED`); returns
   429 with `Retry-After`. Only valid tokens are limited; unknown or expired
@@ -569,8 +650,14 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
 
 - **No SQL endpoint, and Cypher only read-only and opt-in.** The surface stays
   typed so limits, timeouts, and tenant checks remain enforceable; the
-  optional Cypher console reads one tenant's graph under graphos's checks. The bundled compose gives
+  optional Cypher console reads one tenant's graph under graphos's checks
+  and refuses write clauses before the database (§4). The bundled compose gives
   `graphos-db` no published port and keeps it on an internal-only network.
+  People who must read the tables directly get a read-only database role of
+  their own, outside graphos's audit log; that needs AGE 1.8, since AGE 1.6
+  lets a role with only `SELECT` change data through Cypher `SET`, `REMOVE`
+  and `DELETE`
+  ([installation §8](installation.md#direct-sql-readers)).
 - **No consumer concepts at the wire.** Labels, property keys, and edge types
   are strings the caller supplies.
 - **No pattern matching in scans.** `nodes:scan` filters by label and
@@ -584,7 +671,12 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   attempts too). Users, grants, tenant registrations and the K/V cache are
   kept in step across replicas (`LISTEN` / `NOTIFY`, with periodic
   reconciliation as a fallback).
-- **No export formats besides graphology JSON**, and no server-side layout.
+- **No export formats besides graphology JSON** (and the NDJSON dataset
+  export, §3), and no server-side layout.
+- **No variable-length Cypher patterns on graphos's tables.** AGE refuses to
+  build its in-memory graph from label tables with more than its own columns
+  (apache/age#2583), so the console refuses them; `paths` and `expand` cover
+  the API's needs, and a plain AGE copy (§3) runs them.
 
 ---
 
@@ -609,8 +701,18 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   trigger the AGE crash described in [concept §4](concept.md#4-write-paths).
 - **Caps:** every read has a hard `limit`; scans also stop at a 10 MiB payload;
   small-batch writes cap at 1000 rows.
-- **Direct SQL on hot paths:** search, neighbors, expand, scans, and most
-  aggregates bypass Cypher and query AGE's label tables with these indexes.
+- **Direct SQL everywhere:** every API read (search, neighbors, expand,
+  scans, aggregates) bypasses Cypher and queries AGE's label tables with these
+  indexes.
+- **Planner settings:** graphos's connections plan every statement with its
+  values (`plan_cache_mode = force_custom_plan`; on PostgreSQL 18 a generic
+  plan kept after five runs made a two-filter `nodes:scan` go from about
+  50 ms to about 1 s) and run with JIT off unless `GRAPHOS_DB_JIT=true`. A
+  filtered `nodes:scan` raises `cpu_operator_cost` in its own transaction, so
+  a selective filter uses the property indexes instead of walking the id
+  index (350 ms → 37 ms on PostgreSQL 18). Measurements on PostgreSQL 18 /
+  AGE 1.8 against 16 / 1.6 are in
+  [apache-age.md §12](apache-age.md#12-measured-on-postgresql-18--age-18).
 - **Diagnosis:** `pg_stat_statements` via `/v1/db/slow-queries`, plus
   per-route latency histograms. Postgres logs statements slower than 500 ms in
   the bundled compose.

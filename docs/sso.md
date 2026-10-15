@@ -117,7 +117,8 @@ service account.
   access to `oidc-group:<group>` (§4).
 - **Lifetime and revocation:** graphos checks each token as it comes, so it is valid until it
   expires at the provider (often 5–60 minutes); revoking it at the provider takes effect at its
-  expiry. Disabling the person or removing a grant in graphos takes effect at once.
+  expiry. Removing a grant in graphos takes effect at once (graphos keeps no user of its own for
+  such a person: access is what the grants to their subject, groups and roles allow).
 
 An audit line for such a call (`graphos.audit`, one JSON line on stdout):
 

@@ -64,8 +64,8 @@ For people who read this way regularly, give them a read-only role:
   18 with AGE 1.8 from 16 with 1.6), followed by AGE's catalogue fix: see
   [upgrade-postgresql-18.md](upgrade-postgresql-18.md), "A database you run yourself".
 - **One tenant, as data:** the dataset export, `GET /v1/{tenant}/graph/snapshot`
-  (`?computed=true` keeps the metrics and `community_id`, `?gzip=true` compresses). One JSON
-  object per line:
+  (the computed metrics and `community_id` are included unless `?computed=false`; `?gzip=true`
+  compresses; `labels` and `types` narrow it). One JSON object per line:
   - first a `header` line: the format, the counts and the tenant's schema;
   - then every node: `{_kind: "node", id, label, properties}`;
   - then every edge: `{_kind: "edge", src_id, src_label, dst_id, dst_label, type, properties}`;
@@ -106,8 +106,7 @@ python tools/export/ndjson_to_age.py sales.ndjson.gz sales_plain \
 - **Limit:** it holds the file in memory while loading, so budget about 1 GB per million rows.
 
 Tested 2026-10-15 on AGE 1.8.0 / PostgreSQL 18.6, with a 251,246-node, 940,144-edge graph:
-- the export took 48 s, the load 66 s;
 - the content checksums of the source tenant and the plain graph matched, node by node and edge
   by edge (label, ends and properties);
 - the plain tables have 2 and 4 columns;
-- a `-[:R*1..2]->` query answered there (5,778 rows), where it fails on graphos's own tables.
+- a `-[:R*1..2]->` query answered there, where it fails on graphos's own tables.

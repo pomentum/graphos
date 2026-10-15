@@ -11,9 +11,11 @@ overview see [features.md](features.md); for worked request examples see
 ## 1. Summary
 
 **graphos** is a generic, multi-tenant property-graph service: PostgreSQL 18
-with Apache AGE 1.8 (or PostgreSQL 16 with AGE 1.6) as the data plane, and a FastAPI process (`graphos-api`)
+with Apache AGE 1.8 as the data plane (PostgreSQL 16 with AGE 1.6 still runs,
+deprecated: §2.4), and a FastAPI process (`graphos-api`)
 in front of it as the only way in. Consumers speak typed HTTP/JSON (NDJSON for
-bulk writes). They never receive a Postgres DSN and cannot submit Cypher or SQL.
+bulk writes). They never receive a Postgres DSN and cannot submit SQL, nor
+Cypher outside the opt-in, read-only console (§3.1).
 
 Design points:
 
@@ -92,21 +94,28 @@ creates `graphos_app`, the role `graphos-api` connects as (password in
 only what the service needs: `CONNECT` and `CREATE` on the database (AGE puts
 each tenant graph in its own schema), `USAGE` on `ag_catalog` plus DML on its
 tables and sequences, ownership of `graphos_meta` and `graphos_meta.tenants`,
-and membership in `pg_read_all_stats` (for `/v1/db/*`). The superuser is used
+membership in `pg_read_all_stats` (for `/v1/db/*`), and
+`SET ON PARAMETER temp_file_limit` (for the console's temporary-file limit,
+§3.1; an existing database needs that grant run once, and graphos logs a
+warning at start while it is missing). The superuser is used
 by the init scripts only. A volume initialised before `01-app-role.sh`
 existed has no `graphos_app`: run the SQL from that script by hand as the
 superuser, or start from a fresh volume.
 
 On every start `graphos-api` also runs idempotent DDL for its internal tables
-(`db.py::ensure_internal_schema`): `graphos_meta.tenants` and `cache`, the
+(`db.py::ensure_internal_schema`): `graphos_meta.tenants`,
+`unregistered_tenants`, `tenant_settings`, `edge_endpoints` and `cache`, the
 property record (`node_properties`, `node_properties_complete`), background
-`jobs`, the change feed, and the community map (`community_map`,
-`community_links`, `community_map_runs`, written by each Louvain recompute), so
+`jobs`, the change feed (`changes`, `change_horizon`), the community map
+(`community_map`, `community_links`, `community_map_runs`, written by each
+Louvain recompute), identity (`users`, `grants`, `sessions`, `signing_keys`,
+`oidc_pending`), `user_preferences` and the console's `saved_queries`, so
 an existing volume picks up new internal tables without re-initialisation.
 
 #### Layer 2 — tenant registration (per tenant, idempotent)
 
-`POST /v1/tenants` (admin scope) carries the tenant spec:
+`POST /v1/tenants` (`create_tenants` for a new tenant, `maintain` for an
+existing one; §2.5.3) carries the tenant spec:
 
 ```json
 {
@@ -139,6 +148,15 @@ an existing volume picks up new internal tables without re-initialisation.
   startup (`declared.convert_legacy`: statements a declaration expresses
   become one, keeping the index name; the rest are logged and left out of the
   spec, while what they created stays in Postgres).
+- The spec also takes `search_indexes` (§2.3), `edge_endpoints` and
+  `strict_endpoints` (the label pairs each edge type joins, and whether edge
+  writes outside them are refused), `display` (label styles for the web UI)
+  and `property_schema` (property definitions and how writes are held to
+  them: `off`, `warn` or `strict`, §4); see
+  [features.md §2](features.md#2-tenant-model).
+- `?dry_run=true` checks the spec as a registration would and answers what it
+  would change and cost, writing nothing. `GET /v1/tenants/{name}/spec`
+  (`maintain`) exports the whole stored spec as a registration body.
 
 `bootstrap.py::bootstrap_tenant` then applies the spec under a per-tenant
 `pg_advisory_lock`, so concurrent registrations of the same tenant serialise:
@@ -299,7 +317,38 @@ root. Read that file for exact values; its shape:
 `--data-checksums`, and sizing flags (`shared_buffers=1GB`,
 `effective_cache_size=2GB`, `work_mem`, …) set in the compose `command:`.
 These defaults fit a laptop; §7 lists what to raise for larger graphs. Data
-lives in the `graphos_data` volume.
+lives in the `graphos_data_pg18` volume (`PGDATA` set to the mount point, as
+before PostgreSQL 18's images moved it). The optional `graphos-ui` service
+(`--profile ui`) serves the web UI on `127.0.0.1:8081`, on `graphos-net`
+only.
+
+**PostgreSQL 16 / AGE 1.6** (bundled up to 0.9) still runs, and CI runs the
+server's tests against both databases, but it is deprecated: AGE has no
+release after 1.6 for PostgreSQL 16, and 1.6 carries out some Cypher writes in
+a read-only transaction and can wedge a database process on a
+variable-length pattern. `db.py::deprecated_database` flags any PostgreSQL
+before 18 or AGE before 1.8; graphos then logs `database deprecated` at start
+and `GET /v1/info` reports the reason in `database_deprecated` (`null`
+otherwise). The compose moves a PostgreSQL 16 stack by itself with two
+one-shot services that run on every `up` and exit at once when there is
+nothing to move:
+
+- `graphos-db-export` (the PostgreSQL 16 image, `network_mode: none`) starts
+  PostgreSQL 16 on the old `graphos_data` volume, dumps it (`pg_dump -Fc`) to
+  the `graphos_upgrade` volume and stops it;
+- `graphos-db-import` (the PostgreSQL 18 image) restores the dump into a
+  database of its own, points AGE's catalogue (`ag_graph.graphid`,
+  `ag_label.graph`) at the restored schemas' new OIDs, puts it in place of
+  the new, empty `graphos` database, and gathers planner statistics in
+  parallel;
+- `graphos-api` waits for the import to succeed.
+
+A failed import leaves nothing behind and runs again on the next `up`; the
+dump is never loaded over a database graphos has used; `graphos_data` is only
+read, and stays as the way back. A dump and restore rather than `pg_upgrade`:
+the official images carry one PostgreSQL version each, and `pg_upgrade`
+refuses AGE's `regnamespace` column, which AGE 1.6 cannot prepare
+([upgrade-postgresql-18.md](upgrade-postgresql-18.md)).
 
 `graphos-api` is configured through `GRAPHOS_*` environment variables
 (`config.py`): `GRAPHOS_DB_HOST/PORT/NAME`, `GRAPHOS_DB_USER=graphos_app`,
@@ -355,15 +404,16 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | **Health & introspection** | | |
 | `GET /healthz` | Liveness; does not touch the DB | none |
 | `GET /readyz` | Pool exists and `SELECT 1` succeeds, else 503; reports `registered_tenants` as a count | none |
-| `GET /v1/info` | Service, Postgres and AGE versions, `tenants` (a count), `features.louvain` | none |
+| `GET /v1/info` | Service, Postgres and AGE versions, `database_deprecated` (the reason, or `null`), `tenants` (a count), `features.louvain`, `features.metrics`, `features.cypher` | none |
 | `GET /metrics` | Prometheus exposition (§2.5.6) | none |
 | **Tenant control** | | |
-| `POST /v1/tenants[?force_shrink=true]` | Register / re-apply a spec (§2.2) | new: `create_tenants` (the caller becomes owner); existing: `maintain` |
+| `POST /v1/tenants[?force_shrink=true][&dry_run=true]` | Register / re-apply a spec (§2.2); a dry run answers what it would change and cost | new: `create_tenants` (the caller becomes owner); existing: `maintain` |
 | `GET /v1/tenants[?unregistered=true]` | The registered tenants the caller may maintain; also the unregistered ones it owns | signed in |
 | `GET /v1/tenants/{name}` | One tenant's spec summary | `maintain` |
+| `GET /v1/tenants/{name}/spec` | The whole schema as a registration body (the schema file) | `maintain` |
 | `GET /v1/me` | The caller: user, kind, `admin`, `must_change`, its tenants, its level on each, `create_tenants` patterns, its web UI preferences | signed in |
 | `PATCH /v1/me/preferences` | Change one's web UI preferences (`theme`, `last_tenant`) | signed in |
-| `GET /v1/{tenant}/schema` | Labels, label hierarchy, search indexes and rule-derived edge labels (no DDL, rules or `meta`) | tenant |
+| `GET /v1/{tenant}/schema` | Labels, label hierarchy, search indexes, rule-derived edge labels, declared edge endpoints and `strict_endpoints`, `display` and `property_schema` as declared (no DDL, rules or `meta`) | tenant |
 | `DELETE /v1/tenants/{name}/edge_endpoints` | Remove one declared pair | `maintain` |
 | `DELETE /v1/tenants/{name}[?drop_data=true]` | Unregister, keeping the data; or delete with the data (see below) | `owner` (an orphan: admin) |
 | `POST /v1/tenants/{name}/restore` | Register an unregistered tenant again, as it was | `owner` |
@@ -378,8 +428,8 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `GET …/graph/search?q=&index=&label=&fuzzy=&min_score=&limit=` | Ranked search through a named search index (`identifier` or `text` analyzer); hits carry `score` and `matched` | tenant |
 | `GET …/graph/nodes/{external_id}?label=` | One node by external id; 409 if the id is in several labels and `label` is absent | tenant |
 | `GET …/graph/edges/{type}?src=&dst=&src_label=&dst_label=` | One edge by type and end ids; 409 if several match | tenant |
-| `GET …/graph/neighbors?node_id=&rel_types=&limit=` | 1-hop out + in edges; limit default 50, ≤500 | tenant |
-| `GET …/graph/expand?node_id=&seeds=&rel_types=&max_hops=&direction=&communities=&limit=` | BFS; `max_hops` default 2, ≤5; limit default 100, ≤1000 | tenant |
+| `GET …/graph/neighbors?node_id=&rel_types=&limit=` | 1-hop out + in edges; limit default 50, ≤500; capped in graph-id order (§3.1) | tenant |
+| `GET …/graph/expand?node_id=&seeds=&rel_types=&max_hops=&direction=&communities=&limit=` | BFS; `max_hops` default 2, ≤5; limit default 100, ≤1000; capped in graph-id order (§3.1) | tenant |
 | `POST …/graph/induced_edges` `{node_ids, rel_types?, limit}` | Edges with both ends in the set; ≤1000 ids, limit ≤5000 | tenant |
 | `POST …/graph/paths` `{src, dst, rel_types?, direction, max_hops, limit}` | Shortest paths between two nodes (bidirectional BFS, one statement per level); hops ≤8 | tenant |
 | `POST …/graph/scoped_subgraph` | Nodes sharing one property value plus their induced edges; nodes are `{id (external id), label, properties}` | tenant |
@@ -388,10 +438,10 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `POST …/graph/edges:scan` | Paginated edge enumeration with filters/projection | tenant |
 | `GET …/graph/export?node_ids=&rel_types=&limit_nodes=` | graphology JSON (§6); `limit_nodes` default 5000, ≤50000 | tenant |
 | `GET …/graph/catalogue?property=&refresh=` | Resolver property → labels map, recorded at write time; `property` narrows it, `refresh=true` re-reads every node | tenant |
+| `GET …/graph/properties` | Per label and edge type: the property-check mode, the rule for undeclared properties, and each definition as combined down the hierarchy, with the entry it comes from | tenant |
 | **Aggregates & communities** | | |
-| `POST …/graph/nodes/aggregate` `{label, group_by, values?, limit}` | Group one label by a property | tenant |
+| `POST …/graph/nodes/aggregate` `{label, group_by, values?, missing?, limit}` | Group one label by a property; `missing` counts the nodes without it under `""`; returns `total` (every node counted) and `distinct` (distinct values), both before `limit` cuts the groups; non-string values as JSON | tenant |
 | `POST …/graph/edges/aggregate` | Group edges by endpoint properties and type | tenant |
-| `GET …/graph/labels/{label}/histogram?property=&limit=` | Property-value histogram; limit default 100, ≤1000 | tenant |
 | `GET …/graph/labels/{label}/top?by_edge=&direction=&k=` | Top-k nodes by degree on one edge type; k default 20, ≤200 | tenant |
 | `GET …/graph/stats` | Exact per-label row counts (a parent includes its children) and bytes; totals count each node and edge once | tenant |
 | `GET …/graph/map?exact=` | Labels with their own node counts, and edge counts per (source label, type, target label); large edge tables sampled and flagged `estimated` unless `exact` | tenant |
@@ -416,8 +466,15 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `DELETE …/graph/nodes/{external_id}?label=` | Delete one node and its edges | tenant |
 | `DELETE …/graph/edges/{type}?src=&dst=&src_label=&dst_label=` | Delete one edge | tenant |
 | `DELETE …/graph/nodes?property_key=&property_value=` | Delete every node with that property value, and their edges | tenant |
-| **Community detection** | | |
+| **Computations** | | |
 | `POST /v1/{tenant}/recompute-communities` | Louvain (§5); 501 without the extra | `maintain` |
+| `POST …/graph/metrics:compute` | Degree, PageRank, weakly connected components and betweenness, stored on the nodes as `graphos_*` properties | `maintain` |
+| `POST …/graph/properties:check` | Check the stored rows against the property schema as if every rule applied; writes nothing | `maintain` |
+| **Cypher console** (opt-in, §3.1; 404 while off) | | |
+| `POST /v1/{tenant}/cypher` `{query, params?, limit?}` | Run read-only Cypher; a table and the graph it makes | `GRAPHOS_CYPHER_LEVEL` (`read`) |
+| `GET /v1/{tenant}/cypher/saved` | The tenant's saved queries | as running one |
+| `PUT / DELETE /v1/{tenant}/cypher/saved/{name}` | Save (replace) or delete a named, parameterised query | `maintain` |
+| `POST /v1/{tenant}/cypher/saved/{name}:run` `{params}` | Run a saved query; each declared parameter of its type (422 otherwise) | as running one |
 | **Operational** | | |
 | `GET /v1/db/stats` | Version, DB size, top 200 tables by size with tuple counts and vacuum/analyze times | admin |
 | `GET /v1/db/slow-queries?limit=` | Top-N by mean time from `pg_stat_statements` (default 25, ≤200); `available: false` without the extension | admin |
@@ -433,8 +490,8 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 
 The last column is the tenant or admin scope.  Each operation also needs
 `read` or `write` access (§2.5.3): `read` for every row under **Reads** and
-**Aggregates & communities**, cache `GET`, `GET /v1/tenants*`,
-`GET /v1/db/*` and `GET /v1/jobs*`; `write` for the rest.
+**Aggregates & communities**, the dataset export, cache `GET`, `GET /v1/tenants*`,
+`GET /v1/db/*`, `GET /v1/jobs*` and running console queries; `write` for the rest.
 `/openapi.json` lists it per operation as the bearer scope.
 
 `DELETE /v1/tenants/{name}` unregisters a tenant and keeps its data: in one
@@ -478,13 +535,18 @@ Error shapes:
 | 400 | Unknown label, compile/Cypher error, bad cursor, missing resolve rule, broken `:bulk` stream | `{"detail": "..."}`; a `:bulk` or `snapshot-import` stream error names only the exception type and points to the server log |
 | 401 | Missing, invalid or expired bearer token; failed sign-in | `{"detail": "..."}` |
 | 403 | No access to the tenant, a level below what the operation needs, admin required, or a password to change first | `{"detail": "..."}` |
-| 404 | Tenant not registered, node or cache key not found | `{"detail": "..."}` |
-| 409 | Louvain already running for the tenant | `{"detail": "..."}` |
+| 404 | Tenant not registered, node or cache key not found, Cypher console off | `{"detail": "..."}` |
+| 409 | A whole-graph job (Louvain, graph metrics) already running for the tenant; an id in several labels without `label`; a duplicate on a declared unique index; `mode=empty` into a tenant with nodes | `{"detail": "..."}`; the unique-index conflict as `application/problem+json` |
+| 410 | Change-feed cursor older than the retention | `{"detail": "..."}` |
+| 412 | `If-Match` does not match the row's ETag | `{"detail": "..."}` |
 | 413 | `snapshot-import` over 50,000,000 lines, or past `GRAPHOS_IMPORT_MAX_BYTES` after decompression | `{"detail": "..."}` |
-| 422 | Request validation; bad `label_hierarchy` at registration | `{"detail": [...]}` (FastAPI) or `{"detail": "..."}` |
-| 429 | Rate limit (when enabled) | `{"detail": ..., "retry_after_s": ...}` + `Retry-After` |
+| 422 | Request validation; bad `label_hierarchy` at registration; a batch write refused by a `strict` property schema (with its `violations`) | `{"detail": [...]}` (FastAPI) or `{"detail": "..."}` |
+| 428 | `If-Match` missing with `GRAPHOS_REQUIRE_IF_MATCH=true` | `{"detail": "..."}` |
+| 429 | Rate limit (when enabled); the caller's console query still running, or no free console connection within `GRAPHOS_CYPHER_WAIT_S` | `{"detail": ..., "retry_after_s": ...}` + `Retry-After` (rate limit) or `{"detail": "..."}` |
+| 499 | A console query whose caller went away | `{"detail": "..."}` |
+| 500 | A read the database refused (`neighbors`, `expand`, `sample_subgraph`): never a smaller result; the error is logged | `{"detail": "..."}` |
 | 501 | Louvain extra not installed | `{"detail": "..."}` |
-| 504 | Statement timeout, on reads and writes (`/nodes`, `/edges`, `:bulk`, `snapshot-import`) | `application/problem+json`, below |
+| 504 | Statement timeout, on reads and writes (`/nodes`, `/edges`, `:bulk`, `snapshot-import`); a console query past `GRAPHOS_CYPHER_TIMEOUT_S` (`{"detail": "..."}`) | `application/problem+json`, below |
 
 ```json
 {
@@ -597,7 +659,9 @@ most endpoints. Behaviour (`_client.py`):
   30 s timeout.
 - Retries (default 3, exponential backoff from 0.5 s) on connection-level
   errors and on 5xx responses other than 504. `edges:resolve`,
-  `recompute-communities`, vacuum and every `submit_*` (job) call are never
+  `recompute-communities`, `metrics:compute`, vacuum, `snapshot_import`,
+  console queries (`cypher`, `run_saved_query`), restoring a tenant, deleting
+  one with its data, cancelling a job and every `submit_*` (job) call are never
   retried. Read/write timeouts are not retried.
 - 4xx raises `GraphosError`; 503 raises `GraphosNotReady`.
 - `bulk_upsert_nodes` / `bulk_upsert_edges` serialise the whole iterable into
@@ -614,8 +678,12 @@ Postgres setting is the only per-statement limit: the pool is created with
 `command_timeout=None`, because a client-side timeout cannot be raised per
 connection and would cut long operations short. A cancelled statement
 (`QueryCanceledError`) becomes 504 `application/problem+json` (§2.5.2). Write
-paths let it through too: `cypher.py` re-raises it, and the `:bulk` and
+paths let it through too: `writes.py` re-raises it, and the `:bulk` and
 `snapshot-import` handlers do not turn it into a 400.
+
+Every pooled connection also starts with `plan_cache_mode = force_custom_plan`
+and `jit = off` (`GRAPHOS_DB_JIT=true` turns JIT on), as server settings that
+`RESET ALL` keeps (§3).
 
 Deliberately long operations raise the timeout for their own connection
 (`db.py::allow_long_statements`; the pool's `RESET ALL` on release restores
@@ -626,8 +694,13 @@ the default):
 | Tenant bootstrap, internal schema setup, startup reload of stored tenants | 1800 s (`DDL_TIMEOUT_S`) |
 | Louvain edge stream / vertex writeback | 600 s each |
 | Louvain edge `end_community_id` / `start_community_id` update | 300 s per statement (a chunk of 50,000 vertices per edge label) |
+| Graph metrics: edge stream, reading the stored values, each write-back batch | 600 s |
 | `edges:resolve` INSERT | 1800 s per edge type |
+| Dataset export (`GET …/graph/snapshot`) | 900 s |
 | `POST /v1/db/vacuum` | 3600 s |
+
+The Cypher console's own pool runs with `GRAPHOS_CYPHER_TIMEOUT_S` (30 s)
+instead, and a watchdog (§3.1).
 
 #### 2.5.6 Observability
 
@@ -640,6 +713,7 @@ the default):
 | `graphos_db_pool_size` (refreshed on scrape) | `state` = `total` / `idle` / `active` |
 | `graphos_registered_tenants` | — |
 | `graphos_rate_limited_total` | `token_id` (first 12 hex characters of the SHA-256 of the user name) |
+| `graphos_property_violations_total` | `tenant`, `kind`, `outcome` (`refused` or `warned`), `rule` |
 
 Requests to `/metrics` itself are not counted.
 
@@ -732,8 +806,8 @@ export G=http://localhost:8080
 ```
 
 **Merge properties onto a node** (`POST …/nodes/{external_id}/properties`).
-One `UPDATE` on `_ag_label_vertex` (inheritance covers every label); top-level
-keys overwrite, other keys are kept.
+The node is found across every label and locked, then one `UPDATE ONLY` on
+its own label table (§4); top-level keys overwrite, other keys are kept.
 
 ```bash
 curl -X POST "$G/v1/acme/graph/nodes/doc-42/properties" \
@@ -744,23 +818,28 @@ curl -X POST "$G/v1/acme/graph/nodes/doc-42/properties" \
 ```
 
 404 if no node has `properties.id == external_id`. If the id exists under
-several labels, all matching rows are updated and one label is echoed.
+several labels, nothing is written and the answer is 409 with the candidate
+labels, until `?label=` names one (§4).
 
-**Histogram** (`GET …/labels/{label}/histogram`). One `GROUP BY` on the label
-table.
+**Node aggregate** (`POST …/nodes/aggregate`). One `GROUP BY` on the label
+table (a parent label includes its children).
 
 ```bash
-curl "$G/v1/acme/graph/labels/Document/histogram?property=category&limit=10" \
-  -H "Authorization: Bearer $TOKEN"
-# {"tenant": "acme", "label": "Document", "property": "category",
-#  "n_distinct": 3, "n_total": 512,
-#  "bins": [{"value": "report", "count": 312}, {"value": "memo", "count": 150},
-#           {"value": "", "count": 50}],
+curl -X POST "$G/v1/acme/graph/nodes/aggregate" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"label": "Document", "group_by": "category", "missing": true, "limit": 10}'
+# {"tenant": "acme", "label": "Document", "group_by": "category",
+#  "truncated": false, "total": 512, "distinct": 3,
+#  "groups": [{"value": "report", "count": 312}, {"value": "memo", "count": 150},
+#             {"value": "", "count": 50}],
 #  "elapsed_ms": 6}
 ```
 
-Missing values are reported as `""`. `n_distinct` is exact only when fewer
-than `limit` bins came back; otherwise it is `-1`.
+With `missing: true` the nodes without the property are counted under `""`.
+`total` counts every node grouped and `distinct` the distinct values, both
+whatever `limit` cut. A string value comes as it is, any other value as JSON
+(`true`, `["red", "blue"]`). `values` restricts the groups to given string
+values.
 
 **Top by degree** (`GET …/labels/{label}/top`). Counts edges of `by_edge`
 where the node is source (`out`), destination (`in`), or either (`both`).
@@ -849,7 +928,8 @@ curl -X DELETE "$G/v1/acme/graph/cache/dashboard:home" -H "Authorization: Bearer
 ### 2.6 Background jobs
 
 `POST …/recompute-communities`, `POST …/graph/metrics:compute`,
-`POST …/graph/edges:resolve` and `POST /v1/db/vacuum` take
+`POST …/graph/edges:resolve`, `POST …/graph/properties:check` and
+`POST /v1/db/vacuum` take
 `Prefer: respond-async` (RFC 7240). The endpoint
 runs its usual validation (scope, tenant, body, edge types, table names),
 then inserts a row into `graphos_meta.jobs` and answers 202 with the job and
@@ -860,8 +940,9 @@ then inserts a row into `graphos_meta.jobs` and answers 202 with the job and
   FOR UPDATE SKIP LOCKED LIMIT 1)`, so replicas never run the same job, up to
   `GRAPHOS_JOB_CONCURRENCY` at a time. A job queued by the same process starts
   at once; otherwise the runner looks every `GRAPHOS_JOB_POLL_S` (5 s).
-- **Same code as the synchronous call.** The kinds are declared in `app.py`:
-  each calls the endpoint's own `run_*` function, so a job's `result` is
+- **Same code as the synchronous call.** The kinds are declared in `app.py`
+  (`recompute_communities`, `compute_metrics`, `resolve_edges`,
+  `check_properties`, `vacuum`): each calls the endpoint's own `run_*` function, so a job's `result` is
   exactly the synchronous response body, and a failure stores the HTTP status
   and detail the synchronous call would have returned (`{"status", "detail"}`;
   unexpected errors store 500 and a generic detail, the traceback goes to the
@@ -897,15 +978,16 @@ then inserts a row into `graphos_meta.jobs` and answers 202 with the job and
 ```mermaid
 flowchart LR
     subgraph api["graphos/api/*.py (routers)"]
-        R["tenants · graph · bulk · snapshot ·<br/>communities · louvain · cache · db · info · health"]
+        R["tenants · graph · bulk · snapshot · paths ·<br/>communities · louvain · graph_metrics ·<br/>property_check · cypher · changes · jobs ·<br/>cache · db · info · health · auth · access · me"]
     end
     CON["contracts/*<br/>Pydantic models"]
-    AUTH["auth.py · identity.py<br/>sign-in, users, grants"]
+    AUTH["auth.py · identity.py · oidc.py<br/>sign-in, users, grants"]
     OBS["observability/*<br/>metrics · logging · audit · rate_limit"]
     BOOT["bootstrap.py<br/>tenant DDL + registry"]
     RES["resolver/*<br/>catalogue · compiler · indexer"]
-    LV["louvain.py"]
-    CY["cypher.py<br/>cypher() helper, upsert paths"]
+    LV["louvain.py · graph_metrics.py<br/>child-process computations"]
+    WR["writes.py<br/>every write, its change record"]
+    CO["console.py<br/>read-only Cypher console, own pool"]
     DB["db.py<br/>asyncpg pool"]
 
     OBS --> R
@@ -914,12 +996,14 @@ flowchart LR
     R --> BOOT
     R --> RES
     R --> LV
-    R --> CY
+    R --> WR
+    R --> CO
     R --> DB
     BOOT --> DB
     RES --> DB
-    LV --> DB
-    CY --> DB
+    LV --> WR
+    WR --> DB
+    CO --> DB
 ```
 
 The pool (`db.py`) tries `LOAD 'age'` once per physical connection
@@ -927,7 +1011,19 @@ The pool (`db.py`) tries `LOAD 'age'` once per physical connection
 graphos relies on AGE being in `shared_preload_libraries`, which the compose
 file sets) and sets
 `search_path = ag_catalog, "$user", public` on every acquire (asyncpg's
-`RESET ALL` on release clears it). Middleware order on a request:
+`RESET ALL` on release clears it). Its connections start with
+`statement_timeout`, `jit = off` (unless `GRAPHOS_DB_JIT=true`) and
+`plan_cache_mode = force_custom_plan` as server settings, which `RESET ALL`
+keeps. The last one matters on PostgreSQL 18: asyncpg prepares each
+statement, and after five runs PostgreSQL may keep a generic plan made
+without the values; for a `nodes:scan` on two property filters it kept one
+that walked the id index and dropped 34,702 rows to return 100 (about 50 ms
+became about 1 s, [AGE notes §10](apache-age.md#10-operational-gotchas)). A
+filtered `nodes:scan` also raises `cpu_operator_cost` to 0.025 in its own
+transaction, so the planner prices converting each row's properties near its
+cost and uses the property indexes for a selective filter instead of walking
+the id index on a compact table (a fresh load, or a restore). Middleware
+order on a request:
 request-context logging → rate limit → metrics → audit → router.
 
 ### 3.1 Cypher / SQL boundary
@@ -939,18 +1035,39 @@ node-plus-edges pattern for over ten minutes without stopping at either.)
 
 The one exception is the opt-in Cypher console (`GRAPHOS_CYPHER=true`,
 `POST /v1/{tenant}/cypher`): read-only Cypher on one tenant's graph, for
-people who know Cypher. graphos refuses a query with a write clause (AGE
-1.6 carries out `SET`, `REMOVE` and `DELETE` where a read-only transaction
-does not see them) or a schema-qualified call (the only way
-Cypher reaches database functions), runs it in a read-only transaction on a small pool of its own with a row cap and a
-timeout, and a watchdog cancels, then terminates, the backend if AGE does
+people who know Cypher (`console.py`). Before the query reaches the
+database, graphos refuses (400):
+
+- a write clause (`CREATE`, `MERGE`, `SET`, `DELETE`, `DETACH`, `REMOVE`;
+  `console.write_clauses`, outside strings and comments): AGE 1.6 carries out
+  `SET`, `REMOVE` and `DELETE` itself, where PostgreSQL's read-only check does
+  not see them, so the read-only transaction alone stops only `CREATE` and
+  `MERGE` there. AGE 1.8 stops them all in a read-only transaction, and
+  refuses Cypher writes from a role with only `SELECT`; AGE 1.6 does neither
+  ([AGE notes](apache-age.md#pitfall-a-read-only-transaction-does-not-stop-age-16s-writes));
+- a call of a database function: a schema-qualified name, or any function
+  that is not one of Cypher's as AGE documents them (AGE resolves an unknown
+  name to another extension's function on 1.6, and to any function on the
+  search path from 1.7);
+- variable-length patterns, `vertex_stats()` and (AGE 1.8) `shortest_path()`
+  and `all_shortest_paths()`: AGE serves them from an in-memory copy of the
+  graph it cannot load from tables carrying graphos's own columns
+  (apache/age#2583); on AGE 1.6 the failed load leaves that database process
+  stuck on the next such query
+  ([AGE notes](apache-age.md#pitfall-extra-columns--variable-length-patterns--a-backend-that-never-returns)).
+
+It then runs the query in a read-only transaction on the tenant's graph, on a
+small pool of its own (`GRAPHOS_CYPHER_POOL_SIZE`, 5 per replica; a query
+waits up to `GRAPHOS_CYPHER_WAIT_S` for a connection, then 429), one query per
+user (`GRAPHOS_CYPHER_PER_USER`), with a row cap (`GRAPHOS_CYPHER_MAX_ROWS`),
+a timeout (`GRAPHOS_CYPHER_TIMEOUT_S`) and PostgreSQL's `temp_file_limit`
+(`GRAPHOS_CYPHER_TEMP_FILE_LIMIT`, 1GB, when graphos's role may set it). A
+watchdog cancels, then terminates, the backend if AGE does
 not stop in time (AGE 1.6 sees a cancel late while it builds large lists),
-and closes the connection if even that is not seen. It also refuses
-variable-length patterns and `vertex_stats()`: AGE serves them from an
-in-memory copy of the graph it cannot load from tables carrying graphos's
-own columns, and the failed load leaves that database process stuck on the
-next one ([AGE notes](apache-age.md#pitfall-extra-columns--variable-length-patterns--a-backend-that-never-returns)).
-A connection on which a query failed is closed, not reused.
+and closes the connection if even that is not seen; it stops on an event the
+query sets when it ends, so a finished query is answered at once. A cancelled
+request stops its query (499). A connection on which a query failed is
+closed, not reused. Every console query is in the audit log (§2.5.6).
 
 | Operation | Language |
 |---|---|
@@ -959,7 +1076,9 @@ A connection on which a query failed is closed, not reused.
 | `nodes/aggregate`, `export`, `communities?include_members=true` member lists | SQL |
 | Node deletes (by id, by property) | SQL: one statement deletes the matching nodes (unique `id` index, or GIN containment for other keys) and every edge touching them |
 | `search`, `nodes/{id}` (GET, PATCH), `nodes/{id}/properties`, `edges/{type}` (GET, PATCH, DELETE), `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `nodes:scan`, `edges:scan`, `edges/aggregate` | SQL |
-| `histogram`, `top`, `stats`, `communities`, `community-summary`, `community-ids`, `catalogue` | SQL |
+| `top`, `stats`, `communities`, `community-summary`, `community-ids`, `catalogue` | SQL |
+| `paths`, `map`, `map/hubs`, `communities/map`, `properties`, `properties:check`, dataset export (`snapshot`) | SQL |
+| Graph metrics edge stream and write-back | SQL (`COPY` + `UPDATE … FROM`) |
 | `edges:resolve` | SQL: one `INSERT … SELECT … ON CONFLICT (start_id, end_id) DO NOTHING` per edge type |
 | Louvain edge stream and writeback | SQL (`COPY` + `UPDATE … FROM`) |
 | Registration DDL, `/v1/db/*`, advisory locks | SQL |
@@ -967,12 +1086,18 @@ A connection on which a query failed is closed, not reused.
 `neighbors` and `expand` resolve the seed id(s) to graphids, then query
 `"<tenant>"._ag_label_edge` (which routes to each edge-label table and its
 `(start_id, end_id)` / `(end_id)` indexes), filtering edge types by
-`pg_class.relname`. `expand` runs the BFS hop by hop in Python: one query per
+`pg_class.relname`. `neighbors` reads at most `limit` outgoing and `limit`
+incoming edges, ordered by the other end's graphid (then edge type), and keeps
+the outgoing ones first. `expand` runs the BFS hop by hop in Python: one query per
 direction per hop (out and in run concurrently for `direction=both`), at most
-`max(limit × 4, 1000)` edge rows per direction per hop, first arrival wins,
-seeds excluded from results. A non-timeout database error during a hop skips
-that hop instead of failing the request. On a tenant with no edge labels both
-return an empty result.
+`max(limit × 4, 1000)` edge rows per direction per hop, ordered by
+`(start_id, end_id)` (or `(end_id, start_id)` inbound), first arrival wins,
+seeds excluded from results. So when a cap cuts the result, the rows kept are
+the first in graph-id order (the order nodes were loaded in), not the first
+the table happens to hold: a dump and a restore, the move to PostgreSQL 18, or
+rows moved by updates give the same answer. A non-timeout database error
+during a hop answers 500 (and is logged) instead of a smaller result. On a
+tenant with no edge labels both return an empty result.
 
 Operators can still use `psql` inside the compose for ad-hoc inspection:
 
@@ -982,6 +1107,15 @@ SELECT * FROM cypher('acme', $$
   RETURN d.category, count(*) ORDER BY count(*) DESC LIMIT 10
 $$) AS (category agtype, n agtype);
 ```
+
+Such direct reads bypass graphos's checks and audit log. For people who read
+this way regularly, give them a read-only role of their own per tenant schema
+([installation §8](installation.md#direct-sql-readers)); that needs AGE 1.8,
+since on AGE 1.6 a role with only `SELECT` can still change and delete rows
+through Cypher `SET`, `REMOVE` and `DELETE`. Variable-length patterns fail on
+graphos's tables there too; `tools/export/ndjson_to_age.py` loads a dataset
+export into a plain AGE graph, with AGE's own columns only, where they work
+([without-graphos.md](without-graphos.md)).
 
 ---
 
@@ -1060,6 +1194,20 @@ check and the write: a mismatch is 412 with the current ETag, and nothing is
 written. `GRAPHOS_REQUIRE_IF_MATCH=true` turns a missing `If-Match` on those
 writes into 428. The single-row `UPDATE` / `DELETE` statements use `ONLY`, so
 they never reach a row of an inheriting label (`label_hierarchy`).
+
+**Property checks.** A tenant's `property_schema` (`graphos.properties`)
+holds every write path to the definitions it declares, per vertex label and
+edge type, combined from `*` down the label hierarchy (a narrower entry adds
+rules but cannot change a type). In `off` (the default) nothing is checked.
+In `warn` every row is written and its problems are counted in the response's
+`property_warnings`. In `strict` a violating row is refused: `POST /nodes` and
+`/edges` answer 422 with the first `violations`, a `:bulk` or
+`snapshot-import` line is counted invalid, and `PATCH` and the property merge
+are checked on the row they leave. `snapshot-import?properties=report` checks
+and counts but never refuses, to restore data older than its definitions.
+Problems are counted in `graphos_property_violations_total` by rule.
+`POST …/graph/properties:check` reads the stored rows as if every rule
+applied and writes nothing.
 
 With audit enabled (the default), the audit middleware reads each non-`GET`
 request's full body into memory before the handler parses it (§2.5.6).
@@ -1290,6 +1438,21 @@ Converting graphology JSON to another tool's format is the caller's job.
 `sample_subgraph` and `scoped_subgraph` return their own JSON shapes; note that
 `sample_subgraph` identifies nodes by AGE graphid, not external id.
 
+For a whole tenant, the dataset export (`GET …/graph/snapshot`,
+`graphos.dataset`) streams one NDJSON file: a `header` line (format, counts,
+the schema), every node label by label in id order, every edge type by type,
+and an `end` line, read in one consistent snapshot through server-side
+cursors with flat memory. Each edge type is joined to a temporary table of
+every vertex's external id and label; that table is indexed and analyzed
+before the cursors run, because PostgreSQL plans a cursor for its first rows
+and, without the index, compared every edge with every vertex (a
+251,000-node, 940,000-edge tenant did not finish in 33 minutes; with it, the
+export takes about 70 s). `snapshot-import` reads the file back.
+[`tools/export/ndjson_to_age.py`](../tools/export/ndjson_to_age.py) loads it
+into a new, plain AGE graph without graphos (AGE's own columns only, new
+graph ids, external ids kept in `properties`), where AGE's variable-length
+patterns work ([without-graphos.md](without-graphos.md)).
+
 ---
 
 ## 7. Sizing
@@ -1298,7 +1461,9 @@ The compose file is sized to start on a laptop: `graphos-db` with a 2 GiB
 memory limit (512 MiB reservation), `shared_buffers=1GB`,
 `effective_cache_size=2GB`, `work_mem=64MB`, `max_connections=50`, 1 GiB
 `/dev/shm`; `graphos-api` with a 2 GiB limit and an asyncpg pool of 2–16
-connections (`GRAPHOS_DB_POOL_MIN_SIZE` / `GRAPHOS_DB_POOL_MAX_SIZE`). For
+connections (`GRAPHOS_DB_POOL_MIN_SIZE` / `GRAPHOS_DB_POOL_MAX_SIZE`), plus,
+with the console on, up to `GRAPHOS_CYPHER_POOL_SIZE` (5) more per replica:
+allow for both in `max_connections`. For
 graphs with millions of edges, raise `shared_buffers` (4GB),
 `effective_cache_size` (6GB) and the `graphos-db` limit (6g) together
 ([apache-age.md §7](apache-age.md#7-tuning-postgres-for-graphos)).
@@ -1339,13 +1504,22 @@ Postgres instance.
 7. **Generated columns on tables that already hold rows** rewrite the table;
    add them early.
 8. **AGE version.** The compose pins `apache/age:release_PG18_1.8.0` by
-   digest; graphos also runs on `release_PG16_1.6.0`, and CI tests both.
+   digest; graphos also runs on `release_PG16_1.6.0`, deprecated (§2.4), and
+   CI tests both.
    Several code paths work around AGE behaviour (e.g. a Cypher `SET` on a
    label table carrying extra columns such as `end_community_id` or a
-   generated column crashes the backend on 1.6 and writes NULL into them on
-   1.8, so all rows are written through SQL, §4). Re-test on upgrade.
+   generated column crashes the backend on 1.6 and is refused on 1.8, which
+   would leave NULL in them, so all rows are written through SQL, §4).
+   Re-test on upgrade.
 9. **Change-feed latency follows the longest write transaction** on the
    database server (§4.1); a Louvain write-back on a large graph holds every
    tenant's feed until it commits.
 10. **Backups** are operator-owned: `pg_dump` / `pg_basebackup` or a snapshot of
-   the `graphos_data` volume.
+   the `graphos_data_pg18` volume (`graphos_data` on PostgreSQL 16). A
+   restore needs AGE's catalogue pointed at the restored schemas' new OIDs
+   and fresh planner statistics
+   ([upgrade-postgresql-18.md](upgrade-postgresql-18.md#a-database-you-run-yourself)).
+11. **No variable-length Cypher patterns** on graphos's tables: AGE refuses
+   to build its in-memory graph from label tables with extra columns
+   (apache/age#2583), so the console refuses them; the API's `paths` and
+   `expand` do not need them, and a plain AGE copy (§6) runs them.
