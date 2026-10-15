@@ -13,7 +13,10 @@
 # Usage:
 #   scripts/run-db-tests.sh                  → run all @db tests
 #   scripts/run-db-tests.sh tests/test_search.py::test_x   → one test
-#   scripts/run-db-tests.sh --down-volumes   → also wipe graphos_data on exit
+#   scripts/run-db-tests.sh --down-volumes   → also wipe the stack's volumes on exit
+#   scripts/run-db-tests.sh --db-image IMAGE → graphos-db on another database image
+#                                              (CI: the PostgreSQL 16 / AGE 1.6 one),
+#                                              on a volume of its own
 
 set -euo pipefail
 
@@ -23,18 +26,45 @@ SERVICE_DIR="$ROOT/services/graphos"
 COMPOSE_FILE="$ROOT/docker-compose.graphos.yml"
 
 DOWN_VOLUMES=""
+DB_IMAGE=""
 PYTEST_ARGS=()
-for arg in "$@"; do
-    case "$arg" in
+while (( $# )); do
+    case "$1" in
         --down-volumes) DOWN_VOLUMES="--volumes" ;;
-        *)              PYTEST_ARGS+=("$arg") ;;
+        --db-image)     DB_IMAGE="$2"; shift ;;
+        *)              PYTEST_ARGS+=("$1") ;;
     esac
+    shift
 done
+
+COMPOSE=(docker compose -f "$COMPOSE_FILE")
+OVERRIDE=""
+if [[ -n "$DB_IMAGE" ]]; then
+    # Another major's data must never land on graphos_data_pg18, and there is
+    # nothing to move into a test database.
+    OVERRIDE="$(mktemp)"
+    cat > "$OVERRIDE" <<EOF
+services:
+  graphos-db:
+    image: $DB_IMAGE
+    volumes:
+      - graphos_test_db:/var/lib/postgresql/data
+  graphos-db-export:
+    entrypoint: ["true"]
+  graphos-db-import:
+    entrypoint: ["true"]
+volumes:
+  graphos_test_db:
+    name: graphos_test_db
+EOF
+    COMPOSE+=(-f "$OVERRIDE")
+fi
 
 cleanup() {
     echo
     echo "==> tearing down stack..."
-    docker compose -f "$COMPOSE_FILE" down $DOWN_VOLUMES >/dev/null 2>&1 || true
+    "${COMPOSE[@]}" down $DOWN_VOLUMES >/dev/null 2>&1 || true
+    if [[ -n "$OVERRIDE" ]]; then rm -f "$OVERRIDE"; fi
 }
 trap cleanup EXIT INT TERM
 
@@ -42,7 +72,7 @@ echo "==> ensuring secret files exist..."
 bash "$SCRIPT_DIR/init-secrets.sh"
 
 echo "==> bringing up graphos stack..."
-docker compose -f "$COMPOSE_FILE" up -d --build
+"${COMPOSE[@]}" up -d --build
 
 echo "==> waiting for graphos-db to be healthy..."
 deadline=$((SECONDS + 60))

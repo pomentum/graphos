@@ -94,11 +94,24 @@ jobs:
   # ── Integration: brings up compose, runs @db-marked tests ───────────────
   # Heavier; runs only on PRs and pushes to main. Tear-down is in the
   # script's exit trap, so a failure mid-run still cleans up.
+  # One graphos build, against each database it supports: the compose's
+  # (PostgreSQL 18, AGE 1.8) and PostgreSQL 16 with AGE 1.6.
   integration:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - db: pg18-age1.8
+            image: ""
+          - db: pg16-age1.6
+            image: apache/age:release_PG16_1.6.0@sha256:16aa423d20a31aed36a3313244bf7aa00731325862f20ed584510e381f2feaed
+    name: integration (${{ matrix.db }})
     steps:
       - uses: actions/checkout@v4
 
       - name: Run DB-gated tests against compose stack
-        run: bash scripts/run-db-tests.sh --down-volumes
+        env:
+          DB_IMAGE: ${{ matrix.image }}
+        run: bash scripts/run-db-tests.sh --down-volumes ${DB_IMAGE:+--db-image "$DB_IMAGE"}
