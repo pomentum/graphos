@@ -80,9 +80,14 @@ async def create_pool(settings: Settings) -> asyncpg.Pool:
         # JIT off unless configured: on graphos's heaviest queries it gained
         # nothing measurable, and on tenants without statistics it spent
         # ~1.8 s compiling queries that run in milliseconds.
+        # Custom plans always: graphos filters on property expressions whose
+        # selectivity the planner can judge only from the values. After five
+        # runs of a prepared statement PostgreSQL 18 kept a generic plan for a
+        # property scan that read 34,702 rows for 100 (50 ms -> 1 s).
         server_settings={
             "statement_timeout": str(int(settings.statement_timeout_s * 1000)),
             "jit": "on" if settings.db_jit else "off",
+            "plan_cache_mode": "force_custom_plan",
         },
         command_timeout=None,
     )

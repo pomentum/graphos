@@ -3117,6 +3117,16 @@ def _project_properties(
     return {k: v for k, v in raw.items() if k in keys}
 
 
+# A property filter converts each row's properties (agtype to text to jsonb),
+# which the planner prices as one cheap operator. On a compact table it then
+# walks the id index in order and filters, even for a few matches late in that
+# order: on PostgreSQL 18 a scan for 649 of 100,000 rows dropped 15,604 rows in
+# 334 ms, where the property indexes and a sort take 28 ms. Ten times the
+# default prices the conversions near what they cost; a filter that matches
+# most rows keeps the ordered walk (5 -> 15 ms).
+_FILTER_OPERATOR_COST = "0.025"
+
+
 @router.post(
     "/nodes:scan",
     response_model=NodesScanResponse,
@@ -3281,7 +3291,9 @@ async def scan_nodes(
         params.append(remaining)
 
         try:
-            async with pool.acquire() as conn:
+            async with pool.acquire() as conn, conn.transaction():
+                if where_frags and not skip_order_by:
+                    await conn.execute(f"SET LOCAL cpu_operator_cost = {_FILTER_OPERATOR_COST};")
                 rows = await conn.fetch(sql, *params)
         except asyncpg.exceptions.UndefinedTableError as exc:
             raise HTTPException(
