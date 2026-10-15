@@ -1,11 +1,15 @@
 import { Button, CloseButton, Group, Loader, Text } from "@mantine/core";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type Sigma from "sigma";
+import { CanvasExportMenu } from "../../components/CanvasExportMenu";
 import { GraphCanvas } from "../../components/GraphCanvas";
 import { useGraphMap, useLabelStyles } from "../../data/queries";
+import type { EdgeAttributes, NodeAttributes } from "../../graph/GraphModel";
 import { buildMapModel, largestBubbles, mapCategories, mapEdgeDisplay, mapNodeDisplay } from "../../graph/graphMap";
 import { useWorkspace, type ExploreMode } from "../../graph/WorkspaceProvider";
 import { formatCount } from "../../lib/time";
+import { useTenantSession } from "../../session/SessionProvider";
 import { usePalette } from "../../theme/usePalette";
 import classes from "./ExploreView.module.css";
 import { MapPanel } from "./MapPanel";
@@ -26,6 +30,8 @@ export function MapView({ onMode }: { onMode: (mode: ExploreMode) => void }) {
   const [exact, setExact] = useState(false);
   const map = useGraphMap(exact);
   const palette = usePalette();
+  const { tenant } = useTenantSession();
+  const renderer = useRef<Sigma<NodeAttributes, EdgeAttributes> | null>(null);
   // Kept in the workspace: going to Browse and back keeps the label selected.
   const { mapLabel: selected, setMapLabel: setSelected } = useWorkspace();
   const { openHubs, opening } = useOpenHubs();
@@ -63,6 +69,7 @@ export function MapView({ onMode }: { onMode: (mode: ExploreMode) => void }) {
             style={MAP_STYLE}
             onSelect={setSelected}
             onExpand={(label) => void openHubs(label)}
+            rendererRef={renderer}
           />
         ) : (
           <div className={classes.empty}>
@@ -82,6 +89,15 @@ export function MapView({ onMode }: { onMode: (mode: ExploreMode) => void }) {
         )}
         <Group gap={6} className={classes.actions}>
           <ModeSwitch mode="map" onChange={onMode} />
+          {model ? (
+            <CanvasExportMenu
+              renderer={renderer}
+              graph={model.graph}
+              palette={palette}
+              name={[tenant, "map"]}
+              json={() => JSON.stringify(map.data, null, 2)}
+            />
+          ) : null}
           {opening ? <Loader size={14} /> : null}
         </Group>
         {totals ? (

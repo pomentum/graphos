@@ -3,6 +3,7 @@ import type Graph from "graphology";
 import type Sigma from "sigma";
 import type { EdgeAttributes, NodeAttributes } from "../graph/GraphModel";
 import type { Palette } from "../theme/tokens";
+import { SVG_FONT_FAMILY } from "./svgFont";
 
 /**
  * What is on a graph canvas, as a file: a picture (PNG, drawn by sigma; SVG,
@@ -33,13 +34,43 @@ function unit(x: number, y: number): [number, number] {
   return [x / length, y / length];
 }
 
+/** Whether sigma draws the node's label: a highlighted or forced node's. */
+function labelShown(data: { label?: string | null; forceLabel?: boolean; highlighted?: boolean }): boolean {
+  return Boolean(data.label && (data.forceLabel || data.highlighted));
+}
+
+/** The text of the labels the canvas shows now, for picking the font to embed. */
+export function canvasLabelText(renderer: Renderer, graph: Graph<NodeAttributes, EdgeAttributes>): string {
+  const text: string[] = [];
+  graph.forEachNode((key) => {
+    const data = renderer.getNodeDisplayData(key);
+    if (data && !data.hidden && labelShown(data)) text.push(data.label!);
+  });
+  return text.join("");
+}
+
+/** A pictogram's image (drawn in white) in the colour the canvas tints it with. */
+function tinted(image: string, color: string): string {
+  return image.replaceAll(encodeURIComponent("#FFFFFF"), encodeURIComponent(color));
+}
+
+// The image program's padding (GraphCanvas): the pictogram spans the disc's
+// diameter divided by 1 + 2 × padding.
+const PICTOGRAM_SCALE = 1 / (1 + 2 * 0.24);
+
 /**
  * The canvas as SVG, as it is drawn now: edges (with arrowheads; those sharing
- * their two nodes curved apart, as on the canvas), nodes, and
- * the labels sigma shows (those of highlighted and forced nodes), on the
- * canvas's background and at its size. Hidden nodes and edges are left out.
+ * their two nodes curved apart, as on the canvas), nodes with their label's
+ * pictogram, and the labels sigma shows (those of highlighted and forced
+ * nodes), on the canvas's background and at its size. Hidden nodes and edges
+ * are left out. `fontFaces` (from `svgFont`) embeds the labels' font.
  */
-export function canvasSvg(renderer: Renderer, graph: Graph<NodeAttributes, EdgeAttributes>, palette: Palette): string {
+export function canvasSvg(
+  renderer: Renderer,
+  graph: Graph<NodeAttributes, EdgeAttributes>,
+  palette: Palette,
+  fontFaces = "",
+): string {
   const { width, height } = renderer.getDimensions();
   const at = (key: string) => {
     const data = renderer.getNodeDisplayData(key);
@@ -99,9 +130,17 @@ export function canvasSvg(renderer: Renderer, graph: Graph<NodeAttributes, EdgeA
     const node = at(key);
     if (!node) continue;
     nodes.push(`<circle cx="${round(node.x)}" cy="${round(node.y)}" r="${round(node.r)}" fill="${node.data.color}"/>`);
-    if (node.data.label && (node.data.forceLabel || node.data.highlighted)) {
+    const { image, pictoColor } = node.data as { image?: string; pictoColor?: string };
+    if (image) {
+      const side = 2 * node.r * PICTOGRAM_SCALE;
+      nodes.push(
+        `<image xlink:href="${escapeXml(tinted(image, pictoColor ?? "#FFFFFF"))}" x="${round(node.x - side / 2)}" ` +
+          `y="${round(node.y - side / 2)}" width="${round(side)}" height="${round(side)}"/>`,
+      );
+    }
+    if (labelShown(node.data)) {
       labels.push(
-        `<text x="${round(node.x + node.r + 3)}" y="${round(node.y + 4)}">${escapeXml(node.data.label)}</text>`,
+        `<text x="${round(node.x + node.r + 3)}" y="${round(node.y + 4)}">${escapeXml(node.data.label!)}</text>`,
       );
     }
   }
@@ -114,12 +153,12 @@ export function canvasSvg(renderer: Renderer, graph: Graph<NodeAttributes, EdgeA
     )
     .join("");
   return [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
-    `<defs>${defs}</defs>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
+    `<defs>${fontFaces ? `<style>${fontFaces}</style>` : ""}${defs}</defs>`,
     `<rect width="100%" height="100%" fill="${palette.canvas}"/>`,
     `<g>${edges.join("")}</g>`,
     `<g>${nodes.join("")}</g>`,
-    `<g font-family="-apple-system, BlinkMacSystemFont, Inter, sans-serif" font-size="11" font-weight="500" ` +
+    `<g font-family="${SVG_FONT_FAMILY}" font-size="11" font-weight="500" ` +
       `fill="${palette.text}">${labels.join("")}</g>`,
     "</svg>",
   ].join("");

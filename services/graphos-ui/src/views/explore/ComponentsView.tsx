@@ -1,5 +1,5 @@
 import { Group, Loader, Select, Text } from "@mantine/core";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { COMPONENT_LIMIT, useComponent, useComponents } from "../../data/metricViews";
 import type { ExploreMode } from "../../graph/WorkspaceProvider";
@@ -32,7 +32,7 @@ export function ComponentsView({
   const chosen = picked ?? (list.length > 1 ? list[1]!.id : (list[0]?.id ?? null));
   const component = useComponent(chosen);
 
-  const actions = (
+  const actions = (exportMenu?: ReactNode) => (
     <Group gap={6} className={classes.actions}>
       <ModeSwitch mode="groups" onChange={onMode} />
       <LensSwitch lens={lens} onChange={onLens} />
@@ -54,6 +54,7 @@ export function ComponentsView({
           searchable
         />
       ) : null}
+      {exportMenu}
     </Group>
   );
 
@@ -70,7 +71,7 @@ export function ComponentsView({
               </Text>
             ) : null}
           </div>
-          {actions}
+          {actions()}
         </section>
       </div>
     );
@@ -80,6 +81,7 @@ export function ComponentsView({
     <ScoreCanvas
       data={component.data}
       property="graphos_degree"
+      view="components"
       actions={actions}
       note={t("views.explore.lens.componentNote", {
         shown: component.data.nodes.length,

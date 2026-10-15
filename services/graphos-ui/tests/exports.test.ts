@@ -2,8 +2,9 @@ import Graph from "graphology";
 import type { GraphosApi } from "../src/api/graphosApi";
 import type { NodesScanRequest } from "../src/api/types";
 import type { EdgeAttributes, NodeAttributes } from "../src/graph/GraphModel";
-import { canvasJson, canvasPng, canvasSvg } from "../src/lib/canvasExport";
+import { canvasJson, canvasLabelText, canvasPng, canvasSvg } from "../src/lib/canvasExport";
 import { csvCell, exportName, toCsv } from "../src/lib/csv";
+import { fontFaces, subsetsFor } from "../src/lib/svgFont";
 import { exportNodesCsv } from "../src/lib/tableExport";
 import { DARK } from "../src/theme/tokens";
 
@@ -142,7 +143,7 @@ describe("the canvas as a file", () => {
   it("draws an SVG of what is shown: lines, circles, the labels sigma shows, escaped", () => {
     const { graph, renderer } = canvas();
     const svg = canvasSvg(renderer, graph, DARK);
-    expect(svg).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="400" height="300"/);
+    expect(svg).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" [^>]*width="400" height="300"/);
     expect(svg).toContain(`fill="${DARK.canvas}"`);
     expect(svg.match(/<circle /g)).toHaveLength(2); // the hidden placeholder is left out
     expect(svg.match(/<line /g)).toHaveLength(1);
@@ -166,6 +167,55 @@ describe("the canvas as a file", () => {
     const cross = (x2! - x1!) * (cy! - y1!) - (y2! - y1!) * (cx! - x1!);
     expect(cross).toBeLessThan(0);
     expect(svg).toContain('marker-end="url(#a0)"');
+  });
+
+  it("draws each node's pictogram on its disc, tinted as the canvas tints it", () => {
+    const { graph, renderer } = canvas();
+    const white = `data:image/svg+xml;charset=utf-8,${encodeURIComponent('<svg stroke="#FFFFFF"/>')}`;
+    const withIcon = {
+      ...(renderer as unknown as Record<string, unknown>),
+      getNodeDisplayData: (key: string) => ({
+        ...(renderer as unknown as { getNodeDisplayData: (k: string) => object }).getNodeDisplayData(key),
+        ...(key === "Doc|d1" ? { image: white, pictoColor: "#112233" } : {}),
+      }),
+    };
+    const svg = canvasSvg(withIcon as never, graph, DARK);
+    expect(svg.match(/<image /g)).toHaveLength(1);
+    expect(svg).toContain(encodeURIComponent('stroke="#112233"'));
+    // Inside the disc of radius 5, as the image program's padding leaves it: 10 / 1.48.
+    expect(svg).toContain('width="6.8" height="6.8"');
+    expect(svg).toContain('xmlns:xlink="http://www.w3.org/1999/xlink"');
+  });
+
+  it("embeds the labels' font when given, and names it first", () => {
+    const { graph, renderer } = canvas();
+    expect(canvasLabelText(renderer, graph)).toBe("A & B");
+    const svg = canvasSvg(renderer, graph, DARK, '@font-face{font-family:"Inter"}');
+    expect(svg).toContain('<style>@font-face{font-family:"Inter"}</style>');
+    expect(svg).toContain('font-family="Inter, ');
+    expect(canvasSvg(renderer, graph, DARK)).not.toContain("<style>");
+  });
+
+  it("embeds only the font subsets the labels' letters need", async () => {
+    const ranges = (text: string) => subsetsFor(text).map((s) => s.range.split(",")[0]);
+    expect(ranges("")).toEqual([]);
+    expect(ranges("pipelineflow")).toEqual(["U+0000-00FF"]);
+    expect(ranges("Αθήνα")).toEqual(["U+0370-0377"]);
+    expect(ranges("Αθήνα, Łódź")).toEqual(["U+0370-0377", "U+0100-02BA", "U+0000-00FF"]);
+    const fetched: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      fetched.push(url);
+      return new Response(new Uint8Array([1, 2, 3]));
+    });
+    try {
+      const css = await fontFaces("Αθήνα");
+      expect(fetched).toHaveLength(1);
+      expect(css).toContain("src:url(data:font/woff2;base64,AQID)");
+      expect(css).toContain("unicode-range:U+0370-0377,");
+      expect(await fontFaces("")).toBe("");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("saves the graph as JSON without the +N placeholders", () => {

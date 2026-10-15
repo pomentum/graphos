@@ -1,14 +1,17 @@
 import { Badge, Button, Group, Loader, Select, Stack, Text, UnstyledButton } from "@mantine/core";
 import { IconArrowRight } from "@tabler/icons-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import type Sigma from "sigma";
+import { CanvasExportMenu } from "../../components/CanvasExportMenu";
 import { GraphCanvas } from "../../components/GraphCanvas";
 import { useTopByMetric, type MetricGraph } from "../../data/metricViews";
-import { displayName, nodeKey } from "../../graph/GraphModel";
+import { displayName, nodeKey, type EdgeAttributes, type NodeAttributes } from "../../graph/GraphModel";
 import { buildScoreModel, rankHeat, SCORE_LABELS, scoreEdgeDisplay, scoreNodeDisplay } from "../../graph/scoreGraph";
 import { useWorkspace, type ExploreMode } from "../../graph/WorkspaceProvider";
 import { formatMetric, type Lens } from "../../lib/metrics";
+import { useTenantSession } from "../../session/SessionProvider";
 import { usePalette } from "../../theme/usePalette";
 import classes from "./ExploreView.module.css";
 import { LensSwitch } from "./LensSwitch";
@@ -38,7 +41,7 @@ export function ScoreView({
   const { t } = useTranslation();
   const [count, setCount] = useState(50);
   const top = useTopByMetric(property, count);
-  const actions = (
+  const actions = (exportMenu?: ReactNode) => (
     <Group gap={6} className={classes.actions}>
       <ModeSwitch mode="groups" onChange={onMode} />
       <LensSwitch lens={lens} onChange={onLens} />
@@ -51,6 +54,7 @@ export function ScoreView({
         onChange={(value) => value && setCount(Number(value))}
         allowDeselect={false}
       />
+      {exportMenu}
     </Group>
   );
   if (!top.data || top.data.nodes.length === 0) {
@@ -70,12 +74,12 @@ export function ScoreView({
               <NotComputed />
             )}
           </div>
-          {actions}
+          {actions()}
         </section>
       </div>
     );
   }
-  return <ScoreCanvas data={top.data} property={property} actions={actions} />;
+  return <ScoreCanvas data={top.data} property={property} view={lens} actions={actions} />;
 }
 
 /** Shown when no node has the metric: it has not been computed (or not over these relationships). */
@@ -98,17 +102,23 @@ export function NotComputed() {
 export function ScoreCanvas({
   data,
   property,
+  view,
   actions,
   note,
 }: {
   data: MetricGraph;
   property: string;
-  actions: ReactNode;
+  /** The view's name in exported files. */
+  view: string;
+  /** The toolbar, given the canvas's export menu. */
+  actions: (exportMenu: ReactNode) => ReactNode;
   note?: string;
 }) {
   const { t } = useTranslation();
   const workspace = useWorkspace();
   const palette = usePalette();
+  const { tenant } = useTenantSession();
+  const renderer = useRef<Sigma<NodeAttributes, EdgeAttributes> | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const model = useMemo(() => buildScoreModel(data.nodes, data.edges, property), [data, property]);
   const keys = useMemo(() => data.nodes.map((n) => nodeKey({ id: n.id, label: n.label })), [data]);
@@ -140,8 +150,9 @@ export function ScoreCanvas({
           style={SCORE_STYLE}
           onSelect={setSelected}
           onExpand={open}
+          rendererRef={renderer}
         />
-        {actions}
+        {actions(<CanvasExportMenu renderer={renderer} graph={model.graph} palette={palette} name={[tenant, view]} />)}
         <Text size="xs" c="dimmed" className={classes.note}>
           {note ??
             t("views.explore.lens.totals", {

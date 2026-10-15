@@ -1,10 +1,13 @@
 import { Button, CloseButton, Group, Loader, Select, Stack, Text } from "@mantine/core";
 import { IconRefresh } from "@tabler/icons-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type Sigma from "sigma";
+import { CanvasExportMenu } from "../../components/CanvasExportMenu";
 import { GraphCanvas } from "../../components/GraphCanvas";
 import { useCommunityMap, useServiceInfo } from "../../data/queries";
 import { buildCommunityModel, communityCategories, groupKey, type Community } from "../../graph/communityGraph";
+import type { EdgeAttributes, NodeAttributes } from "../../graph/GraphModel";
 import { largestBubbles, mapEdgeDisplay, mapNodeDisplay } from "../../graph/graphMap";
 import { useWorkspace, type ExploreMode } from "../../graph/WorkspaceProvider";
 import type { Lens } from "../../lib/metrics";
@@ -48,7 +51,8 @@ export function GroupsView({
   onLens: (lens: Lens) => void;
 }) {
   const { t } = useTranslation();
-  const { canMaintain } = useTenantSession();
+  const { canMaintain, tenant } = useTenantSession();
+  const renderer = useRef<Sigma<NodeAttributes, EdgeAttributes> | null>(null);
   const workspace = useWorkspace();
   const map = useCommunityMap();
   const palette = usePalette();
@@ -115,6 +119,7 @@ export function GroupsView({
               const group = byKey.get(key);
               if (group) openHub(group);
             }}
+            rendererRef={renderer}
           />
         ) : (
           <div className={classes.empty}>
@@ -169,6 +174,15 @@ export function GroupsView({
             />
           ) : null}
           {data ? computeButton : null}
+          {model ? (
+            <CanvasExportMenu
+              renderer={renderer}
+              graph={model.graph}
+              palette={palette}
+              name={[tenant, "groups"]}
+              json={() => JSON.stringify(data, null, 2)}
+            />
+          ) : null}
         </Group>
         {data ? (
           <Text size="xs" c="dimmed" className={classes.note} title={t("views.explore.groups.hint")}>
