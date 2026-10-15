@@ -4,6 +4,38 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+A security fix for the Cypher console on AGE 1.6, and a fix for exports of large tenants. No
+database migration; nothing else changes.
+
+### Security
+
+- **The Cypher console could write on AGE 1.6.** It ran every query in a read-only transaction and
+  relied on that alone, but AGE 1.6 carries out `SET`, `REMOVE` and `DELETE` (`DETACH DELETE` too)
+  where PostgreSQL's read-only check does not see them; only `CREATE` and `MERGE` were stopped. Any
+  user allowed the console (`read` on a tenant, by default) could change or delete that tenant's
+  data through it, past revisions and the change feed (the audit log has the console call). A
+  query with a write clause (`CREATE`, `MERGE`, `SET`, `DELETE`, `DETACH`, `REMOVE`) is now refused
+  (400) before the database, whichever AGE runs. Affects every release with the console
+  (`GRAPHOS_CYPHER=true`) on AGE 1.6; the console is off by default.
+
+### Fixed
+
+- **Dataset export of large tenants took hours.** `GET /v1/{tenant}/graph/snapshot` reads each edge
+  type through a cursor joined to a table of every vertex's ends. PostgreSQL plans a cursor for
+  its first rows, and with no index on that table it chose to compare every edge with every vertex:
+  a 251,000-node, 940,000-edge tenant did not finish in 33 minutes. The table is now indexed; the
+  same export takes about 70 s.
+
+### Upgrading from 0.9.0
+
+- No database migration, no setting changes. Console queries with a write clause now answer 400
+  (they were meant to; writes go through the API).
+- Also note: on AGE 1.6, a database role with only `SELECT` can still change data through Cypher
+  `SET`, `REMOVE` and `DELETE`. That is AGE's behaviour, outside graphos: give no direct Cypher
+  access to graphos's database on AGE 1.6 (AGE 1.8 refuses these writes).
+
 ## 0.9.0 — 2026-10-15
 
 A tenant can now declare the properties its labels and relationship types carry, and hold writes to
