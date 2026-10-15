@@ -7,7 +7,9 @@ under one version.
 ## Unreleased
 
 The bundled database moves to PostgreSQL 18 with Apache AGE 1.8, and `docker compose up` moves an
-existing PostgreSQL 16 stack's data there by itself. graphos itself is one image, as before, and
+existing PostgreSQL 16 stack's data there by itself; PostgreSQL 16 with AGE 1.6 is deprecated.
+Three performance fixes found on PostgreSQL 18, a stable order for capped reads, and a way to take
+a tenant into plain AGE. Includes everything in 0.9.1 (the console write guard, the export fix). graphos itself is one image, as before, and
 runs on either database: CI runs the server's tests against both.
 
 ### Added
@@ -60,24 +62,8 @@ runs on either database: CI runs the server's tests against both.
   gives the same counts (`total` for `n_total`). The client's `label_histogram` warns. Both stay
   until a later release.
 
-### Security
-
-- **The Cypher console could write on AGE 1.6.** It ran every query in a read-only transaction and
-  relied on that alone, but AGE 1.6 carries out `SET`, `REMOVE` and `DELETE` (`DETACH DELETE` too)
-  where PostgreSQL's read-only check does not see them; only `CREATE` and `MERGE` were stopped. Any
-  user with `read` on a tenant could change or delete its data through the console, past revisions
-  and the change feed (the audit log has the console call). A query with a write clause (`CREATE`,
-  `MERGE`, `SET`, `DELETE`, `DETACH`, `REMOVE`) is now refused (400) before the database, whichever
-  AGE runs. AGE 1.8 stops these writes itself. Affects every release with the console
-  (`GRAPHOS_CYPHER=true`) on AGE 1.6; off by default.
-
 ### Fixed
 
-- **Dataset export of large tenants took hours.** `GET /v1/{tenant}/graph/snapshot` reads each edge
-  type through a cursor joined to a table of every vertex's ends. PostgreSQL plans a cursor for
-  its first rows, and with no index on that table it chose to compare every edge with every vertex:
-  about 19 billion comparisons for one type of 75,000 edges on a 251,000-node tenant, where the
-  same read takes 2 s. The table is now indexed; that read takes 2.8 s through the cursor.
 - **Reads slowed down after their fifth run on PostgreSQL 18.** asyncpg prepares each statement on
   a connection, and after five runs PostgreSQL may keep a generic plan, made without the values.
   For a `nodes:scan` on two property filters PostgreSQL 18 kept one that walked the id index and
@@ -94,7 +80,7 @@ runs on either database: CI runs the server's tests against both.
   they come as JSON now (`true`, `["red", "blue"]`), as the histogram gave them. Strings and
   numbers are unchanged.
 
-### Upgrading from 0.9.0
+### Upgrading from 0.9.x
 
 - **Compose:** update the files and run `docker compose -f docker-compose.graphos.yml up -d`. The
   first start moves the data (about as long as a dump and a restore); see
@@ -104,8 +90,39 @@ runs on either database: CI runs the server's tests against both.
   the same section.
 - **Clients:** `nodes/aggregate` returns booleans, lists and maps as JSON text (`true`, not
   `True`). Move from the label histogram to `nodes/aggregate` with `missing: true`.
-- **Console on AGE 1.6:** upgrade, or turn the console off (`GRAPHOS_CYPHER=false`), on any
-  deployment where console users must not write.
+- **From 0.9.0:** the console write guard and the export fix of 0.9.1 come with this release too.
+
+## 0.9.1 — 2026-10-15
+
+A security fix for the Cypher console on AGE 1.6, and a fix for exports of large tenants. No
+database migration; nothing else changes.
+
+### Security
+
+- **The Cypher console could write on AGE 1.6.** It ran every query in a read-only transaction and
+  relied on that alone, but AGE 1.6 carries out `SET`, `REMOVE` and `DELETE` (`DETACH DELETE` too)
+  where PostgreSQL's read-only check does not see them; only `CREATE` and `MERGE` were stopped. Any
+  user allowed the console (`read` on a tenant, by default) could change or delete that tenant's
+  data through it, past revisions and the change feed (the audit log has the console call). A
+  query with a write clause (`CREATE`, `MERGE`, `SET`, `DELETE`, `DETACH`, `REMOVE`) is now refused
+  (400) before the database, whichever AGE runs. Affects every release with the console
+  (`GRAPHOS_CYPHER=true`) on AGE 1.6; the console is off by default.
+
+### Fixed
+
+- **Dataset export of large tenants took hours.** `GET /v1/{tenant}/graph/snapshot` reads each edge
+  type through a cursor joined to a table of every vertex's ends. PostgreSQL plans a cursor for
+  its first rows, and with no index on that table it chose to compare every edge with every vertex:
+  a 251,000-node, 940,000-edge tenant did not finish in 33 minutes. The table is now indexed; the
+  same export takes about 70 s.
+
+### Upgrading from 0.9.0
+
+- No database migration, no setting changes. Console queries with a write clause now answer 400
+  (they were meant to; writes go through the API).
+- Also note: on AGE 1.6, a database role with only `SELECT` can still change data through Cypher
+  `SET`, `REMOVE` and `DELETE`. That is AGE's behaviour, outside graphos: give no direct Cypher
+  access to graphos's database on AGE 1.6 (AGE 1.8 refuses these writes).
 
 ## 0.9.0 — 2026-10-15
 
