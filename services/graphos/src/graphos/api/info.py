@@ -20,7 +20,9 @@ router = APIRouter(tags=["info"])
     description=(
         "Needs no token. The graphos, PostgreSQL and Apache AGE versions, the number of "
         "registered tenants (not their names), and which optional features this server has: "
-        "`louvain`, `metrics`, `cypher` (the Cypher console)."
+        "`louvain`, `metrics`, `cypher` (the Cypher console). `database_deprecated` says "
+        "why the database is deprecated for graphos (PostgreSQL before 18, AGE before 1.8), "
+        "or is null."
     ),
 )
 async def info(request: Request) -> dict[str, Any]:
@@ -31,6 +33,8 @@ async def info(request: Request) -> dict[str, Any]:
         "version": __version__,
         "postgres_version": db["postgres_version"],
         "age_version": db["age_version"],
+        # Why this database is deprecated for graphos, or null.
+        "database_deprecated": db["deprecated"],
         # Count only: /v1/info needs no token, so tenant names are not
         # disclosed here (admins list them via GET /v1/tenants).
         "tenants": len(registered_tenants()),

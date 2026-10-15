@@ -61,7 +61,7 @@ from graphos.contracts.graph_metrics import ComputeMetricsRequest
 from graphos.contracts.louvain import RecomputeCommunitiesRequest
 from graphos.contracts.property_schema import PropertiesCheckRequest
 from graphos.contracts.tenants import ResolveEdgesRequest
-from graphos.db import create_pool, ensure_internal_schema
+from graphos.db import create_pool, ensure_internal_schema, fetch_db_version
 from graphos.graph_compute import terminate_running
 from graphos.graph_metrics import configure as configure_metrics
 from graphos.jobs import JobKind, JobRunner
@@ -172,6 +172,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 2. asyncpg pool
     pool = await create_pool(settings)
     app.state.pool = pool
+    versions = await fetch_db_version(pool)
+    if versions["deprecated"]:
+        log.warning("database deprecated", extra={"reason": versions["deprecated"]})
 
     # 3. graphos-internal schema (idempotent) + restore registered tenants
     #    from the previous boot.
