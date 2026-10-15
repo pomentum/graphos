@@ -401,9 +401,14 @@ in `graphos_property_violations_total{tenant,kind,outcome,rule}`.
 job) reads the stored rows as if every rule applied, whatever the mode, so a schema can be tried in
 `off` before it is turned on: per label and type, rows read, rows with errors and warnings, counts
 by rule, some example ids (`examples`, default 10) and the undeclared names the rows carry.
-`labels` and `types` narrow it. `GET /v1/{tenant}/schema` serves `property_schema` to every reader; it is in the schema
-file (version 2 when present) and the change feed (entries as `vertex:Person`, the mode as
-`property_mode`).
+`labels` and `types` narrow it. `GET /v1/{tenant}/schema` serves `property_schema` to every reader,
+as declared (only the keywords each definition states); it is in the schema file (version 2 when
+present) and the change feed (entries as `vertex:Person`, the mode as `property_mode`).
+`GET /v1/{tenant}/graph/properties` (`read`) serves what each registered label and type is checked
+against: its mode, its rule for undeclared properties, and each property's definition combined from
+`*`, the ancestors and its own entry, with the entry it comes from last (`source`).
+In the web UI, the Schema page shows each label's and type's definitions and where they come from,
+and maintainers edit them there (§11, *Web UI*).
 
 **Indexes created automatically.** Per vertex label: `<Label>_properties_gin` (GIN on
 `properties`), `<Label>_id_unique` (unique on the `id` property, so ids are unique within a label),
@@ -471,11 +476,13 @@ with the same `email`.
 
 Any token on a tenant, read-only included, can read its shape with `GET /v1/{tenant}/schema`:
 `{"name", "vertex_labels", "edge_labels", "label_hierarchy", "search_indexes", "rule_edge_labels",
-"edge_endpoints", "strict_endpoints"}`.
+"edge_endpoints", "strict_endpoints", "display", "property_schema"}`. `display` and
+`property_schema` list only what was declared: a key left out of an entry is left out here too.
 It leaves out what only maintainers see (property indexes, generated columns, rule bodies, `meta`).
 
 **Export and import a schema.** `GET /v1/tenants/{name}/spec` answers the tenant's whole schema as
-a file (`<name>.schema.json`, format `graphos.schema`, version 1). The file **is a registration
+a file (`<name>.schema.json`, format `graphos.schema`, version 1, or 2 when it carries a
+`property_schema`). The file **is a registration
 body**: posting it to `POST /v1/tenants` registers that schema, and changing `name` imports it into
 another tenant (created when new, with `create_tenants`). It is lossless: labels, edge labels with
 their resolve rules (one `{name, resolve_rule}` entry per rule), `label_hierarchy`,
@@ -1301,7 +1308,11 @@ large tenant on its graph map (or its communities, under Groups) and a small one
 graph; the canvas adds neighbours a page at a time with undo, is laid out by force, on a circle or
 in layers, and saves as PNG, SVG or JSON. It also has shortest paths, counts per label, live
 activity, a table view of a label (and CSV), a Query page where the Cypher console is on, and the
-schema, which admins can extend and whose label styles maintainers set.
+schema, which admins can extend and whose label styles and property definitions maintainers set:
+each label and relationship type (and *every label*, *every relationship type*) opens to the
+definitions in effect, where each comes from and the properties its rows carry undeclared, in the
+list and in the diagram's side panel; *Add → Property* declares one anywhere, *Property checks* sets
+the mode and checks the stored rows as a background job, with its report.
 It is an nginx image with no backend of its own: it serves the app and forwards `/api/` to
 graphos on the same origin, so graphos needs no CORS setup. Each person signs in as themselves,
 with a graphos password or through single sign-on, so the UI shows only what their level allows (a `read` user gets a

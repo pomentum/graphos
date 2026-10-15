@@ -23,8 +23,21 @@ under one version.
 - **Property report.** `POST /v1/{tenant}/graph/properties:check` (`maintain`, or as a job) reads
   the stored rows as if every rule applied: per label and type, rows with errors and warnings,
   counts by rule, example ids and the undeclared names the rows carry.
+- **Effective definitions.** `GET /v1/{tenant}/graph/properties` (`read`): per label and type, the
+  mode, the rule for undeclared properties and each definition as combined down the hierarchy,
+  with the entry it comes from.
+- **Web UI: property schema.** On the Schema page each label and relationship type (and every
+  label, every relationship type) opens to its definitions, with their rules, where each comes
+  from and the properties its rows carry undeclared; maintainers declare, narrow and remove them,
+  set an entry's description, mode and rule for undeclared properties, add one from *Add →
+  Property*, set the tenant's mode (strict asks first) and check the stored rows as a job with its
+  report. The diagram's side panel shows the same, compact. A write refused by the property
+  schema names its first violations.
 
 ### Changed
+
+- **`GET /v1/{tenant}/schema`** serves `display` and `property_schema` as declared: keys an entry
+  leaves out are left out (they came back as `null` or as defaults), and empty sections are omitted.
 
 - **`community_id` is reserved.** graphos writes it (the community recompute), so a node or edge
   write that sets or removes it is now refused as `graphos_*` writes are: `400` on single and batch
@@ -33,6 +46,9 @@ under one version.
   A client that wrote its own `community_id` must use another name.
 
 ### Fixed
+
+- **Web UI: schema files with a property schema.** The import dialogs refused version-2 schema
+  files (those carrying a `property_schema`) as "from a newer graphos"; they read version 2 now.
 
 - **Cypher console.** A query whose database process the watchdog had to close answered 500
   instead of 499 (cancelled) or 504: graphos tried to close the connection again after asyncpg had
