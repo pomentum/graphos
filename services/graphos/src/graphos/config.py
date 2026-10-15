@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     log_json: bool = True   # structured JSON to stdout (set false for dev-tty)
     audit_enabled: bool = True
     audit_endpoints_only_writes: bool = True   # log POST/PUT/DELETE/PATCH only
+    # Reads logged besides: "exports" (dataset and graph exports, Cypher console
+    # queries) or "data" (also every read of a tenant's data, with its query).
+    audit_reads: Literal["exports", "data"] = "exports"
 
     # ── Graph metrics (``graphos.graph_metrics``) ─────────────────────────
     # Exact betweenness costs O(nodes x edges): above this many nodes taking

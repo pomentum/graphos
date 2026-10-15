@@ -4,13 +4,17 @@ Emits one structured log line per state-changing request: one whose route
 declares ``write`` access (``graphos.auth``), whatever its HTTP method, so a
 read sent as ``POST`` (``nodes:scan``, ``edges/aggregate``) is not logged.
 A request that reached no route's auth falls back to its method.  A read
-that hands out a lot at once (a whole dataset export) asks to be logged too,
-with :func:`audit_this` (message ``read``).  Reads:
+that hands out a lot at once (a dataset export, a Cypher console query)
+asks to be logged too, with :func:`audit_this` (message ``read``).  With
+``data_reads`` (``GRAPHOS_AUDIT_READS=data``) every read of a tenant's data
+is logged as well (any route under ``/v1/{tenant}/`` that needs ``read``),
+with its query string, so the trail says who looked at what.  Reads:
 
   - method, path, route template (from request scope)
   - tenant (when the path includes ``/v1/{tenant}/...``)
   - consumer (token principal — bound by auth, but the middleware
     reads it from the request scope without re-validating the token)
+  - query: the query string, on ``read`` lines (which node, which search)
   - args_hash: sha256 of the request body, truncated to 16 hex chars.
     Bounded log size; lets you correlate "same payload" without
     storing the payload itself.  Hashed chunk by chunk as the endpoint
@@ -59,6 +63,11 @@ def audit_this(request: Request) -> None:
     request.scope[AUDIT_READ_KEY] = True
 
 
+# The route template of every read of one tenant's data (without the
+# ``/v1`` its router is included under).
+_TENANT_ROUTES = "/{tenant}/"
+
+
 def _extract_tenant_from_path(path: str) -> str | None:
     """If path is ``/v1/<tenant>/...``, return ``<tenant>``. Else None."""
     parts = path.lstrip("/").split("/", 2)
@@ -74,10 +83,14 @@ def _extract_tenant_from_path(path: str) -> str | None:
 
 
 class AuditMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, *, enabled: bool = True, writes_only: bool = True):  # noqa: ANN001
+    def __init__(  # noqa: ANN204
+        self, app, *, enabled: bool = True, writes_only: bool = True,  # noqa: ANN001
+        data_reads: bool = False,
+    ):
         super().__init__(app)
         self._enabled = enabled
         self._writes_only = writes_only
+        self._data_reads = data_reads
 
     async def dispatch(
         self,
@@ -127,6 +140,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
             not self._writes_only
             or _is_write(request)
             or bool(request.scope.get(AUDIT_READ_KEY))
+            or (self._data_reads and _is_data_read(request))
         )
 
 
@@ -140,6 +154,15 @@ def _is_write(request: Request) -> bool:
     return access is not Access.READ
 
 
+def _is_data_read(request: Request) -> bool:
+    """A read of one tenant's data: a route under ``/v1/{tenant}/`` needing ``read``."""
+    route = request.scope.get("route")
+    return (
+        request.scope.get(ACCESS_SCOPE_KEY) is Access.READ
+        and getattr(route, "path", "").removeprefix("/v1").startswith(_TENANT_ROUTES)
+    )
+
+
 def _emit(request: Request, args_hash: str, status: int, started: float) -> None:
     consumer = "anonymous"
     principal = request.scope.get("principal")
@@ -148,11 +171,13 @@ def _emit(request: Request, args_hash: str, status: int, started: float) -> None
 
     # stdlib logging takes a message + extra; structlog's processor
     # chain picks `extra` up as fields and renders the JSON line.
+    read = bool(request.scope.get(AUDIT_READ_KEY)) or not _is_write(request)
     log.info(
-        "read" if request.scope.get(AUDIT_READ_KEY) else "write",
+        "read" if read else "write",
         extra={
             "method": request.method,
             "path": request.url.path,
+            **({"query": request.url.query} if read else {}),
             "tenant": _extract_tenant_from_path(request.url.path),
             "consumer": consumer,
             "args_hash": args_hash,

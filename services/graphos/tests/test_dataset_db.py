@@ -238,8 +238,12 @@ async def test_what_the_import_refuses_or_reports(
 async def test_an_export_is_audited_as_a_read(
     api: httpx.AsyncClient, caplog: pytest.LogCaptureFixture,
 ) -> None:
+    # Both exports hand out a lot at once; the schema is an ordinary read.
     with caplog.at_level(logging.INFO, logger="graphos.audit"):
         await api.get(f"/v1/{SOURCE}/graph/snapshot")
+        await api.get(f"/v1/{SOURCE}/graph/export", params={"limit_nodes": 10})
         await api.get(f"/v1/{SOURCE}/schema")
     audited = [(r.getMessage(), r.path) for r in caplog.records if r.name == "graphos.audit"]
-    assert audited == [("read", f"/v1/{SOURCE}/graph/snapshot")]
+    assert audited == [
+        ("read", f"/v1/{SOURCE}/graph/snapshot"), ("read", f"/v1/{SOURCE}/graph/export"),
+    ]

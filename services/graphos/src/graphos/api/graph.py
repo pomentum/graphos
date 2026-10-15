@@ -121,6 +121,7 @@ from graphos.contracts.tenants import (
 )
 from graphos.cypher import CypherError, parse_agtype
 from graphos.endpoints import policy_for
+from graphos.observability.audit import audit_this
 from graphos.observability.metrics import record_property_tally
 from graphos.resolver import (
     CompileError,
@@ -2606,6 +2607,8 @@ async def export_graph(
     ] = DEFAULT_EXPORT_NODE_LIMIT,
 ) -> GraphologyExport:
     _check_tenant(tenant, principal)
+    # It hands out a subgraph of up to 50,000 nodes at once: audited as a read.
+    audit_this(request)
 
     if rel_types is not None:
         for rt in rel_types:

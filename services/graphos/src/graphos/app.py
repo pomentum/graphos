@@ -364,6 +364,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         AuditMiddleware,
         enabled=settings.audit_enabled,
         writes_only=settings.audit_endpoints_only_writes,
+        data_reads=settings.audit_reads == "data",
     )
     app.add_middleware(MetricsMiddleware)
     app.add_middleware(

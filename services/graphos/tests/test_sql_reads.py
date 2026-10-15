@@ -29,7 +29,8 @@ ADMIN = Principal.static("test", admin=True)
 
 
 def _request(pool: asyncpg.Pool) -> SimpleNamespace:
-    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(pool=pool)))
+    # ``scope``: what the audit marks a read in (``audit_this``).
+    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(pool=pool)), scope={})
 
 
 async def _seed(pool: asyncpg.Pool) -> None:

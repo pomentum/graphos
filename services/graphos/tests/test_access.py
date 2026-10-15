@@ -239,3 +239,27 @@ def test_audit_follows_the_declared_access(
         ("POST", "/v1/acme/graph/nodes", HTTPStatus.UNAUTHORIZED),
     ]
 
+
+
+def test_audit_reads_data_also_logs_who_read_what(caplog: pytest.LogCaptureFixture) -> None:
+    # GRAPHOS_AUDIT_READS=data: every read of a tenant's data, with its query
+    # string; health, metrics and the caller's own account stay out.
+    app = create_app(Settings(db_password="placeholder", audit_reads="data"))
+    app.state.authenticator = StaticAuthenticator(PRINCIPALS)
+    client = TestClient(app, raise_server_exceptions=False)
+    admin = {"Authorization": "Bearer tok_admin"}
+    with caplog.at_level(logging.INFO, logger="graphos.audit"):
+        client.get("/v1/acme/graph/neighbors?node_id=FI-1&limit=5", headers=admin)   # data read
+        client.post("/v1/acme/graph/nodes:scan", headers=admin, json={})            # data read
+        client.get("/healthz")
+        client.get("/v1/me", headers=admin)
+        client.patch("/v1/acme/graph/nodes/x", headers=admin, json={"a": 1})        # write
+    audited = [
+        (r.getMessage(), r.method, r.path, getattr(r, "query", None))
+        for r in caplog.records if r.name == "graphos.audit"
+    ]
+    assert audited == [
+        ("read", "GET", "/v1/acme/graph/neighbors", "node_id=FI-1&limit=5"),
+        ("read", "POST", "/v1/acme/graph/nodes:scan", ""),
+        ("write", "PATCH", "/v1/acme/graph/nodes/x", None),
+    ]
