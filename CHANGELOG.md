@@ -36,6 +36,24 @@ under one version.
 
 ### Changed
 
+- **Cypher console: Cypher's functions only.** A query that calls a function which is not one of
+  Cypher's (as AGE documents them) is refused (400) before the database, as one with a qualified
+  call already was. AGE resolves such a name to another extension's function on 1.6 (it reached
+  `pg_trgm`'s `similarity()`) and to any function on the search path from 1.7 (`version()`), so the
+  rule holds whichever AGE runs. `shortest_path()` and `all_shortest_paths()` (AGE 1.8) are refused
+  with the variable-length patterns: they need AGE's in-memory graph.
+- **Cypher console sized for several users.** `GRAPHOS_CYPHER_POOL_SIZE` defaults to 5 (was 2),
+  and a query waits up to `GRAPHOS_CYPHER_WAIT_S` (10 s, new; was 1 s) for a free connection
+  before 429. With the old defaults five concurrent users had one query in five refused.
+- **Cypher console: temporary files bounded.** `GRAPHOS_CYPHER_TEMP_FILE_LIMIT` (new, `1GB`) sets
+  PostgreSQL's `temp_file_limit` on the console's connections, so a query with many hops is stopped
+  before its spilled sorts fill the disk (seen with five explicit hops from a hub). It needs
+  `GRANT SET ON PARAMETER temp_file_limit` for graphos's role: the bundled database's init script
+  grants it to `graphos_app`; an existing database needs the grant run once (graphos logs it at
+  start when missing, and carries on unbounded).
+- **Audit: the graph export, and reads on demand.** `GET /v1/{tenant}/graph/export` is logged as a
+  `read`, like the dataset export. `GRAPHOS_AUDIT_READS=data` (new; default `exports`) also logs
+  every read of a tenant's data, with its query string. `read` lines carry `query`.
 - **API documentation without a CDN.** `/docs` (Swagger UI 5.33.0) and `/redoc` (ReDoc 2.5.4) load
   their scripts, stylesheet and icon from graphos (`/api-docs-assets/`), not from cdn.jsdelivr.net,
   so they work where the browser has no internet access; ReDoc no longer asks Google Fonts, and
@@ -53,6 +71,15 @@ under one version.
 
 ### Fixed
 
+- **Cypher console: a stalled query answered 500 after 41 s.** When the watchdog had to close a
+  query's connection after terminating its backend, asyncpg had already released the connection,
+  and the watchdog's own close raised: the caller got 500 instead of the 504 or 499 decided. The
+  close tolerates it, and a watchdog failure is logged, never the query's answer. (Seen under five
+  concurrent console users, about one query in 120.)
+- **Reads that swallowed database errors.** `neighbors` and `expand` skipped a hop, and
+  `sample_subgraph` a relationship type or its endpoints, when the database refused the query, so
+  a failure looked like a smaller result. They now answer 500 and log the error; a sampled type
+  without a table still has no edges.
 - **Web UI: schema files with a property schema.** The import dialogs refused version-2 schema
   files (those carrying a `property_schema`) as "from a newer graphos"; they read version 2 now.
 

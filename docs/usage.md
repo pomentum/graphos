@@ -945,12 +945,20 @@ curl -s -X POST "$G/v1/acme/cypher" -H "Authorization: Bearer $TOKEN" -H 'Conten
 - **Read-only:** `CREATE`, `SET`, `DELETE`, `MERGE` answer 400; write through the API, which keeps
   revisions, the change feed and the audit log right.
 - **Only Cypher's own functions:** a call of a database function by its schema-qualified name
-  (`pg_catalog.version()`) is refused (400) before the query reaches the database.
+  (`pg_catalog.version()`), or of any function that is not one of Cypher's (as AGE documents them:
+  `toUpper`, `count`, `collect`, `coalesce`, …; `version()`, `similarity()` are not), is refused
+  (400) before the query reaches the database. AGE would otherwise resolve such a name to another
+  extension's function (on 1.6) or to any function on the search path (from 1.7).
 - **Limits:** `GRAPHOS_CYPHER_MAX_ROWS` rows (5,000; `truncated` says when more matched, and
   `"limit"` asks for fewer); `GRAPHOS_CYPHER_TIMEOUT_S` (30 s), after which the query is stopped
   (504; graphos also terminates a query AGE is slow to stop, and if even that is not seen, closes
   the connection so the caller is answered); one query per user at a time and
-  `GRAPHOS_CYPHER_POOL_SIZE` (2) in all (429 when busy). Cancelling the request stops the query.
+  `GRAPHOS_CYPHER_POOL_SIZE` (5) in all, a query waiting up to `GRAPHOS_CYPHER_WAIT_S` (10 s) for
+  a free connection (429 after that); and `GRAPHOS_CYPHER_TEMP_FILE_LIMIT` (1 GB) of temporary
+  files per query, so a query with many hops cannot fill the disk with spilled sorts (PostgreSQL's
+  `temp_file_limit`: applied when graphos's role may set it, which the bundled database grants;
+  otherwise graphos logs a warning at start with the `GRANT` to run). Cancelling the request stops
+  the query.
 - **No variable-length patterns** (`-[:R*1..3]->`) **nor `vertex_stats()`** (400): AGE serves them
   from an in-memory copy of the whole graph, which it refuses to build from tables carrying more than
   its own columns, as graphos's do (revisions, communities). Worse, the failed attempt leaves a lock

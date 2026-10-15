@@ -649,19 +649,25 @@ and `route`, plus `trace_id` when a valid W3C `traceparent` header is present;
 the header is echoed on the response. graphos does not create spans or export
 traces.
 
-**Audit log.** On by default (`GRAPHOS_AUDIT_ENABLED`), covering writes
-only (`GRAPHOS_AUDIT_ENDPOINTS_ONLY_WRITES`): the operations that declare
-`write` access, whatever their method, including writes refused with 401 or
-403. POST-bodied reads (`nodes:scan`, aggregates, `community-ids`, …) are not
-audited; a request that reaches no operation's auth (an unknown path) falls
-back to its method. Each record is a `write` line from the
-`graphos.audit` logger, rendered with all its fields in the JSON log
-(structlog's `ExtraAdder` in `observability/logging.py`): `method`, `path`,
-`tenant` (parsed from the path), `consumer` (the user name;
-`anonymous` without one), `args_hash` (first 16 hex characters of the
-SHA-256 of the request body), `status`, and `elapsed_ms`. A request that
-raises is recorded as 500 before the error propagates. To compute the hash the
-middleware reads the full body of every non-`GET` request into memory.
+**Audit log.** On by default (`GRAPHOS_AUDIT_ENABLED`), covering writes:
+the operations that declare `write` access, whatever their method, including
+writes refused with 401 or 403; a request that reaches no operation's auth (an
+unknown path) falls back to its method. Reads are added by
+`GRAPHOS_AUDIT_READS`: `exports` (the default) logs the reads that hand out a
+lot at once, the dataset export, the graph export (`GET …/graph/export`) and
+every Cypher console query; `data` logs every read of a tenant's data as well
+(any operation under `/v1/{tenant}/` that needs `read`, POST-bodied ones such
+as `nodes:scan` included), so the trail says who looked at what. Health,
+metrics and the caller's own account are never logged that way;
+`GRAPHOS_AUDIT_ENDPOINTS_ONLY_WRITES=false` logs every request. Each record is
+a `write` or `read` line from the `graphos.audit` logger, rendered with all its
+fields in the JSON log (structlog's `ExtraAdder` in `observability/logging.py`):
+`method`, `path`, `query` (on `read` lines: which node, which search),
+`tenant` (parsed from the path), `consumer` (the user name; `anonymous`
+without one), `args_hash` (first 16 hex characters of the SHA-256 of the
+request body, hashed chunk by chunk as the endpoint reads it), `status`, and
+`elapsed_ms`. A request that raises is recorded as 500 before the error
+propagates.
 
 **Rate limiting.** Off by default (`GRAPHOS_RATE_LIMIT_ENABLED`). When on, it
 is an in-memory sliding window per signed-in user (`GRAPHOS_RATE_LIMIT_RPS`,
