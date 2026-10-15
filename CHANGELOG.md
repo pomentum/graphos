@@ -6,6 +6,24 @@ under one version.
 
 ## Unreleased
 
+A tenant can now declare the properties its labels and relationship types carry, and hold writes to
+them: `off`, `warn` or `strict`, on every write path. It can check its stored data against those
+definitions and edit them on the Schema page and in the diagram. The Cypher console is hardened from
+an evaluation under load:
+- a finished query is no longer held for the whole timeout, nor answered with a 500;
+- the console is sized for several users;
+- each query's temporary files are bounded;
+- it runs Cypher's functions only, whichever AGE runs.
+
+Reads no longer hide a database error behind a smaller result. Reads of a tenant's data can be audited.
+The API documentation is served without a CDN. Breaking changes are few and listed under *Upgrading
+from 0.8.3*:
+- `community_id` is graphos's own;
+- console queries are limited to Cypher's functions;
+- a read the database refuses is now an error.
+
+There is no database migration.
+
 ### Added
 
 - **Property schema.** A tenant can declare the properties each vertex label and edge type carries
@@ -71,11 +89,16 @@ under one version.
 
 ### Fixed
 
-- **Cypher console: a stalled query answered 500 after 41 s.** When the watchdog had to close a
-  query's connection after terminating its backend, asyncpg had already released the connection,
-  and the watchdog's own close raised: the caller got 500 instead of the 504 or 499 decided. The
-  close tolerates it, and a watchdog failure is logged, never the query's answer. (Seen under five
-  concurrent console users, about one query in 120.)
+- **Cypher console: a finished query could be held for 41 s, then answer 500.** When a query ended,
+  the console stopped its watchdog with a cancel, which sometimes did not stop it: the stalled
+  requests had their result and were waiting on the watchdog. (The likely place the cancel is lost
+  is the watchdog's check whether the caller has gone, Starlette's `is_disconnected`, which runs
+  inside an anyio scope that cancels itself; not reproduced in isolation.) The watchdog then ran on
+  to its deadline, cancelled and terminated a backend that was idle, and closed a connection asyncpg
+  had already released, which raised: 500 after 41 s for a query that had finished. The watchdog now
+  stops on an event the query sets when it ends, whatever becomes of the cancel, and its own
+  failures are logged, never the answer. Seen under five concurrent console users (about one query
+  in 120); under the same load with asyncio's debug mode, 38 stalls in 120 before, none after.
 - **Reads that swallowed database errors.** `neighbors` and `expand` skipped a hop, and
   `sample_subgraph` a relationship type or its endpoints, when the database refused the query, so
   a failure looked like a smaller result. They now answer 500 and log the error; a sampled type
@@ -86,6 +109,28 @@ under one version.
 - **Cypher console.** A query whose database process the watchdog had to close answered 500
   instead of 499 (cancelled) or 504: graphos tried to close the connection again after asyncpg had
   handed it back to the pool.
+
+### Upgrading from 0.8.3
+
+- **Clients:**
+  - A write that sets or removes `community_id` is now refused (400): it is the community
+    recompute's. Store your own grouping under another name.
+  - A console query that calls a function which is not Cypher's is refused (400).
+  - `neighbors`, `expand` and `sample_subgraph` answer 500 when the database refuses a read, where
+    they used to return fewer results: treat it as any server error.
+  - `GET /v1/{tenant}/schema` leaves out undeclared keys in `display` and `property_schema` (they
+    came back as `null` or as defaults): read a missing key as not set.
+  - A schema file that carries a `property_schema` is version 2. 0.9.0 reads versions 1 and 2;
+    0.8.x refuses version 2.
+- **Operators:**
+  - No database migration.
+  - The console's pool now opens up to 5 connections per replica (was 2): allow for them in
+    `max_connections` (16 for the API pool, 5 for the console, per replica).
+  - For the console's temporary-file limit, run once as a superuser on an existing database:
+    `GRANT SET ON PARAMETER temp_file_limit TO graphos_app;` (new databases get it from the init
+    script). Without it graphos logs a warning at start and the console stays unbounded.
+  - The API documentation pages need no internet access any more.
+- **Property schemas** are off for every tenant until one declares them: nothing changes until then.
 
 ## 0.8.3 — 2026-10-14
 
