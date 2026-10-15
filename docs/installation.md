@@ -14,14 +14,16 @@ once it runs is in the [usage guide](usage.md).
 - [8. Before other people use it](#8-before-other-people-use-it)
 - [9. Settings for sign-in and access](#9-settings-for-sign-in-and-access)
 - [10. Other ways to run it](#10-other-ways-to-run-it)
-- [11. Upgrading from 0.4 (static tokens)](#11-upgrading-from-04-static-tokens)
-- [12. Locked out](#12-locked-out)
+- [11. Upgrading from PostgreSQL 16](#11-upgrading-from-postgresql-16)
+- [12. Upgrading from 0.4 (static tokens)](#12-upgrading-from-04-static-tokens)
+- [13. Locked out](#13-locked-out)
 
 ## 1. What you install
 
 | Part | Image | Role |
 |---|---|---|
-| `graphos-db` | `apache/age:release_PG16_1.6.0` | PostgreSQL 16 with Apache AGE. On an internal network: nothing but graphos-api reaches it. |
+| `graphos-db` | `apache/age:release_PG18_1.8.0` (pinned by digest) | PostgreSQL 18 with Apache AGE 1.8. On an internal network: nothing but graphos-api reaches it. |
+| `graphos-db-export`, `graphos-db-import` | `apache/age` for PostgreSQL 16 and 18 | One-shot: move a PostgreSQL 16 database to PostgreSQL 18 on the first start after an upgrade ([§11](#11-upgrading-from-postgresql-16)); otherwise they exit at once. |
 | `graphos-api` | built from `services/graphos` (published: `ghcr.io/<owner>/graphos-api`) | The REST API, sign-in and the background jobs. Listens on `127.0.0.1:8080`. |
 | `graphos-ui` (optional) | built from `services/graphos-ui` (published: `ghcr.io/<owner>/graphos-ui`) | The web UI: static files and a same-origin proxy to the API, no state of its own. Listens on `127.0.0.1:8081`. |
 
@@ -288,7 +290,8 @@ lists every one; the README the most common). Those for sign-in, besides the OID
 ## 10. Other ways to run it
 
 - **The published images.** `ghcr.io/<owner>/graphos-api` and `ghcr.io/<owner>/graphos-ui`, tagged
-  by version, take the same settings. The API needs PostgreSQL 16 with Apache AGE 1.6, loaded with
+  by version, take the same settings. The API needs PostgreSQL 18 with Apache AGE 1.8 (or PostgreSQL
+  16 with AGE 1.6; CI runs the server's tests against both), loaded with
   `shared_preload_libraries=age,pg_stat_statements`, and a database role for itself: the compose
   file and `services/graphos/deploy/db-init/` show the set-up to copy. The published API image has
   no Louvain; with the compose file, run the published images and add Louvain as in
@@ -296,7 +299,47 @@ lists every one; the README the most common). Those for sign-in, besides the OID
 - **Without containers.** `pip install "./services/graphos[louvain]"`, point `GRAPHOS_DB_*` at the
   database, and run `python -m graphos` (see [services/graphos](../services/graphos/README.md)).
 
-## 11. Upgrading from 0.4 (static tokens)
+## 11. Upgrading from PostgreSQL 16
+
+graphos 0.9 and earlier ran PostgreSQL 16 with AGE 1.6 on the volume `graphos_data`. The compose
+now runs PostgreSQL 18 with AGE 1.8 on a new volume, `graphos_data_pg18`, and moves the data by
+itself: update the files and run `docker compose -f docker-compose.graphos.yml up -d` as for any
+upgrade. On that first start:
+
+1. `graphos-db` starts on PostgreSQL 18, on the new, empty volume (its init creates the roles).
+2. `graphos-db-export` starts PostgreSQL 16 on `graphos_data`, with no network, dumps the
+   database to the volume `graphos_upgrade` and stops it cleanly.
+3. `graphos-db-import` loads the dump into `graphos-db`: tenants and their graphs, users and
+   grants, saved queries, the change feed and revisions, all of it.
+4. `graphos-api` starts once the import has succeeded.
+
+It takes about as long as a dump and a restore of the database. Every later start finds the move
+made and goes on at once; a new install has nothing to move. The dump is never loaded over a
+database graphos has already used, so what is written after the move is never replaced by older
+data. The dump is restored beside the new database and put in its place only once complete, so a
+failed import leaves nothing behind: it stops `graphos-api` from starting, and the next `up` runs
+it again from the start. The logs say what failed:
+
+```bash
+docker logs graphos-db-export
+docker logs graphos-db-import
+```
+
+`graphos_data` is not changed and is kept: it is the way back (the previous release's compose runs
+on it as before, without what was written since the move). Once you are content with the move,
+remove it and the dump:
+
+```bash
+docker volume rm graphos_data graphos_upgrade
+```
+
+Sessions survive the move (the token signing key is in the database). A database you run yourself
+rather than the bundled one moves the same way: `pg_dump -Fc` from PostgreSQL 16, `pg_restore`
+into PostgreSQL 18 with AGE 1.8 and graphos's roles, then the catalogue fix in
+[`deploy/db-upgrade/import-pg18.sh`](../services/graphos/deploy/db-upgrade/import-pg18.sh) (AGE
+records each graph by its schema's OID, which a restore changes).
+
+## 12. Upgrading from 0.4 (static tokens)
 
 1. Remove the tokens file and the setting that pointed at it: graphos no longer reads it.
 2. Start graphos, sign in as `graphos` / `graphos` and change the password (§3).
@@ -308,7 +351,7 @@ lists every one; the README the most common). Those for sign-in, besides the OID
 
 The [changelog](../CHANGELOG.md) lists every other change.
 
-## 12. Locked out
+## 13. Locked out
 
 If no admin can sign in (the password is lost, or the last admin was disabled):
 

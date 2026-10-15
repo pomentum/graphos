@@ -6,8 +6,12 @@ name: graphos
 services:
   # ── Data plane ──────────────────────────────────────────────────────────
   # Not exposed outside the compose. Only graphos-api can reach it.
+  # PostgreSQL 18 with AGE 1.8, on a volume of its own (graphos_data_pg18). A
+  # stack that ran PostgreSQL 16 (graphos_data) is moved by graphos-db-export
+  # and graphos-db-import below on its first start, by itself; graphos_data is
+  # kept as it was, as a way back.
   graphos-db:
-    image: apache/age:release_PG16_1.6.0
+    image: apache/age:release_PG18_1.8.0@sha256:47a0b054c3663a3e64a25fc0c5a982f1b58348019274b326a691cdf77f78eb58
     container_name: graphos-db
     hostname: graphos-db
     restart: unless-stopped
@@ -16,6 +20,9 @@ services:
       POSTGRES_USER: graphos
       POSTGRES_PASSWORD_FILE: /run/graphos/secrets/graphos_pw.txt
       POSTGRES_INITDB_ARGS: "--data-checksums"
+      # The data where the volume is mounted, as before PostgreSQL 18's
+      # images moved it to /var/lib/postgresql/18/docker.
+      PGDATA: /var/lib/postgresql/data
     command:
       - "postgres"
       - "-c"
@@ -39,7 +46,7 @@ services:
     expose:
       - "5432"
     volumes:
-      - graphos_data:/var/lib/postgresql/data
+      - graphos_data_pg18:/var/lib/postgresql/data
       - ./services/graphos/deploy/db-init:/docker-entrypoint-initdb.d:ro
       # Mount the whole secrets dir (not individual files). Docker Desktop
       # on Windows has a known bug where single-file bind-mounts surface
@@ -70,6 +77,45 @@ services:
     # graphos-db stays bounded by ``mem_limit`` above.
     shm_size: 1g
 
+  # ── The move from PostgreSQL 16 ─────────────────────────────────────────
+  # One-shot, on every start, and quick once there is nothing to move: a new
+  # install, or a move already made. The first start after an upgrade from
+  # PostgreSQL 16 dumps graphos_data (with PostgreSQL 16, without network) and
+  # loads it into graphos-db; graphos-api waits for it. A failed load is tried
+  # again by the next `docker compose up`.
+  graphos-db-export:
+    image: apache/age:release_PG16_1.6.0@sha256:16aa423d20a31aed36a3313244bf7aa00731325862f20ed584510e381f2feaed
+    container_name: graphos-db-export
+    entrypoint: ["bash", "/upgrade-scripts/export-pg16.sh"]
+    # After graphos-db is replaced, so PostgreSQL 16 has stopped on graphos_data.
+    depends_on:
+      graphos-db:
+        condition: service_started
+    restart: "no"
+    network_mode: none
+    volumes:
+      - graphos_data:/var/lib/postgresql/data
+      - graphos_upgrade:/upgrade
+      - ./services/graphos/deploy/db-upgrade:/upgrade-scripts:ro
+      - ./services/graphos/deploy/secrets:/run/graphos/secrets:ro
+
+  graphos-db-import:
+    image: apache/age:release_PG18_1.8.0@sha256:47a0b054c3663a3e64a25fc0c5a982f1b58348019274b326a691cdf77f78eb58
+    container_name: graphos-db-import
+    entrypoint: ["bash", "/upgrade-scripts/import-pg18.sh"]
+    depends_on:
+      graphos-db:
+        condition: service_healthy
+      graphos-db-export:
+        condition: service_completed_successfully
+    restart: "no"
+    volumes:
+      - graphos_upgrade:/upgrade
+      - ./services/graphos/deploy/db-upgrade:/upgrade-scripts:ro
+      - ./services/graphos/deploy/secrets:/run/graphos/secrets:ro
+    networks:
+      - graphos-internal
+
   # ── Control plane / REST API ────────────────────────────────────────────
   # Bridges graphos-internal (talks to graphos-db) and graphos-net (consumers).
   graphos-api:
@@ -88,6 +134,8 @@ services:
     depends_on:
       graphos-db:
         condition: service_healthy
+      graphos-db-import:
+        condition: service_completed_successfully
     environment:
       GRAPHOS_DB_HOST: graphos-db
       GRAPHOS_DB_PORT: "5432"
@@ -156,8 +204,15 @@ services:
     mem_limit: 64m
 
 volumes:
+  # PostgreSQL 16's data, from before the move: read once by graphos-db-export,
+  # then kept as it was (remove it by hand once the move is accepted).
   graphos_data:
     name: graphos_data
+  graphos_data_pg18:
+    name: graphos_data_pg18
+  # The dump of the move, and its markers.
+  graphos_upgrade:
+    name: graphos_upgrade
 
 networks:
   graphos-internal:
