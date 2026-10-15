@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 from http import HTTPStatus
+from pathlib import Path
 from typing import Any
 
 import anyio
@@ -335,3 +337,20 @@ def test_every_console_route_answers_404_while_it_is_off() -> None:
         resp = client.request(method, path, headers=headers, json=body)
         assert resp.status_code == HTTPStatus.NOT_FOUND, (method, path, resp.text)
         assert resp.json()["detail"] == "the Cypher console is off"
+
+
+def test_only_the_console_sends_cypher_to_the_database() -> None:
+    """With the console off, nothing in graphos runs Cypher: the console is the
+    only module that builds a ``cypher(...)`` call, and ``query_cypher`` (a
+    reference helper for tests) is used by no server module."""
+    src = Path(console_mod.__file__).parent
+    builders, users = [], []
+    for path in src.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        if re.search(r"cypher\('\{", text):
+            builders.append(path.relative_to(src).as_posix())
+        if path.name != "cypher.py" and "query_cypher" in text:
+            users.append(path.relative_to(src).as_posix())
+    assert sorted(builders) == ["console.py", "cypher.py"]
+    assert users == []
+

@@ -370,3 +370,56 @@ async def test_a_console_connection_bounds_its_temporary_files(db_pool: asyncpg.
                 assert await conn.fetchval("SHOW temp_file_limit;") == "64MB"
     finally:
         await console.pool.close()
+
+
+# Every route to a write found for the console, tried against the database (Q6).
+_REFUSED_BEFORE_THE_DATABASE = [
+    "match (d:Doc {id: 'd1'}) set d.x = 1 return d.id",
+    "MATCH (d:Doc {id: 'd1'})\n\tSeT d.x = 1 RETURN d.id",
+    "MATCH (d:Doc {id: 'd1'})SET d.x = 1 RETURN d.id",
+    "MATCH (d:Doc) WITH d SET d.x = 1 RETURN count(d)",
+    "MATCH (d:Doc) FOREACH (x IN [1] | SET d.x = x) RETURN count(d)",
+    "MERGE (d:Doc {id: 'd1'}) ON CREATE SET d.x = 1 ON MATCH SET d.y = 2 RETURN d.id",
+    "UNWIND [1, 2] AS i CREATE (:Doc {id: 'u' + toString(i)})",
+    "MATCH (d:Doc {id: 'd1'}) RETURN d.id; MATCH (d:Doc) DETACH DELETE d",
+    "MATCH (d:Doc {id: 'd1'}) REMOVE d:Doc RETURN d",
+    "MATCH ()-[r]->() DELETE r",
+    "CALL ag_catalog.create_vlabel('graphos_test_console', 'X')",
+    "RETURN load_labels_from_file('graphos_test_console', 'Doc', '/etc/passwd')",
+    "RETURN pg_catalog.pg_terminate_backend(1)",
+    "MATCH (d:Doc) RETURN d $$) AS (a agtype); DELETE FROM graphos_test_console.\"Doc\"; --",
+]
+# Harmless whatever AGE makes of them: a refusal from AGE, or a read.
+_HARMLESS = [
+    "MATCH (d:Doc {id: 'd1'}) SE/**/T d.x = 1 RETURN d.id",
+    "MATCH (d:Doc {id: 'd1'}) RETURN d.set, d.`delete`, {create: 1, merge: 2} AS m",
+    "MATCH (d:Doc) WHERE d.title = 'SET d.x = 1' RETURN count(d)",
+    "MATCH (d:Doc {id: $delete}) RETURN d.id",
+]
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_no_route_through_the_console_writes(
+    api: httpx.AsyncClient,
+    db_pool: asyncpg.Pool,
+) -> None:
+    labels_sql = (
+        "SELECT array_agg(l.name ORDER BY l.name) FROM ag_catalog.ag_label l "
+        "JOIN ag_catalog.ag_graph g ON g.graphid = l.graph WHERE g.name = $1;"
+    )
+    async with db_pool.acquire() as conn:
+        before = await conn.fetch(_DOC_ROWS)
+        labels_before = await conn.fetchval(labels_sql, TENANT)
+    for query in _REFUSED_BEFORE_THE_DATABASE:
+        refused = await _query(api, query)
+        assert refused.status_code == HTTPStatus.BAD_REQUEST, query
+    for query in _HARMLESS:
+        answer = await _query(api, query, params={"delete": "d1"})
+        assert answer.status_code in (HTTPStatus.OK, HTTPStatus.BAD_REQUEST), query
+    async with db_pool.acquire() as conn:
+        after = await conn.fetch(_DOC_ROWS)
+        labels_after = await conn.fetchval(labels_sql, TENANT)
+    assert after == before
+    assert labels_after == labels_before
+
