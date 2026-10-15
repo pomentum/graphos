@@ -1,7 +1,9 @@
 # Apache AGE — practices and lessons learned
 
-Hands-on notes from running Apache AGE 1.6.x on PostgreSQL 16
-(`apache/age:release_PG16_1.6.0`) under graphos's write and read paths.
+Hands-on notes from running Apache AGE under graphos's write and read paths:
+1.6.0 on PostgreSQL 16 (`apache/age:release_PG16_1.6.0`, the bundled database up to graphos 0.9) and
+1.8.0 on PostgreSQL 18 (`apache/age:release_PG18_1.8.0`, bundled since). A pitfall marked *1.6* is
+fixed in 1.8 (§11); the rest hold on both.
 For the write-path templates in more detail see
 [`graph_age_practices.md`](./graph_age_practices.md).
 
@@ -17,7 +19,7 @@ For the write-path templates in more detail see
 | Multi-label `(:L1:L2 …)` in `CREATE/MERGE/MATCH` | ❌ parse error | Postgres `INHERIT` between label tables (see §3) |
 | Multiple `;`-separated statements inside one `cypher(...)` call | ❌ rejected | One statement per cypher() call |
 | `WITH …`-chained `MERGE`s for batched writes | ⚠️ super-linear | Never chain >1 MERGE — issue separate cypher() calls or use COPY (see §5) |
-| Cypher `SET` on a label whose table has extra (non-AGE) columns | 💥 backend segfault (AGE 1.6.0) | Write that label with plain SQL only (see §5) |
+| Cypher `SET` on a label whose table has extra (non-AGE) columns | 💥 backend segfault (1.6); 1.8 writes NULL into those columns | Write that label with plain SQL only (see §5) |
 
 The right mental model: AGE is a **Postgres extension that transpiles
 openCypher to SQL**. Anything that doesn't have a clean SQL lowering
@@ -213,9 +215,12 @@ graphos label tables always carry such columns: bootstrap adds
 `graphos_rev` to every label table (through AGE's two parent tables), and
 `end_community_id` and `start_community_id` to every edge table (§9,
 community-scoped traversal); declared `generated_columns` add more to vertex
-labels. Verified live on AGE 1.6.0; fixed in AGE 1.8.0 (apache/age#2458),
-which has no PostgreSQL 16 release (§11). graphos therefore issues **no
-Cypher writes**: every node and edge write is the SQL `INSERT … ON CONFLICT
+labels. Verified live on AGE 1.6.0. AGE 1.8.0 no longer crashes
+(apache/age#2458) but rebuilds the row from `id` and `properties` only: a
+`SET` writes NULL into the extra columns, which fails on `graphos_rev` (NOT
+NULL), and a `CREATE` on a graphos label table fails with `invalid
+perminfoindex` (both verified on 1.8.0, PostgreSQL 18). graphos therefore
+issues **no Cypher writes**: every node and edge write is the SQL `INSERT … ON CONFLICT
 … DO UPDATE SET properties = properties || EXCLUDED.properties` of §6,
 which never enters AGE's tuple-building code and keeps the same contract
 (additive property merge, missing endpoints counted as skipped). As a
@@ -252,8 +257,7 @@ large graph cannot be cancelled.
 Upstream, AGE 1.8.0 removed the mutex (apache/age#2433) and checks for
 interrupts in the variable-length search (apache/age#2430), though not in the
 graph load. The column-count check is still there (apache/age#2583, open), so
-variable-length patterns still fail on graphos's tables; and 1.8.0 has no
-PostgreSQL 16 release (§11).
+variable-length patterns still fail on graphos's tables (§11).
 
 graphos runs neither: its paths, expand and other reads are plain SQL. The
 Cypher console refuses variable-length patterns and `vertex_stats()` before
@@ -522,14 +526,14 @@ aggregates back.
 
 ## 11. Upstream status
 
-Checked 2026-10-14 against `apache/age`. graphos runs AGE 1.6.0 on
-PostgreSQL 16, and AGE has no PostgreSQL 16 release after 1.6.0: the fixes
-below ship in 1.8.0 for PostgreSQL 15, 17 and 18. Every pitfall in this
-document therefore still applies to graphos.
+Checked 2026-10-15 against `apache/age`. The bundled database is AGE 1.8.0
+on PostgreSQL 18; graphos also runs on AGE 1.6.0 on PostgreSQL 16, which has
+no AGE release after 1.6.0 (the fixes below ship in 1.8.0 for PostgreSQL 15,
+17 and 18). CI runs the server's tests against both.
 
 | Pitfall | Upstream |
 |---|---|
-| Cypher write on a label table with extra columns segfaults (§5) | Fixed in 1.8.0 (apache/age#2458) |
+| Cypher write on a label table with extra columns segfaults (§5) | No crash from 1.8.0 (apache/age#2458), but the extra columns are written NULL: graphos still writes with SQL only |
 | Variable-length patterns and `vertex_stats()`: the mutex left locked (§5) | Fixed in 1.8.0 (apache/age#2433) |
 | Variable-length patterns and `vertex_stats()`: the column-count check (§5) | Open (apache/age#2583) |
 | No interrupt checks in the variable-length search (§5) | Added in 1.8.0 (apache/age#2430); still none in the graph load |
@@ -540,8 +544,9 @@ document therefore still applies to graphos.
 | Chained `MERGE` slow (§1) | Open (apache/age#2177) |
 | GIN key-exists `?` missing rows (§4) | No matching issue found; apache/age#2322 reports missing rows with a GIN index |
 
-Moving to a newer AGE therefore means moving to PostgreSQL 15, 17 or 18 as
-well.
+Moving from AGE 1.6 to 1.8 therefore means moving from PostgreSQL 16 to 18
+as well: the compose does it by itself
+([installation §11](installation.md#11-upgrading-from-postgresql-16)).
 
 ---
 

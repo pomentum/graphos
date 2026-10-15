@@ -10,8 +10,8 @@ overview see [features.md](features.md); for worked request examples see
 
 ## 1. Summary
 
-**graphos** is a generic, multi-tenant property-graph service: PostgreSQL 16
-with Apache AGE 1.6 as the data plane, and a FastAPI process (`graphos-api`)
+**graphos** is a generic, multi-tenant property-graph service: PostgreSQL 18
+with Apache AGE 1.8 (or PostgreSQL 16 with AGE 1.6) as the data plane, and a FastAPI process (`graphos-api`)
 in front of it as the only way in. Consumers speak typed HTTP/JSON (NDJSON for
 bulk writes). They never receive a Postgres DSN and cannot submit Cypher or SQL.
 
@@ -44,7 +44,7 @@ flowchart LR
     subgraph graphos["graphos compose"]
         direction TB
         API["graphos-api<br/>FastAPI + asyncpg"]
-        DB[("graphos-db<br/>PostgreSQL 16 + Apache AGE 1.6")]
+        DB[("graphos-db<br/>PostgreSQL 18 + Apache AGE 1.8")]
         API -- "asyncpg: SQL and cypher()" --> DB
     end
 
@@ -286,7 +286,7 @@ root. Read that file for exact values; its shape:
 
 | | `graphos-db` | `graphos-api` |
 |---|---|---|
-| Image | `apache/age:release_PG16_1.6.0` | built from `services/graphos/Dockerfile`, tagged `graphos-api:${GRAPHOS_API_TAG:-dev}` |
+| Image | `apache/age:release_PG18_1.8.0` (by digest) | built from `services/graphos/Dockerfile`, tagged `graphos-api:${GRAPHOS_API_TAG:-dev}` |
 | Networks | `graphos-internal` only | `graphos-internal` + `graphos-net` |
 | Ports | `expose: 5432` (no host port) | `127.0.0.1:8080:8080` |
 | Secrets | `services/graphos/deploy/secrets/` bind-mounted (directory) at `/run/graphos/secrets` | same directory |
@@ -1336,11 +1336,12 @@ Postgres instance.
 6. **`DELETE /v1/tenants/{name}` keeps data** unless `drop_data=true` (§2.5.1).
 7. **Generated columns on tables that already hold rows** rewrite the table;
    add them early.
-8. **AGE version.** The compose pins `apache/age:release_PG16_1.6.0`; several
-   code paths work around AGE 1.6 behaviour (e.g. a Cypher `SET` on a label
-   table carrying extra columns such as `end_community_id` or a generated
-   column crashes the backend, so all rows are written through SQL, §4).
-   Re-test on upgrade.
+8. **AGE version.** The compose pins `apache/age:release_PG18_1.8.0` by
+   digest; graphos also runs on `release_PG16_1.6.0`, and CI tests both.
+   Several code paths work around AGE behaviour (e.g. a Cypher `SET` on a
+   label table carrying extra columns such as `end_community_id` or a
+   generated column crashes the backend on 1.6 and writes NULL into them on
+   1.8, so all rows are written through SQL, §4). Re-test on upgrade.
 9. **Change-feed latency follows the longest write transaction** on the
    database server (§4.1); a Louvain write-back on a large graph holds every
    tenant's feed until it commits.

@@ -188,7 +188,7 @@ ${pill(324, 380, 140, 'Louvain · igraph', t.card, t.accent)}${pill(472, 380, 14
 ${arrow('M636 215 H708', { color: t.store, w: 2.2 })}
 ${text(712, 444, 'graphos-internal', { size: 12, weight: 600, fill: t.store, mono: true })}${text(842, 444, 'no external port', { size: 12, fill: t.soft })}
 ${cylinder(840, 82, 128, 316, { ry: 22 })}
-${text(840, 132, 'PostgreSQL 16', { size: 16, weight: 700, fill: t.store, anchor: 'middle' })}
+${text(840, 132, 'PostgreSQL 18', { size: 16, weight: 700, fill: t.store, anchor: 'middle' })}
 ${text(840, 152, '+ Apache AGE (openCypher)', { size: 13, weight: 600, fill: t.store, anchor: 'middle' })}
 ${[['tenant_a', 'its own AGE graph'], ['tenant_b', 'its own AGE graph'], ['graphos_meta', 'registrations · cache']].map(([n, d], i) => {
   const y = 176 + i * 62;
@@ -201,7 +201,7 @@ ${text(840, 384, 'pg_trgm · pg_stat_statements', { size: 12, fill: t.soft, anch
 <path d="M48 475 l12 12 M60 475 l-12 12" stroke="${t.stop}" stroke-width="2" stroke-linecap="round"/>
 ${text(72, 486, 'Consumers never receive a database connection string and never send raw Cypher or SQL.', { size: 13.5, weight: 600, fill: t.stop })}`;
   return k.svg(1000, 516, 'How graphos is deployed',
-    'Consumers such as a loader job, an application, an analytics UI and an operator call graphos-api over the graphos-net network with a short-lived bearer token from signing in. graphos-api checks the grants of the signed-in user against the tenant in the path and the level each operation needs, validates typed request contracts, builds SQL internally with checked identifiers and capped limits, runs each query under a statement timeout, and emits metrics, JSON logs and an audit trail; it also runs Louvain community detection, in a separate process, and a key/value cache. Only graphos-api reaches graphos-db, PostgreSQL 16 with Apache AGE, over an internal network with no external port. Each tenant is its own AGE graph, and graphos_meta holds registrations and the cache. Consumers never receive a connection string and never send raw Cypher or SQL.',
+    'Consumers such as a loader job, an application, an analytics UI and an operator call graphos-api over the graphos-net network with a short-lived bearer token from signing in. graphos-api checks the grants of the signed-in user against the tenant in the path and the level each operation needs, validates typed request contracts, builds SQL internally with checked identifiers and capped limits, runs each query under a statement timeout, and emits metrics, JSON logs and an audit trail; it also runs Louvain community detection, in a separate process, and a key/value cache. Only graphos-api reaches graphos-db, PostgreSQL 18 with Apache AGE, over an internal network with no external port. Each tenant is its own AGE graph, and graphos_meta holds registrations and the cache. Consumers never receive a connection string and never send raw Cypher or SQL.',
     body);
 }
 

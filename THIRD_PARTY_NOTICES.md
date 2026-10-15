@@ -7,9 +7,12 @@ it is vendored in this repository; it is pulled in at build or run time.
 ## Apache AGE
 
 - **Project:** Apache AGE, https://age.apache.org/ (source: https://github.com/apache/age)
-- **Version:** 1.6.0 for PostgreSQL 16 (container image `apache/age:release_PG16_1.6.0`)
+- **Version:** 1.8.0 for PostgreSQL 18 (container image `apache/age:release_PG18_1.8.0`); 1.6.0 for
+  PostgreSQL 16 (`apache/age:release_PG16_1.6.0`) for the one-shot move from PostgreSQL 16
+  (`graphos-db-export`)
 - **Licence:** Apache-2.0
-- **Used by:** `docker-compose.graphos.yml` (service `graphos-db`) and
+- **Used by:** `docker-compose.graphos.yml` (services `graphos-db`, `graphos-db-export` and
+  `graphos-db-import`) and
   `services/graphos/deploy/db-init/00-extensions.sql`, which runs `CREATE EXTENSION age`.
 
 graphos uses the upstream image unmodified. AGE provides the property-graph storage model and

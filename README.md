@@ -6,7 +6,7 @@ Your services send JSON over HTTP. graphos owns the database, writes the SQL aga
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture-dark.svg">
-  <img src="docs/images/architecture-light.svg" width="100%" alt="Consumers call graphos-api over the graphos-net network with a bearer token. graphos-api checks tenant scope and read/write access, validates typed contracts, builds SQL internally, times out bad queries and emits metrics and audit logs. Only graphos-api reaches PostgreSQL 16 with Apache AGE on an internal network; each tenant is its own AGE graph.">
+  <img src="docs/images/architecture-light.svg" width="100%" alt="Consumers call graphos-api over the graphos-net network with a bearer token. graphos-api checks tenant scope and read/write access, validates typed contracts, builds SQL internally, times out bad queries and emits metrics and audit logs. Only graphos-api reaches PostgreSQL 18 with Apache AGE on an internal network; each tenant is its own AGE graph.">
 </picture>
 
 **Why:** read the [whitepaper](https://graphos-pomentum.vercel.app) for the problem graphos solves and what it gives you.
@@ -62,7 +62,7 @@ git clone https://github.com/pomentum/graphos.git && cd graphos
 # 1. Create local secrets: random database passwords
 bash scripts/init-secrets.sh          # or: pwsh scripts/init-secrets.ps1
 
-# 2. Start graphos-db (Postgres 16 + AGE 1.6), graphos-api and the web UI (http://127.0.0.1:8081)
+# 2. Start graphos-db (Postgres 18 + AGE 1.8), graphos-api and the web UI (http://127.0.0.1:8081)
 docker compose -f docker-compose.graphos.yml --profile ui up -d
 
 # 3. Check it is up
@@ -225,12 +225,13 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | [Usage guide](docs/usage.md) | Practical integration patterns |
 | [Feature survey](docs/features.md) | Every capability, briefly |
 | [Concept](docs/concept.md) | Architecture, endpoint catalogue, capacity planning |
-| [Apache AGE notes](docs/apache-age.md) | AGE 1.6 pitfalls, indexing, Postgres tuning, measured numbers |
+| [Apache AGE notes](docs/apache-age.md) | AGE pitfalls, indexing, Postgres tuning, measured numbers |
 | [Web UI](services/graphos-ui/README.md) | Running the UI, its views, how its code and text are organised |
 
 ## Built on Apache AGE
 
-graphos stores every tenant as an [Apache AGE](https://age.apache.org/) graph inside PostgreSQL 16 (image `apache/age:release_PG16_1.6.0`). AGE provides the property-graph model and its per-label storage tables (and an openCypher engine; graphos queries the tables with SQL instead, so statement timeouts and cancellation always apply); graphos adds the HTTP boundary, tenancy, bulk paths, indexing and analytics on top. Apache AGE is a project of the Apache Software Foundation, licensed under Apache 2.0, and is not affiliated with graphos.
+graphos stores every tenant as an [Apache AGE](https://age.apache.org/) graph inside PostgreSQL 18 (image `apache/age:release_PG18_1.8.0`; PostgreSQL 16 with AGE 1.6 works too, and a stack on it is
+moved to 18 by `docker compose up`). AGE provides the property-graph model and its per-label storage tables (and an openCypher engine; graphos queries the tables with SQL instead, so statement timeouts and cancellation always apply); graphos adds the HTTP boundary, tenancy, bulk paths, indexing and analytics on top. Apache AGE is a project of the Apache Software Foundation, licensed under Apache 2.0, and is not affiliated with graphos.
 
 ## Development
 

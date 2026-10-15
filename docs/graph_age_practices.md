@@ -3,7 +3,8 @@
 A working catalogue of what AGE 1.6.x does and does not accept, what
 costs are surprising, and the concrete templates graphos uses on the
 write path (`graphos.writes`, `graphos.bootstrap`, `graphos.api.bulk`).
-Verified against AGE 1.6.0 on PostgreSQL 16. For tuning, concurrency
+Verified against AGE 1.6.0 on PostgreSQL 16; the bundled database is now
+AGE 1.8.0 on PostgreSQL 18, where the write path is the same. For tuning, concurrency
 and community-detection notes see [`apache-age.md`](./apache-age.md).
 
 ## 1. AGE Cypher acceptances and rejections
@@ -20,8 +21,9 @@ What Neo4j-style Cypher accepts that AGE 1.6 does not:
 | Cypher `SET` on a label whose table has extra (non-AGE) columns | backend segfault (AGE 1.6.0) |
 
 AGE 1.8.0 accepts `ON CREATE SET` / `ON MATCH SET` and no longer segfaults,
-but it has no PostgreSQL 16 release; graphos runs 1.6.0 on PostgreSQL 16
-(see [`apache-age.md` §11](./apache-age.md#11-upstream-status)).
+but its Cypher writes still break graphos's label tables: a `SET` writes NULL
+into the extra columns (`graphos_rev` is NOT NULL) and a `CREATE` fails with
+`invalid perminfoindex` (see [`apache-age.md` §11](./apache-age.md#11-upstream-status)).
 
 Because of the last row (and the throughput gap in §3), graphos writes
 no rows through Cypher: every write is SQL in `graphos.writes`, and every

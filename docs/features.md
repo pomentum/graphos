@@ -9,8 +9,8 @@ in [concept.md](concept.md); request/response models are in
 
 ## 1. What graphos is
 
-graphos is a generic, multi-tenant property-graph service: PostgreSQL 16 with
-Apache AGE 1.6 behind a typed FastAPI REST surface. Storage is ordinary
+graphos is a generic, multi-tenant property-graph service: PostgreSQL 18 with
+Apache AGE 1.8 (or 16 with 1.6) behind a typed FastAPI REST surface. Storage is ordinary
 Postgres (MVCC, WAL, standard backup tooling). Requests are JSON, with NDJSON
 for bulk writes. Internally graphos runs plain SQL against AGE's per-label
 tables, never Cypher ([concept §3.1](concept.md#31-cypher--sql-boundary)).

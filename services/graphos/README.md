@@ -1,6 +1,6 @@
 # graphos
 
-FastAPI service for graphos — a multi-tenant property-graph service backed by PostgreSQL 16 + Apache AGE.
+FastAPI service for graphos — a multi-tenant property-graph service backed by PostgreSQL 18 + Apache AGE 1.8 (or 16 + 1.6).
 
 This directory is the Python package. For the overview, the docker-compose stack and the quickstart, see the repository [`README.md`](../../README.md).
 
@@ -18,7 +18,7 @@ The `louvain` extra pulls in python-igraph (GPL-2.0-or-later); without it `POST 
 
 ## Run
 
-Point the service at a PostgreSQL 16 + AGE database and give it its credentials:
+Point the service at a PostgreSQL 18 + AGE 1.8 (or 16 + 1.6) database and give it its credentials:
 
 ```bash
 GRAPHOS_DB_HOST=localhost \

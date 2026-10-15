@@ -4,6 +4,39 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+The bundled database moves to PostgreSQL 18 with Apache AGE 1.8, and `docker compose up` moves an
+existing PostgreSQL 16 stack's data there by itself. graphos itself is one image, as before, and
+runs on either database: CI runs the server's tests against both.
+
+### Changed
+
+- **PostgreSQL 18 with AGE 1.8.** `graphos-db` runs `apache/age:release_PG18_1.8.0`, pinned by
+  digest, on a new volume, `graphos_data_pg18` (the data where it is mounted, `PGDATA` set as
+  before PostgreSQL 18's images moved it). PostgreSQL 16 with AGE 1.6 is still supported.
+- **The move from PostgreSQL 16, by itself.** Two one-shot services, `graphos-db-export`
+  (PostgreSQL 16, no network) and `graphos-db-import` (PostgreSQL 18), dump the database on
+  `graphos_data` and load it into `graphos-db` on the first start after the upgrade; `graphos-api`
+  waits for them. Everything moves: tenants and their graphs, users and grants, saved queries, the
+  change feed, revisions and sessions. Every later start, and a new install, has nothing to move.
+  A failed import leaves nothing behind and runs again on the next `up`; the dump is never loaded
+  over a database graphos has used. `graphos_data` is kept unchanged, as the way back.
+- **CI against both databases.** The integration tests run against the compose's PostgreSQL 18 /
+  AGE 1.8 and against PostgreSQL 16 / AGE 1.6; `scripts/run-db-tests.sh --db-image` picks
+  another database image, on a volume of its own.
+- **asyncpg 0.31 or newer** (the first tested against PostgreSQL 18).
+
+### Upgrading from 0.9.0
+
+- **Compose:** update the files and run `docker compose -f docker-compose.graphos.yml up -d`. The
+  first start moves the data (about as long as a dump and a restore); see
+  [installation §11](docs/installation.md#11-upgrading-from-postgresql-16). Once content, remove
+  the old data: `docker volume rm graphos_data graphos_upgrade`.
+- **Your own database:** graphos still runs on PostgreSQL 16 with AGE 1.6; to move it to 18, see
+  the same section.
+- **Clients:** nothing changes.
+
 ## 0.9.0 — 2026-10-15
 
 A tenant can now declare the properties its labels and relationship types carry, and hold writes to

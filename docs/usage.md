@@ -1,7 +1,7 @@
 # graphos usage guide
 
 A practical guide to integrating with graphos, a multi-tenant property-graph service (FastAPI on
-PostgreSQL 16 + Apache AGE 1.6). The service code is the reference: routers live in
+PostgreSQL 18 + Apache AGE 1.8). The service code is the reference: routers live in
 `services/graphos/src/graphos/api/` and wire contracts in `services/graphos/src/graphos/contracts/`.
 The live OpenAPI schema is served at `/openapi.json`, and read as Swagger UI at `/docs` or as
 ReDoc at `/redoc`. graphos serves both pages' scripts itself (`/api-docs-assets/`), so they work in
