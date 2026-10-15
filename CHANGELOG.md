@@ -4,7 +4,7 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.9.0 — 2026-10-15
 
 A tenant can now declare the properties its labels and relationship types carry, and hold writes to
 them: `off`, `warn` or `strict`, on every write path. It can check its stored data against those

@@ -1,3 +1,3 @@
 """graphos — multi-tenant graph service over PostgreSQL + Apache AGE."""
 
-__version__ = "0.8.3"
+__version__ = "0.9.0"
