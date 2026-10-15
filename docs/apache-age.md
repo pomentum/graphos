@@ -651,8 +651,26 @@ The copy's content checksum matched the source's. An import writes about 2,500 r
 row goes through the tenant's indexes (13 property, trigram and search indexes on this graph), and
 the edge community columns are restored after the edges.
 
-**Recompute** (PostgreSQL 18): degree, PageRank and components 19 s; Louvain 52 s (144
-communities); betweenness skipped (`GRAPHOS_BETWEENNESS_MAX_NODES`, 20,000).
+**Recompute** (PostgreSQL 18; a first run on fresh data writes every row, later runs only what
+changed):
+
+| Graph | Metrics (degree, PageRank, components) | Louvain |
+|---|---:|---:|
+| the graph above, groups unchanged since the last run | 13.8 s | 46 s (144 communities) |
+| synthetic, 270,000 nodes / 1.0M edges, first run | 51 s | 276 s |
+| synthetic, 810,000 nodes / 3.0M edges, first run | 152 s | 1,373 s |
+
+Betweenness is skipped above `GRAPHOS_BETWEENNESS_MAX_NODES` (20,000). Metrics grow linearly with
+the graph; Louvain's first run is mostly its write-back (every node's `community_id` and both
+community columns of every edge), which also leaves dead rows behind until autovacuum.
+
+**Import, isolated** (the same 1.19M-row export into an empty tenant): 447 s with no load, 470–488 s
+with five concurrent readers, 507 s with the tenant's property and search indexes left out; the
+time is the import path itself (about 2,500 rows/s here), not the load or the declared indexes.
+
+**`VACUUM FULL`** of all 24 label tables (748 MB) through `POST /v1/db/vacuum`: 309 s; reads of a
+table wait while it is rewritten (up to 21.6 s for the largest), other tables stay available.
+`pg_repack` is not in the `apache/age` image.
 
 **Moving PostgreSQL 16 to 18** (dump and restore, as the compose does): a 9.5 GB database with
 five tenants in 12 minutes, 4.3 GB afterwards; a 2 GB tenant's restore in 72 s plus 36 s of
