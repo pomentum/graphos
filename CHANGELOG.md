@@ -4,7 +4,7 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.11.0 — 2026-10-15
 
 The label histogram, deprecated in 0.10.0, is removed: `nodes/aggregate` now counts the distinct
 values too, and the web UI uses it. The Python client catches up with the server: property
