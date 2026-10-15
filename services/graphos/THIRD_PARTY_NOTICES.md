@@ -110,9 +110,10 @@ file in its npm distribution.
 | @fontsource/inter (Inter typeface) | SIL Open Font License 1.1 |
 | @fontsource/ibm-plex-mono (IBM Plex Mono typeface) | SIL Open Font License 1.1 |
 
-These are the direct dependencies. They bundle 89 packages in all. Apart from elkjs, each is
-under a permissive licence: MIT for most, ISC (the d3 modules React Flow uses), BSD-3-Clause
-(react-transition-group, d3-ease), 0BSD (tslib) and MIT OR CC0-1.0 (type-fest). The fonts are redistributed unmodified under the OFL, which permits bundling them
+These are the direct dependencies. The built UI holds code from 69 packages in all, the two fonts
+included (counted from the build's source maps). Apart from elkjs and the fonts, each is under a
+permissive licence: MIT for 55 of them, ISC (the eight d3 modules React Flow uses), BSD-3-Clause
+(react-transition-group, d3-ease) and 0BSD (tslib). The fonts are redistributed unmodified under the OFL, which permits bundling them
 with software. The image is built on `nginxinc/nginx-unprivileged` (nginx: BSD-2-Clause, on
 Alpine Linux, whose packages carry their own licences).
 

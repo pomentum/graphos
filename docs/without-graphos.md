@@ -103,7 +103,8 @@ python tools/export/ndjson_to_age.py sales.ndjson.gz sales_plain \
 
 - **What it builds:** one vertex label per node label and one edge label per relationship type;
   AGE assigns new graph ids; node `properties` keep the external `id`.
-- **Limit:** it holds the file in memory while loading, so budget about 1 GB per million rows.
+- **Limit:** it holds every row in memory while loading, so budget about 1 GB per million rows
+  (measured: 855 MiB at its peak for 1.19 million rows, a 32 MB export, loaded in 77 s).
 
 Tested 2026-10-15 on AGE 1.8.0 / PostgreSQL 18.6, with a 251,246-node, 940,144-edge graph:
 - the content checksums of the source tenant and the plain graph matched, node by node and edge

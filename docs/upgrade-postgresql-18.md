@@ -22,8 +22,8 @@ long it takes, how to check it and how to go back.
 
 ## Why move
 
-- **AGE 1.6 is the last AGE release for PostgreSQL 16.** Its fixes land only in AGE 1.8, which
-  is built for PostgreSQL 15, 17 and 18.
+- **AGE 1.6 is the last AGE release for PostgreSQL 16.** Its fixes land only in AGE 1.8, released
+  for PostgreSQL 15 and 18 (PostgreSQL 17's latest is AGE 1.7; checked 2026-10-15).
 - **AGE 1.6 carries out Cypher `SET`, `REMOVE` and `DELETE` inside a read-only transaction.**
   graphos now refuses those clauses in its console before they reach the database, but anything
   else that runs Cypher against the database stays exposed on 1.6.
@@ -197,8 +197,9 @@ the contents matched by checksum). Only the restore must be serial: a parallel d
 (`pg_dump -Fd -j N`) is fine.
 
 [`deploy/db-upgrade/import-pg18.sh`](../services/graphos/deploy/db-upgrade/import-pg18.sh) is the
-same procedure as the compose runs it. Managed services (Azure, AWS, …) that offer AGE 1.8 on
-PostgreSQL 18 take the same steps.
+same procedure as the compose runs it. On a managed PostgreSQL that offers AGE 1.8 on PostgreSQL 18,
+the same steps apply where its tools allow them (a serial `pg_restore`, then the catalogue fix);
+check what it permits before moving.
 
 ## Why a dump and a restore, not pg_upgrade
 

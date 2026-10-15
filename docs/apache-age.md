@@ -588,7 +588,7 @@ aggregates back.
 
 Checked 2026-10-15 against `apache/age`. The bundled database is AGE 1.8.0
 on PostgreSQL 18. AGE 1.6.0 on PostgreSQL 16, which has no AGE release after
-1.6.0 (the fixes below ship in 1.8.0 for PostgreSQL 15, 17 and 18), still runs
+1.6.0 (the fixes below ship in 1.8.0, released for PostgreSQL 15 and 18), still runs
 but is **deprecated** for graphos: it logs `database deprecated` at start
 and reports it in `GET /v1/info`. CI runs the server's tests against both.
 

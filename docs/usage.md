@@ -170,7 +170,8 @@ become its `owner`, as the creator of a PostgreSQL database owns it; also re-reg
 tenant that matches) and `admin` (everything: users, every grant, `/v1/db/*`, vacuum). A user's level
 on a tenant is the highest of its grants that match; a wrong tenant answers 403 before any SQL.
 `/openapi.json` shows the access each operation needs as its bearer scope (`read`, `write`,
-`maintain`, `owner` or `admin`). Reads sent as `POST` (`nodes:scan`, `edges:scan`, `induced_edges`,
+`maintain`, `owner` or `admin`); an admin passes every one. `POST /v1/tenants` shows `maintain` and
+also accepts `create_tenants` on a pattern the name matches. Reads sent as `POST` (`nodes:scan`, `edges:scan`, `induced_edges`,
 `scoped_subgraph`, `sample_subgraph`, `nodes/aggregate`, `edges/aggregate`, `community-ids`) need
 only `read`.
 
@@ -1345,7 +1346,8 @@ than PostgreSQL 18 or AGE 1.8, graphos logs `database deprecated` at every start
 `services/graphos-ui` is a web UI for exploring, editing and following a tenant. Explore opens a
 large tenant on its graph map (or its communities, under Groups) and a small one on its whole
 graph; the canvas adds neighbours a page at a time with undo, is laid out by force, on a circle or
-in layers, and saves as PNG, SVG or JSON. It also has shortest paths, counts per label, live
+in layers, and saves as PNG, SVG or JSON; so do the map, the groups and the metric views, and an SVG
+keeps the label icons and embeds the labels' font. It also has shortest paths, counts per label, live
 activity, a table view of a label (and CSV), a Query page where the Cypher console is on, and the
 schema, which admins can extend and whose label styles and property definitions maintainers set:
 each label and relationship type (and *every label*, *every relationship type*) opens to the

@@ -44,6 +44,13 @@ in line with the code throughout.
 
 - **Web UI:** the Overview's value counts and the Components view read `nodes/aggregate`. The
   Overview's count of distinct values is exact when the list is cut, where it showed `-1`.
+- **Web UI exports.** Every Explore view saves what it shows: the map, the groups and the metric
+  views (PageRank, betweenness, degree, components) as well as the graph, as PNG, SVG or JSON (the
+  map and the groups as the data they drew). An SVG keeps each node's label icon, tinted and sized
+  as on the canvas, and embeds the labels' font (Inter, only the subsets its letters need), so it
+  looks the same in other tools and on machines without the font.
+- **`POST /v1/tenants` shows `maintain` as its scope in the API documentation**, not `write`; it
+  also accepts `create_tenants` on a pattern the name matches, as before.
 - **Docs**, checked against the code: the configuration table lists every setting; status codes,
   permissions, the Cypher console's refusals, the move to PostgreSQL 18 and the client's coverage
   are brought up to date. A logical restore must be serial: `pg_restore -j` fails on AGE's catalog

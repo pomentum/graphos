@@ -576,7 +576,8 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   which maintainers declare, narrow and remove, with the tenant's property-check mode (`off`,
   `warn`, `strict`, which asks first) and a check of the stored rows run as a job with its report;
   creating a tenant (empty or from a schema file), unregistering it, restoring it, and deleting it
-  with its data; exports of what is on screen: the canvas as PNG, SVG or JSON, a label's nodes and
+  with its data; exports of what is on screen: every Explore view (graph, map, groups, metric views)
+  as PNG, SVG (with the label icons, and the labels' font embedded) or JSON, a label's nodes and
   the overview's counts as CSV; the tenant's label styles (colour, caption, size, icon per label,
   colour and caption per relationship type) on the canvas, the map, the legend, the schema diagram
   and query results, set by maintainers on the Schema page; the Graph canvas laid out by force,

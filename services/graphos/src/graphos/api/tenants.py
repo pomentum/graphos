@@ -46,7 +46,6 @@ from graphos.auth import (
     MaintainPrincipal,
     OwnerPrincipal,
     ReadPrincipal,
-    WritePrincipal,
     require_admin,
     require_level,
 )
@@ -334,7 +333,7 @@ async def export_spec(name: TenantName, request: Request, principal: MaintainPri
 async def register(
     body: TenantSpecBody,
     request: Request,
-    principal: WritePrincipal,
+    principal: MaintainPrincipal,
     force_shrink: Annotated[
         bool,
         Query(description=(
