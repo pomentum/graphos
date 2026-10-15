@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncpg
 import pytest
 
+from graphos import writes
 from graphos.bootstrap import TenantSpec, register_tenant
 from graphos.cypher import query_cypher
 
@@ -35,17 +36,13 @@ async def test_search_finds_nodes_by_name(db_pool: asyncpg.Pool) -> None:
     )
     await register_tenant(db_pool, spec)
 
-    # Insert three Thing nodes — one matching, two not.
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            f"""
-            SELECT * FROM cypher('{TEST_TENANT}', $$
-              CREATE (:Thing {{name: 'foobar', kind: 'A'}})
-              CREATE (:Thing {{name: 'foobaz', kind: 'B'}})
-              CREATE (:Thing {{name: 'unrelated', kind: 'C'}})
-            $$) AS (v agtype);
-            """
-        )
+    # Three Thing nodes, two of them matching, written with SQL as graphos
+    # writes (a Cypher CREATE into graphos's tables fails on AGE 1.8).
+    await writes.upsert_nodes(db_pool, tenant=TEST_TENANT, label="Thing", rows=[
+        {"id": "t1", "props": {"name": "foobar", "kind": "A"}},
+        {"id": "t2", "props": {"name": "foobaz", "kind": "B"}},
+        {"id": "t3", "props": {"name": "unrelated", "kind": "C"}},
+    ])
 
     # Substring 'foob' should match the first two.
     rows = await query_cypher(

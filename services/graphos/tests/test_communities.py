@@ -19,7 +19,6 @@ import pytest
 from graphos import writes
 from graphos.api.communities import _communities_with_labels
 from graphos.bootstrap import TenantSpec, register_tenant
-from graphos.cypher import query_cypher
 
 from .conftest import requires_db
 
@@ -61,41 +60,27 @@ async def _seed(pool: asyncpg.Pool) -> None:
     )
     await register_tenant(pool, spec)
 
-    await writes.upsert_nodes(
-        pool, tenant=TEST_TENANT, label="Document",
-        rows=[
-            {"id": "c1a", "props": {}},
-            {"id": "c1b", "props": {}},
-            {"id": "c1c", "props": {}},
-            {"id": "c2a", "props": {}},
-            {"id": "c2b", "props": {}},
-            {"id": "c3a", "props": {}},
-            {"id": "orphan", "props": {}},
-        ],
-    )
-    await writes.upsert_nodes(
-        pool, tenant=TEST_TENANT, label="Collection",
-        rows=[{"id": "cmp2", "props": {}}],
-    )
-
-    # Assign community_id via Cypher SET — same shape Louvain
-    # writeback produces (agtype integer under properties.community_id).
+    # community_id as Louvain's write-back leaves it (an agtype integer under
+    # properties.community_id), written with SQL as graphos writes: a Cypher
+    # SET into graphos's tables fails on AGE 1.8 (graphos_rev comes out NULL).
     assignments = {
         "c1a": 1, "c1b": 1, "c1c": 1,
         "c2a": 2, "c2b": 2, "cmp2": 2,
         "c3a": 3,
         # "orphan" intentionally left without community_id
     }
-    for ext_id, cid in assignments.items():
-        await query_cypher(
-            pool, graph=TEST_TENANT,
-            cypher=(
-                "MATCH (n {id: $ext_id}) SET n.community_id = $cid "
-                "RETURN n.id AS id"
-            ),
-            return_cols=[("id", "agtype")],
-            params={"ext_id": ext_id, "cid": cid},
-        )
+
+    def rows(*ids: str) -> list[dict[str, object]]:
+        return [
+            {"id": i, "props": {"community_id": assignments[i]} if i in assignments else {}}
+            for i in ids
+        ]
+
+    await writes.upsert_nodes(
+        pool, tenant=TEST_TENANT, label="Document",
+        rows=rows("c1a", "c1b", "c1c", "c2a", "c2b", "c3a", "orphan"),
+    )
+    await writes.upsert_nodes(pool, tenant=TEST_TENANT, label="Collection", rows=rows("cmp2"))
 
 
 async def _drop(pool: asyncpg.Pool) -> None:
