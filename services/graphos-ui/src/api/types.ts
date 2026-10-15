@@ -617,12 +617,15 @@ export interface TenantStats {
   labels: LabelCount[];
 }
 
-export interface HistogramResponse {
+export interface NodesAggregateResponse {
   label: string;
-  property: string;
-  n_distinct: number;
-  n_total: number;
-  bins: { value: string; count: number }[];
+  group_by: string;
+  truncated: boolean;
+  /** Nodes counted in every group, `limit` aside. */
+  total: number;
+  /** Groups (distinct values), `limit` aside. */
+  distinct: number;
+  groups: { value: string; count: number }[];
 }
 
 /** What a schema change added, removed or switched (`op: "schema"`). */

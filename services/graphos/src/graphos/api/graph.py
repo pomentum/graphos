@@ -2167,9 +2167,9 @@ async def _aggregate_edge_groups(
         "semantic as Cypher `MATCH (n:Document)`. Useful for live "
         "histograms (e.g. count per `language` or per `type`) "
         "without precomputing a summary. `missing` also counts the nodes "
-        "without the property, under `\"\"`; `total` is every node counted, "
-        "`limit` aside. A string value is returned as it is, any other "
-        "value as JSON."
+        "without the property, under `\"\"`; `total` is every node counted "
+        "and `distinct` every group, `limit` aside. A string value is "
+        "returned as it is, any other value as JSON."
     ),
 )
 async def aggregate_nodes(
@@ -2189,7 +2189,8 @@ async def aggregate_nodes(
     label = body.label
     value = f"""(n.properties -> '"{body.group_by}"'::agtype)"""
     sql = f"""
-        SELECT {value}::text AS v, count(*) AS c, sum(count(*)) OVER ()::bigint AS total
+        SELECT {value}::text AS v, count(*) AS c, sum(count(*)) OVER ()::bigint AS total,
+               count(*) OVER () AS n_groups
         FROM "{tenant}"."{label}" n
         WHERE CASE WHEN {value} IS NULL THEN $3
                    ELSE $2::text[] IS NULL
@@ -2223,6 +2224,7 @@ async def aggregate_nodes(
         truncated=len(groups) == body.limit,
         elapsed_ms=elapsed_ms,
         total=int(rows[0]["total"]) if rows else 0,
+        distinct=int(rows[0]["n_groups"]) if rows else 0,
         groups=groups,
     )
 

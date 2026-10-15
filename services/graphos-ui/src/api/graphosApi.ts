@@ -21,7 +21,7 @@ import type {
   HubsResponse,
   InducedEdgesResponse,
   EdgesUpsertResponse,
-  HistogramResponse,
+  NodesAggregateResponse,
   Me,
   Preferences,
   CypherResult,
@@ -535,9 +535,9 @@ export class GraphosApi {
     return this.http.get(`${this.graph}/stats`);
   }
 
-  /** How often each value of one property occurs among a label's nodes. */
-  histogram(label: string, property: string, limit = 20): Promise<HistogramResponse> {
-    return this.http.get(`${this.graph}/labels/${enc(label)}/histogram`, { property, limit });
+  /** How often each value of one property occurs among a label's nodes, nodes without it under "". */
+  valueCounts(label: string, property: string, limit = 20): Promise<NodesAggregateResponse> {
+    return this.http.post(`${this.graph}/nodes/aggregate`, { label, group_by: property, limit, missing: true });
   }
 
   /** The change feed's current position: following from here sees every new change. */

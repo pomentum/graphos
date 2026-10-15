@@ -42,7 +42,7 @@ export const keys = {
   properties: (tenant: string, label: string) => ["properties", tenant, label] as const,
   edgeProperties: (tenant: string, type: string) => ["edgeProperties", tenant, type] as const,
   scan: (tenant: string, request: NodesScanRequest) => ["scan", tenant, request] as const,
-  histogram: (tenant: string, label: string, property: string) => ["histogram", tenant, label, property] as const,
+  valueCounts: (tenant: string, label: string, property: string) => ["valueCounts", tenant, label, property] as const,
   catalogue: (tenant: string) => ["catalogue", tenant] as const,
   map: (tenant: string, exact: boolean) => ["map", tenant, exact] as const,
   groups: (tenant: string) => ["groups", tenant] as const,
@@ -362,11 +362,11 @@ export function useStats() {
 }
 
 /** Value counts of one property of one label; idle until both are chosen. */
-export function useHistogram(label: string | null, property: string | null) {
+export function useValueCounts(label: string | null, property: string | null) {
   const { api, tenant } = useTenantSession();
   return useQuery({
-    queryKey: keys.histogram(tenant, label ?? "", property ?? ""),
-    queryFn: () => api.histogram(label!, property!),
+    queryKey: keys.valueCounts(tenant, label ?? "", property ?? ""),
+    queryFn: () => api.valueCounts(label!, property!),
     enabled: Boolean(label && property),
   });
 }

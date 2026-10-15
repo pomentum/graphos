@@ -69,6 +69,7 @@ class Me(BaseModel):
     tenants: list[str] = Field(default_factory=list)
     levels: dict[str, str] = Field(default_factory=dict)   # tenant -> read|write|maintain|owner
     create_tenants: list[str] = Field(default_factory=list)  # name patterns
+    preferences: dict[str, Any] = Field(default_factory=dict)  # the web UI's, per user
 
 
 class UnregisteredTenant(BaseModel):
@@ -317,6 +318,7 @@ class NodesAggregateResponse(BaseModel):
     truncated: bool
     elapsed_ms: int
     total: int | None = None
+    distinct: int | None = None
     groups: list[NodeAggregateRow] = Field(default_factory=list)
 
 
@@ -354,6 +356,7 @@ class NodesUpsertResponse(BaseModel):
     nodes_upserted: int
     by_label: dict[str, int] = Field(default_factory=dict)
     elapsed_ms: int
+    property_warnings: dict[str, int] = Field(default_factory=dict)
 
 
 class EdgesUpsertResponse(BaseModel):
@@ -362,6 +365,7 @@ class EdgesUpsertResponse(BaseModel):
     edges_skipped: int
     by_type: dict[str, int] = Field(default_factory=dict)
     elapsed_ms: int
+    property_warnings: dict[str, int] = Field(default_factory=dict)
 
 
 class BulkNodesResponse(BaseModel):
@@ -372,6 +376,8 @@ class BulkNodesResponse(BaseModel):
     by_label: dict[str, int] = Field(default_factory=dict)
     errors: list[str] = Field(default_factory=list)
     elapsed_ms: int
+    property_violations: dict[str, int] = Field(default_factory=dict)
+    property_warnings: dict[str, int] = Field(default_factory=dict)
 
 
 class BulkEdgesResponse(BaseModel):
@@ -383,6 +389,8 @@ class BulkEdgesResponse(BaseModel):
     by_type: dict[str, int] = Field(default_factory=dict)
     errors: list[str] = Field(default_factory=list)
     elapsed_ms: int
+    property_violations: dict[str, int] = Field(default_factory=dict)
+    property_warnings: dict[str, int] = Field(default_factory=dict)
 
 
 # ── Delete responses ────────────────────────────────────────────────────────
@@ -497,6 +505,50 @@ class ComputeMetricsResponse(BaseModel):
     dry_run: bool
 
 
+class PropertyPolicy(BaseModel):
+    """How one vertex label's or edge type's writes are checked."""
+
+    mode: str
+    undeclared: str
+    undeclared_source: str
+    properties: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
+class PropertyDefinitionsResponse(BaseModel):
+    """``GET /v1/{tenant}/graph/properties``: every label's and type's definitions."""
+
+    tenant: str
+    mode: str
+    vertex: dict[str, PropertyPolicy] = Field(default_factory=dict)
+    edge: dict[str, PropertyPolicy] = Field(default_factory=dict)
+
+
+class LabelCheck(BaseModel):
+    """What one vertex label's or edge type's stored rows break."""
+
+    kind: str
+    name: str
+    rows: int
+    rows_with_errors: int
+    rows_with_warnings: int
+    errors: dict[str, int] = Field(default_factory=dict)
+    warnings: dict[str, int] = Field(default_factory=dict)
+    examples: dict[str, list[str]] = Field(default_factory=dict)
+    undeclared: dict[str, int] = Field(default_factory=dict)
+
+
+class PropertiesCheckResponse(BaseModel):
+    """``POST /v1/{tenant}/graph/properties:check``: the stored rows against the definitions."""
+
+    tenant: str
+    mode: str
+    rows: int
+    rows_with_errors: int
+    rows_with_warnings: int
+    labels: list[LabelCheck] = Field(default_factory=list)
+    elapsed_ms: int
+
+
 # ── Background jobs ─────────────────────────────────────────────────────────
 
 
@@ -576,21 +628,6 @@ class CommunityIdsResponse(BaseModel):
 
 
 # ── Generic analytics primitives ─────────────────────────────────────
-
-
-class HistogramRow(BaseModel):
-    value: str
-    count: int
-
-
-class HistogramResponse(BaseModel):
-    tenant: str
-    label: str
-    property: str
-    n_distinct: int
-    n_total: int
-    bins: list[HistogramRow] = Field(default_factory=list)
-    elapsed_ms: int
 
 
 class TopByEdgeRow(BaseModel):

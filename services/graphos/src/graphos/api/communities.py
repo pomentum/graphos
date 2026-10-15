@@ -27,8 +27,6 @@ from graphos.contracts.communities import (
     CommunityIdsResponse,
     CommunityRow,
     CommunitySummary,
-    HistogramResponse,
-    HistogramRow,
     LabelCount,
     TenantStatsResponse,
     TopByEdgeResponse,
@@ -488,16 +486,11 @@ async def community_ids(
     )
 
 
-# ── /labels/{label}/histogram + /labels/{label}/top ────────────────────────
+# ── /labels/{label}/top ────────────────────────────────────────────────────
 #
-# Schema-agnostic analytics.  Callers parameterise the label, the
-# property to bucket on (histogram), or the edge to count (top-by-edge).
-# Each replaces N sequential per-label scans a consumer would otherwise run.
+# Schema-agnostic analytics.  Callers parameterise the label and the edge
+# to count, instead of N sequential per-label scans.
 
-# Sanity caps — protect graphos from a runaway scan if a caller asks
-# for "histogram every value of a free-text property."
-MAX_HISTOGRAM_LIMIT = 1000
-DEFAULT_HISTOGRAM_LIMIT = 100
 MAX_TOP_K = 200
 DEFAULT_TOP_K = 20
 
@@ -529,102 +522,6 @@ def _check_label(tenant: str, label: str, *, kind: str) -> None:
                 f"{tenant!r}.  Register it via POST /v1/tenants."
             ),
         )
-
-
-@router.get(
-    "/labels/{label}/histogram",
-    response_model=HistogramResponse,
-    tags=["communities"],
-    deprecated=True,
-    summary="Property-value histogram for one label",
-    description=(
-        "Deprecated: `POST /v1/{tenant}/graph/nodes/aggregate` with `missing: true` "
-        "returns the same counts, with `total` for `n_total`.  "
-        "Count nodes of ``label`` grouped by a property value.  Replaces "
-        "a pattern of N sequential Cypher queries (one per value) "
-        "with one SQL ``GROUP BY`` against the per-label storage table — "
-        "~1-50ms even on large tenants.  Schema-agnostic: pick any "
-        "registered label and any property name; missing-value rows are "
-        "reported under value ``\"\"`` (empty string)."
-    ),
-)
-async def label_histogram(
-    tenant: Tenant,
-    label: VertexLabel,
-    request: Request,
-    principal: ReadPrincipal,
-    property: Annotated[
-        str, Query(..., min_length=1, max_length=128,
-                   description="Property name to bucket on."),
-    ],
-    limit: Annotated[
-        int, Query(ge=1, le=MAX_HISTOGRAM_LIMIT,
-                   description="Max distinct values to return, most frequent first."),
-    ] = DEFAULT_HISTOGRAM_LIMIT,
-) -> HistogramResponse:
-    _check_tenant(tenant, principal)
-    _check_label(tenant, label, kind="vertex")
-    started = time.perf_counter()
-    pool = request.app.state.pool
-    # ``properties->'"<key>"'``: agtype value of the property.  ``::text``
-    # strips the wrapping quotes for string scalars; numeric scalars
-    # already render as bare numbers.  ``trim`` removes the outer
-    # double-quotes added by the JSON-text cast so callers see
-    # ``"foo"`` instead of ``"\"foo\""``.  COALESCE on NULL preserves
-    # the missing-value bucket as the empty string.
-    # Single query: bins + totals via ``SUM(count) OVER ()`` window.
-    # Avoids a second ``COUNT(DISTINCT
-    # properties->'"X"')`` on the full label table — verified slow
-    # (~2-5s on 281K-row tables because COUNT DISTINCT on a jsonb
-    # expression can't use the per-property GIN).
-    #
-    # The window emits the same ``n_total`` on every row; we read
-    # it off the first row.  ``n_distinct`` is no longer cheap to
-    # compute on a value-extracted GROUP BY; we report it only as
-    # ``len(bins)`` when the bins were not truncated (caller can
-    # detect truncation via ``len(bins) == limit``).  When ``limit``
-    # is hit we leave ``n_distinct`` at -1 as the "not-known" sentinel
-    # to keep the response shape stable.
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            f"""
-            SELECT
-              COALESCE(
-                trim(both '"' from (v.properties->('"' || $1::text || '"')::agtype)::text),
-                ''
-              ) AS value,
-              count(*) AS c,
-              SUM(count(*)) OVER ()::bigint AS n_total
-            FROM "{tenant}"."{label}" v
-            GROUP BY 1
-            ORDER BY c DESC, value ASC
-            LIMIT $2;
-            """,
-            property,
-            limit,
-        )
-
-    n_total = int(rows[0]["n_total"]) if rows else 0
-    truncated = len(rows) >= limit
-    # n_distinct is the exact count when we didn't truncate, else
-    # the not-known sentinel (-1).  Callers that need the true
-    # distinct count when truncated should re-query with a bigger
-    # ``limit`` — the bins themselves carry the same information.
-    n_distinct = len(rows) if not truncated else -1
-
-    elapsed_ms = int((time.perf_counter() - started) * 1000)
-    return HistogramResponse(
-        tenant=tenant,
-        label=label,
-        property=property,
-        n_distinct=n_distinct,
-        n_total=n_total,
-        bins=[
-            HistogramRow(value=str(r["value"]), count=int(r["c"]))
-            for r in rows
-        ],
-        elapsed_ms=elapsed_ms,
-    )
 
 
 @router.get(

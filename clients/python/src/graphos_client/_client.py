@@ -7,7 +7,6 @@ import gzip as gzip_module
 import json
 import logging
 import os
-import warnings
 from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from http import HTTPStatus
 from pathlib import Path
@@ -44,7 +43,6 @@ from graphos_client._models import (
     ExpandResponse,
     GraphMap,
     GraphologyExport,
-    HistogramResponse,
     HubsResponse,
     InducedEdgesResponse,
     Job,
@@ -57,6 +55,8 @@ from graphos_client._models import (
     NodesUpsertResponse,
     NodeUpsert,
     PathsResponse,
+    PropertiesCheckResponse,
+    PropertyDefinitionsResponse,
     RecomputeCommunitiesResponse,
     SampleSubgraphResponse,
     SearchResponse,
@@ -521,7 +521,7 @@ class GraphosClient:
     async def remove_edge_endpoint(
         self, edge_type: str, src_label: str, dst_label: str, *, name: str | None = None,
     ) -> dict[str, Any]:
-        """Remove one declared label pair (admin).  No data is touched; a type
+        """Remove one declared label pair (maintain).  No data is touched; a type
         with no pairs left accepts any pair again."""
         target = name or self._tenant
         resp = await self._request(
@@ -692,8 +692,15 @@ class GraphosClient:
         self,
         nodes: Iterable[NodeUpsert] = (),
         edges: Iterable[EdgeUpsert] = (),
+        *,
+        mode: str = "merge",
+        properties: str = "enforce",
     ) -> dict[str, Any]:
         """``POST .../graph/snapshot-import``: nodes and edges in one stream.
+
+        ``mode="empty"`` is refused (409) unless the tenant has no nodes.
+        ``properties="report"`` checks the rows against the property schema and
+        counts what they break without refusing any, to restore older data.
 
         Nodes are sent first; the server also flushes buffered nodes before
         every edge batch.  Returns the raw response (``nodes_upserted``,
@@ -706,6 +713,7 @@ class GraphosClient:
         resp = await self._request(
             "POST",
             f"/v1/{self._tenant}/graph/snapshot-import",
+            params={"mode": mode, "properties": properties},
             content="\n".join(lines).encode("utf-8"),
             content_type="application/x-ndjson",
             idempotent=False,
@@ -755,6 +763,7 @@ class GraphosClient:
         *,
         mode: str = "merge",
         schema: str = "check",
+        properties: str = "enforce",
         name: str | None = None,
     ) -> dict[str, Any]:
         """``POST .../graph/snapshot-import``: a file from :meth:`export_dataset`.
@@ -765,7 +774,9 @@ class GraphosClient:
         ``schema="apply"`` first imports the schema from the file's header
         (:meth:`import_schema`, creating the tenant when new), so one file
         restores a tenant from nothing; ``"check"`` expects the labels to be
-        registered.  ``name`` imports into another tenant than this client's.
+        registered.  ``properties="report"`` counts the rows' property problems
+        without refusing any.  ``name`` imports into another tenant than this
+        client's.
 
         Returns the import's result: counts, ``complete`` (false when the file
         was cut off before its end line), ``errors``.  Not retried.
@@ -786,7 +797,7 @@ class GraphosClient:
                     yield chunk
 
         resp = await self._http.post(
-            url, params={"mode": mode}, content=body(), timeout=None,
+            url, params={"mode": mode, "properties": properties}, content=body(), timeout=None,
             headers={"content-type": "application/x-ndjson"},
         )
         if resp.status_code >= httpx.codes.BAD_REQUEST:
@@ -1194,8 +1205,13 @@ class GraphosClient:
         *,
         min_size: int = 1,
         include_members: bool = False,
+        limit: int = 50,
     ) -> CommunitiesResponse:
-        params: dict[str, Any] = {"min_size": min_size, "include_members": include_members}
+        """The tenant's communities, largest first: at most ``limit`` (up to 500;
+        0 = no cap)."""
+        params: dict[str, Any] = {
+            "min_size": min_size, "include_members": include_members, "limit": limit,
+        }
         resp = await self._request(
             "GET", f"/v1/{self._tenant}/graph/communities", params=params,
         )
@@ -1267,13 +1283,21 @@ class GraphosClient:
 
     # ── Generic analytics primitives ───────────────────────────────────────
 
-    async def catalogue(self) -> dict[str, Any]:
+    async def catalogue(
+        self, *, properties: list[str] | None = None, refresh: bool = False,
+    ) -> dict[str, Any]:
         """``GET .../graph/catalogue``: property name → labels carrying it.
 
         Diagnostic for rule-based edges: shows which labels the resolver
-        considers for each property.
+        considers for each property.  ``properties`` narrows it; ``refresh``
+        re-reads every node first, dropping properties no node carries.
         """
-        resp = await self._request("GET", f"/v1/{self._tenant}/graph/catalogue")
+        params: dict[str, Any] = {"refresh": refresh}
+        if properties:
+            params["property"] = list(properties)
+        resp = await self._request(
+            "GET", f"/v1/{self._tenant}/graph/catalogue", params=params,
+        )
         return resp.json()
 
     # ── operations (admin token) ───────────────────────────────────────────
@@ -1312,25 +1336,6 @@ class GraphosClient:
     ) -> Job:
         """:meth:`vacuum` as a background job; see :meth:`wait_for_job`."""
         return await self._submit("/v1/db/vacuum", _vacuum_body(tables, full, analyze))
-
-    async def label_histogram(
-        self, label: str, *, property: str, limit: int = 100,
-    ) -> HistogramResponse:
-        """Property-value histogram for one label — one SQL GROUP BY.
-
-        Deprecated: ``aggregate_nodes(label=..., group_by=..., missing=True)``
-        returns the same counts (``total`` for ``n_total``).
-        """
-        warnings.warn(
-            "label_histogram is deprecated; use aggregate_nodes(..., missing=True)",
-            DeprecationWarning, stacklevel=2,
-        )
-        resp = await self._request(
-            "GET",
-            f"/v1/{self._tenant}/graph/labels/{label}/histogram",
-            params={"property": property, "limit": limit},
-        )
-        return HistogramResponse.model_validate(resp.json())
 
     async def label_top_by_edge(
         self, label: str, *,
@@ -1720,7 +1725,7 @@ class GraphosClient:
         damping: float = 0.85,
         dry_run: bool = False,
     ) -> ComputeMetricsResponse:
-        """Compute graph metrics and store them on the nodes (admin).
+        """Compute graph metrics and store them on the nodes (maintain).
 
         ``metrics``: any of ``degree`` (graphos_degree, graphos_in_degree,
         graphos_out_degree), ``pagerank`` (graphos_pagerank), ``components``
@@ -1756,6 +1761,43 @@ class GraphosClient:
             damping=damping, dry_run=dry_run,
         )
         return await self._submit(f"/v1/{self._tenant}/graph/metrics:compute", body)
+
+    # ── Property definitions ──────────────────────────────────────────────
+
+    async def property_definitions(self) -> PropertyDefinitionsResponse:
+        """The property definitions every label and edge type is checked against,
+        with the mode each one is checked in."""
+        resp = await self._request("GET", f"/v1/{self._tenant}/graph/properties")
+        return PropertyDefinitionsResponse.model_validate(resp.json())
+
+    async def check_properties(
+        self,
+        *,
+        labels: list[str] | None = None,
+        types: list[str] | None = None,
+        examples: int = 10,
+    ) -> PropertiesCheckResponse:
+        """Check the stored rows against the property definitions (maintain), as if
+        every rule applied whatever the mode. Writes nothing. ``labels`` and
+        ``types`` narrow it (all by default); ``examples`` ids are kept per rule."""
+        resp = await self._request(
+            "POST", f"/v1/{self._tenant}/graph/properties:check",
+            json_body=_check_body(labels, types, examples),
+        )
+        return PropertiesCheckResponse.model_validate(resp.json())
+
+    async def submit_check_properties(
+        self,
+        *,
+        labels: list[str] | None = None,
+        types: list[str] | None = None,
+        examples: int = 10,
+    ) -> Job:
+        """:meth:`check_properties` as a background job; its ``result`` is the
+        :class:`PropertiesCheckResponse` body."""
+        return await self._submit(
+            f"/v1/{self._tenant}/graph/properties:check", _check_body(labels, types, examples),
+        )
 
     # ── Background jobs ───────────────────────────────────────────────────
 
@@ -1823,6 +1865,15 @@ def _vacuum_body(tables: list[str] | None, full: bool, analyze: bool) -> dict[st
     body: dict[str, Any] = {"full": full, "analyze": analyze}
     if tables:
         body["tables"] = list(tables)
+    return body
+
+
+def _check_body(labels: list[str] | None, types: list[str] | None, examples: int) -> dict[str, Any]:
+    body: dict[str, Any] = {"examples": examples}
+    if labels is not None:
+        body["labels"] = list(labels)
+    if types is not None:
+        body["types"] = list(types)
     return body
 
 

@@ -5,7 +5,7 @@ import { useSearchParams } from "react-router-dom";
 import { CountBars } from "../../components/CountBars";
 import { CsvButton } from "../../components/CsvButton";
 import { StatTile } from "../../components/StatTile";
-import { useHistogram, useProperties, useStats } from "../../data/queries";
+import { useProperties, useStats, useValueCounts } from "../../data/queries";
 import { formatBytes, formatCount } from "../../lib/time";
 import { useTenantSession } from "../../session/SessionProvider";
 import { DeleteTenantSection } from "./DeleteTenantSection";
@@ -35,7 +35,7 @@ export function OverviewView() {
     setParams(query, { replace: true });
   };
   const properties = useProperties(label);
-  const histogram = useHistogram(label, property);
+  const counts = useValueCounts(label, property);
 
   const labels = (stats.data?.labels ?? []).filter((l) => l.kind === "v");
   const edges = (stats.data?.labels ?? []).filter((l) => l.kind === "e");
@@ -143,34 +143,34 @@ export function OverviewView() {
             onChange={(next) => show({ label, property: next })}
           />
         </Group>
-        {histogram.data ? (
+        {counts.data ? (
           <>
             <Text size="xs" c="dimmed">
               {t("views.overview.distinct", {
                 values: t("views.overview.distinctValues", {
-                  count: histogram.data.n_distinct,
-                  formatted: formatCount(histogram.data.n_distinct),
+                  count: counts.data.distinct,
+                  formatted: formatCount(counts.data.distinct),
                 }),
                 nodes: t("common.counts.nodes", {
-                  count: histogram.data.n_total,
-                  formatted: formatCount(histogram.data.n_total),
+                  count: counts.data.total,
+                  formatted: formatCount(counts.data.total),
                 }),
               })}
             </Text>
-            <CountBars rows={histogram.data.bins.map((b) => ({ name: b.value, count: b.count }))} />
+            <CountBars rows={counts.data.groups.map((b) => ({ name: b.value, count: b.count }))} />
             <Group justify="flex-end">
               <CsvButton
                 name={[tenant, label ?? "", property ?? ""]}
                 header={[property ?? "value", "nodes"]}
-                rows={histogram.data.bins.map((b) => [b.value, b.count])}
+                rows={counts.data.groups.map((b) => [b.value, b.count])}
                 label={t("views.overview.values")}
               />
             </Group>
           </>
         ) : null}
-        {histogram.error ? (
+        {counts.error ? (
           <Text size="sm" c="red">
-            {histogram.error.message}
+            {counts.error.message}
           </Text>
         ) : null}
       </Stack>

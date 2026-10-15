@@ -108,39 +108,8 @@ class CommunityIdsResponse(BaseModel):
 # Schema-agnostic shape: callers parameterise label + property + edge.
 # These collapse what would otherwise be N sequential Cypher queries
 # into one SQL ``GROUP BY`` per call.  Useful for any
-# consumer that needs "histogram a property across all instances of a
-# label" or "top-K nodes by edge degree" — not coupled to any
+# consumer that needs "top-K nodes by edge degree" — not coupled to any
 # consumer's data model.
-
-
-class HistogramRow(BaseModel):
-    value: str = Field(
-        ...,
-        description=(
-            "Property value as a string.  Numeric values are stringified "
-            "on the wire so the response is uniformly JSON-typeable; "
-            "callers that need int / float should parse on read."
-        ),
-    )
-    count: int
-
-
-class HistogramResponse(BaseModel):
-    tenant: str
-    label: str
-    property: str
-    n_distinct: int = Field(
-        ..., description="Distinct values BEFORE the ``limit`` truncation.",
-    )
-    n_total: int = Field(
-        ...,
-        description=(
-            "Total nodes considered (sum of all counts including any "
-            "truncated tail).  Useful to detect when results are clipped."
-        ),
-    )
-    bins: list[HistogramRow] = Field(default_factory=list)
-    elapsed_ms: int
 
 
 class TopByEdgeRow(BaseModel):

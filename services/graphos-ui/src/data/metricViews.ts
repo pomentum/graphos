@@ -69,11 +69,8 @@ export function useComponents() {
     enabled: ready,
     staleTime: 5 * 60_000,
     queryFn: async () => {
-      const histograms = await Promise.all(labels.map((label) => api.histogram(label, "graphos_component", 100)));
-      return mergeComponentCounts(
-        Object.fromEntries(labels.map((label, i) => [label, histograms[i]!.bins])),
-        hierarchy,
-      );
+      const counts = await Promise.all(labels.map((label) => api.valueCounts(label, "graphos_component", 100)));
+      return mergeComponentCounts(Object.fromEntries(labels.map((label, i) => [label, counts[i]!.groups])), hierarchy);
     },
   });
 }

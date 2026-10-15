@@ -41,8 +41,8 @@ async def main() -> None:
         print(f"follows among the first 50: {len(induced.edges)}")
 
         # Aggregates: distribution of a property, and the most-connected nodes.
-        hist = await g.label_histogram("Document", property="kind")
-        print("documents by kind:", {b.value: b.count for b in hist.bins})
+        kinds = await g.aggregate_nodes(label="Document", group_by="kind", missing=True)
+        print("documents by kind:", {k.value: k.count for k in kinds.groups})
         top = await g.label_top_by_edge("User", by_edge="AUTHORED", direction="out", k=3)
         print("top authors:", [(r.node_id, r.edge_count) for r in top.rows])
 
@@ -52,7 +52,8 @@ async def main() -> None:
         print("u0 now:", node.properties if node else None)
 
         # A small key/value cache for results with no natural node to live on.
-        await g.cache_put("dashboard:kinds", {b.value: b.count for b in hist.bins}, ttl_seconds=600)
+        by_kind = {k.value: k.count for k in kinds.groups}
+        await g.cache_put("dashboard:kinds", by_kind, ttl_seconds=600)
         cached = await g.cache_get("dashboard:kinds")
         print("cached:", cached.value if cached else None, "from", cached.source if cached else "-")
 

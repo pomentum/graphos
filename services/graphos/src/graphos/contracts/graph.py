@@ -673,6 +673,7 @@ class NodesAggregateResponse(BaseModel):
     truncated: bool
     elapsed_ms: int
     total: int = Field(..., description="Nodes counted in every group, `limit` aside.")
+    distinct: int = Field(..., description="Groups (distinct values), `limit` aside.")
     groups: list[NodeAggregateRow] = Field(default_factory=list)
 
 

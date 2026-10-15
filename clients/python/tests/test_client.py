@@ -15,9 +15,11 @@ import pytest
 
 from graphos_client import (
     BearerAuth,
+    BulkNodesResponse,
     EdgeUpsert,
     GraphosClient,
     GraphosError,
+    NodesUpsertResponse,
     NodeUpsert,
     PasswordAuth,
     SearchHit,
@@ -1065,7 +1067,7 @@ async def test_import_dataset_applies_the_schema_then_streams_the_file(tmp_path)
     assert schema_call[1] == "http://x/v1/tenants"
     assert json.loads(schema_call[2]) == {"name": "copy", "vertex_labels": ["Doc"]}
     assert me_call[1] == "http://x/v1/me"
-    assert upload[1] == "http://x/v1/copy/graph/snapshot-import?mode=empty"
+    assert upload[1] == "http://x/v1/copy/graph/snapshot-import?mode=empty&properties=enforce"
     assert upload[2] == path.read_bytes()                 # the file as it is, gzip included
     await cli.close()
 
@@ -1157,3 +1159,100 @@ async def test_cypher_and_saved_queries() -> None:
         ("DELETE", "/v1/demo/cypher/saved/q1"),
     ]
     await cli.close()
+
+
+def _client_for(handler) -> GraphosClient:
+    cli = GraphosClient(base_url="http://x", token="tok", tenant="demo")
+    cli._http = httpx.AsyncClient(base_url="http://x", transport=_mock_transport(handler))
+    return cli
+
+
+@pytest.mark.asyncio
+async def test_aggregate_nodes_reads_total_and_distinct() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={
+            "tenant": "demo", "label": "Doc", "group_by": "kind", "truncated": True,
+            "elapsed_ms": 1, "total": 9, "distinct": 4,
+            "groups": [{"value": "a", "count": 5}],
+        })
+
+    resp = await _client_for(handler).aggregate_nodes(
+        label="Doc", group_by="kind", limit=1, missing=True,
+    )
+    assert captured["url"].endswith("/v1/demo/graph/nodes/aggregate")
+    assert captured["body"]["missing"] is True
+    assert (resp.total, resp.distinct, resp.truncated) == (9, 4, True)
+
+
+@pytest.mark.asyncio
+async def test_property_definitions_and_check() -> None:
+    seen: list[tuple[str, str, dict | None]] = []
+    policy = {"mode": "warn", "undeclared": "allow", "undeclared_source": "default",
+              "properties": {"name": {"type": "string", "required": True}}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content) if request.content else None
+        seen.append((request.method, request.url.path, body))
+        if request.url.path.endswith("/properties"):
+            return httpx.Response(200, json={
+                "tenant": "demo", "mode": "warn", "vertex": {"Doc": policy}, "edge": {},
+            })
+        return httpx.Response(200, json={
+            "tenant": "demo", "mode": "warn", "rows": 3, "rows_with_errors": 1,
+            "rows_with_warnings": 0, "elapsed_ms": 2,
+            "labels": [{"kind": "vertex", "name": "Doc", "rows": 3, "rows_with_errors": 1,
+                        "rows_with_warnings": 0, "errors": {"Doc.name:required": 1},
+                        "examples": {"Doc.name:required": ["d2"]}}],
+        })
+
+    cli = _client_for(handler)
+    defs = await cli.property_definitions()
+    report = await cli.check_properties(labels=["Doc"], examples=1)
+    assert defs.vertex["Doc"].properties["name"]["required"] is True
+    assert report.labels[0].examples == {"Doc.name:required": ["d2"]}
+    assert seen == [
+        ("GET", "/v1/demo/graph/properties", None),
+        ("POST", "/v1/demo/graph/properties:check", {"examples": 1, "labels": ["Doc"]}),
+    ]
+
+
+def test_bulk_and_upsert_responses_carry_property_problems() -> None:
+    bulk = BulkNodesResponse.model_validate({
+        "tenant": "demo", "rows_received": 2, "rows_invalid": 0, "nodes_upserted": 1,
+        "elapsed_ms": 1, "property_violations": {"Doc.name:required": 1},
+        "property_warnings": {"Doc.size:type": 1},
+    })
+    upsert = NodesUpsertResponse.model_validate({
+        "tenant": "demo", "nodes_upserted": 1, "elapsed_ms": 1,
+        "property_warnings": {"Doc.size:type": 1},
+    })
+    assert bulk.property_violations == {"Doc.name:required": 1}
+    assert upsert.property_warnings == {"Doc.size:type": 1}
+
+
+@pytest.mark.asyncio
+async def test_query_parameters_reach_the_server() -> None:
+    seen: list[httpx.URL] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url)
+        if request.url.path.endswith("/communities"):
+            return httpx.Response(200, json={
+                "tenant": "demo", "min_size": 1, "n_communities": 0, "n_assigned_nodes": 0,
+                "n_unassigned_nodes": 0, "elapsed_ms": 1,
+            })
+        return httpx.Response(200, json={})
+
+    cli = _client_for(handler)
+    await cli.list_communities(limit=0)
+    await cli.catalogue(properties=["tags", "name"], refresh=True)
+    await cli.snapshot_import(mode="empty", properties="report")
+    communities, catalogue, snapshot = seen
+    assert communities.params["limit"] == "0"
+    assert catalogue.params.get_list("property") == ["tags", "name"]
+    assert catalogue.params["refresh"] == "true"
+    assert (snapshot.params["mode"], snapshot.params["properties"]) == ("empty", "report")
