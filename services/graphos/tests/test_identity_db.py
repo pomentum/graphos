@@ -379,6 +379,60 @@ async def test_a_service_account_creates_tenants_and_owns_them(
 
 @requires_db
 @pytest.mark.asyncio
+async def test_the_property_schema_follows_the_access_levels(
+    api: httpx.AsyncClient, db_pool: asyncpg.Pool,
+) -> None:
+    """Reading the definitions needs read, being held to them comes with
+    write, and changing them, the mode included, or checking the stored rows
+    needs maintain."""
+    tenant = f"sol_{uuid4().hex[:8]}"
+    admin = await _admin(api)
+    passwords = {}
+    for level in ("read", "write", "maintain"):
+        passwords[level] = await _create(api, admin, f"props-{level}", kind="service")
+        granted = await _grant(api, admin, f"user:props-{level}", tenant, level)
+        assert granted.status_code == HTTPStatus.CREATED, granted.text
+    schema = {"mode": "strict", "vertex": {"Doc": {"properties": {
+        "title": {"type": "string", "required": True}}}}}
+    try:
+        made = await api.post("/v1/tenants", headers=_auth(admin), json={
+            "name": tenant, "vertex_labels": ["Doc"], "property_schema": schema,
+        })
+        assert made.status_code == HTTPStatus.OK, made.text
+        token = {level: (await _login(api, f"props-{level}", pw))["access_token"]
+                 for level, pw in passwords.items()}
+        graph = f"/v1/{tenant}/graph"
+        untitled = {"nodes": [{"id": "d1", "label": "Doc", "properties": {}}]}
+        mode_off = {"name": tenant, "property_schema": {"mode": "off"}}
+        cases = [  # level, method, path, body, expected
+            ("read", "GET", f"{graph}/properties", None, HTTPStatus.OK),
+            ("read", "GET", f"/v1/{tenant}/schema", None, HTTPStatus.OK),
+            ("read", "POST", f"{graph}/nodes", untitled, HTTPStatus.FORBIDDEN),
+            ("read", "POST", f"{graph}/properties:check", {}, HTTPStatus.FORBIDDEN),
+            ("write", "POST", f"{graph}/nodes", untitled, HTTPStatus.UNPROCESSABLE_ENTITY),
+            ("write", "POST", f"{graph}/properties:check", {}, HTTPStatus.FORBIDDEN),
+            ("write", "POST", "/v1/tenants", mode_off, HTTPStatus.FORBIDDEN),
+            ("maintain", "POST", f"{graph}/properties:check", {}, HTTPStatus.OK),
+            ("maintain", "POST", "/v1/tenants", mode_off, HTTPStatus.OK),
+        ]
+        for level, method, path, body, expected in cases:
+            resp = await api.request(method, path, headers=_auth(token[level]), json=body)
+            assert resp.status_code == expected, (level, method, path, resp.text)
+        # The mode a maintainer set is what writers are now held to: off.
+        written = await api.post(f"{graph}/nodes", headers=_auth(token["write"]), json=untitled)
+        assert written.status_code == HTTPStatus.OK, written.text
+    finally:
+        async with db_pool.acquire() as conn:
+            if await conn.fetchval("SELECT 1 FROM ag_catalog.ag_graph WHERE name = $1;", tenant):
+                await conn.execute(f"SELECT drop_graph('{tenant}', true);")
+            for table in ("tenants", "unregistered_tenants"):
+                await conn.execute(f"DELETE FROM graphos_meta.{table} WHERE name = $1;", tenant)
+            await conn.execute("DELETE FROM graphos_meta.changes WHERE tenant = $1;", tenant)
+        forget(tenant)
+
+
+@requires_db
+@pytest.mark.asyncio
 async def test_an_owner_manages_access_to_its_tenant_only(api: httpx.AsyncClient) -> None:
     admin = await _admin(api)
     owner_pw = await _create(api, admin, "olive")
