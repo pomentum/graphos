@@ -32,6 +32,7 @@ from graphos.identity import Principal
 from .conftest import requires_db
 
 TENANT, OTHER = "graphos_test_console", "graphos_test_console_b"
+_DOC_ROWS = f'SELECT id::text, graphos_rev, properties::text FROM "{TENANT}"."Doc" ORDER BY 1;'
 PRINCIPALS = {
     "reader": Principal.static("rita", tenants={TENANT: "read"}),
     "maintainer": Principal.static("max", tenants={TENANT: "maintain"}),
@@ -218,8 +219,21 @@ async def test_writes_admin_functions_and_other_tenants_are_refused(
     api: httpx.AsyncClient,
     db_pool: asyncpg.Pool,
 ) -> None:
-    write = await _query(api, "CREATE (d:Doc {id: 'x'}) RETURN d")
-    assert write.status_code == HTTPStatus.BAD_REQUEST and "only reads" in write.json()["detail"]
+    async with db_pool.acquire() as conn:
+        before = await conn.fetch(_DOC_ROWS)
+    for write in (
+        "CREATE (d:Doc {id: 'x'}) RETURN d",
+        "MATCH (d:Doc {id: 'd1'}) SET d.x = 1 RETURN d.id",
+        "MATCH (d:Doc {id: 'd1'}) REMOVE d.name RETURN d.id",
+        "MERGE (d:Doc {id: 'd1'}) ON MATCH SET d.x = 1 RETURN d.id",
+        "MATCH (d:Doc {id: 'd1'}) DETACH DELETE d",
+    ):
+        refused = await _query(api, write)
+        assert refused.status_code == HTTPStatus.BAD_REQUEST, write
+        assert "only reads" in refused.json()["detail"]
+    async with db_pool.acquire() as conn:
+        after = await conn.fetch(_DOC_ROWS)
+    assert after == before
     admin_fn = await _query(api, "RETURN pg_catalog.pg_reload_conf()")
     assert admin_fn.status_code == HTTPStatus.BAD_REQUEST
     assert "pg_catalog.pg_reload_conf" in admin_fn.json()["detail"]

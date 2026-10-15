@@ -171,6 +171,26 @@ def test_variable_length_patterns_are_found(query: str, found: bool) -> None:  #
     assert variable_length(query) is found
 
 
+@pytest.mark.parametrize(
+    ("query", "found"),
+    [
+        ("CREATE (n:Doc {id: 'x'}) RETURN n", ["CREATE"]),
+        ("MERGE (n:Doc {id: 'x'}) ON CREATE SET n.a = 1 RETURN n", ["MERGE", "CREATE", "SET"]),
+        ("MATCH (n:Contract {id: 'c'}) SET n.x = 1 RETURN n.id", ["SET"]),
+        ("MATCH (n) set n += {a: 1}", ["SET"]),
+        ("MATCH (n {id: 'c'}) DETACH DELETE n", ["DETACH", "DELETE"]),
+        ("MATCH ()-[r]->() DELETE r", ["DELETE"]),
+        ("MATCH (n) REMOVE n.x RETURN n", ["REMOVE"]),
+        ("MATCH (n) WITH n /* SET n.x = 1 */ RETURN n.set, n.`delete`", []),
+        ("MATCH (n:Set)-[:REMOVE]->(m) RETURN {create: 1, merge: n.id} AS m", []),
+        ("MATCH (n) WHERE n.name = 'SET ME' OR n.x = $delete RETURN n // DELETE", []),
+        ("MATCH (`create`) RETURN `create`", []),
+    ],
+)
+def test_write_clauses_are_found_and_nothing_else(query: str, found: list[str]) -> None:
+    assert console_mod.write_clauses(query) == found
+
+
 def test_what_needs_ages_in_memory_graph_is_named() -> None:
     assert needs_age_graph("MATCH p = (a)-[*1..2]->(b) RETURN p") == (
         "variable-length patterns (-[*1..3]->)"
