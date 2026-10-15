@@ -8,6 +8,7 @@ import contextlib
 from http import HTTPStatus
 from typing import Any
 
+import anyio
 import asyncpg
 import pytest
 from fastapi.testclient import TestClient
@@ -206,7 +207,7 @@ async def test_the_watchdog_closes_a_connection_whose_backend_does_not_stop(
     conn = Conn()
     console = Console(pool=None, owner=Owner(), settings=Settings(db_password="x"))  # type: ignore[arg-type]
     stopped: dict[str, Any] = {}
-    await asyncio.wait_for(console._watch(conn, gone, stopped), 5)  # type: ignore[arg-type]
+    await asyncio.wait_for(console._watch(conn, gone, stopped, asyncio.Event()), 5)  # type: ignore[arg-type]
     assert sent == ["pg_cancel_backend", "pg_terminate_backend"]
     assert conn.closed and stopped == {"why": "gone"}
 
@@ -239,7 +240,7 @@ async def test_the_watchdog_does_not_fail_on_a_connection_the_terminate_closed(
 
     console = Console(pool=None, owner=Owner(), settings=Settings(db_password="x"))  # type: ignore[arg-type]
     stopped: dict[str, Any] = {}
-    await asyncio.wait_for(console._watch(Released(), gone, stopped), 5)  # type: ignore[arg-type]
+    await asyncio.wait_for(console._watch(Released(), gone, stopped, asyncio.Event()), 5)  # type: ignore[arg-type]
     assert stopped == {"why": "gone"}
 
 
@@ -259,6 +260,45 @@ async def test_a_role_that_may_not_bound_temporary_files_is_told_not_stopped() -
             return contextlib.nullcontext(Refusing())
 
     assert await console_mod._may_set(Owner(), "temp_file_limit", "1GB") is False  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_the_watchdog_stops_when_the_query_ends_even_if_its_cancel_is_lost() -> None:
+    # The cancel _on sends when the query ends did not always stop the
+    # watchdog (most likely when it landed inside the caller check, Starlette's
+    # is_disconnected, run in an anyio scope it cancels itself); the watchdog
+    # then went on to its deadline (35 s) and held the answer. Ended is ended:
+    # it must stop at once, here with the cancel landing in that check.
+    class Owner:
+        async def execute(self, sql: str, pid: int) -> None:
+            raise AssertionError("an idle backend was stopped")
+
+    class Conn:
+        def get_server_pid(self) -> int:
+            return 42
+
+        def terminate(self) -> None:
+            raise AssertionError("the connection was closed")
+
+    checking = asyncio.Event()
+
+    async def gone() -> bool:  # what Request.is_disconnected does
+        checking.set()
+        with anyio.CancelScope() as scope:
+            scope.cancel()
+            await asyncio.sleep(0.1)
+        return False
+
+    console = Console(pool=None, owner=Owner(), settings=Settings(db_password="x"))  # type: ignore[arg-type]
+    done = asyncio.Event()
+    watchdog = asyncio.create_task(console._watch(Conn(), gone, {}, done))  # type: ignore[arg-type]
+    await checking.wait()          # the watchdog is inside the caller check
+    done.set()
+    watchdog.cancel()
+    started = asyncio.get_running_loop().time()
+    with contextlib.suppress(asyncio.CancelledError):
+        await asyncio.wait_for(watchdog, 2)
+    assert asyncio.get_running_loop().time() - started < 1.0
 
 def test_every_console_route_answers_404_while_it_is_off() -> None:
     app = create_app(Settings(db_password="placeholder"))

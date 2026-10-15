@@ -442,7 +442,8 @@ class Console:
     ) -> dict[str, Any]:
         timeout_ms = int(self.settings.cypher_timeout_s * 1000)
         stopped: dict[str, str] = {}
-        watchdog = asyncio.create_task(self._watch(conn, gone, stopped))
+        done = asyncio.Event()
+        watchdog = asyncio.create_task(self._watch(conn, gone, stopped, done))
         started = time.monotonic()
         rows: list[asyncpg.Record] = []
         count = 0
@@ -482,6 +483,7 @@ class Console:
         except asyncpg.PostgresError as exc:
             raise ConsoleError(400, str(exc)) from exc
         finally:
+            done.set()
             watchdog.cancel()
             try:
                 await watchdog
@@ -505,15 +507,23 @@ class Console:
 
     async def _watch(
         self, conn: asyncpg.Connection, gone: Callable[[], Awaitable[bool]],
-        stopped: dict[str, str],
+        stopped: dict[str, str], done: asyncio.Event,
     ) -> None:
         """Cancel, then terminate, the backend when the caller goes away or the
-        query outlives its timeout (the statement timeout should stop it first)."""
+        query outlives its timeout (the statement timeout should stop it first).
+
+        Returns as soon as ``done`` is set, when the query has ended.  A cancel
+        alone did not always stop it (most likely when it arrives while ``gone``
+        runs Starlette's ``is_disconnected``, inside an anyio scope that cancels
+        itself): the watchdog then went on to its deadline and stopped an idle
+        backend, holding a finished query's answer for the whole timeout."""
         pid = conn.get_server_pid()
         deadline = time.monotonic() + self.settings.cypher_timeout_s + WATCHDOG_GRACE_S
-        while True:
-            await asyncio.sleep(0.5)
-            if await gone():
+        while not await _set_within(done, 0.5):
+            caller_gone = await gone()
+            if done.is_set():
+                return
+            if caller_gone:
                 stopped["why"] = "gone"
             elif time.monotonic() > deadline:
                 stopped["why"] = "overran"
@@ -521,9 +531,11 @@ class Console:
             else:
                 continue
             await self.owner.execute("SELECT pg_cancel_backend($1);", pid)
-            await asyncio.sleep(WATCHDOG_TERMINATE_AFTER_S)
+            if await _set_within(done, WATCHDOG_TERMINATE_AFTER_S):
+                return
             await self.owner.execute("SELECT pg_terminate_backend($1);", pid)
-            await asyncio.sleep(WATCHDOG_TERMINATE_AFTER_S)
+            if await _set_within(done, WATCHDOG_TERMINATE_AFTER_S):
+                return
             # Still here: the backend has not seen either (AGE checks for them
             # only now and then). Close the connection, so the caller is answered
             # and the slot is freed; the backend ends when it next checks. When
@@ -536,6 +548,13 @@ class Console:
             with contextlib.suppress(asyncpg.InterfaceError):
                 conn.terminate()
             return
+
+
+async def _set_within(event: asyncio.Event, seconds: float) -> bool:
+    """Whether ``event`` is set within ``seconds``."""
+    with contextlib.suppress(TimeoutError):
+        await asyncio.wait_for(event.wait(), seconds)
+    return event.is_set()
 
 
 async def start(settings: Settings, owner: asyncpg.Pool) -> Console | None:
