@@ -1177,6 +1177,7 @@ async def neighbors(
                 f'JOIN pg_class c ON c.oid = e.tableoid '
                 f'WHERE e.start_id = $1::graphid '
                 f'  AND c.relname IN ({rel_in}) '
+                f'ORDER BY e.end_id, c.relname '
                 f'LIMIT $2;',
                 src_gid, limit,
             )
@@ -1188,6 +1189,7 @@ async def neighbors(
                 f'JOIN pg_class c ON c.oid = e.tableoid '
                 f'WHERE e.end_id = $1::graphid '
                 f'  AND c.relname IN ({rel_in}) '
+                f'ORDER BY e.start_id, c.relname '
                 f'LIMIT $2;',
                 src_gid, limit,
             )
@@ -1853,6 +1855,7 @@ async def expand(
                 f'WHERE e.start_id IN ({id_csv}) '
                 f'  AND c.relname IN ({rel_in}) '
                 f'{out_scope} '
+                f'ORDER BY e.start_id, e.end_id, c.relname '
                 f'LIMIT $1;'
             ) if out_dir else None
             in_sql = (
@@ -1864,6 +1867,7 @@ async def expand(
                 f'WHERE e.end_id IN ({id_csv}) '
                 f'  AND c.relname IN ({rel_in}) '
                 f'{in_scope} '
+                f'ORDER BY e.end_id, e.start_id, c.relname '
                 f'LIMIT $1;'
             ) if in_dir else None
             # When scope is active, $2 = community_id strings as text[],
