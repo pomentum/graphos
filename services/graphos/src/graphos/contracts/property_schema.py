@@ -198,6 +198,38 @@ class PropertySchemaSpec(BaseModel):
         return v
 
 
+# ── The effective definitions ────────────────────────────────────────────────
+
+
+class EffectiveProperty(BaseModel):
+    """One property as a write of the label or type is checked against it."""
+
+    source: str = Field(
+        description="The entry the definition comes from last: `*`, a label or a type.",
+    )
+    definition: dict[str, Any] = Field(
+        description="The keywords combined from `*`, the ancestors and the entry itself.",
+    )
+
+
+class EffectivePolicy(BaseModel):
+    """How one vertex label's or edge type's writes are checked."""
+
+    mode: Mode
+    undeclared: Undeclared
+    undeclared_source: str
+    properties: dict[str, EffectiveProperty] = Field(default_factory=dict)
+
+
+class PropertyDefinitionsResponse(BaseModel):
+    """``GET /v1/{tenant}/graph/properties``: every label's and type's definitions."""
+
+    tenant: str
+    mode: Mode = Field(description="The tenant's mode; an entry may override it.")
+    vertex: dict[str, EffectivePolicy] = Field(default_factory=dict)
+    edge: dict[str, EffectivePolicy] = Field(default_factory=dict)
+
+
 # ── The report on stored data ────────────────────────────────────────────────
 
 MAX_EXAMPLES = 100

@@ -93,6 +93,9 @@ async def update_preferences(
     "/{tenant}/schema",
     summary="One tenant's labels, hierarchy, declared endpoints and search indexes",
     responses={404: {"description": "Tenant not registered."}},
+    # Declarations as declared: a property definition lists only the keywords
+    # it states, so a narrowing entry is not read as restating the defaults.
+    response_model_exclude_unset=True,
 )
 async def tenant_schema(tenant: str, principal: ReadPrincipal) -> TenantSchema:  # noqa: ARG001 — auth
     spec = registered_tenants().get(tenant)

@@ -364,6 +364,18 @@ def policies_for(spec: Any) -> Policies:
     return found
 
 
+def effective(policy: Policy) -> dict[str, Any]:
+    """A policy as the API serves it (``PropertyDefinitionsResponse``)."""
+    return {
+        "mode": policy.mode, "undeclared": policy.undeclared,
+        "undeclared_source": policy.undeclared_source,
+        "properties": {
+            name: {"source": d.source, "definition": dict(d.spec)}
+            for name, d in policy.properties.items()
+        },
+    }
+
+
 def validate_schema(
     schema: Mapping[str, Any],
     vertex_labels: Iterable[str],

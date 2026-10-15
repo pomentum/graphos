@@ -211,3 +211,34 @@ async def test_the_stored_rows_are_reported_as_if_every_rule_applied(
     assert wrote["errors"] == {"WROTE.role:enum": 1}
     assert wrote["examples"]["WROTE.role:enum"] == ["p1 -> d1"]
     assert wrote["undeclared"] == {"at": 1}
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_the_schema_serves_what_was_declared_and_the_definitions_what_applies(
+    api: httpx.AsyncClient,
+) -> None:
+    narrowed = {"Author": {"properties": {"name": {"pattern": "[A-Z].*"}}}}
+    body = {"name": TENANT, "vertex_labels": ["Person", "Author"],
+            "label_hierarchy": {"Author": "Person"}, "property_schema": {"vertex": narrowed}}
+    resp = await api.post("/v1/tenants", json=body)
+    assert resp.status_code == HTTPStatus.OK, resp.text
+
+    declared = (await api.get(f"/v1/{TENANT}/schema")).json()["property_schema"]
+    # Only the keywords stated: the narrowing entry does not restate a type.
+    assert declared["vertex"]["Author"] == {"properties": {"name": {"pattern": "[A-Z].*"}}}
+    assert declared["vertex"]["Person"]["properties"]["email"] == {
+        "type": "string", "pattern": "[^@]+@[^@]+", "recommended": True,
+    }
+
+    effective = (await api.get(f"{G}/properties")).json()
+    assert effective["mode"] == "strict"
+    author = effective["vertex"]["Author"]
+    assert (author["mode"], author["undeclared"]) == ("strict", "allow")
+    assert author["properties"]["name"] == {
+        "source": "Author",
+        "definition": {"type": "string", "required": True, "pattern": "[A-Z].*"},
+    }
+    assert author["properties"]["source"]["source"] == "*"
+    assert set(effective["vertex"]["Doc"]["properties"]) == {"source"}
+    assert effective["edge"]["WROTE"]["properties"]["role"]["definition"]["enum"] == ["lead", "co"]
