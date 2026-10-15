@@ -131,6 +131,21 @@ from graphos.resolver import (
 )
 
 _aggregate_log = logging.getLogger("graphos.aggregate")
+_read_log = logging.getLogger("graphos.reads")
+
+
+def _read_failed(what: str, exc: asyncpg.exceptions.PostgresError) -> HTTPException:
+    """A read the database refused: answered as an error (500), never as a
+    smaller result, so a client cannot mistake a failure for fewer neighbours.
+    The database's message is logged, not sent."""
+    _read_log.warning("%s failed: %s: %s", what, type(exc).__name__, str(exc)[:300])
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=(
+            f"{what} failed in the database ({exc.sqlstate or type(exc).__name__}); "
+            "nothing was left out silently"
+        ),
+    )
 
 router = APIRouter(tags=["graph"], prefix="/{tenant}/graph")
 
@@ -1161,9 +1176,8 @@ async def neighbors(
             )
         except asyncpg.exceptions.QueryCanceledError:
             raise
-        except asyncpg.exceptions.PostgresError:
-            out_rows = []
-            in_rows = []
+        except asyncpg.exceptions.PostgresError as exc:
+            raise _read_failed("neighbors", exc) from exc
         for r in out_rows:
             if len(endpoints) >= limit:
                 break
@@ -1852,9 +1866,8 @@ async def expand(
                     edge_rows.extend(await conn.fetch(in_sql, *args))
             except asyncpg.exceptions.QueryCanceledError:
                 raise
-            except asyncpg.exceptions.PostgresError:
-                # Best-effort -- skip the hop on a DB error.
-                pass
+            except asyncpg.exceptions.PostgresError as exc:
+                raise _read_failed(f"expand (hop {hop})", exc) from exc
 
             # Map current-frontier gid -> its rel_path so we can
             # extend it for next-hop nodes.
@@ -2327,10 +2340,10 @@ async def sample_subgraph(
                 )
             except asyncpg.exceptions.QueryCanceledError:
                 raise
-            except asyncpg.exceptions.PostgresError:
-                # Best-effort per-rel -- missing a stratum is better
-                # than 500ing the whole response.
-                continue
+            except asyncpg.exceptions.UndefinedTableError:
+                continue  # a type without a table has no edges to sample
+            except asyncpg.exceptions.PostgresError as exc:
+                raise _read_failed(f"sample_subgraph ({rel})", exc) from exc
             for r in edge_rows:
                 src = str(r["src_id"])
                 dst = str(r["dst_id"])
@@ -2371,8 +2384,10 @@ async def sample_subgraph(
                 vrows = await conn.fetch(vertex_sql)
             except asyncpg.exceptions.QueryCanceledError:
                 raise
-            except asyncpg.exceptions.PostgresError:
-                vrows = []
+            except asyncpg.exceptions.UndefinedTableError:
+                vrows = []  # a label without a table holds none of the ends
+            except asyncpg.exceptions.PostgresError as exc:
+                raise _read_failed("sample_subgraph (endpoints)", exc) from exc
             # Optional property filter on the endpoints.  Apply
             # post-hoc in Python -- the WHERE clause on the agtype
             # operator (``properties->'"X"' = $fv::agtype``) doesn't
