@@ -83,6 +83,11 @@ BEGIN
 END \$\$;
 SQL
 
+# A restore carries no planner statistics. Gathered here, in parallel, so
+# graphos-api starts with them instead of analyzing table by table at start.
+say "gathering planner statistics"
+vacuumdb -d "${DB}" --analyze-only --jobs 4 --quiet
+
 graphs="$(psql -d "${DB}" -tAc 'SELECT count(*) FROM ag_catalog.ag_graph;')"
 done_
 say "done: ${graphs} graph(s) on PostgreSQL 18; the PostgreSQL 16 volume is kept as it was"
