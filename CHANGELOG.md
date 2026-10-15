@@ -36,6 +36,12 @@ under one version.
 
 ### Changed
 
+- **API documentation without a CDN.** `/docs` (Swagger UI 5.33.0) and `/redoc` (ReDoc 2.5.4) load
+  their scripts, stylesheet and icon from graphos (`/api-docs-assets/`), not from cdn.jsdelivr.net,
+  so they work where the browser has no internet access; ReDoc no longer asks Google Fonts, and
+  Swagger UI's validator badge, which sent the schema's address to validator.swagger.io, is off.
+  `tools/docs/api_docs_assets.py` fetches the pinned releases (checked against their published
+  checksums); CI checks the files match the pins. Both licences are in THIRD_PARTY_NOTICES.md.
 - **`GET /v1/{tenant}/schema`** serves `display` and `property_schema` as declared: keys an entry
   leaves out are left out (they came back as `null` or as defaults), and empty sections are omitted.
 

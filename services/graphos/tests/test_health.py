@@ -8,6 +8,7 @@ context manager (which is what triggers lifespan).
 
 from __future__ import annotations
 
+import re
 from http import HTTPStatus
 
 from fastapi.testclient import TestClient
@@ -37,6 +38,18 @@ def test_the_api_documentation_is_served_and_listed() -> None:
     links = client.get("/").json()
     for page in ("docs", "redoc", "openapi"):
         assert client.get(links[page]).status_code == HTTPStatus.OK, page
+
+
+def test_the_documentation_pages_load_nothing_from_elsewhere() -> None:
+    """Swagger UI and ReDoc come from graphos's own files: no CDN, no fonts."""
+    client = TestClient(_bare_app(), raise_server_exceptions=False)
+    for page in ("/docs", "/redoc"):
+        html = client.get(page).text
+        assert "https://" not in html, page
+        if page == "/docs":
+            assert '"validatorUrl": null' in html    # no badge from validator.swagger.io
+        for asset in re.findall(r'(?:src|href)="(/api-docs-assets/[^"]+)"', html):
+            assert client.get(asset).status_code == HTTPStatus.OK, asset
 
 
 def test_healthz_returns_ok() -> None:

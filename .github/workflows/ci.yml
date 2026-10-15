@@ -88,6 +88,9 @@ jobs:
       - name: One version across server, client and UI
         run: node tools/release/version.mjs --check
 
+      - name: The API documentation files are the pinned releases
+        run: python3 tools/docs/api_docs_assets.py --check
+
   # ── Integration: brings up compose, runs @db-marked tests ───────────────
   # Heavier; runs only on PRs and pushes to main. Tear-down is in the
   # script's exit trap, so a failure mid-run still cleans up.

@@ -68,6 +68,22 @@ from PyPI into its own container, on the machine running it. If you distribute
 an install or image that includes python-igraph, that distribution must comply with the GPL for
 the igraph component.
 
+## API documentation pages
+
+The server serves its API documentation from files it carries
+(`services/graphos/src/graphos/static/api-docs`, fetched and checked against
+their published checksums by `tools/docs/api_docs_assets.py`), unmodified:
+
+| Package | Version | Licence | Files |
+|---|---|---|---|
+| swagger-ui-dist (Swagger UI, `/docs`) | 5.33.0 | Apache-2.0 | `swagger-ui-bundle.js`, `swagger-ui.css`, `favicon-32x32.png` |
+| redoc (ReDoc, `/redoc`) | 2.5.4 | MIT | `redoc.standalone.js` |
+
+Their licences travel with them in the same directory: `LICENSE.swagger-ui`
+and Swagger UI's `NOTICE.swagger-ui` ("swagger-ui, Copyright 2020-2021
+SmartBear Software Inc."), `LICENSE.redoc`, and `redoc.standalone.js.LICENSE.txt`
+for the MIT-licensed packages the ReDoc bundle includes.
+
 ## UI dependencies
 
 Bundled into the web UI built from `services/graphos-ui` (`package.json`, versions pinned in

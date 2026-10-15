@@ -4,8 +4,9 @@ A practical guide to integrating with graphos, a multi-tenant property-graph ser
 PostgreSQL 16 + Apache AGE 1.6). The service code is the reference: routers live in
 `services/graphos/src/graphos/api/` and wire contracts in `services/graphos/src/graphos/contracts/`.
 The live OpenAPI schema is served at `/openapi.json`, and read as Swagger UI at `/docs` or as
-ReDoc at `/redoc` (both pages load their scripts from cdn.jsdelivr.net, so they need internet
-access in the browser; `/openapi.json` does not).
+ReDoc at `/redoc`. graphos serves both pages' scripts itself (`/api-docs-assets/`), so they work in
+a browser without internet access, and nothing on them calls out: no CDN, no web fonts, and Swagger
+UI's online validator is off.
 
 Examples use tenant `acme`, vertex labels `User`, `Document` and `Tag`, and edge labels `AUTHORED`,
 `FOLLOWS`, `TAGGED_WITH` and `WRITTEN_BY`.
