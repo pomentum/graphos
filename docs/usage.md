@@ -942,7 +942,9 @@ curl -s -X POST "$G/v1/acme/cypher" -H "Authorization: Bearer $TOKEN" -H 'Conten
 - **Columns** are named after the `RETURN` items (`AS` aliases, else the expression); `RETURN *`
   works, its columns named `c1`, `c2`, … .
 - **Parameters** are used as `$name`.
-- **Read-only:** `CREATE`, `SET`, `DELETE`, `MERGE` answer 400; write through the API, which keeps
+- **Read-only:** a query with `CREATE`, `MERGE`, `SET`, `DELETE`, `DETACH` or `REMOVE` answers 400
+  before it reaches the database (AGE 1.6 carries out `SET`, `REMOVE` and `DELETE` where
+  PostgreSQL's read-only transaction does not see them), and every query runs read-only; write through the API, which keeps
   revisions, the change feed and the audit log right.
 - **Only Cypher's own functions:** a call of a database function by its schema-qualified name
   (`pg_catalog.version()`), or of any function that is not one of Cypher's (as AGE documents them:
@@ -983,9 +985,9 @@ tenant's data. Python: `cypher(query, params)`, `saved_queries()`, `save_query(.
 
 | Endpoint (`/v1/{t}` prefix) | Inputs (default / max) | Result |
 |---|---|---|
-| `POST /graph/nodes/aggregate` | `label`, `group_by`, `values`, `limit` (200 / 5000) | `groups[{value, count}]`, highest count first; a parent label includes its children |
+| `POST /graph/nodes/aggregate` | `label`, `group_by`, `values`, `limit` (200 / 5000), `missing` | `groups[{value, count}]`, highest count first, and `total`; a parent label includes its children; `missing: true` counts nodes without the property under `""`; a value that is not a string comes as JSON |
 | `POST /graph/edges/aggregate` | `group_by_src`, `group_by_dst`, `rel_types`, `src_values`, `dst_values`, `require_different`, `limit` (200 / 5000) | `groups[{src_value, dst_value, rel_type, count}]` |
-| `GET /graph/labels/{label}/histogram` | `property` (required), `limit` (100 / 1000) | `bins[{value, count}]`, `n_total`, `n_distinct` (`-1` when truncated); a missing value counts as `""` |
+| `GET /graph/labels/{label}/histogram` (deprecated: `nodes/aggregate` with `missing: true`) | `property` (required), `limit` (100 / 1000) | `bins[{value, count}]`, `n_total`, `n_distinct` (`-1` when truncated); a missing value counts as `""` |
 | `GET /graph/labels/{label}/top` | `by_edge` (required), `direction` `out\|in\|both` (`out`), `k` (20 / 200) | `rows[{node_id, edge_count}]` |
 | `GET /graph/stats` | – | exact per-label counts (a parent label includes its children), `n_vertices` and `n_edges` (each node and edge once), `total_bytes` |
 | `GET /graph/map` | `exact` (false) | `labels[{label, count}]` (each label's own nodes), `links[{src_label, type, dst_label, count, estimated}]`, `estimated` |
@@ -1001,7 +1003,8 @@ curl -s "$G/v1/acme/graph/labels/User/top?by_edge=FOLLOWS&direction=in&k=10" \
 ```
 
 `histogram` and `top` return 400 when `{label}` or `by_edge` is not registered. The Python methods
-are `aggregate_nodes`, `aggregate_edges`, `label_histogram(label, property=…)`,
+are `aggregate_nodes` (with `missing=True` for what `label_histogram` gave), `aggregate_edges`,
+`label_histogram(label, property=…)` (deprecated),
 `label_top_by_edge(label, by_edge=…)`, `tenant_stats()`, `graph_map(exact=…)` and
 `map_hubs(label, limit=…)`.
 

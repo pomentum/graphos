@@ -939,9 +939,10 @@ node-plus-edges pattern for over ten minutes without stopping at either.)
 
 The one exception is the opt-in Cypher console (`GRAPHOS_CYPHER=true`,
 `POST /v1/{tenant}/cypher`): read-only Cypher on one tenant's graph, for
-people who know Cypher. graphos refuses a query with a schema-qualified
-call (the only way Cypher reaches database functions), runs it in a
-read-only transaction on a small pool of its own with a row cap and a
+people who know Cypher. graphos refuses a query with a write clause (AGE
+1.6 carries out `SET`, `REMOVE` and `DELETE` where a read-only transaction
+does not see them) or a schema-qualified call (the only way
+Cypher reaches database functions), runs it in a read-only transaction on a small pool of its own with a row cap and a
 timeout, and a watchdog cancels, then terminates, the backend if AGE does
 not stop in time (AGE 1.6 sees a cancel late while it builds large lists),
 and closes the connection if even that is not seen. It also refuses

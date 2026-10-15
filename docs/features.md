@@ -329,13 +329,15 @@ pattern.
 
 - **Node aggregate** (`POST …/graph/nodes/aggregate`): group one label (parent
   labels include their children) by a property, optionally restricted to
-  given values.
+  given values, optionally counting the nodes without it (`missing`), with
+  the `total` counted.
 - **Edge aggregate** (`POST …/graph/edges/aggregate`): group edges by a
   source-node property, a destination-node property, and type. Options:
   `src_values` / `dst_values` filters and `require_different`. Edge types are
   queried one after another.
-- **Histogram** (`GET …/graph/labels/{label}/histogram`): `{value, count}` bins
-  plus `n_total`, and `n_distinct` (`-1` when truncated).
+- **Histogram** (`GET …/graph/labels/{label}/histogram`, deprecated: the node
+  aggregate with `missing` gives the same): `{value, count}` bins plus
+  `n_total`, and `n_distinct` (`-1` when truncated).
 - **Top by degree** (`GET …/graph/labels/{label}/top`): top-k nodes by number
   of edges of one type (`out|in|both`).
 - **Tenant stats** (`GET …/graph/stats`): exact row count and total bytes per

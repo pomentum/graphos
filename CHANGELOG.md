@@ -21,11 +21,33 @@ runs on either database: CI runs the server's tests against both.
   waits for them. Everything moves: tenants and their graphs, users and grants, saved queries, the
   change feed, revisions and sessions. Every later start, and a new install, has nothing to move.
   A failed import leaves nothing behind and runs again on the next `up`; the dump is never loaded
-  over a database graphos has used. `graphos_data` is kept unchanged, as the way back.
+  over a database graphos has used. `graphos_data` is kept unchanged, as the way back. The import
+  gathers planner statistics in parallel, so `graphos-api` does not analyze table by table on its
+  first start.
 - **CI against both databases.** The integration tests run against the compose's PostgreSQL 18 /
   AGE 1.8 and against PostgreSQL 16 / AGE 1.6; `scripts/run-db-tests.sh --db-image` picks
   another database image, on a volume of its own.
 - **asyncpg 0.31 or newer** (the first tested against PostgreSQL 18).
+- **`POST /v1/{tenant}/graph/nodes/aggregate`** takes `missing` (count the nodes without the
+  property, under `""`) and returns `total` (every node counted, `limit` aside). Client:
+  `aggregate_nodes(..., missing=True)`; `total` is `None` from older servers.
+
+### Deprecated
+
+- **`GET /v1/{tenant}/graph/labels/{label}/histogram`**: `nodes/aggregate` with `missing: true`
+  gives the same counts (`total` for `n_total`). The client's `label_histogram` warns. Both stay
+  until a later release.
+
+### Security
+
+- **The Cypher console could write on AGE 1.6.** It ran every query in a read-only transaction and
+  relied on that alone, but AGE 1.6 carries out `SET`, `REMOVE` and `DELETE` (`DETACH DELETE` too)
+  where PostgreSQL's read-only check does not see them; only `CREATE` and `MERGE` were stopped. Any
+  user with `read` on a tenant could change or delete its data through the console, past revisions
+  and the change feed (the audit log has the console call). A query with a write clause (`CREATE`,
+  `MERGE`, `SET`, `DELETE`, `DETACH`, `REMOVE`) is now refused (400) before the database, whichever
+  AGE runs. AGE 1.8 stops these writes itself. Affects every release with the console
+  (`GRAPHOS_CYPHER=true`) on AGE 1.6; off by default.
 
 ### Fixed
 
@@ -34,6 +56,21 @@ runs on either database: CI runs the server's tests against both.
   its first rows, and with no index on that table it chose to compare every edge with every vertex:
   about 19 billion comparisons for one type of 75,000 edges on a 251,000-node tenant, where the
   same read takes 2 s. The table is now indexed; that read takes 2.8 s through the cursor.
+- **Reads slowed down after their fifth run on PostgreSQL 18.** asyncpg prepares each statement on
+  a connection, and after five runs PostgreSQL may keep a generic plan, made without the values.
+  For a `nodes:scan` on two property filters PostgreSQL 18 kept one that walked the id index and
+  dropped 34,702 rows to return 100: 40–55 ms became 0.7–1.2 s, on every connection that had run
+  it five times (PostgreSQL 16 kept the custom plan). graphos's connections now always plan with
+  the values (`plan_cache_mode = force_custom_plan`); the same scan stays at 26–60 ms.
+- **`nodes:scan` with selective property filters was 8× slower on PostgreSQL 18.** A filter
+  converts each row's properties, which the planner prices as one cheap operator; on a compact
+  table (a fresh load, or the move to PostgreSQL 18) it then walked the id index in order and
+  filtered: 649 matches of 100,000 rows cost 334 ms, where the property indexes and a sort take
+  28 ms. A filtered scan now prices the conversion near its cost; through graphos the scan takes
+  about 37 ms instead of 350 ms, and a filter that matches most rows keeps the ordered walk.
+- **`nodes/aggregate` returned non-string values as Python writes them** (`True`, `['red', 'blue']`):
+  they come as JSON now (`true`, `["red", "blue"]`), as the histogram gave them. Strings and
+  numbers are unchanged.
 
 ### Upgrading from 0.9.0
 
@@ -43,7 +80,10 @@ runs on either database: CI runs the server's tests against both.
   the old data: `docker volume rm graphos_data graphos_upgrade`.
 - **Your own database:** graphos still runs on PostgreSQL 16 with AGE 1.6; to move it to 18, see
   the same section.
-- **Clients:** nothing changes.
+- **Clients:** `nodes/aggregate` returns booleans, lists and maps as JSON text (`true`, not
+  `True`). Move from the label histogram to `nodes/aggregate` with `missing: true`.
+- **Console on AGE 1.6:** upgrade, or turn the console off (`GRAPHOS_CYPHER=false`), on any
+  deployment where console users must not write.
 
 ## 0.9.0 — 2026-10-15
 
