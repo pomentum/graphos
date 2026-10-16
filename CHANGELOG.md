@@ -4,6 +4,14 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Added
+
+- **Docs:** `SECURITY.md` (private vulnerability reporting, supported versions, what a deployment
+  must do itself, known security limits), `CONTRIBUTING.md` (where the rules are, how to open a
+  pull request), issue templates for bugs and feature requests, and a pull request template.
+
 ## 0.12.0 — 2026-10-16
 
 Team tools in the web UI and the server work behind them: select several nodes on the canvas,
