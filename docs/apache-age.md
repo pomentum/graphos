@@ -572,8 +572,9 @@ aggregates back.
   never uses that in-memory graph, so nothing else changes: on a server with
   many tenants (or after a test suite) expect the warning in PostgreSQL's
   log until a restart. The statement-level trigger behind it
-  (`_age_cache_invalidate`) is on label tables AGE 1.8 creates, not on tables
-  restored from 1.6.
+  (`_age_cache_invalidate`) is on label tables AGE 1.8 creates; tables restored
+  from a 1.6 dump get it from the move's import and from graphos-api at start
+  ([upgrade guide](upgrade-postgresql-18.md#age-18s-cache-trigger)).
 - **After a restore, gather statistics.** A dump carries no planner
   statistics; run `vacuumdb --analyze-only --jobs N` before traffic (the
   compose's PostgreSQL 18 import does).

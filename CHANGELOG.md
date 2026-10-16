@@ -4,6 +4,21 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Fixed
+
+- **AGE 1.8's cache-invalidation trigger on databases moved from PostgreSQL 16 / AGE 1.6.** AGE
+  1.8 puts a statement-level trigger, `_age_cache_invalidate`, on every label table, so writes in
+  plain SQL invalidate the in-memory graph its variable-length patterns read; AGE's upgrade script
+  adds it to existing tables, but a dump restored into AGE 1.8 runs no upgrade script, so the
+  tables of a moved database came without it. The compose's import (`graphos-db-import`) now adds
+  it where missing, as AGE's script does, and graphos-api adds it at start to the label tables of
+  every registered tenant (one catalogue read when nothing is missing; nothing before AGE 1.8). A
+  database moved by hand runs the same block ([Upgrading the
+  database](docs/upgrade-postgresql-18.md#age-18s-cache-trigger)). Nothing graphos does changed:
+  it never reads AGE's in-memory graph; anything else that does now sees graphos's writes.
+
 ## 0.11.0 — 2026-10-15
 
 The label histogram, deprecated in 0.10.0, is removed: `nodes/aggregate` now counts the distinct

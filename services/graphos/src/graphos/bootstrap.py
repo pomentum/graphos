@@ -237,6 +237,68 @@ async def _vertex_label_tables(conn: asyncpg.Connection, tenant: str) -> set[str
     return {str(r["relname"]) for r in rows}
 
 
+# AGE 1.8 puts a statement-level trigger on every label table it creates, so
+# writes made in plain SQL (graphos's) invalidate its in-memory graph, the one
+# variable-length patterns read. Its 1.7.0 -> 1.8.0 upgrade script adds it to
+# the label tables that already exist; a dump of an AGE 1.6 database restored
+# into AGE 1.8 (docs/upgrade-postgresql-18.md) runs no upgrade script, so its
+# tables come without it. The same trigger as AGE's, where missing. The
+# function exists from AGE 1.8 on; before that there is nothing to install.
+CACHE_TRIGGER = "_age_cache_invalidate"
+CACHE_TRIGGER_FUNCTION = "ag_catalog.age_invalidate_graph_cache()"
+
+_LABEL_TABLES_WITHOUT_CACHE_TRIGGER_SQL = f"""
+SELECT n.nspname, c.relname
+  FROM ag_catalog.ag_label l
+  JOIN ag_catalog.ag_graph g ON g.graphid = l.graph
+  JOIN pg_catalog.pg_class c ON c.oid = l.relation
+  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+ WHERE g.name = $1
+   AND l.name NOT IN ('_ag_label_vertex', '_ag_label_edge')
+   AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_trigger t
+                    WHERE t.tgrelid = c.oid AND t.tgname = '{CACHE_TRIGGER}')
+ ORDER BY c.relname;
+"""
+
+
+async def ensure_cache_invalidation_triggers(conn: asyncpg.Connection, tenant: str) -> int:
+    """Add AGE 1.8's cache-invalidation trigger to ``tenant``'s label tables lacking it.
+
+    Returns the number of tables it was added to: 0 on AGE before 1.8, and on
+    every graph AGE 1.8 created (one catalogue read, then nothing). A table it
+    cannot be added to (another role owns it) is logged and skipped: nothing
+    in graphos reads AGE's in-memory graph, so it must not keep a tenant from
+    starting.
+    """
+    if not await conn.fetchval(
+        f"SELECT to_regprocedure('{CACHE_TRIGGER_FUNCTION}') IS NOT NULL;",
+    ):
+        return 0
+    added = 0
+    for row in await conn.fetch(_LABEL_TABLES_WITHOUT_CACHE_TRIGGER_SQL, tenant):
+        schema, table = row["nspname"], row["relname"]
+        try:
+            await conn.execute(
+                f'CREATE TRIGGER {CACHE_TRIGGER} '
+                f'AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE ON "{schema}"."{table}" '
+                f'FOR EACH STATEMENT EXECUTE FUNCTION {CACHE_TRIGGER_FUNCTION};'
+            )
+            added += 1
+        except asyncpg.DuplicateObjectError:
+            pass  # added meanwhile by another replica
+        except asyncpg.PostgresError as exc:
+            log.warning(
+                "AGE cache-invalidation trigger not added",
+                extra={"tenant": tenant, "table": table, "error": str(exc)},
+            )
+    if added:
+        log.info(
+            "AGE cache-invalidation trigger added to label tables",
+            extra={"tenant": tenant, "tables": added},
+        )
+    return added
+
+
 async def _ensure_generated_columns(conn: asyncpg.Connection, spec: TenantSpec) -> None:
     """Add each declared generated column its label table lacks.
 
@@ -650,6 +712,10 @@ async def bootstrap_tenant(
             # 5. Declared generated columns, added only when missing (adding
             # one to a label that has rows rewrites its table).
             await _ensure_generated_columns(conn, spec)
+
+            # 6. AGE 1.8's cache-invalidation trigger, on label tables that
+            # lack it (restored from an AGE 1.6 dump).
+            await ensure_cache_invalidation_triggers(conn, spec.name)
 
             # 7. A btree on ``id`` (the graphid), which AGE does not create.
             # Edge tables always: paging edges in graphid order

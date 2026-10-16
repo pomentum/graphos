@@ -84,6 +84,8 @@ That is all. Do not remove any volume before the move has finished and you have 
    - restores the dump into a database of its own;
    - points AGE's catalogue at the restored schemas (AGE records each graph by its schema's OID,
      which a restore changes);
+   - adds AGE 1.8's cache-invalidation trigger to every label table (see
+     [AGE 1.8's cache trigger](#age-18s-cache-trigger));
    - only then puts it in place of the new, empty `graphos` database;
    - gathers planner statistics in parallel.
 4. **`graphos-api`** waits for the import to succeed, then starts as usual.
@@ -172,7 +174,7 @@ pg_dump -h OLD -U graphos -d graphos -Fc -f graphos.dump
 createdb -h NEW -U graphos graphos
 pg_restore -h NEW -U graphos -d graphos --exit-on-error graphos.dump   # serial: no -j / --jobs
 
-# 3. AGE's catalogue, then planner statistics
+# 3. AGE's catalogue, AGE 1.8's cache trigger, then planner statistics
 psql -h NEW -U graphos -d graphos -v ON_ERROR_STOP=1 <<'SQL'
 BEGIN;
 ALTER TABLE ag_catalog.ag_label DROP CONSTRAINT IF EXISTS fk_graph_oid;
@@ -182,6 +184,29 @@ UPDATE ag_catalog.ag_graph SET graphid = namespace::oid WHERE graphid <> namespa
 ALTER TABLE ag_catalog.ag_label
   ADD CONSTRAINT fk_graph_oid FOREIGN KEY (graph) REFERENCES ag_catalog.ag_graph (graphid);
 COMMIT;
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  IF to_regprocedure('ag_catalog.age_invalidate_graph_cache()') IS NULL THEN
+    RETURN;  -- before AGE 1.8
+  END IF;
+  FOR r IN
+    SELECT n.nspname AS schema_name, c.relname AS table_name
+      FROM ag_catalog.ag_label l
+      JOIN pg_catalog.pg_class c ON c.oid = l.relation
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     WHERE l.name NOT IN ('_ag_label_vertex', '_ag_label_edge')
+       AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_trigger t
+                        WHERE t.tgrelid = c.oid AND t.tgname = '_age_cache_invalidate')
+  LOOP
+    EXECUTE format(
+      'CREATE TRIGGER _age_cache_invalidate '
+      'AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE ON %I.%I '
+      'FOR EACH STATEMENT EXECUTE FUNCTION ag_catalog.age_invalidate_graph_cache()',
+      r.schema_name, r.table_name);
+  END LOOP;
+END $$;
 GRANT CONNECT, CREATE ON DATABASE graphos TO graphos_app;
 SQL
 vacuumdb -h NEW -U graphos -d graphos --analyze-only --jobs 4
@@ -198,8 +223,32 @@ the contents matched by checksum). Only the restore must be serial: a parallel d
 
 [`deploy/db-upgrade/import-pg18.sh`](../services/graphos/deploy/db-upgrade/import-pg18.sh) is the
 same procedure as the compose runs it. On a managed PostgreSQL that offers AGE 1.8 on PostgreSQL 18,
-the same steps apply where its tools allow them (a serial `pg_restore`, then the catalogue fix);
+the same steps apply where its tools allow them (a serial `pg_restore`, then the catalogue fix and the
+trigger block);
 check what it permits before moving.
+
+### AGE 1.8's cache trigger
+
+AGE 1.8 puts a statement-level trigger, `_age_cache_invalidate`, on every label table it creates,
+so writes made in plain SQL (as graphos makes them) invalidate its in-memory graph, the one
+variable-length patterns read. AGE's own upgrade script (1.7.0 to 1.8.0) adds it to the label
+tables that already exist, but a restore runs no upgrade script: the tables of a 1.6 dump come
+without it. The `DO` block in step 3 adds it where it is missing, the same way AGE's script does;
+it can run any number of times, and does nothing before AGE 1.8.
+
+graphos does not read that in-memory graph (its console refuses variable-length patterns and
+AGE's graph functions), so a missing trigger changes nothing graphos does today; it matters to
+anything else that runs such queries against the database. graphos-api also adds the trigger at
+start, where missing, to the label tables of every tenant it serves; the `DO` block covers every
+graph in the database, registered or not. To check a database (0 means none is missing):
+
+```sql
+SELECT count(*) FROM ag_catalog.ag_label l
+  JOIN pg_class c ON c.oid = l.relation
+ WHERE l.name NOT IN ('_ag_label_vertex', '_ag_label_edge')
+   AND NOT EXISTS (SELECT 1 FROM pg_trigger t
+                    WHERE t.tgrelid = c.oid AND t.tgname = '_age_cache_invalidate');
+```
 
 ## Why a dump and a restore, not pg_upgrade
 

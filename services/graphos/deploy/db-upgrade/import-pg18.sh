@@ -69,6 +69,38 @@ ALTER TABLE ag_catalog.ag_label
 COMMIT;
 SQL
 
+# AGE 1.8 puts a cache-invalidation trigger on every label table, so writes in
+# plain SQL invalidate its in-memory graph (the one variable-length patterns
+# read). Its 1.7.0 -> 1.8.0 upgrade script adds it to existing tables; a
+# restore runs no upgrade script, so the tables of a 1.6 dump come without it.
+# The same block as that script's, where the trigger is missing (graphos-api
+# also adds it when it starts, to the tenants it serves).
+psql -d "${STAGE}" -v ON_ERROR_STOP=1 -q <<'SQL'
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  IF to_regprocedure('ag_catalog.age_invalidate_graph_cache()') IS NULL THEN
+    RETURN;  -- before AGE 1.8
+  END IF;
+  FOR r IN
+    SELECT n.nspname AS schema_name, c.relname AS table_name
+      FROM ag_catalog.ag_label l
+      JOIN pg_catalog.pg_class c ON c.oid = l.relation
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     WHERE l.name NOT IN ('_ag_label_vertex', '_ag_label_edge')
+       AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_trigger t
+                        WHERE t.tgrelid = c.oid AND t.tgname = '_age_cache_invalidate')
+  LOOP
+    EXECUTE format(
+      'CREATE TRIGGER _age_cache_invalidate '
+      'AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE ON %I.%I '
+      'FOR EACH STATEMENT EXECUTE FUNCTION ag_catalog.age_invalidate_graph_cache()',
+      r.schema_name, r.table_name);
+  END LOOP;
+END $$;
+SQL
+
 # What a dump does not carry: grants on the database itself (the roles and
 # their settings live outside it and were made by graphos-db's init).
 psql -d postgres -v ON_ERROR_STOP=1 -q \
