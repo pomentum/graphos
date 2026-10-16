@@ -10,6 +10,7 @@ import { pickSaveTarget } from "../../lib/download";
 import { formatCount } from "../../lib/time";
 import { isActive, startDownload, startUpload, useTransfers } from "../../lib/transfers";
 import { useTenantSession } from "../../session/SessionProvider";
+import { CsvImportEntry } from "./CsvImportDialog";
 import classes from "./OverviewView.module.css";
 
 /**
@@ -191,6 +192,7 @@ export function DatasetPanel() {
             {upload?.result ? <ImportSummary result={upload.result} /> : null}
           </Stack>
         ) : null}
+        {canWrite ? <CsvImportEntry /> : null}
       </div>
     </Stack>
   );

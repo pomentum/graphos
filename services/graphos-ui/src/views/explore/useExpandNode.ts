@@ -27,6 +27,8 @@ export function useExpandNode(
   onExpanded: (center: string, added: string[]) => void,
 ): {
   expand: (key: string) => Promise<void>;
+  /** Adds the first page of each node's neighbours, without asking; returns the nodes added. */
+  expandMany: (keys: string[]) => Promise<string[]>;
   dialog: ExpandDialogProps;
   isExpanding: boolean;
 } {
@@ -39,15 +41,15 @@ export function useExpandNode(
    */
   const fetched = useRef(new Map<string, Neighbor[]>());
 
-  /** Adds the next page of `center`'s neighbours that are not on the canvas. */
-  const addPage = (center: string) => {
+  /** Adds the next page of `center`'s neighbours that are not on the canvas; returns the nodes added. */
+  const nextPage = (center: string): string[] => {
     const queue = (fetched.current.get(center) ?? []).filter(
       (n) => !model.graph.hasNode(nodeKey({ id: n.neighbor_id, label: n.neighbor_label })),
     );
     const page = queue.slice(0, EXPAND_PAGE);
-    const added = model.addNeighbors(center, page, queue.length - page.length);
-    onExpanded(center, added);
+    return model.addNeighbors(center, page, queue.length - page.length);
   };
+  const addPage = (center: string) => onExpanded(center, nextPage(center));
 
   /** Starts paging through `neighbors` of `center`, edges to nodes already shown included. */
   const begin = (center: string, neighbors: Neighbor[]) => {
@@ -83,6 +85,24 @@ export function useExpandNode(
     else begin(key, response.neighbors);
   };
 
+  const expandMany = async (keys: string[]): Promise<string[]> => {
+    const added: string[] = [];
+    for (const key of keys) {
+      if (!model.graph.hasNode(key) || model.graph.getNodeAttribute(key, "more") !== undefined) continue;
+      const id = model.graph.getNodeAttribute(key, "id");
+      const response = await fetchNeighbors.mutateAsync({ id, limit: EXPAND_FETCH_LIMIT }).catch(() => null);
+      if (!response || !model.graph.hasNode(key)) continue;
+      const shown = response.neighbors.filter((n) =>
+        model.graph.hasNode(nodeKey({ id: n.neighbor_id, label: n.neighbor_label })),
+      );
+      if (shown.length > 0) model.addNeighbors(key, shown);
+      if (shown.length === response.neighbors.length) continue;
+      fetched.current.set(key, response.neighbors);
+      added.push(...nextPage(key));
+    }
+    return added;
+  };
+
   const confirm = async (edgeTypes: string[]) => {
     if (!pending) return;
     const { key } = pending;
@@ -98,6 +118,7 @@ export function useExpandNode(
   const counts = useMemo(() => (pending ? countByEdgeType(pending.response.neighbors) : []), [pending]);
   return {
     expand,
+    expandMany,
     isExpanding: fetchNeighbors.isPending,
     dialog: {
       opened: pending !== null,

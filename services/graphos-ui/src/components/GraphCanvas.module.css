@@ -19,3 +19,24 @@
   background: color-mix(in srgb, var(--gx-window) 85%, transparent);
   border: 0.5px solid var(--gx-separator);
 }
+
+/* The lasso loop and the link being drawn, over the canvas. */
+.overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.minimap {
+  position: absolute;
+  right: 12px;
+  bottom: 52px;
+  width: 168px;
+  height: 112px;
+  border-radius: var(--mantine-radius-md);
+  border: 0.5px solid var(--gx-separator);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+  cursor: crosshair;
+}

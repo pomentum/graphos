@@ -187,6 +187,17 @@ one id (or one src/dst pair) in a batch collapse into one row.
   counts, 0/0 if absent) and `DELETE …/graph/nodes?property_key=&property_value=`
   (every node with that string value, across labels, and their edges). Each
   is one SQL statement: nodes and edges go together or not at all.
+- **Batch node delete** (`POST …/graph/nodes:delete`): up to 1,000 nodes, each
+  by `label` and `id`, with their edges.
+  - One transaction: all of them go, or none.
+  - One statement per label, served by the label's unique id index; a label
+    takes in its child labels' nodes, as the single delete does.
+  - A node that does not exist is skipped, so a repeat deletes nothing.
+  - Two batches deleting nodes joined by edges can block each other: the
+    transaction is run again (three times at most), then the answer is 503
+    with `Retry-After`, nothing deleted.
+  - Returns `nodes_requested`, `nodes_deleted` and `edges_deleted` (each edge
+    once).
 
 ---
 
@@ -562,11 +573,21 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
 - **Web UI** (`services/graphos-ui`, optional): Explore opens a large tenant
   on its graph map or its communities and a small one on its whole graph; a
   canvas that adds neighbours a page at a time with undo, focus and collapse;
+  several nodes picked at once (Ctrl, ⌘ or Shift click, a loop drawn with
+  Shift-drag, Ctrl/⌘+A) and then expanded, hidden, exported as JSON or CSV,
+  or deleted together; a minimap of the whole canvas that moves the camera;
+  a relationship's type shown under the pointer; pictograms and hub labels
+  left out when zoomed far out; writers create a node where they double-click
+  the empty canvas and connect two nodes by Alt-dragging one onto the other;
   inspect and edit (saved with `If-Match`); shortest paths; where the console
   is on, a Query page (Cypher coloured and suggested from the tenant's labels
   and properties, results as a table and on the canvas, saved queries run
   with a form); counts per label; the graph algorithms, run by maintainers;
   the tenant's data downloaded and uploaded as one dataset file;
+  a CSV file imported by writers as nodes of a label or as relationships
+  (separator detected, each column mapped to a property and a type, a preview
+  of the first rows and checks over all of them, sent through the NDJSON bulk
+  endpoints with its progress and graphos's answer);
   activity (what runs now, with cancel, and the writes, computations and
   schema changes of the last days, filterable, with a running indicator in
   the toolbar on every page); a label as a table; the schema as a list or a diagram (laid out

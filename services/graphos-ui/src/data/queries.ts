@@ -417,6 +417,40 @@ export function useDeleteNode() {
   });
 }
 
+/** Nodes per `nodes:delete` call: graphos's limit. */
+const DELETE_BATCH = 1000;
+
+/**
+ * Deletes several nodes (and their edges), a thousand per call; returns how
+ * many were deleted. `onDeleted` hears how many of `nodes`, in order, each
+ * call took care of, so a failure part-way leaves the earlier calls counted.
+ */
+export function useDeleteNodes() {
+  const { api, tenant } = useTenantSession();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      nodes,
+      onDeleted,
+    }: {
+      nodes: { id: string; label: string }[];
+      onDeleted?: (count: number) => void;
+    }) => {
+      let deleted = 0;
+      for (let start = 0; start < nodes.length; start += DELETE_BATCH) {
+        const batch = nodes.slice(start, start + DELETE_BATCH);
+        deleted += (await api.deleteNodes(batch)).nodes_deleted;
+        onDeleted?.(batch.length);
+      }
+      return deleted;
+    },
+    onSettled: (_, __, { nodes }) => {
+      for (const node of nodes) client.removeQueries({ queryKey: keys.node(tenant, node.label, node.id) });
+      void client.invalidateQueries({ queryKey: keys.stats(tenant) });
+    },
+  });
+}
+
 /** Creates a node. */
 export function useCreateNode() {
   const { api, tenant } = useTenantSession();

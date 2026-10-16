@@ -334,7 +334,9 @@
         "addPaths": "Add paths",
         "connect": "Connect {{type}}",
         "hide": "Hide {{name}}",
-        "collapse": "Collapse {{name}}"
+        "collapse": "Collapse {{name}}",
+        "hideMany_one": "Hide {{count}} node",
+        "hideMany_other": "Hide {{count}} nodes"
       },
       "morePlaceholder_one": "+{{count}} more",
       "morePlaceholder_other": "+{{count}} more",
@@ -478,6 +480,21 @@
         "circular": "Circle, label by label",
         "layered": "Layers along the edges",
         "tooMany": "Layers: at most {{count}} nodes"
+      },
+      "selection": {
+        "region": "Selected nodes",
+        "count_one": "{{count}} node selected",
+        "count_other": "{{count}} nodes selected",
+        "expand": "Expand",
+        "expandTooltip": "Add the first neighbours of each node",
+        "expandFirst_one": "Adds the first neighbours of the first {{count}} node",
+        "expandFirst_other": "Adds the first neighbours of the first {{count}} nodes",
+        "hide": "Hide",
+        "deleteQuestion_one": "Delete this node and every relationship touching it from graphos? Back cannot undo it.",
+        "deleteQuestion_other": "Delete these {{count}} nodes and every relationship touching them from graphos? Back cannot undo it.",
+        "deleteConfirm_one": "Delete the node",
+        "deleteConfirm_other": "Delete {{count}} nodes",
+        "clear": "Clear the selection"
       }
     },
     "path": {
@@ -1234,7 +1251,9 @@
     "graphCanvas": {
       "zoomOut": "Zoom out",
       "showAll": "Show everything",
-      "zoomIn": "Zoom in"
+      "zoomIn": "Zoom in",
+      "minimap": "Overview of the whole canvas: click or drag to move there",
+      "toggleMinimap": "Show or hide the overview"
     },
     "graphMetrics": {
       "title": "Computed by graphos",
@@ -1258,7 +1277,140 @@
     "neighboursAllShown": "Its neighbours are all on the canvas already",
     "noHubs": "No {{label}} node has any edges",
     "schemaUpdated": "Added to the schema",
-    "schemaImported": "Schema imported"
+    "schemaImported": "Schema imported",
+    "nodesDeleted_one": "{{count}} node deleted",
+    "nodesDeleted_other": "{{count}} nodes deleted"
+  },
+  "csvImport": {
+    "entryTitle": "Import a CSV file",
+    "entryWhat": "The rows of a spreadsheet as nodes of a label or as relationships, each column mapped to a property, checked before anything is written.",
+    "open": "Import CSV",
+    "title": "Import a CSV file",
+    "file": "CSV file",
+    "filePlaceholder": "Choose a .csv or .tsv file",
+    "reading": "Reading the file · {{percent}}%",
+    "readFailed": "Couldn't read the file: {{message}}",
+    "empty": "The file has no rows under its header row.",
+    "detected_one": "{{rows}} row · {{columns}} columns (the first row is the header)",
+    "detected_other": "{{rows}} rows · {{columns}} columns (the first row is the header)",
+    "separator": "Separator",
+    "delimiters": {
+      "comma": "Comma",
+      "semicolon": "Semicolon",
+      "tab": "Tab"
+    },
+    "openQuote": "A quoted cell is never closed: everything after its opening quote is read as one cell. Check the file's quotes.",
+    "rowsAre": "Each row is",
+    "kinds": {
+      "nodes": "A node",
+      "edges": "A relationship"
+    },
+    "label": "Label",
+    "idColumn": "Id column",
+    "relationship": "Relationship type",
+    "sourceLabel": "Source label",
+    "sourceColumn": "Source id column",
+    "targetLabel": "Target label",
+    "targetColumn": "Target id column",
+    "declaredFor": "Declared for {{type}}",
+    "otherLabels": "Other labels",
+    "noLabels": "The tenant has no labels yet; a maintainer adds them on the Schema page.",
+    "noTypes": "The tenant has no relationship types to write to; a maintainer adds them on the Schema page.",
+    "columns": {
+      "title": "Columns",
+      "column": "Column",
+      "example": "First value",
+      "property": "Property",
+      "type": "Type",
+      "include": "Import {{column}}",
+      "propertyOf": "Property name for {{column}}",
+      "typeOf": "Type of {{column}}",
+      "declared": "Declared: {{rules}}",
+      "skipped": "Left out",
+      "none": "No other columns: only the ids are written."
+    },
+    "types": {
+      "auto": "Auto",
+      "text": "Text",
+      "number": "Number",
+      "boolean": "True / false"
+    },
+    "preview": {
+      "title": "Preview",
+      "first": "The first {{shown}} of {{total}} rows, as they will be written.",
+      "id": "id",
+      "source": "source",
+      "target": "target",
+      "invalid": "Does not read as {{type}}: left out"
+    },
+    "checks": {
+      "title": "Checks over all {{rows}} rows",
+      "checking": "Checking the rows · {{percent}}%",
+      "none": "Nothing to report: every row reads as mapped.",
+      "refused": "refused by graphos",
+      "warning": "written anyway",
+      "row": "row {{row}}",
+      "examples": "For example: {{examples}}",
+      "hint": "Rows are numbered from the first one under the header, as in graphos's answer. graphos checks every row again when it writes them."
+    },
+    "issues": {
+      "emptyId_one": "{{count}} empty id",
+      "emptyId_other": "{{count}} empty ids",
+      "longId_one": "{{count}} id is longer than 512 characters",
+      "longId_other": "{{count}} ids are longer than 512 characters",
+      "duplicateId_one": "{{count}} row repeats the id of an earlier row: rows with the same id are sent as one node, a later non-empty cell winning",
+      "duplicateId_other": "{{count}} rows repeat the id of an earlier row: rows with the same id are sent as one node, a later non-empty cell winning",
+      "duplicatePair_one": "{{count}} row repeats the source and target of an earlier row: such rows are sent as one relationship, a later non-empty cell winning",
+      "duplicatePair_other": "{{count}} rows repeat the source and target of an earlier row: such rows are sent as one relationship, a later non-empty cell winning",
+      "ragged_one": "{{count}} row has more or fewer cells than the header: missing cells are empty, extra ones ignored",
+      "ragged_other": "{{count}} rows have more or fewer cells than the header: missing cells are empty, extra ones ignored",
+      "badValue_one": "{{count}} value does not read as its column's type: it is left out",
+      "badValue_other": "{{count}} values do not read as their column's type: they are left out",
+      "emptyName_one": "{{count}} imported column has no property name: it is left out",
+      "emptyName_other": "{{count}} imported columns have no property name: they are left out",
+      "reservedName_one": "{{count}} column uses a name graphos keeps for itself (graphos_*, community_id, and id on nodes, set from the id column)",
+      "reservedName_other": "{{count}} columns use names graphos keeps for itself (graphos_*, community_id, and id on nodes, set from the id column)",
+      "invalidName_one": "{{count}} property name is not letters, digits and _ starting with a letter or _: hard to use in queries and definitions",
+      "invalidName_other": "{{count}} property names are not letters, digits and _ starting with a letter or _: hard to use in queries and definitions",
+      "sameName_one": "{{count}} column maps to a property another column maps to: the last one wins",
+      "sameName_other": "{{count}} columns map to a property another column maps to: the last one wins",
+      "undeclared_one": "{{count}} property is not declared for this label or type",
+      "undeclared_other": "{{count}} properties are not declared for this label or type",
+      "required_one": "{{count}} row lacks a required property",
+      "required_other": "{{count}} rows lack a required property",
+      "wrongType_one": "{{count}} value is not of the declared type",
+      "wrongType_other": "{{count}} values are not of the declared type",
+      "notInEnum_one": "{{count}} value is not one of the declared values",
+      "notInEnum_other": "{{count}} values are not among the declared values",
+      "outOfRange_one": "{{count}} value is outside the declared range",
+      "outOfRange_other": "{{count}} values are outside the declared range",
+      "undeclaredPair_one": "This label pair is not declared for the relationship type",
+      "undeclaredPair_other": "This label pair is not declared for the relationship type"
+    },
+    "import_one": "Import {{rows}} row",
+    "import_other": "Import {{rows}} rows",
+    "progress": {
+      "preparing": "Preparing the rows",
+      "sending": "Sending · {{percent}}%",
+      "writing": "graphos is writing the rows",
+      "done": "Done",
+      "cancelled": "Cancelled before anything was sent",
+      "stopped": "Stopped: rows sent before stopping may already be written",
+      "failed": "Failed"
+    },
+    "result": {
+      "written": "{{received}} rows received, {{written}} written, in {{seconds}} s.",
+      "invalid_one": "{{count}} row refused",
+      "invalid_other": "{{count}} rows refused",
+      "skipped_one": "{{count}} relationship skipped: its source or target node does not exist",
+      "skipped_other": "{{count}} relationships skipped: their source or target node does not exist",
+      "violations": "Refused by the property definitions: {{list}}",
+      "warnings": "Written with property warnings: {{list}}",
+      "moreErrors": "and {{count}} more",
+      "merged": "The file's {{rows}} rows were sent as {{lines}}: rows with the same id, or the same source and target, merged into one.",
+      "errorAt": "Row {{row}}: {{message}}"
+    },
+    "failed": "The import failed: {{message}}"
   },
   "errors": {
     "notSaved": "Not saved",

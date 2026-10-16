@@ -103,3 +103,18 @@
 .rankRow[data-selected] {
   background: var(--mantine-color-accent-light);
 }
+
+/* What can be done with several selected nodes, over the canvas foot. */
+.selectionBar {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  padding: 4px 6px 4px 12px;
+  border-radius: var(--mantine-radius-xl);
+  background: color-mix(in srgb, var(--gx-window) 92%, transparent);
+  border: 0.5px solid var(--gx-separator);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+  white-space: nowrap;
+}
