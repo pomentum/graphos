@@ -4,6 +4,8 @@
 # services/graphos/deploy/secrets/ (gitignored):
 #   graphos_pw.txt       random password for the database superuser (init only)
 #   graphos_app_pw.txt   random password for graphos_app, the role graphos-api uses
+#   master_key.txt       the master key graphos-api seals its signing keys and ID
+#                        tokens with (GRAPHOS_MASTER_KEY_FILE); keep a copy safe
 #
 # Idempotent: never overwrites an existing file.
 
@@ -33,5 +35,16 @@ function Ensure-Password([string]$name) {
 
 Ensure-Password 'graphos_pw.txt'
 Ensure-Password 'graphos_app_pw.txt'
+
+$masterKey = Join-Path $secretsDir 'master_key.txt'
+if ((Test-Path $masterKey) -and ((Get-Item $masterKey).Length -gt 0)) {
+    Write-Host 'ok: master_key.txt already present'
+} else {
+    $bytes = New-Object byte[] 32
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    # One key per line, "<version>:<base64 of 32 bytes>" (graphos.vault).
+    [System.IO.File]::WriteAllText($masterKey, "1:$([Convert]::ToBase64String($bytes))`n")
+    Write-Host 'created: master_key.txt (back it up: graphos cannot read what it sealed without it)'
+}
 # graphos's own first admin is user "graphos", password "graphos", to be
 # changed at the first sign-in (or set GRAPHOS_ADMIN_PASSWORD_FILE).

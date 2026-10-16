@@ -579,7 +579,8 @@ Error shapes:
   `GRAPHOS_LOGIN_LOCKOUT_S`; at most `GRAPHOS_LOGIN_ATTEMPTS_PER_MIN` attempts a
   minute per client address, per replica) and answers an access token: a JWT
   signed ES256 with the newest key of `graphos_meta.signing_keys` (generated at
-  the first start under an advisory lock, or `GRAPHOS_AUTH_SIGNING_KEY_FILE`),
+  the first start under an advisory lock, or `GRAPHOS_AUTH_SIGNING_KEY_FILE`;
+  stored sealed with the master key, see *Secrets at rest* below),
   claims `iss` (`GRAPHOS_AUTH_ISSUER`), `aud` `graphos`, `sub` (the user),
   `iat`/`nbf`/`exp` (`GRAPHOS_ACCESS_TOKEN_TTL_S`, 900) and `ver` (the
   user's `token_version`). A person also gets a refresh token (256 random
@@ -593,6 +594,18 @@ Error shapes:
   or a `ver` other than its current `token_version`, is refused. A password
   change, reset or disable bumps the version, so older tokens stop at the next
   request, not at expiry. The grants are read from memory on every request.
+- **Secrets at rest** (`vault.py`): the signing keys and each session's ID token
+  from the identity provider are stored sealed with `GRAPHOS_MASTER_KEY_FILE`,
+  which the database never sees: AES-256-GCM with a key derived per row by
+  HKDF from the master key and a random salt, and the row (`signing_key:<kid>`,
+  `session:<family>`) as associated data, so a sealed value copied to another
+  row does not open. The newest master key version seals, every listed one
+  opens; `python -m graphos.vault reseal` re-seals everything. A key stored in
+  clear is sealed at the next start; without a master key, values are stored in
+  clear with a warning; a sealed key graphos cannot open stops the start.
+- **Host names** (`GRAPHOS_ALLOWED_HOSTS`): Starlette's `TrustedHostMiddleware`,
+  outermost, refuses a request for another `Host` (400), against DNS rebinding;
+  `localhost` and `127.0.0.1` are always allowed. Empty: off.
 - **Grants** (`graphos_meta.grants`): `(subject, tenant_pattern, level)`. The
   subject is `user:<name>`; the pattern a tenant name or a glob with `*`;
   the level `read` < `write` < `maintain` < `owner`, or the global rights

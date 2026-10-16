@@ -4,6 +4,28 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Added
+
+- **Secrets at rest**: the signing keys graphos signs tokens with and each session's ID token from
+  the identity provider are stored sealed with a master key the database never sees
+  (`GRAPHOS_MASTER_KEY_FILE`): AES-256-GCM, a key per row derived with HKDF, the row as associated
+  data. A database dump or backup no longer holds a usable signing key. Several key versions may
+  be listed (the newest seals); `python -m graphos.vault reseal` re-seals everything and
+  `python -m graphos.vault new-key` prints a key. Keys stored in clear are sealed at the next
+  start. Without a master key graphos stores them in clear, as before, and warns at start.
+  `scripts/init-secrets.sh` / `.ps1` write `master_key.txt`, and the compose sets the variable.
+- **Host allowlist**: `GRAPHOS_ALLOWED_HOSTS` (comma-separated, `*.example.com` wildcards) refuses
+  requests for any other `Host` with 400, against DNS rebinding; `localhost` and `127.0.0.1` are
+  always allowed. Empty (the default): off.
+
+### Changed
+
+- The compose file sets `GRAPHOS_MASTER_KEY_FILE`: **run `scripts/init-secrets.sh` once** when
+  upgrading an existing installation, or graphos-api does not start (it names the missing file).
+  Back up `master_key.txt` apart from the database.
+
 ## 0.12.0 — 2026-10-16
 
 Team tools in the web UI and the server work behind them: select several nodes on the canvas,

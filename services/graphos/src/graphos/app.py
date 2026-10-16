@@ -24,6 +24,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from graphos import (
     __version__,
@@ -34,6 +35,7 @@ from graphos import (
     oidc,
     openapi,
     properties,
+    vault,
 )
 from graphos.api import (
     access,
@@ -159,6 +161,7 @@ async def setup_identity(
             "the admin user '%s' still has its first password: sign in and change it",
             identity.ADMIN_USER,
         )
+    vault.configure(settings.master_key_file)
     signer = identity.Signer(issuer=settings.auth_issuer, ttl_s=settings.access_token_ttl_s)
     await signer.load(pool, settings.auth_signing_key_file)
     app.state.access_store = store
@@ -277,6 +280,20 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         log.info("graphos shutdown complete")
 
 
+# Always answered as well: the container's own health check and a person on
+# the host use them, and a rebinding page cannot send them (its requests carry
+# the attacker's host name).
+LOOPBACK_HOSTS = ("localhost", "127.0.0.1")
+
+
+def allowed_hosts(setting: str) -> list[str]:
+    """``GRAPHOS_ALLOWED_HOSTS`` as a list, with the loopback names; empty: off."""
+    hosts = [h.strip().lower() for h in setting.split(",") if h.strip()]
+    if not hosts or "*" in hosts:
+        return []
+    return [*hosts, *(h for h in LOOPBACK_HOSTS if h not in hosts)]
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """FastAPI app factory used by uvicorn (``--factory``)."""
     settings = settings or Settings()
@@ -388,6 +405,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         window_s=settings.rate_limit_window_s,
     )
     app.add_middleware(RequestContextMiddleware)
+    hosts = allowed_hosts(settings.allowed_hosts)
+    if hosts:
+        # Outermost: a request for a Host graphos is not is refused (400)
+        # before anything else runs, against DNS rebinding.
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
     app.add_route("/metrics", metrics_handler, methods=["GET"])
 
     # Routers (no prefix on health; /v1 prefix on every other surface)

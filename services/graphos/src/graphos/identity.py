@@ -56,6 +56,7 @@ import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from graphos import vault
 from graphos.oidc import Identity
 
 log = logging.getLogger(__name__)
@@ -629,7 +630,14 @@ class Signer:
 
     async def load(self, pool: asyncpg.Pool, key_file: Path | None = None) -> None:
         """The newest key signs, every unretired key verifies.  Generates the
-        first key (once, whichever replica gets there first)."""
+        first key (once, whichever replica gets there first).  Keys are stored
+        sealed (:mod:`graphos.vault`); a key stored in clear is sealed here
+        when a master key is set.
+
+        Raises:
+            vault.VaultError: a stored key is sealed with a master key this
+                process does not hold.
+        """
         if key_file is not None:
             pem = key_file.read_bytes()
             key = serialization.load_pem_private_key(pem, password=None)
@@ -638,6 +646,7 @@ class Signer:
             kid = "file-" + hashlib.sha256(pem).hexdigest()[:12]
             self._use([(kid, key)])
             return
+        sealer = vault.current()
         async with pool.acquire() as conn, conn.transaction():
             await conn.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended('graphos.signing_keys', 0));",
@@ -656,14 +665,23 @@ class Signer:
                 kid = uuid.uuid4().hex[:16]
                 await conn.execute(
                     "INSERT INTO graphos_meta.signing_keys (kid, private_pem) VALUES ($1, $2);",
-                    kid, new_pem,
+                    kid, sealer.seal(new_pem, vault.signing_key_context(kid)),
                 )
                 rows = [{"kid": kid, "private_pem": new_pem}]
+            pems: list[tuple[str, str]] = []
+            for row in rows:
+                stored, context = row["private_pem"], vault.signing_key_context(row["kid"])
+                pems.append((row["kid"], sealer.open(stored, context)))
+                if sealer.enabled and not sealer.is_sealed(stored):
+                    await conn.execute(
+                        "UPDATE graphos_meta.signing_keys SET private_pem = $2 WHERE kid = $1;",
+                        row["kid"], sealer.seal(stored, context),
+                    )
         keys = []
-        for row in rows:
-            key = serialization.load_pem_private_key(row["private_pem"].encode(), password=None)
+        for kid, pem in pems:
+            key = serialization.load_pem_private_key(pem.encode(), password=None)
             assert isinstance(key, ec.EllipticCurvePrivateKey)
-            keys.append((row["kid"], key))
+            keys.append((kid, key))
         self._use(keys)
 
     def use_key(self, kid: str, key: ec.EllipticCurvePrivateKey) -> None:
@@ -734,16 +752,17 @@ async def open_session(  # noqa: PLR0913 — a session's fields
     (its tokens are issued again from it at each renewal)."""
     token = secrets.token_urlsafe(32)
     now = datetime.now(UTC)
+    family = uuid.uuid4()
     await pool.execute(
         "INSERT INTO graphos_meta.sessions "
         "(family, user_name, refresh_hash, idle_expires_at, absolute_expires_at, kind, claims, "
         " id_token) "
         "VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8);",
-        uuid.uuid4(), user, _hash_refresh(token),
+        family, user, _hash_refresh(token),
         now + timedelta(seconds=idle_s), now + timedelta(seconds=max_s),
         "oidc" if identity else "native",
         json.dumps(identity.claims()) if identity else None,
-        id_token,
+        vault.current().seal(id_token, vault.session_context(family)) if id_token else None,
     )
     return token
 
@@ -825,7 +844,8 @@ async def rotate_session(pool: asyncpg.Pool, token: str, *, idle_s: int) -> Rene
                 "VALUES ($1, $2, $3, LEAST(now() + make_interval(secs => $4), $5), $5, "
                 " $6, $7::jsonb, $8);",
                 row["family"], row["user_name"], _hash_refresh(new), float(idle_s),
-                row["absolute_expires_at"], row["kind"], row["claims"], row["id_token"],
+                row["absolute_expires_at"], row["kind"], row["claims"],
+                _sealed_copy(row["id_token"], row["family"]),
             )
         # Rotated rows are only kept to detect reuse while the family lives.
         await conn.execute(
@@ -849,11 +869,29 @@ async def close_session(pool: asyncpg.Pool, token: str) -> Ended | None:
     row = await pool.fetchrow(
         "WITH ended AS (UPDATE graphos_meta.sessions s SET revoked_at = now() "
         "FROM graphos_meta.sessions t WHERE t.refresh_hash = $1 AND s.family = t.family "
-        "AND s.revoked_at IS NULL RETURNING s.kind, s.id_token) "
-        "SELECT kind, id_token FROM ended LIMIT 1;",
+        "AND s.revoked_at IS NULL RETURNING s.kind, s.family, s.id_token) "
+        "SELECT kind, family, id_token FROM ended LIMIT 1;",
         _hash_refresh(token),
     )
-    return Ended(kind=row["kind"], id_token=row["id_token"]) if row else None
+    if row is None:
+        return None
+    id_token = None
+    if row["id_token"] is not None:
+        try:
+            id_token = vault.current().open(row["id_token"], vault.session_context(row["family"]))
+        except vault.VaultError as exc:
+            # Signing out here still works; the provider then asks to confirm.
+            log.warning("the session's ID token does not open: %s", exc)
+    return Ended(kind=row["kind"], id_token=id_token)
+
+
+def _sealed_copy(id_token: str | None, family: object) -> str | None:
+    """The stored ID token for the next session of ``family``: as it is when
+    sealed (the family is its context), sealed when a master key is set."""
+    sealer = vault.current()
+    if id_token is None or sealer.is_sealed(id_token) or not sealer.enabled:
+        return id_token
+    return sealer.seal(id_token, vault.session_context(family))
 
 
 async def revoke_sessions(conn: asyncpg.Connection, user: str) -> None:

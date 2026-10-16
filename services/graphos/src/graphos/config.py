@@ -136,6 +136,13 @@ class Settings(BaseSettings):
     # A PEM EC P-256 private key to sign with, instead of the key graphos
     # generates and keeps in graphos_meta.signing_keys.
     auth_signing_key_file: Path | None = None
+    # The master keys that seal the secrets graphos stores (graphos.vault):
+    # signing keys and ID tokens.  Without it they are stored in clear.
+    master_key_file: Path | None = None
+    # Host names the API answers to (Starlette's TrustedHostMiddleware;
+    # ``*.example.com`` wildcards), comma-separated.  Empty: any Host.  Behind
+    # a proxy, the names clients use, as the proxy forwards them.
+    allowed_hosts: str = ""
     access_token_ttl_s: int = Field(default=900, ge=60, le=86_400)
     # The web UI's session cookie (the refresh token, HttpOnly, SameSite=Strict)
     # is Secure: sent over HTTPS only (browsers also accept it on http://localhost).
@@ -204,7 +211,7 @@ class Settings(BaseSettings):
         return v.upper()
 
     @field_validator(
-        "admin_password_file", "auth_signing_key_file",
+        "admin_password_file", "auth_signing_key_file", "master_key_file",
         "oidc_issuer", "oidc_client_id", "oidc_audience", mode="before",
     )
     @classmethod
