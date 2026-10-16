@@ -203,6 +203,12 @@ project with a running stack. So:
   the trailer.
 - **No push, tag, release or merge without the owner's explicit approval
   in the current turn.** An earlier approval does not carry over.
+- **Never rebase; merge.** Bring a branch up to date by merging `main` into
+  it (`git fetch` then `git merge origin/main`, or `git pull --no-rebase`),
+  and land it on `main` with a merge or a fast-forward. No `git rebase`,
+  `git pull --rebase` or interactive history editing. A merge commit says
+  what it joins in plain English, as in `git log`: "Merge 0.9.1 into the
+  PostgreSQL 18 branch".
 - **Conventional commits**, as in `git log`: `type(scope): summary`, lower
   case, plain English, no trailing period. Types in use: `feat`, `fix`,
   `docs`, `test`, `perf`, `refactor`, `ci`, `chore`. Scopes in use: `ui`,
@@ -210,6 +216,12 @@ project with a running stack. So:
   `tenants`, `schema`, `whitepaper`, `age`.
   A security fix says so: `fix(cypher): ... (security)`. Releases are
   `chore: release X.Y.Z`.
+- **Never commit secrets.** Passwords, keys and tokens live in
+  `services/graphos/deploy/secrets/` (made by `scripts/init-secrets.sh`) or
+  in `.env` files, and git ignores both; only the `*.example` files and
+  `.gitkeep` are tracked there. Never force-add one (`git add -f`), never put a secret in code,
+  tests, docs or a commit message, and check `git diff --cached` before a
+  commit. A secret that reached a commit is rotated, not just deleted.
 - Leave other people's uncommitted changes alone; stage only your own files.
 
 ## 7. Privacy
