@@ -31,7 +31,8 @@ The module docstrings explain the why; read them before changing a module.
 
 ## 2. Setup, test, lint
 
-Python 3.11 (CI's version).
+Python 3.11 (CI's version), in a venv at `.venv` in the checkout
+([development.md, Python environment](../../docs/development.md#python-environment)).
 
 ```bash
 pip install -e "services/graphos[dev,louvain]"     # louvain: python-igraph, GPL, optional
@@ -106,8 +107,10 @@ Changing one takes an [ADR](../../docs/adrs/README.md) first.
 ## 4. Code conventions
 
 - **Ruff** with the config in `pyproject.toml`: line length 100, target
-  `py311`, rules `E F I B UP SIM RET PL`. The ruff version is pinned
-  (`>=0.16,<0.17`): new releases add rules. A `# noqa` names the rule and
+  `py311`, rules `E F I B UP SIM RET PL`. Ruff is held to 0.16.x
+  (`>=0.16,<0.17`), so a new minor release cannot change the rules
+  unannounced; a patch release can still bring new findings. CI installs
+  the newest 0.16.x: lint with the same. A `# noqa` names the rule and
   says why.
 - **Typing:** `from __future__ import annotations` at the top of every
   module; every function annotated; modern syntax (`str | None`,

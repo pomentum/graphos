@@ -22,6 +22,9 @@ Paths are under `clients/python/`.
 
 ## 2. Setup, test, lint
 
+In a venv at `.venv` in the checkout
+([development.md, Python environment](../../docs/development.md#python-environment)):
+
 ```bash
 pip install -e "clients/python[dev]"
 ruff check clients/python/src clients/python/tests clients/python/examples
@@ -56,7 +59,8 @@ against a running stack, set `GRAPHOS_URL` (default
 
 - **Ruff** with the config in `clients/python/pyproject.toml`: line length
   100, target `py311`, rules `E F I B UP SIM RET PL` (`PLR0913` ignored:
-  methods mirror the API's parameters).
+  methods mirror the API's parameters). Same ruff range as the service
+  (`>=0.16,<0.17`); lint with the newest 0.16.x, as CI does.
 - Module docstrings, typing and comments follow the service's conventions
   ([services/graphos/DEVELOPMENT.md §4](../../services/graphos/DEVELOPMENT.md#4-code-conventions)).
 - Tests live in `clients/python/tests/test_<area>.py`; names say what is

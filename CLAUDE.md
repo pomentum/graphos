@@ -18,3 +18,6 @@ guides instead. Before a design change, read [`docs/adrs/README.md`](docs/adrs/R
   the no-AI-attribution rule overrides it.
 - Ask before `git push`, `git tag`, a release or a merge, every time.
 - Run long commands such as `scripts/run-db-tests.sh` in the background.
+- This file and its imports are read when a session starts. When the rules
+  change during a session, re-read `docs/development.md` and the package
+  `DEVELOPMENT.md` before going on.

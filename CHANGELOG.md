@@ -4,6 +4,18 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Added
+
+- **Docs:** development guides, for people and coding agents: the rules for the whole repository
+  ([docs/development.md](docs/development.md): docs, pictures and docs tools, test stacks, git,
+  privacy) and a `DEVELOPMENT.md` in each package for the
+  [service](services/graphos/DEVELOPMENT.md), the [client](clients/python/DEVELOPMENT.md) and the
+  [web UI](services/graphos-ui/DEVELOPMENT.md); architecture decision records in
+  [docs/adrs/](docs/adrs/README.md), with when one is needed and its template; `AGENTS.md` and
+  `CLAUDE.md` at the root point to them.
+
 ## 0.11.1 — 2026-10-16
 
 A fix for databases moved from PostgreSQL 16 / AGE 1.6: their label tables now get the

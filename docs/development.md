@@ -49,6 +49,26 @@ docker compose -f docker-compose.graphos.yml --profile ui up -d
 
 The API listens on `http://127.0.0.1:8080`, the UI on `http://127.0.0.1:8081`.
 
+### Python environment
+
+Work in a venv at `.venv` in the checkout (git ignores it):
+
+```bash
+python -m venv .venv
+.venv/Scripts/python -m pip install -e "services/graphos[dev]" -e "clients/python[dev]"   # .venv/bin/ on Linux and macOS
+.venv/Scripts/python -c "import graphos; print(graphos.__file__)"                         # must be in this checkout
+```
+
+- Do not test with a global Python: it may hold another checkout's editable
+  `graphos`, or a FastAPI that breaks test collection ("Status code 204
+  must not have a response body").
+- On Windows, a venv under a long path (a temp directory) cannot load
+  asyncpg ("The filename or extension is too long"). Keep it at `.venv`.
+- pip installs the newest ruff the pin allows, as CI does. Lint with that
+  one, not an older ruff on the `PATH`.
+
+### Repository checks
+
 graphos-api, graphos-ui and graphos-client share one version, set by
 `node tools/release/version.mjs <version>`. Besides each component's lint
 and tests, CI checks the repository as a whole:
@@ -67,7 +87,11 @@ match the root copies.
 A change is done when its docs are. With a feature change, update:
 
 - [`CHANGELOG.md`](../CHANGELOG.md), under `## Unreleased` (Added /
-  Changed / Fixed / Deprecated), in the style of the existing entries;
+  Changed / Fixed / Deprecated), in the style of the existing entries
+  (add the heading at the top when it is missing; the release script dates
+  it). Docs that change what a reader learns, such as a new guide or a
+  section brought in line with the code, get a `**Docs:**` bullet too;
+  retaken screenshots, figures and wording fixes do not;
 - [`features.md`](features.md) when a capability is added, changed or removed;
 - [`concept.md`](concept.md) where the design is described, and §8 (known
   limitations) when a limitation appears, changes or goes away;
