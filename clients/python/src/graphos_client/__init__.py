@@ -88,7 +88,7 @@ from graphos_client._models import (
 )
 from graphos_client._pool import GraphosPool, TenantSchema, is_schema_drift
 
-__version__ = "0.11.0"
+__version__ = "0.11.1"
 
 __all__ = [
     "CommunityHub",

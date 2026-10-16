@@ -4,7 +4,7 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.11.1 — 2026-10-16
 
 A fix for databases moved from PostgreSQL 16 / AGE 1.6: their label tables now get the
 cache-invalidation trigger AGE 1.8 gives its own, from the compose's import, from graphos-api at
