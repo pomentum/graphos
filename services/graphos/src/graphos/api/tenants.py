@@ -329,6 +329,10 @@ async def export_spec(name: TenantName, request: Request, principal: MaintainPri
 @router.post(
     "", summary="Register a tenant (idempotent)",
     response_model=RegisterResponse | RegisterDryRunResponse,
+    responses={409: {"description": (
+        "The name is an unregistered tenant that keeps its data, which only its owner or an "
+        "admin may restore; or an orphan graph, which only an admin may register again."
+    )}},
 )
 async def register(
     body: TenantSpecBody,

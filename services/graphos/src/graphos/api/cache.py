@@ -88,23 +88,37 @@ class CachePutRequest(BaseModel):
 
 
 class CachePutResponse(BaseModel):
-    tenant: str
-    key: str
-    expires_at: datetime | None
-    bytes_written: int
-    elapsed_ms: int
+    """A stored cache value."""
+
+    tenant: str = Field(..., description="The tenant.")
+    key: str = Field(..., description="The cache key (1 to 256 characters).")
+    expires_at: datetime | None = Field(
+        ..., description="When the value expires (`ttl_seconds` from now); null for no expiry.",
+    )
+    bytes_written: int = Field(..., description="Size of the value as UTF-8 JSON, in bytes.")
+    elapsed_ms: int = Field(..., description="Time spent writing, in milliseconds.")
 
 
 class CacheGetResponse(BaseModel):
-    tenant: str
-    key: str
-    value: Any
-    expires_at: datetime | None
-    cached_at: datetime
+    """A cached value that has not expired."""
+
+    tenant: str = Field(..., description="The tenant.")
+    key: str = Field(..., description="The cache key.")
+    value: Any = Field(..., description="The value, as written (object key order may differ).")
+    expires_at: datetime | None = Field(
+        ..., description="When the value expires; null for no expiry.",
+    )
+    cached_at: datetime = Field(
+        ...,
+        description=(
+            "From `pg`: when the value was last written. From `lru`: when this replica put it "
+            "in memory (on its write, or on reading it from `pg`)."
+        ),
+    )
     source: str = Field(
         ..., description="``lru`` or ``pg`` — which tier served the hit.",
     )
-    elapsed_ms: int
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
 
 
 # ── In-process LRU ─────────────────────────────────────────────────────────
@@ -235,6 +249,9 @@ def on_notification(payload: str) -> None:
         "their in-process cache. 400 for an empty key or one longer than "
         f"{MAX_CACHE_KEY_LEN} characters."
     ),
+    responses={400: {
+        "description": f"The key is empty or longer than {MAX_CACHE_KEY_LEN} characters.",
+    }},
 )
 async def cache_put(
     tenant: Tenant,
@@ -301,6 +318,7 @@ async def cache_put(
         "(``lru`` / ``pg``).  Missing or expired keys return 404; "
         "callers should treat 404 as 'recompute and PUT'."
     ),
+    responses={404: {"description": "No value under the key, or it expired."}},
 )
 async def cache_get(
     tenant: Tenant,

@@ -19,7 +19,7 @@ import logging
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TypeVar
+from typing import Any, TypeVar
 from urllib.parse import urlsplit
 
 import asyncpg
@@ -49,6 +49,21 @@ router = APIRouter(tags=["auth"])
 
 # The browser session: the refresh token, where page scripts cannot read it.
 SESSION_COOKIE = "graphos_session"
+
+# Error responses the sign-in routes share (``responses=``).
+_AUTH_OFF_404: dict[int | str, dict[str, Any]] = {
+    404: {"description": "Authentication is disabled on this server (`GRAPHOS_AUTH_DISABLED`)."},
+}
+_SSO_404: dict[int | str, dict[str, Any]] = {
+    404: {"description": (
+        "Single sign-on is not configured, or authentication is disabled on this server."
+    )},
+}
+_THROTTLED_429: dict[int | str, dict[str, Any]] = {
+    429: {"description": (
+        "Too many sign-in attempts from this address; `Retry-After` says when to try again."
+    )},
+}
 
 
 @dataclass(frozen=True)
@@ -130,6 +145,14 @@ def _clear_cookie(response: Response, d: AuthDeps) -> None:
         "failures lock the account for a while, and too many attempts from one address "
         "answer 429."
     ),
+    responses={
+        401: {"description": (
+            "The name or password is wrong, or the account is locked or disabled: one message "
+            "whatever the cause."
+        )},
+        **_AUTH_OFF_404,
+        **_THROTTLED_429,
+    },
 )
 async def login(body: LoginRequest, request: Request, response: Response) -> TokenResponse:
     d = deps(request)
@@ -166,6 +189,13 @@ async def login(body: LoginRequest, request: Request, response: Response) -> Tok
         "again more than a few seconds after it was rotated revokes the whole session; within "
         "them (another browser tab renewing at the same moment) it gives an access token only."
     ),
+    responses={
+        401: {"description": (
+            "No refresh token, or one that is invalid, expired or revoked; or its user is "
+            "disabled or gone."
+        )},
+        **_AUTH_OFF_404,
+    },
 )
 async def refresh(body: RefreshRequest, request: Request, response: Response) -> TokenResponse:
     d = deps(request)
@@ -205,6 +235,7 @@ async def refresh(body: RefreshRequest, request: Request, response: Response) ->
         "identity provider the answer carries `end_session_url`: opening it ends the session "
         "there too."
     ),
+    responses=_AUTH_OFF_404,
 )
 async def logout(body: LogoutRequest, request: Request, response: Response) -> LogoutResponse:
     d = deps(request)
@@ -275,6 +306,15 @@ def _unavailable(exc: oidc.OidcError) -> HTTPException:
         "PKCE verifier and the nonce for 5 minutes; the browser stores nothing. `silent` asks "
         "the provider not to prompt (single sign-on on page load)."
     ),
+    responses={
+        **_SSO_404,
+        422: {"description": (
+            "The request is not valid, or `redirect_uri` is not one graphos accepts "
+            "(`GRAPHOS_OIDC_REDIRECT_URIS`)."
+        )},
+        **_THROTTLED_429,
+        502: {"description": "The identity provider could not be reached."},
+    },
 )
 async def oidc_start(body: OidcStart, request: Request) -> OidcStartResponse:
     d = deps(request)
@@ -322,6 +362,14 @@ async def oidc_start(body: OidcStart, request: Request) -> OidcStartResponse:
         "refresh tokens, and the page to return to. An `error` (`login_required` after a "
         "silent attempt) answers 401."
     ),
+    responses={
+        401: {"description": (
+            "The sign-in expired or was already used, the provider did not sign the user in "
+            "(`error`), or its answer was not valid."
+        )},
+        **_SSO_404,
+        **_THROTTLED_429,
+    },
 )
 async def oidc_callback(body: OidcCallback, request: Request, response: Response) -> OidcSignedIn:
     d = deps(request)
@@ -369,6 +417,16 @@ async def oidc_callback(body: OidcCallback, request: Request, response: Response
         "the answer carries new ones. A user whose password must change can call only this, "
         "`GET /v1/me` and `/v1/auth/logout`."
     ),
+    responses={
+        400: {"description": "The caller signed in at the identity provider: no graphos password."},
+        403: {"description": (
+            "The current password is wrong; or the token's grants do not allow this operation."
+        )},
+        **_AUTH_OFF_404,
+        422: {"description": (
+            "The request is not valid, or the new password does not meet the password policy."
+        )},
+    },
 )
 async def change_password(
     body: PasswordChange, request: Request, response: Response, principal: ReadPrincipal,

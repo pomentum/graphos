@@ -31,7 +31,7 @@ from pydantic import ValidationError
 
 from graphos import csv_rows
 from graphos.api.bulk import PASSED_THROUGH, EdgeWriter, NodeWriter, _Writer, stream_error
-from graphos.api.graph import _check_tenant, _check_vertex_label
+from graphos.api.graph import UNIQUE_VIOLATION_RESPONSE, _check_tenant, _check_vertex_label
 from graphos.auth import Tenant, WritePrincipal
 from graphos.bootstrap import registered_tenants
 from graphos.contracts.graph import (
@@ -68,6 +68,36 @@ _DESCRIPTION = (
     "what the import would do. Errors name the file's rows, counted from the first one under "
     "the header."
 )
+
+_CSV_BODY = {"requestBody": {
+    "required": True,
+    "content": {"text/csv": {"schema": {
+        "type": "string",
+        "format": "binary",
+        "description": (
+            "The CSV file: UTF-8, comma, semicolon or tab separated (`delimiter`), the first "
+            "row the header; at most `GRAPHOS_CSV_MAX_BYTES`."
+        ),
+    }}},
+}}
+
+
+def _csv_responses(registered: str, refused: str = "") -> dict[int | str, dict[str, Any]]:
+    """The errors of a CSV import: ``registered`` names what must be registered,
+    ``refused`` what else the import refuses with 422."""
+    return {
+        400: {"description": (
+            f"{registered} not registered for the tenant, a file that cannot be read as CSV "
+            "(not UTF-8, empty), or a write the database refused or that failed part-way (the "
+            "batches written before it stay written)."
+        )},
+        413: {"description": "The file is larger than `GRAPHOS_CSV_MAX_BYTES`."},
+        422: {"description": (
+            "The request is not valid: `columns` is not a JSON column map or does not fit the "
+            "header (an unknown column, a bad or reserved property name, an unknown type, two "
+            f"columns for one property), or an id column is not in the header{refused}."
+        )},
+    }
 
 
 def _choices(columns: str | None) -> dict[str, dict[str, Any]]:
@@ -142,6 +172,8 @@ def _answer(
     response_model=CsvImportResponse,
     summary="Import a CSV file as nodes of a label",
     description=_DESCRIPTION.format(bulk="nodes:bulk"),
+    openapi_extra=_CSV_BODY,
+    responses={**_csv_responses("`label`"), **UNIQUE_VIOLATION_RESPONSE},
 )
 async def import_nodes_csv(  # noqa: PLR0913 — FastAPI route parameters
     tenant: Tenant,
@@ -196,6 +228,12 @@ async def import_nodes_csv(  # noqa: PLR0913 — FastAPI route parameters
     summary="Import a CSV file as relationships of a type",
     description=_DESCRIPTION.format(bulk="edges:bulk")
     + " A relationship whose end does not exist is counted in `edges_skipped`.",
+    openapi_extra=_CSV_BODY,
+    responses=_csv_responses(
+        "`type`, `src_label` or `dst_label`",
+        "; or the source and target are one column, or the type does not declare the label "
+        "pair (`strict_endpoints`)",
+    ),
 )
 async def import_edges_csv(  # noqa: PLR0913 — FastAPI route parameters
     tenant: Tenant,

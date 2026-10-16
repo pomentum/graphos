@@ -9,7 +9,13 @@ from fastapi.responses import JSONResponse
 
 from graphos import properties
 from graphos.api.graph import _check_tenant
-from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, run_sync, wants_async
+from graphos.api.jobs import (
+    ACCEPTED_RESPONSE,
+    CANCELLED_RESPONSE,
+    respond_async,
+    run_sync,
+    wants_async,
+)
 from graphos.auth import MaintainPrincipal, ReadPrincipal, Tenant
 from graphos.bootstrap import registered_tenants
 from graphos.contracts.property_schema import (
@@ -62,7 +68,7 @@ async def property_definitions(
         "names. Writes nothing. Needs `maintain`. With `Prefer: respond-async` it runs as a "
         "background job (202, see `/v1/jobs`)."
     ),
-    responses=ACCEPTED_RESPONSE,
+    responses={**ACCEPTED_RESPONSE, **CANCELLED_RESPONSE},
 )
 async def check_properties(
     tenant: Tenant,

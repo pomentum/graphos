@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from graphos import analysis
 from graphos.api.graph import _check_tenant
 from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, run_sync, wants_async
-from graphos.api.louvain import busy
+from graphos.api.louvain import BUSY_RESPONSE, busy
 from graphos.auth import MaintainPrincipal, Tenant
 from graphos.contracts.graph_metrics import ComputeMetricsRequest, ComputeMetricsResponse
 from graphos.graph_metrics import run_metrics
@@ -34,7 +34,7 @@ router = APIRouter(tags=["metrics"], prefix="/{tenant}/graph")
         "top ones with `nodes:scan` and `order_by: [{\"property\": \"graphos_pagerank\", "
         "\"desc\": true}]`."
     ),
-    responses=ACCEPTED_RESPONSE,
+    responses={**ACCEPTED_RESPONSE, **BUSY_RESPONSE},
 )
 async def compute_metrics(
     tenant: Tenant,
