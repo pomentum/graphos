@@ -1,0 +1,104 @@
+# The graphos website: https://pomentum.github.io/graphos/
+#
+# Build: python website/assemble.py && mkdocs build --strict -f website/mkdocs.yml
+# The pages are the repository's own docs, copied and link-fixed into
+# website/.build/docs by assemble.py; nothing here holds content of its own.
+# The Pages workflow (.github/workflows/pages.yml) runs the same two steps.
+
+site_name: graphos
+site_url: https://pomentum.github.io/graphos/
+site_description: A multi-tenant property-graph service, PostgreSQL + Apache AGE behind a typed HTTP API.
+repo_url: https://github.com/pomentum/graphos
+repo_name: pomentum/graphos
+edit_uri: ""
+copyright: graphos is licensed under the Apache License 2.0. Apache AGE is a project of the Apache Software Foundation and is not affiliated with graphos.
+
+docs_dir: .build/docs
+site_dir: .build/site
+
+theme:
+  name: material
+  language: en
+  font: false # system fonts: the site asks no other origin for anything
+  icon:
+    logo: material/graph-outline
+    repo: fontawesome/brands/github
+  favicon: assets/favicon.svg
+  palette:
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Light theme
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Dark theme
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.indexes
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+extra_css:
+  - assets/graphos.css
+
+plugins:
+  - search
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - footnotes
+  - toc:
+      permalink: true
+      # GitHub's anchors, so links like usage.md#3-tenant-registration keep working.
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+validation:
+  omitted_files: warn
+  absolute_links: info
+  unrecognized_links: warn
+  anchors: warn
+
+nav:
+  - Home: index.md
+  - Get started:
+      - Installation: installation.md
+      - Single sign-on: sso.md
+      - Upgrading to PostgreSQL 18: upgrade-postgresql-18.md
+  - Guides:
+      - Usage: usage.md
+      - Graph algorithms: algorithms.md
+      - Web UI: ui.md
+      - Python client: client.md
+      - Reading the data without graphos: without-graphos.md
+  - Reference:
+      - Feature survey: features.md
+      - Concept: concept.md
+      - Apache AGE notes: apache-age.md
+      - AGE write-path practices: graph_age_practices.md
+      - Architecture decisions: adrs/index.md
+  - Project:
+      - Changelog: changelog.md
+      - Developing graphos: development.md
+      - Whitepaper: whitepaper.html

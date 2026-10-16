@@ -61,6 +61,10 @@ under one version.
   [web UI](services/graphos-ui/DEVELOPMENT.md); architecture decision records in
   [docs/adrs/](docs/adrs/README.md), with when one is needed and its template; `AGENTS.md` and
   `CLAUDE.md` at the root point to them.
+- **Docs:** a website for graphos on GitHub Pages, built from the docs as they are
+  (`website/`, MkDocs Material): a landing page filled from the README, the guides and
+  references with search, a dark and a light theme, and the whitepaper. The `pages` workflow
+  builds it, refusing broken links, and publishes it from `main`.
 
 ## 0.11.1 — 2026-10-16
 

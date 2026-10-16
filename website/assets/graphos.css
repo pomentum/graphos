@@ -1,0 +1,158 @@
+/* graphos website: Material for MkDocs, in the colours of the capabilities infographic. */
+
+[data-md-color-scheme="slate"] {
+  --md-hue: 230;
+  --md-default-bg-color: #0b0b0c;
+  --md-default-fg-color--light: #bcc2cb;
+  --md-primary-fg-color: #121317;
+  --md-primary-bg-color: #f2f3f5;
+  --md-accent-fg-color: #b7a6f2;
+  --md-typeset-a-color: #8ab0ff;
+  --md-code-bg-color: #15171c;
+  --md-footer-bg-color: #0b0b0c;
+  --md-footer-bg-color--dark: #08080a;
+  --gx-card-bg: #121317;
+  --gx-card-border: #262a31;
+  --gx-muted: #9aa1ab;
+  --gx-glow: radial-gradient(60rem 24rem at 15% -10%, rgba(138, 176, 255, 0.14), transparent 70%),
+    radial-gradient(50rem 22rem at 90% 0%, rgba(183, 166, 242, 0.12), transparent 70%);
+}
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #1d5bd6;
+  --md-primary-fg-color--light: #4a7fe6;
+  --md-primary-fg-color--dark: #1647a8;
+  --md-accent-fg-color: #6b4fd8;
+  --md-typeset-a-color: #1d5bd6;
+  --gx-card-bg: #f7f8fa;
+  --gx-card-border: #e1e4ea;
+  --gx-muted: #5b6270;
+  --gx-glow: radial-gradient(60rem 24rem at 15% -10%, rgba(29, 91, 214, 0.08), transparent 70%);
+}
+
+/* Buttons in the link colour: the dark header colour would vanish on the page. */
+.md-typeset .md-button {
+  color: var(--md-typeset-a-color);
+  border-color: var(--md-typeset-a-color);
+}
+.md-typeset .md-button--primary {
+  background-color: var(--md-typeset-a-color);
+  color: var(--md-default-bg-color);
+}
+.md-typeset .md-button:focus,
+.md-typeset .md-button:hover {
+  background-color: var(--md-accent-fg-color);
+  border-color: var(--md-accent-fg-color);
+  color: var(--md-default-bg-color);
+}
+
+/* The landing page is wider than a docs page. */
+.md-main:has(.gx-hero) .md-grid {
+  max-width: 72rem;
+}
+.md-main:has(.gx-hero) {
+  background: var(--gx-glow);
+}
+
+.gx-hero {
+  padding: 2.5rem 0 1rem;
+  max-width: 50rem;
+}
+.md-typeset .gx-hero h1 {
+  font-size: 3.2rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin: 0.2rem 0 0.6rem;
+  color: var(--md-default-fg-color);
+}
+.md-typeset .gx-hero h1 .headerlink {
+  display: none;
+}
+.md-typeset .gx-eyebrow {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gx-muted);
+  margin: 0;
+}
+.md-typeset .gx-tagline {
+  font-size: 1.35rem;
+  line-height: 1.4;
+  margin: 0 0 1rem;
+}
+.md-typeset .gx-hero .md-button {
+  margin: 0.3rem 0.4rem 0.3rem 0;
+}
+
+.gx-figures img {
+  display: block;
+  margin: 1.5rem 0;
+  border-radius: 0.6rem;
+}
+
+.md-typeset h2 {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-top: 2.5rem;
+}
+.md-typeset .gx-group {
+  color: var(--md-accent-fg-color);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 1.6rem 0 0.6rem;
+}
+
+.gx-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.8rem;
+}
+.md-typeset .gx-card {
+  background: var(--gx-card-bg);
+  border: 1px solid var(--gx-card-border);
+  border-radius: 0.6rem;
+  padding: 0.9rem 1rem;
+  font-size: 0.72rem;
+  line-height: 1.55;
+}
+.md-typeset .gx-card p {
+  margin: 0;
+}
+.md-typeset .gx-card .gx-card-title {
+  font-weight: 700;
+  font-size: 0.8rem;
+  margin-bottom: 0.35rem;
+  color: var(--md-default-fg-color);
+}
+
+.gx-shots img {
+  border-radius: 0.5rem;
+  border: 1px solid var(--gx-card-border);
+}
+.md-typeset .gx-shots em {
+  display: block;
+  color: var(--gx-muted);
+  font-size: 0.7rem;
+  margin: 0.2rem 0 1.4rem;
+}
+
+.gx-closing {
+  margin: 2.5rem 0 1rem;
+  padding: 1.4rem;
+  border: 1px solid var(--gx-card-border);
+  border-radius: 0.6rem;
+  background: var(--gx-card-bg);
+}
+
+@media screen and (max-width: 44.9375em) {
+  .md-typeset .gx-hero h1 {
+    font-size: 2.3rem;
+  }
+  .md-typeset .gx-tagline {
+    font-size: 1.1rem;
+  }
+  .gx-hero {
+    padding-top: 1rem;
+  }
+}

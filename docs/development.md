@@ -27,6 +27,7 @@ and [`CLAUDE.md`](../CLAUDE.md) point here and do not repeat them.
 | `scripts/` | `init-secrets.sh` / `.ps1`, `run-db-tests.sh`, benchmarks. | |
 | `tools/` | `docs/` (diagrams, UI screenshots, API docs assets), `release/version.mjs`, `export/ndjson_to_age.py`. | |
 | `docs/` | User and design documentation; [`README.md`](README.md) is its index. | |
+| `website/` | The website at `pomentum.github.io/graphos`, built from the docs (MkDocs Material). | [§3](#pictures-and-docs-tools) |
 | `docs/adrs/` | Architecture decision records: one file per decision. | [ADRs](adrs/README.md) |
 | `docs/images/` | Diagrams and UI screenshots, all made by `tools/docs/`. | [§3](#pictures-and-docs-tools) |
 
@@ -160,6 +161,25 @@ for diagrams and `<!--shot:<name>-->…<!--/shot:…-->` for screenshots, that
 The `whitepaper` workflow publishes the page on every push to `main` that
 touches it, `docs/images/` or `tools/docs/`, so merging such a change
 publishes it.
+
+**The website** (`https://pomentum.github.io/graphos/`) is the docs
+rendered with MkDocs Material, and holds no text of its own:
+`website/assemble.py` copies `docs/*.md`, `docs/images/`, the whitepaper,
+the changelog and the UI and client READMEs into `website/.build/docs`,
+points their links at the site's pages (or at GitHub for other files) and
+fills the landing page's frame, `website/home.md`, with the README's
+sections. Write in the docs and the README, never in `website/.build/`.
+
+```bash
+pip install -r website/requirements.txt
+bash website/build.sh                   # assemble, then mkdocs build --strict: a broken link fails
+python -m http.server -d website/.build/site 8000   # preview at http://127.0.0.1:8000/
+```
+
+A new doc gets a line in `nav` of `website/mkdocs.yml`; a file outside
+`docs/` that should be a page goes into `EXTRA_PAGES` of `assemble.py`.
+The `pages` workflow builds the site on pull requests that touch it and
+publishes it on every push to `main` that does.
 
 **API docs assets.** graphos serves Swagger UI (`/docs`) and ReDoc
 (`/redoc`) from files in `services/graphos/src/graphos/static/api-docs/`,
