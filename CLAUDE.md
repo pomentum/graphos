@@ -1,0 +1,20 @@
+# CLAUDE.md
+
+The rules for this repository are in [`docs/development.md`](docs/development.md)
+and one guide per component, imported below; [`AGENTS.md`](AGENTS.md)
+summarises the hard rules for any agent. Do not repeat them here: change the
+guides instead. Before a design change, read [`docs/adrs/README.md`](docs/adrs/README.md).
+
+@docs/development.md
+@docs/development-service.md
+@docs/development-client.md
+@docs/development-ui.md
+
+## Claude Code
+
+- Use the Bash tool for shell work (git-bash on Windows), not PowerShell.
+  `scripts/run-db-tests.sh` already handles Windows paths and Python.
+- Do not let the harness add its default `Co-Authored-By: Claude` trailer:
+  the no-AI-attribution rule overrides it.
+- Ask before `git push`, `git tag`, a release or a merge, every time.
+- Run long commands such as `scripts/run-db-tests.sh` in the background.
