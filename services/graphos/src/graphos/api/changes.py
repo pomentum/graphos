@@ -44,6 +44,7 @@ _STREAM_BATCH = 500
 _GONE_RESPONSE = {
     410: {"description": "The records after this cursor were pruned; resync from the head."},
 }
+_BAD_CURSOR_RESPONSE = {400: {"description": "The cursor is not one the feed issued."}}
 
 
 def _cursor(text: str | None) -> changes.Cursor | None:
@@ -94,7 +95,7 @@ def item(change: changes.Change) -> ChangeItem:
         "`next` back as `after` to continue; `more` means the page was full.  Delivery "
         "is at least once and never skips a committed change."
     ),
-    responses=_GONE_RESPONSE,
+    responses={**_BAD_CURSOR_RESPONSE, **_GONE_RESPONSE},
 )
 async def list_changes(
     tenant: Tenant,
@@ -148,6 +149,7 @@ async def changes_head(
         "For showing what happened; to follow the feed, use `after` or the stream. "
         "Records older than the retention period are gone."
     ),
+    responses=_BAD_CURSOR_RESPONSE,
 )
 async def changes_history(
     tenant: Tenant,
@@ -194,6 +196,7 @@ async def changes_history(
             ),
             "content": {"text/event-stream": {}},
         },
+        **_BAD_CURSOR_RESPONSE,
         **_GONE_RESPONSE,
     },
 )

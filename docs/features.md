@@ -611,8 +611,9 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   the tenant's data downloaded and uploaded as one dataset file;
   a CSV file imported by writers as nodes of a label or as relationships
   (separator detected, each column mapped to a property and a type, a preview
-  of the first rows and checks over all of them, sent through the NDJSON bulk
-  endpoints with its progress and graphos's answer);
+  of the first rows; the file itself sent to `nodes:csv` / `edges:csv`, which
+  read, merge and check it: a dry run with each change of the mapping, then
+  the import, with its progress and graphos's answer);
   activity (what runs now, with cancel, and the writes, computations and
   schema changes of the last days, filterable, with a running indicator in
   the toolbar on every page); a label as a table; the schema as a list or a diagram (laid out

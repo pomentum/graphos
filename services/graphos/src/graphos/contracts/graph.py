@@ -38,9 +38,13 @@ BULK_FLUSH_CHUNK = 500
 class NodeHit(BaseModel):
     """One row in a graph search / read response."""
 
-    id: int                                       # AGE graphid
-    label: str                                    # vertex label
-    properties: dict[str, object] = Field(default_factory=dict)
+    id: int = Field(  # AGE graphid
+        ..., description="The node's AGE graph id (internal), not its `id` property.",
+    )
+    label: str = Field(..., description="The node's own vertex label.")  # vertex label
+    properties: dict[str, object] = Field(
+        default_factory=dict, description="The node's stored properties.",
+    )
 
 
 class SearchHit(NodeHit):
@@ -53,11 +57,11 @@ class SearchHit(NodeHit):
 class SearchResponse(BaseModel):
     """Response for GET /v1/{tenant}/graph/search."""
 
-    tenant: str
-    query: str
-    label: str | None = None
+    tenant: str = Field(..., description="The tenant.")
+    query: str = Field(..., description="The query `q`, as sent.")
+    label: str | None = Field(None, description="The `label` searched; null for every label.")
     index: str | None = Field(None, description="The search index used; null for substring.")
-    limit: int
+    limit: int = Field(..., description="The `limit` applied.")
     truncated: bool = Field(
         ...,
         description=(
@@ -66,8 +70,13 @@ class SearchResponse(BaseModel):
             "round-trip second query — so it's a hint, not authoritative."
         ),
     )
-    elapsed_ms: int
-    nodes: list[SearchHit] = Field(default_factory=list)
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
+    nodes: list[SearchHit] = Field(
+        default_factory=list,
+        description=(
+            "The hits: by score with a search index; in no set order for a substring search."
+        ),
+    )
 
 
 def validate_label_optional(value: str | None) -> str | None:
@@ -103,7 +112,10 @@ class NodeUpsert(BaseModel):
     same consumer-side scan.
     """
 
-    id: str = Field(..., min_length=1, max_length=_NODE_ID_MAX_LEN)
+    id: str = Field(
+        ..., min_length=1, max_length=_NODE_ID_MAX_LEN,
+        description="The node's external id (1 to 512 characters): the key it is upserted on.",
+    )
     label: str = Field(..., description="Vertex label; must be registered for the tenant.")
     properties: dict[str, object] = Field(
         default_factory=dict,
@@ -143,10 +155,19 @@ class NodesUpsertRequest(BaseModel):
 
 
 class NodesUpsertResponse(BaseModel):
-    tenant: str
-    nodes_upserted: int
-    by_label: dict[str, int] = Field(default_factory=dict)
-    elapsed_ms: int
+    """What a small-batch node upsert wrote."""
+
+    tenant: str = Field(..., description="The tenant.")
+    nodes_upserted: int = Field(
+        ...,
+        description=(
+            "Distinct nodes inserted or merged into (an id repeated in one label counts once)."
+        ),
+    )
+    by_label: dict[str, int] = Field(
+        default_factory=dict, description="`nodes_upserted` per vertex label.",
+    )
+    elapsed_ms: int = Field(..., description="Time spent writing, in milliseconds.")
     property_warnings: dict[str, int] = Field(
         default_factory=dict,
         description="Written rows' property problems, by `<label or *>.<property>:<rule>`.",
@@ -179,8 +200,10 @@ class NodePropertiesUpsertRequest(BaseModel):
 
 
 class NodePropertiesUpsertResponse(BaseModel):
-    tenant: str
-    external_id: str
+    """The node a property merge wrote to, and its new revision."""
+
+    tenant: str = Field(..., description="The tenant.")
+    external_id: str = Field(..., description="The node's `id`, as in the URL.")
     label: str = Field(
         ..., description=(
             "The AGE label of the node that was updated.  Reported so callers "
@@ -196,21 +219,23 @@ class NodePropertiesUpsertResponse(BaseModel):
     etag: str = Field(
         ..., description="Also the `ETag` header; send it as `If-Match` to write this version.",
     )
-    elapsed_ms: int
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
 
 
 class NodeGetResponse(BaseModel):
     """Single-node read by external id, returning the full property bag."""
 
-    tenant: str
-    external_id: str
-    label: str
-    properties: dict[str, object] = Field(default_factory=dict)
+    tenant: str = Field(..., description="The tenant.")
+    external_id: str = Field(..., description="The node's `id`, as in the URL.")
+    label: str = Field(..., description="The node's own vertex label.")
+    properties: dict[str, object] = Field(
+        default_factory=dict, description="Every stored property, `id` included.",
+    )
     rev: int = Field(..., description="Revision: 1 when created, +1 on every write.")
     etag: str = Field(
         ..., description="Also the `ETag` header; send it as `If-Match` to write this version.",
     )
-    elapsed_ms: int
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
 
 
 # ── One edge, by identity ──────────────────────────────────────────────────
@@ -219,27 +244,31 @@ class NodeGetResponse(BaseModel):
 class EdgeGetResponse(BaseModel):
     """One edge, named by its type and the ids of its two ends."""
 
-    tenant: str
-    type: str
-    src_id: str
-    src_label: str
-    dst_id: str
-    dst_label: str
-    properties: dict[str, object] = Field(default_factory=dict)
+    tenant: str = Field(..., description="The tenant.")
+    type: str = Field(..., description="The edge type.")
+    src_id: str = Field(..., description="`id` of the source node, as asked.")
+    src_label: str = Field(..., description="The source node's vertex label.")
+    dst_id: str = Field(..., description="`id` of the target node, as asked.")
+    dst_label: str = Field(..., description="The target node's vertex label.")
+    properties: dict[str, object] = Field(
+        default_factory=dict, description="The edge's stored properties.",
+    )
     rev: int = Field(..., description="Revision: 1 when created, +1 on every write.")
     etag: str = Field(
         ..., description="Also the `ETag` header; send it as `If-Match` to write this version.",
     )
-    elapsed_ms: int
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
 
 
 class DeleteEdgeResponse(BaseModel):
-    tenant: str
-    type: str
-    src_id: str
-    dst_id: str
+    """What deleting one edge removed; its end nodes stay."""
+
+    tenant: str = Field(..., description="The tenant.")
+    type: str = Field(..., description="The edge type.")
+    src_id: str = Field(..., description="`id` of the source node, as asked.")
+    dst_id: str = Field(..., description="`id` of the target node, as asked.")
     edges_deleted: int = Field(..., description="1, or 0 when there was no such edge.")
-    elapsed_ms: int
+    elapsed_ms: int = Field(..., description="Time spent deleting, in milliseconds.")
 
 
 # ── Many edges checked at once (POST /edges:check) ─────────────────────────
@@ -249,8 +278,12 @@ class EdgeCheckItem(BaseModel):
     """One edge to look for, named as in ``GET /edges/{type}``."""
 
     type: str = Field(..., description="Edge type; must be registered for the tenant.")
-    src_id: str = Field(..., min_length=1, max_length=_NODE_ID_MAX_LEN)
-    dst_id: str = Field(..., min_length=1, max_length=_NODE_ID_MAX_LEN)
+    src_id: str = Field(
+        ..., min_length=1, max_length=_NODE_ID_MAX_LEN, description="`id` of the source node.",
+    )
+    dst_id: str = Field(
+        ..., min_length=1, max_length=_NODE_ID_MAX_LEN, description="`id` of the target node.",
+    )
     src_label: str | None = Field(
         None, description="Source label; needed only when the id is in several labels.",
     )
@@ -285,9 +318,9 @@ class EdgesCheckRequest(BaseModel):
 class EdgeCheckResult(BaseModel):
     """What was found for one requested edge, in request order."""
 
-    type: str
-    src_id: str
-    dst_id: str
+    type: str = Field(..., description="The edge type, as requested.")
+    src_id: str = Field(..., description="`id` of the source node, as requested.")
+    dst_id: str = Field(..., description="`id` of the target node, as requested.")
     status: Literal["present", "absent", "ambiguous"] = Field(
         ...,
         description=(
@@ -296,8 +329,12 @@ class EdgeCheckResult(BaseModel):
             "`candidates` lists the label pairs, and `src_label` / `dst_label` pick one."
         ),
     )
-    src_label: str | None = None
-    dst_label: str | None = None
+    src_label: str | None = Field(
+        None, description="The source's label: found when present, else as requested.",
+    )
+    dst_label: str | None = Field(
+        None, description="The target's label: found when present, else as requested.",
+    )
     rev: int | None = Field(None, description="The present edge's revision.")
     etag: str | None = Field(None, description="The present edge's ETag, for a later `If-Match`.")
     properties: dict[str, object] | None = Field(
@@ -311,12 +348,12 @@ class EdgeCheckResult(BaseModel):
 class EdgesCheckResponse(BaseModel):
     """Response for POST /v1/{tenant}/graph/edges:check."""
 
-    tenant: str
+    tenant: str = Field(..., description="The tenant.")
     results: list[EdgeCheckResult] = Field(..., description="One per requested edge, in order.")
-    present: int
-    absent: int
-    ambiguous: int
-    elapsed_ms: int
+    present: int = Field(..., description="Results with status `present`.")
+    absent: int = Field(..., description="Results with status `absent`.")
+    ambiguous: int = Field(..., description="Results with status `ambiguous`.")
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
 
 
 # ── Edge upsert ────────────────────────────────────────────────────────────
@@ -332,12 +369,21 @@ class EdgeUpsert(BaseModel):
     ``edges_skipped`` so the consumer can detect ordering issues.
     """
 
-    src_id: str = Field(..., min_length=1, max_length=_NODE_ID_MAX_LEN)
+    src_id: str = Field(
+        ..., min_length=1, max_length=_NODE_ID_MAX_LEN,
+        description="`id` of the source node, which must exist.",
+    )
     src_label: str = Field(..., description="Vertex label of the source.")
-    dst_id: str = Field(..., min_length=1, max_length=_NODE_ID_MAX_LEN)
+    dst_id: str = Field(
+        ..., min_length=1, max_length=_NODE_ID_MAX_LEN,
+        description="`id` of the destination node, which must exist.",
+    )
     dst_label: str = Field(..., description="Vertex label of the destination.")
     type: str = Field(..., description="Edge label / relationship type.")
-    properties: dict[str, object] = Field(default_factory=dict)
+    properties: dict[str, object] = Field(
+        default_factory=dict,
+        description="Free-form properties, merged into the edge's (keys not sent are kept).",
+    )
 
     @field_validator("src_label", "dst_label", "type")
     @classmethod
@@ -369,11 +415,15 @@ class EdgesUpsertRequest(BaseModel):
 
 
 class EdgesUpsertResponse(BaseModel):
-    tenant: str
+    """What a small-batch edge upsert wrote and skipped."""
+
+    tenant: str = Field(..., description="The tenant.")
     edges_upserted: int = Field(..., description="MERGEs whose MATCH found both endpoints.")
     edges_skipped: int = Field(..., description="Rows whose src or dst node didn't exist.")
-    by_type: dict[str, int] = Field(default_factory=dict)
-    elapsed_ms: int
+    by_type: dict[str, int] = Field(
+        default_factory=dict, description="`edges_upserted` per edge type.",
+    )
+    elapsed_ms: int = Field(..., description="Time spent writing, in milliseconds.")
     property_warnings: dict[str, int] = Field(
         default_factory=dict,
         description="Written rows' property problems, by `<label or *>.<property>:<rule>`.",
@@ -386,21 +436,27 @@ class EdgesUpsertResponse(BaseModel):
 class BulkNodesResponse(BaseModel):
     """Response for POST /v1/{tenant}/graph/nodes:bulk."""
 
-    tenant: str
-    rows_received: int
+    tenant: str = Field(..., description="The tenant.")
+    rows_received: int = Field(..., description="Non-blank lines read, invalid ones included.")
     rows_invalid: int = Field(
         ...,
         description=(
-            "NDJSON lines that failed Pydantic validation; their indices appear in `errors`."
+            "Lines refused: not JSON or not a valid node, an unregistered label, a reserved "
+            "property name, or a property error under `strict`; their line numbers appear in "
+            "`errors`."
         ),
     )
-    nodes_upserted: int
-    by_label: dict[str, int] = Field(default_factory=dict)
+    nodes_upserted: int = Field(
+        ..., description="Nodes inserted or merged into, over every flushed batch.",
+    )
+    by_label: dict[str, int] = Field(
+        default_factory=dict, description="`nodes_upserted` per vertex label.",
+    )
     errors: list[str] = Field(
         default_factory=list,
         description="The first 50 invalid lines' errors, in the form 'line N: <message>'.",
     )
-    elapsed_ms: int
+    elapsed_ms: int = Field(..., description="Time spent reading and writing, in milliseconds.")
     property_violations: dict[str, int] = Field(
         default_factory=dict,
         description="Refused rows' property errors, by `<label or *>.<property>:<rule>` (strict).",
@@ -414,14 +470,30 @@ class BulkNodesResponse(BaseModel):
 class BulkEdgesResponse(BaseModel):
     """Response for POST /v1/{tenant}/graph/edges:bulk."""
 
-    tenant: str
-    rows_received: int
-    rows_invalid: int
-    edges_upserted: int
-    edges_skipped: int
-    by_type: dict[str, int] = Field(default_factory=dict)
-    errors: list[str] = Field(default_factory=list)
-    elapsed_ms: int
+    tenant: str = Field(..., description="The tenant.")
+    rows_received: int = Field(..., description="Non-blank lines read, invalid ones included.")
+    rows_invalid: int = Field(
+        ...,
+        description=(
+            "Lines refused: not JSON or not a valid edge, an unregistered label or type, a "
+            "reserved property name, a label pair `strict_endpoints` refuses, or a property "
+            "error under `strict`."
+        ),
+    )
+    edges_upserted: int = Field(
+        ..., description="Edges inserted or merged into, over every flushed batch.",
+    )
+    edges_skipped: int = Field(
+        ..., description="Valid lines not written because an end node does not exist.",
+    )
+    by_type: dict[str, int] = Field(
+        default_factory=dict, description="`edges_upserted` per edge type.",
+    )
+    errors: list[str] = Field(
+        default_factory=list,
+        description="The first 50 invalid lines' errors, in the form 'line N: <message>'.",
+    )
+    elapsed_ms: int = Field(..., description="Time spent reading and writing, in milliseconds.")
     property_violations: dict[str, int] = Field(
         default_factory=dict,
         description="Refused rows' property errors, by `<label or *>.<property>:<rule>` (strict).",
@@ -438,9 +510,15 @@ class BulkEdgesResponse(BaseModel):
 class CsvColumnPlan(BaseModel):
     """One CSV column as it was imported: the property it filled, its type."""
 
-    header: str
-    property: str
-    type: Literal["auto", "text", "number", "boolean"]
+    header: str = Field(..., description="The column's header in the file.")
+    property: str = Field(..., description="The property it fills.")
+    type: Literal["auto", "text", "number", "boolean"] = Field(
+        ...,
+        description=(
+            "How its cells are read: `auto` (`true` / `false`, plain numbers, else text), "
+            "`text`, `number` or `boolean` (also `yes` / `no` / `1` / `0`)."
+        ),
+    )
 
 
 class CsvIssue(BaseModel):
@@ -455,7 +533,7 @@ class CsvIssue(BaseModel):
         ),
     )
     refused: bool = Field(..., description="The rows it names are not written.")
-    count: int
+    count: int = Field(..., description="How many times it occurs in the file.")
     examples: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Up to 3: the row (from 1, under the header), column, value.",
@@ -465,9 +543,14 @@ class CsvIssue(BaseModel):
 class CsvImportResponse(BaseModel):
     """Response for POST /v1/{tenant}/graph/nodes:csv and /edges:csv."""
 
-    tenant: str
+    tenant: str = Field(..., description="The tenant.")
     dry_run: bool = Field(..., description="Checked only: nothing was written.")
-    delimiter: Literal["comma", "semicolon", "tab"]
+    delimiter: Literal["comma", "semicolon", "tab"] = Field(
+        ...,
+        description=(
+            "The separator used: as asked, else the one that splits the first lines most evenly."
+        ),
+    )
     rows: int = Field(..., description="Rows under the header (blank lines aside).")
     records: int = Field(
         ...,
@@ -488,9 +571,17 @@ class CsvImportResponse(BaseModel):
         default_factory=list,
         description="The first 50 refused records, as 'row N: <message>' (the first of its rows).",
     )
-    elapsed_ms: int
-    property_violations: dict[str, int] = Field(default_factory=dict)
-    property_warnings: dict[str, int] = Field(default_factory=dict)
+    elapsed_ms: int = Field(..., description="Time spent, in milliseconds.")
+    property_violations: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Refused records' property errors, by `<label or *>.<property>:<rule>` (strict)."
+        ),
+    )
+    property_warnings: dict[str, int] = Field(
+        default_factory=dict,
+        description="Written records' property problems, by `<label or *>.<property>:<rule>`.",
+    )
 
 
 # ── Reads: neighbors + induced_edges ───────────────────────────────────────
@@ -512,11 +603,18 @@ MAX_EXPAND_LIMIT = 1000
 class EdgeHit(BaseModel):
     """One edge row in a graph-read response."""
 
-    id: int                         # AGE relationship graphid
-    src_id: str                     # neighbor's consumer-assigned `id` (or this node's)
-    dst_id: str
-    type: str
-    properties: dict[str, object] = Field(default_factory=dict)
+    id: int = Field(  # AGE relationship graphid
+        ..., description="The edge's AGE graph id (internal).",
+    )
+    src_id: str = Field(  # neighbor's consumer-assigned `id` (or this node's)
+        ..., description="`id` of the source node.",
+    )
+    dst_id: str = Field(..., description="`id` of the target node.")
+    type: str = Field(..., description="The edge type.")
+    properties: dict[str, object] = Field(
+        default_factory=dict,
+        description="The edge's properties; empty in a scoped subgraph, which does not read them.",
+    )
 
 
 class Neighbor(BaseModel):
@@ -527,21 +625,39 @@ class Neighbor(BaseModel):
     neighbor to us.
     """
 
-    neighbor_id: str
-    neighbor_label: str
-    neighbor_properties: dict[str, object] = Field(default_factory=dict)
-    direction: str = Field(..., pattern="^(in|out)$")
-    edge_type: str
-    edge_properties: dict[str, object] = Field(default_factory=dict)
+    neighbor_id: str = Field(
+        ..., description="The neighbor's `id`; its graph id when it has none.",
+    )
+    neighbor_label: str = Field(..., description="The neighbor's vertex label.")
+    neighbor_properties: dict[str, object] = Field(
+        default_factory=dict, description="The neighbor's stored properties.",
+    )
+    direction: str = Field(
+        ..., pattern="^(in|out)$",
+        description="`out`: the edge points from the node to the neighbor; `in`: the other way.",
+    )
+    edge_type: str = Field(..., description="The connecting edge's type.")
+    edge_properties: dict[str, object] = Field(
+        default_factory=dict, description="The connecting edge's properties.",
+    )
 
 
 class NeighborsResponse(BaseModel):
-    tenant: str
-    node_id: str
-    limit: int
-    truncated: bool
-    elapsed_ms: int
-    neighbors: list[Neighbor] = Field(default_factory=list)
+    """A node's neighbors, one row per connecting edge."""
+
+    tenant: str = Field(..., description="The tenant.")
+    node_id: str = Field(..., description="`id` of the node, as sent.")
+    limit: int = Field(..., description="The `limit` applied.")
+    truncated: bool = Field(
+        ..., description="`limit` rows were returned: there may be more (a hint).",
+    )
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
+    neighbors: list[Neighbor] = Field(
+        default_factory=list,
+        description=(
+            "Outgoing edges first, then incoming; empty when the node does not exist."
+        ),
+    )
 
 
 class InducedEdgesRequest(BaseModel):
@@ -555,30 +671,45 @@ class InducedEdgesRequest(BaseModel):
         ...,
         min_length=1,
         max_length=MAX_INDUCED_NODE_IDS,
+        description="1 to 1000 node `id`s, in any label; unknown ids are ignored.",
     )
     rel_types: list[str] | None = Field(
         default=None,
         description="If set, restrict to edges of these types. Default: all types.",
     )
-    limit: int = Field(default=DEFAULT_INDUCED_LIMIT, ge=1, le=MAX_INDUCED_LIMIT)
+    limit: int = Field(
+        default=DEFAULT_INDUCED_LIMIT, ge=1, le=MAX_INDUCED_LIMIT,
+        description="Edges to return at most (1 to 5000).",
+    )
 
 
 class InducedEdgesResponse(BaseModel):
-    tenant: str
-    node_count: int
-    rel_types: list[str] | None = None
-    limit: int
-    truncated: bool
-    elapsed_ms: int
-    edges: list[EdgeHit] = Field(default_factory=list)
+    """The edges among a set of nodes."""
+
+    tenant: str = Field(..., description="The tenant.")
+    node_count: int = Field(..., description="Entries in `node_ids`, as sent.")
+    rel_types: list[str] | None = Field(
+        None, description="The `rel_types` applied; null for every type.",
+    )
+    limit: int = Field(..., description="The `limit` applied.")
+    truncated: bool = Field(
+        ..., description="`limit` edges were returned: there may be more (a hint).",
+    )
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
+    edges: list[EdgeHit] = Field(
+        default_factory=list, description="Edges whose two ends are both among the nodes.",
+    )
 
 
 class ScopedSubgraphNode(BaseModel):
     """One vertex in a scoped-subgraph response."""
 
-    id: str
-    label: str = ""
-    properties: dict[str, object] = Field(default_factory=dict)
+    id: str = Field(..., description="The node's `id`; its graph id when it has none.")
+    label: str = Field("", description="The node's own vertex label.")
+    properties: dict[str, object] = Field(
+        default_factory=dict,
+        description="The `include_properties` the node has (null values left out).",
+    )
 
 
 class ScopedSubgraphRequest(BaseModel):
@@ -597,16 +728,44 @@ class ScopedSubgraphRequest(BaseModel):
     index on ``scope_property`` at registration for large tenants.
     """
 
-    scope_property: str
-    scope_value: str = Field(..., min_length=1)
-    group_property: str | None = None
-    group_values: list[str] | None = Field(default=None, max_length=64)
-    include_properties: list[str] = Field(default_factory=lambda: ["name"], max_length=32)
-    exclude_property: str | None = None
-    exclude_substrings: list[str] | None = Field(default=None, max_length=64)
-    node_cap: int = Field(default=1200, ge=1, le=4000)
-    rel_types: list[str] | None = None
-    edge_limit: int = Field(default=8000, ge=1, le=12000)
+    scope_property: str = Field(..., description="The property that selects the vertices.")
+    scope_value: str = Field(
+        ..., min_length=1,
+        description="The value `scope_property` must equal: a string value, matched exactly.",
+    )
+    group_property: str | None = Field(
+        None, description="A property to balance the vertices across; needs `group_values`.",
+    )
+    group_values: list[str] | None = Field(
+        default=None, max_length=64,
+        description=(
+            "Keep only vertices whose `group_property` is one of these (up to 64), at most "
+            "`node_cap / len(group_values)` (at least 40) of each."
+        ),
+    )
+    include_properties: list[str] = Field(
+        default_factory=lambda: ["name"], max_length=32,
+        description="Properties returned on each vertex (up to 32; default `name`).",
+    )
+    exclude_property: str | None = Field(
+        None, description="A property tested against `exclude_substrings`.",
+    )
+    exclude_substrings: list[str] | None = Field(
+        default=None, max_length=64,
+        description=(
+            "Drop vertices whose `exclude_property` contains any of these, ignoring case "
+            "(up to 64); needs `exclude_property`."
+        ),
+    )
+    node_cap: int = Field(
+        default=1200, ge=1, le=4000, description="Vertices to return at most (1 to 4000).",
+    )
+    rel_types: list[str] | None = Field(
+        None, description="Edge types of the induced edges; all when absent.",
+    )
+    edge_limit: int = Field(
+        default=8000, ge=1, le=12000, description="Edges to return at most (1 to 12000).",
+    )
 
     @field_validator("scope_property", "group_property", "exclude_property")
     @classmethod
@@ -628,13 +787,24 @@ class ScopedSubgraphRequest(BaseModel):
 
 
 class ScopedSubgraphResponse(BaseModel):
-    tenant: str
-    scope_property: str
-    scope_value: str
-    truncated: bool
-    elapsed_ms: int
-    nodes: list[ScopedSubgraphNode] = Field(default_factory=list)
-    edges: list[EdgeHit] = Field(default_factory=list)
+    """The vertices sharing one property value, and the edges among them."""
+
+    tenant: str = Field(..., description="The tenant.")
+    scope_property: str = Field(..., description="The `scope_property`, as sent.")
+    scope_value: str = Field(..., description="The `scope_value`, as sent.")
+    truncated: bool = Field(
+        ...,
+        description=(
+            "`node_cap` was reached, or the scan read its row cap (4 x `node_cap`, between "
+            "2000 and 8000): more vertices may match."
+        ),
+    )
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
+    nodes: list[ScopedSubgraphNode] = Field(default_factory=list, description="The vertices.")
+    edges: list[EdgeHit] = Field(
+        default_factory=list,
+        description="Edges with both ends among `nodes`, at most `edge_limit`, without properties.",
+    )
 
 
 class CatalogueResponse(BaseModel):
@@ -653,8 +823,11 @@ class CatalogueResponse(BaseModel):
     pruned, see ``catalogue._discover_label_parents``).
     """
 
-    tenant: str
-    by_property: dict[str, list[str]] = Field(default_factory=dict)
+    tenant: str = Field(..., description="The tenant.")
+    by_property: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Per property name, the leaf vertex labels carrying it, sorted.",
+    )
 
 
 # ── Expand (variable-length BFS) ───────────────────────────────────────────
@@ -663,10 +836,12 @@ class CatalogueResponse(BaseModel):
 class PathHit(BaseModel):
     """One reachable endpoint with metadata about the path that got there."""
 
-    end_id: str
-    end_label: str
-    end_properties: dict[str, object] = Field(default_factory=dict)
-    hops: int = Field(..., ge=1)
+    end_id: str = Field(..., description="The reached node's `id`; its graph id when it has none.")
+    end_label: str = Field(..., description="The reached node's vertex label.")
+    end_properties: dict[str, object] = Field(
+        default_factory=dict, description="The reached node's stored properties.",
+    )
+    hops: int = Field(..., ge=1, description="Edges from the nearest seed: the first hop found.")
     rel_path: list[str] = Field(
         ...,
         description="Edge types in order from seed to endpoint.",
@@ -674,15 +849,27 @@ class PathHit(BaseModel):
 
 
 class ExpandResponse(BaseModel):
-    tenant: str
-    node_id: str
-    max_hops: int
-    direction: str
-    rel_types: list[str] | None = None
-    limit: int
-    truncated: bool
-    elapsed_ms: int
-    paths: list[PathHit] = Field(default_factory=list)
+    """The nodes reached from the seeds, nearest first."""
+
+    tenant: str = Field(..., description="The tenant.")
+    node_id: str = Field(..., description="The `node_id`, as sent (also when `seeds` is used).")
+    max_hops: int = Field(..., description="The `max_hops` applied.")
+    direction: str = Field(..., description="The `direction` walked: `out`, `in` or `both`.")
+    rel_types: list[str] | None = Field(
+        None, description="The `rel_types` walked; null for every type.",
+    )
+    limit: int = Field(..., description="The `limit` applied.")
+    truncated: bool = Field(
+        ..., description="`limit` nodes were returned: more may be reachable (a hint).",
+    )
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
+    paths: list[PathHit] = Field(
+        default_factory=list,
+        description=(
+            "One entry per node reached (seeds left out), by `hops`, then `end_id`; empty "
+            "when no seed exists."
+        ),
+    )
 
 
 # ── Edges aggregate ────────────────────────────────────────────────────────
@@ -721,7 +908,9 @@ class EdgesAggregateRequest(BaseModel):
 
     group_by_src: str = Field(..., description="Source-node property to group by.")
     group_by_dst: str = Field(..., description="Destination-node property to group by.")
-    rel_types: list[str] | None = Field(default=None)
+    rel_types: list[str] | None = Field(
+        default=None, description="Edge types to count; all when absent.",
+    )
     src_values: list[str] | None = Field(
         default=None,
         description="If set, only count edges whose `src.<group_by_src>` is in this list.",
@@ -734,7 +923,10 @@ class EdgesAggregateRequest(BaseModel):
         default=False,
         description="If true, only count edges where the two grouping values differ.",
     )
-    limit: int = Field(default=DEFAULT_AGGREGATE_LIMIT, ge=1, le=MAX_AGGREGATE_LIMIT)
+    limit: int = Field(
+        default=DEFAULT_AGGREGATE_LIMIT, ge=1, le=MAX_AGGREGATE_LIMIT,
+        description="Groups to return at most (1 to 5000).",
+    )
 
     @field_validator("group_by_src", "group_by_dst")
     @classmethod
@@ -743,20 +935,40 @@ class EdgesAggregateRequest(BaseModel):
 
 
 class AggregateRow(BaseModel):
-    src_value: str
-    dst_value: str
-    rel_type: str
-    count: int
+    """One group of edges and its count."""
+
+    src_value: str = Field(
+        ...,
+        description="The source nodes' `group_by_src` value: a string as it is, else as JSON.",
+    )
+    dst_value: str = Field(
+        ...,
+        description="The target nodes' `group_by_dst` value: a string as it is, else as JSON.",
+    )
+    rel_type: str = Field(..., description="The edge type.")
+    count: int = Field(
+        ..., description="Edges in the group (both ends carry their grouping property).",
+    )
 
 
 class EdgesAggregateResponse(BaseModel):
-    tenant: str
-    group_by_src: str
-    group_by_dst: str
-    rel_types: list[str] | None = None
-    truncated: bool
-    elapsed_ms: int
-    groups: list[AggregateRow] = Field(default_factory=list)
+    """Edges grouped by their ends' property values and type, with counts."""
+
+    tenant: str = Field(..., description="The tenant.")
+    group_by_src: str = Field(..., description="The `group_by_src`, as sent.")
+    group_by_dst: str = Field(..., description="The `group_by_dst`, as sent.")
+    rel_types: list[str] | None = Field(
+        None, description="The `rel_types` counted; null for every type.",
+    )
+    truncated: bool = Field(..., description="There were more than `limit` groups.")
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
+    groups: list[AggregateRow] = Field(
+        default_factory=list,
+        description=(
+            "At most `limit` groups, by count descending, then `src_value`, `dst_value`, "
+            "`rel_type`."
+        ),
+    )
 
 
 # ── Node aggregate (sibling of the edges variant) ─────────────────────────
@@ -785,7 +997,10 @@ class NodesAggregateRequest(BaseModel):
         default=None,
         description="If set, only count nodes whose `n.<group_by>` is in this list.",
     )
-    limit: int = Field(default=DEFAULT_AGGREGATE_LIMIT, ge=1, le=MAX_AGGREGATE_LIMIT)
+    limit: int = Field(
+        default=DEFAULT_AGGREGATE_LIMIT, ge=1, le=MAX_AGGREGATE_LIMIT,
+        description="Groups to return at most (1 to 5000).",
+    )
     missing: bool = Field(
         default=False,
         description="Also count the nodes without `group_by`, under the value `\"\"`.",
@@ -798,21 +1013,29 @@ class NodesAggregateRequest(BaseModel):
 
 
 class NodeAggregateRow(BaseModel):
+    """One value of the property and how many nodes have it."""
+
     value: str = Field(
         ..., description="The property's value: a string as it is, any other value as JSON.",
     )
-    count: int
+    count: int = Field(..., description="Nodes with this value.")
 
 
 class NodesAggregateResponse(BaseModel):
-    tenant: str
-    label: str
-    group_by: str
-    truncated: bool
-    elapsed_ms: int
+    """Nodes of a label grouped by a property's value, with counts."""
+
+    tenant: str = Field(..., description="The tenant.")
+    label: str = Field(..., description="The `label` counted, its child labels included.")
+    group_by: str = Field(..., description="The `group_by` property, as sent.")
+    truncated: bool = Field(
+        ..., description="`limit` groups were returned: compare with `distinct` for more.",
+    )
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
     total: int = Field(..., description="Nodes counted in every group, `limit` aside.")
     distinct: int = Field(..., description="Groups (distinct values), `limit` aside.")
-    groups: list[NodeAggregateRow] = Field(default_factory=list)
+    groups: list[NodeAggregateRow] = Field(
+        default_factory=list, description="At most `limit` groups, by count descending.",
+    )
 
 
 # ── Stratified sample-subgraph (for graph visualisation) ───────────────────
@@ -889,46 +1112,86 @@ class SampleSubgraphRequest(BaseModel):
 
 
 class SampleNodeHit(BaseModel):
-    id: str
-    properties: dict[str, Any] = Field(default_factory=dict)
+    """One endpoint of the sampled edges."""
+
+    id: str = Field(
+        ..., description="The node's AGE graph id, as text: not its `id` property.",
+    )
+    properties: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "The `include_properties` it has, when it is a row of `label`; empty otherwise."
+        ),
+    )
 
 
 class SampleEdgeHit(BaseModel):
-    src_id: str
-    dst_id: str
-    type: str
-    properties: dict[str, Any] = Field(default_factory=dict)
+    """One sampled edge."""
+
+    src_id: str = Field(
+        ..., description="The source node's AGE graph id, as text (a `nodes` entry's `id`).",
+    )
+    dst_id: str = Field(
+        ..., description="The target node's AGE graph id, as text (a `nodes` entry's `id`).",
+    )
+    type: str = Field(..., description="The edge type.")
+    properties: dict[str, Any] = Field(
+        default_factory=dict, description="The `edge_properties` the edge has.",
+    )
 
 
 class SampleSubgraphResponse(BaseModel):
-    tenant: str
-    label: str
-    rel_types: list[str]
-    per_rel: int
-    truncated: bool
-    elapsed_ms: int
-    nodes: list[SampleNodeHit] = Field(default_factory=list)
-    edges: list[SampleEdgeHit] = Field(default_factory=list)
+    """A sample of up to `per_rel` edges per type, and their ends."""
+
+    tenant: str = Field(..., description="The tenant.")
+    label: str = Field(..., description="The `label`, as sent.")
+    rel_types: list[str] = Field(
+        ..., description="The edge types sampled: as sent, else every edge type of the tenant.",
+    )
+    per_rel: int = Field(..., description="The `per_rel` applied.")
+    truncated: bool = Field(..., description="Always false: `per_rel` is the only bound.")
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
+    nodes: list[SampleNodeHit] = Field(
+        default_factory=list, description="The ends of the edges, each once.",
+    )
+    edges: list[SampleEdgeHit] = Field(
+        default_factory=list,
+        description=(
+            "The sampled edges; with `filter_property`, only those whose two ends are rows "
+            "of `label` with that value."
+        ),
+    )
 
 
 # ── Delete responses ───────────────────────────────────────────────────────
 
 
 class DeleteNodeResponse(BaseModel):
-    tenant: str
-    node_id: str
-    nodes_deleted: int
+    """What deleting a node by id removed."""
+
+    tenant: str = Field(..., description="The tenant.")
+    node_id: str = Field(..., description="The node's `id`, as in the URL.")
+    nodes_deleted: int = Field(
+        ...,
+        description=(
+            "Nodes removed: every node with that id (in `label` only, when given); 0 when "
+            "there was none."
+        ),
+    )
     edges_deleted: int = Field(
         ...,
         description="Edges incident to the deleted node, removed with it (each counted once).",
     )
-    elapsed_ms: int
+    elapsed_ms: int = Field(..., description="Time spent deleting, in milliseconds.")
 
 
 class NodeRef(BaseModel):
     """One node named by its label and consumer-assigned ``id``."""
 
-    id: str = Field(..., min_length=1, max_length=_NODE_ID_MAX_LEN)
+    id: str = Field(
+        ..., min_length=1, max_length=_NODE_ID_MAX_LEN,
+        description="The node's external id (1 to 512 characters).",
+    )
     label: str = Field(..., description="Vertex label; must be registered for the tenant.")
 
     @field_validator("label")
@@ -958,25 +1221,35 @@ class NodesDeleteRequest(BaseModel):
 class DeleteNodesResponse(BaseModel):
     """Response for POST /v1/{tenant}/graph/nodes:delete."""
 
-    tenant: str
+    tenant: str = Field(..., description="The tenant.")
     nodes_requested: int = Field(..., description="Entries in the request, duplicates included.")
-    nodes_deleted: int
+    nodes_deleted: int = Field(
+        ..., description="Nodes removed, child labels' nodes included; missing ones are skipped.",
+    )
     edges_deleted: int = Field(
         ...,
         description="Edges incident to the deleted nodes, removed with them (each counted once).",
     )
-    elapsed_ms: int
+    elapsed_ms: int = Field(..., description="Time spent deleting, in milliseconds.")
 
 
 class DeleteByPropertyResponse(BaseModel):
     """Response for property-scoped tombstones (e.g. drop every node of one project)."""
 
-    tenant: str
-    property_key: str
-    property_value: str
-    nodes_deleted: int
-    edges_deleted: int
-    elapsed_ms: int
+    tenant: str = Field(..., description="The tenant.")
+    property_key: str = Field(..., description="The `property_key`, as sent.")
+    property_value: str = Field(..., description="The `property_value`, as sent.")
+    nodes_deleted: int = Field(
+        ...,
+        description=(
+            "Nodes removed: those whose property is the string `property_value` (not a number, "
+            "not an array holding it)."
+        ),
+    )
+    edges_deleted: int = Field(
+        ..., description="Edges incident to the deleted nodes, removed with them (each once).",
+    )
+    elapsed_ms: int = Field(..., description="Time spent deleting, in milliseconds.")
 
 
 # ── Bulk node enumeration (POST /nodes:scan) ──────────────────────────────
@@ -1001,7 +1274,13 @@ class NodesScanWhere(BaseModel):
     """
 
     property: str = Field(..., description="Property name to filter on.")
-    op: Literal["=", "!=", "in", "not in", "exists", "not exists"]
+    op: Literal["=", "!=", "in", "not in", "exists", "not exists"] = Field(
+        ...,
+        description=(
+            "`=` / `!=` compare with a scalar `value`; `in` / `not in` test membership in a list "
+            "`value`; `exists` / `not exists` test whether the property is present."
+        ),
+    )
     value: Any | None = Field(
         default=None,
         description=(
@@ -1106,8 +1385,8 @@ class NodesScanRequest(BaseModel):
             "  sort on ``properties.<order_by>``.  ``id`` benefits "
             "  from graphos's auto-created ``<Label>_id_unique`` "
             "  btree.  Other property names need a matching "
-            "  functional index declared via ``POST /v1/tenants`` "
-            "  ``indexes`` to stay index-driven on large tables.\n"
+            "  property index declared via ``POST /v1/tenants`` "
+            "  ``property_indexes`` to stay index-driven on large tables.\n"
             "* **``_node`` sentinel** (str): single-key ASC sort by "
             "  the node's intrinsic identity (AGE ``graphid`` primary "
             "  key — always indexed).  Equivalent to Cypher's "
@@ -1234,9 +1513,14 @@ class NodesScanItem(BaseModel):
 
 
 class NodesScanResponse(BaseModel):
-    tenant: str
-    labels: list[str]
-    items: list[NodesScanItem] = Field(default_factory=list)
+    """One page of a node scan."""
+
+    tenant: str = Field(..., description="The tenant.")
+    labels: list[str] = Field(..., description="The labels scanned, without repeats, in order.")
+    items: list[NodesScanItem] = Field(
+        default_factory=list,
+        description="The nodes of this page, label by label, in `order_by` order.",
+    )
     next_cursor: str | None = Field(
         default=None,
         description=(
@@ -1256,7 +1540,7 @@ class NodesScanResponse(BaseModel):
             "``next_cursor``."
         ),
     )
-    elapsed_ms: int
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
 
 
 # ── Bulk edge enumeration (POST /edges:scan) ──────────────────────────────
@@ -1378,10 +1662,26 @@ class EdgesScanItem(BaseModel):
 
 
 class EdgesScanResponse(BaseModel):
-    tenant: str
-    types: list[str]
-    items: list[EdgesScanItem] = Field(default_factory=list)
-    next_cursor: str | None = None
-    scanned: int
-    truncated_by_payload_cap: bool = False
-    elapsed_ms: int
+    """One page of an edge scan."""
+
+    tenant: str = Field(..., description="The tenant.")
+    types: list[str] = Field(..., description="The edge types scanned, without repeats, in order.")
+    items: list[EdgesScanItem] = Field(
+        default_factory=list,
+        description="The edges of this page, type by type, in graph id order.",
+    )
+    next_cursor: str | None = Field(
+        None,
+        description=(
+            "Opaque cursor for the next page (pass it as `cursor`); null when the scan is "
+            "fully drained."
+        ),
+    )
+    scanned: int = Field(..., description="Number of rows returned in this page.")
+    truncated_by_payload_cap: bool = Field(
+        False,
+        description=(
+            "True when the page was cut short by the 10 MiB payload cap before `limit` was hit."
+        ),
+    )
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")

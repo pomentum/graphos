@@ -24,6 +24,10 @@ and the commands.
   attribution.
 - **No push, tag, release or merge** without the owner's explicit approval
   in the current turn.
+- **Never rebase; merge.** Update a branch by merging `main` into it; no
+  `git rebase`, no `git pull --rebase`.
+- **Never commit secrets.** `deploy/secrets/` and `.env` stay ignored; never
+  `git add -f` them or put a password, key or token in a commit.
 - **No customer data** in code, tests, fixtures, commits or published docs:
   no customer names, schemas, hosts, repository ids or paths. Neutral
   fixtures only.

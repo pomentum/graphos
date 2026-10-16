@@ -143,3 +143,18 @@ async def test_scan_edges_where_and_multiple_types(db_pool: asyncpg.Pool) -> Non
     both = await _reference(db_pool, "CITES") + await _reference(db_pool, "PART_OF")
     items, _ = await _scan_all(db_pool, types=["CITES", "PART_OF"], limit=4)
     assert items == both
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_page_the_size_cap_ends_at_a_new_type_still_continues(
+    db_pool: asyncpg.Pool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A 1-byte cap: every page holds one row, so one page ends on the first
+    # row of PART_OF, before any of it was returned.
+    monkeypatch.setattr("graphos.api.graph.SCAN_PAYLOAD_CAP_BYTES", 1)
+    await _seed(db_pool)
+    expected = await _reference(db_pool, "CITES") + await _reference(db_pool, "PART_OF")
+    items, sizes = await _scan_all(db_pool, types=["CITES", "PART_OF"], limit=1000)
+    assert items == expected
+    assert set(sizes[:-1]) == {1}

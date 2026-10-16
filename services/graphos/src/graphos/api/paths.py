@@ -51,6 +51,10 @@ _GIDS = "ARRAY(SELECT x::graphid FROM unnest($1::text[]) AS x)"
         f"more than {MAX_PATH_LEVEL_EDGES:,} edges stops the search (`truncated`)."
     ),
     responses={
+        400: {"description": (
+            "`src_label`, `dst_label` or an edge type in `rel_types` is not registered for the "
+            "tenant."
+        )},
         404: {"description": "`src` or `dst` does not exist."},
         409: {"description": "`src` or `dst` is in several labels; pass its label."},
     },

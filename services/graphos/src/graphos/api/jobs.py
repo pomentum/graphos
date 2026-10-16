@@ -39,6 +39,13 @@ ACCEPTED_RESPONSE: dict[int | str, dict[str, Any]] = {
         ),
     },
 }
+# A synchronous call is listed as a job while it runs, so it can be cancelled.
+CANCELLED_RESPONSE: dict[int | str, dict[str, Any]] = {
+    409: {"description": "The call was cancelled (`POST /v1/jobs/{id}:cancel`) while it ran."},
+}
+_JOB_404: dict[int | str, dict[str, Any]] = {
+    404: {"description": "No such job, or one the caller may not see."},
+}
 
 
 def wants_async(request: Request) -> bool:
@@ -124,6 +131,7 @@ def _not_found(job_id: UUID) -> HTTPException:
         "instance-wide jobs (vacuum) to admins only. 404 for a job the caller may not see, "
         "as for one that does not exist or was deleted after the retention period."
     ),
+    responses=_JOB_404,
 )
 async def get_job(job_id: JobId, request: Request, principal: ReadPrincipal) -> Job:
     job = await jobs.get(request.app.state.pool, job_id)
@@ -176,6 +184,10 @@ async def list_jobs(
         "already finished. Cancelling a kind that needs admin scope to start "
         "needs admin scope."
     ),
+    responses={
+        **_JOB_404,
+        409: {"description": "The job has already finished."},
+    },
 )
 async def cancel_job(job_id: JobId, request: Request, principal: WritePrincipal) -> Job:
     pool = request.app.state.pool

@@ -25,7 +25,13 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
-from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, run_sync, wants_async
+from graphos.api.jobs import (
+    ACCEPTED_RESPONSE,
+    CANCELLED_RESPONSE,
+    respond_async,
+    run_sync,
+    wants_async,
+)
 from graphos.auth import AdminPrincipal
 from graphos.contracts.db import (
     DbStatsResponse,
@@ -230,7 +236,7 @@ def _validated_table_names(tables: list[str] | None) -> list[str]:
         "sparingly — it takes an exclusive lock. With `Prefer: "
         "respond-async` it runs as a background job (202, see `/v1/jobs`)."
     ),
-    responses=ACCEPTED_RESPONSE,
+    responses={**ACCEPTED_RESPONSE, **CANCELLED_RESPONSE},
 )
 async def vacuum(
     body: VacuumRequest,

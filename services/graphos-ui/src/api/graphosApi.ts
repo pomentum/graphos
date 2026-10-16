@@ -1,8 +1,8 @@
 import type { HttpClient, Tagged } from "./http";
 import type {
   AuthConfig,
-  BulkEdgesResult,
-  BulkNodesResult,
+  CsvImportQuery,
+  CsvImportResult,
   DeleteNodeResponse,
   DeleteNodesResponse,
   EdgeRecord,
@@ -60,6 +60,11 @@ export interface SearchParams {
 export interface UploadProgress {
   onSent?: (bytes: number, total: number) => void;
   signal?: AbortSignal;
+}
+
+export interface CsvImportOptions extends UploadProgress {
+  /** Check every row and write nothing: the answer says what the import would do. */
+  dryRun?: boolean;
 }
 
 export interface EdgeKey {
@@ -445,18 +450,20 @@ export class GraphosApi {
     });
   }
 
-  /** Upserts nodes sent as NDJSON, one `{id, label, properties}` per line (`write`). */
-  bulkNodes(file: Blob, progress: UploadProgress = {}): Promise<BulkNodesResult> {
-    return this.http.upload<BulkNodesResult>(`${this.graph}/nodes:bulk`, file, {
-      contentType: "application/x-ndjson",
-      ...progress,
-    });
-  }
-
-  /** Upserts edges sent as NDJSON, one `{src_id, src_label, dst_id, dst_label, type, properties}` per line. */
-  bulkEdges(file: Blob, progress: UploadProgress = {}): Promise<BulkEdgesResult> {
-    return this.http.upload<BulkEdgesResult>(`${this.graph}/edges:bulk`, file, {
-      contentType: "application/x-ndjson",
+  /**
+   * Imports a CSV file, sent as it is, as nodes of a label or relationships
+   * of a type (`write`); graphos reads, maps, merges and checks the rows.
+   * `dryRun` checks them and writes nothing.
+   */
+  csvImport(
+    kind: "nodes" | "edges",
+    file: Blob,
+    query: CsvImportQuery,
+    { dryRun = false, ...progress }: CsvImportOptions = {},
+  ): Promise<CsvImportResult> {
+    return this.http.upload<CsvImportResult>(`${this.graph}/${kind}:csv`, file, {
+      contentType: "text/csv",
+      query: { ...query, dry_run: dryRun },
       ...progress,
     });
   }

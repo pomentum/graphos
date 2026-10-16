@@ -50,7 +50,13 @@ from fastapi.responses import JSONResponse
 
 from graphos import lookup, properties, reserved, writes
 from graphos import search as search_index
-from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, run_sync, wants_async
+from graphos.api.jobs import (
+    ACCEPTED_RESPONSE,
+    CANCELLED_RESPONSE,
+    respond_async,
+    run_sync,
+    wants_async,
+)
 from graphos.auth import ReadPrincipal, Tenant, WritePrincipal, require_tenant
 from graphos.bootstrap import registered_tenants
 from graphos.contracts.export import (
@@ -230,6 +236,52 @@ _PRECONDITION_RESPONSES: dict[int | str, dict[str, Any]] = {
     428: {"description": "`If-Match` is required (`GRAPHOS_REQUIRE_IF_MATCH`) and was absent."},
 }
 
+# ── Error responses several routes share (``responses=``) ──────────────────
+
+_JSON_ERROR = {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}
+# The app's handlers answer a unique violation and a strict property refusal so.
+_PROBLEM = {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}
+UNIQUE_VIOLATION_RESPONSE: dict[int | str, dict[str, Any]] = {
+    409: {
+        "description": (
+            "The write would give two nodes the same values of a unique property index "
+            "(`application/problem+json`)."
+        ),
+        "content": _PROBLEM,
+    },
+}
+_NODE_CONFLICT_RESPONSE: dict[int | str, dict[str, Any]] = {
+    409: {
+        "description": (
+            "The id exists in several labels; pass `label`. Or the write would give two "
+            "nodes the same values of a unique property index (`application/problem+json`)."
+        ),
+        "content": {**_JSON_ERROR, **_PROBLEM},
+    },
+}
+_PROPERTY_REFUSAL_RESPONSE: dict[int | str, dict[str, Any]] = {
+    422: {
+        "description": (
+            "The request is not valid; or the property schema (mode `strict`) refuses rows, "
+            "listed in an `application/problem+json` body, and nothing is written."
+        ),
+        "content": {**_JSON_ERROR, **_PROBLEM},
+    },
+}
+_LABEL_400: dict[int | str, dict[str, Any]] = {
+    400: {"description": "`label` is not registered for the tenant."},
+}
+_END_LABEL_400: dict[int | str, dict[str, Any]] = {
+    400: {"description": "`src_label` or `dst_label` is not registered for the tenant."},
+}
+_NO_NODE_404: dict[int | str, dict[str, Any]] = {404: {"description": "No node has that id."}}
+_READ_FAILED_RESPONSE: dict[int | str, dict[str, Any]] = {
+    500: {"description": (
+        "The database refused a read; answered as an error, never as a smaller result "
+        "(the database's message is logged)."
+    )},
+}
+
 
 def _if_match(request: Request, header: str | None) -> lookup.IfMatch | None:
     if header is None:
@@ -289,7 +341,12 @@ def _node_response(
         "which is slow on a large tenant when few nodes match. Declare a search index "
         "for properties searched often."
     ),
-    responses={404: {"description": "No search index of that name."}},
+    responses={
+        400: {"description": (
+            "`label` is not registered for the tenant, or `index` does not cover it."
+        )},
+        404: {"description": "No search index of that name."},
+    },
 )
 async def search(
     tenant: Tenant,
@@ -488,6 +545,14 @@ def _group_by_label(nodes: Iterable[NodeUpsert]) -> dict[str, list[dict[str, obj
         "request payload are preserved. Re-POSTing the same payload is a "
         "graph-state no-op."
     ),
+    responses={
+        400: {"description": (
+            "A label not registered for the tenant, a reserved property name (`graphos_*`, "
+            "`community_id`), or a write the database refused."
+        )},
+        **UNIQUE_VIOLATION_RESPONSE,
+        **_PROPERTY_REFUSAL_RESPONSE,
+    },
 )
 async def upsert_nodes(
     tenant: Tenant,
@@ -570,7 +635,11 @@ def _row_check(tenant: str, part: str) -> writes.RowCheck | None:
         "each label's ``*_id_unique`` btree).  An id that exists in several "
         "labels answers 409 unless ``label`` picks one."
     ),
-    responses={409: {"description": "The id exists in several labels; pass `label`."}},
+    responses={
+        **_LABEL_400,
+        **_NO_NODE_404,
+        409: {"description": "The id exists in several labels; pass `label`."},
+    },
 )
 async def get_node_by_external_id(  # noqa: PLR0913 — FastAPI route parameters
     tenant: Tenant,
@@ -615,9 +684,14 @@ async def get_node_by_external_id(  # noqa: PLR0913 — FastAPI route parameters
         "with its new `ETag`."
     ),
     responses={
-        404: {"description": "No node has that id."},
-        409: {"description": "The id exists in several labels; pass `label`."},
+        400: {"description": (
+            "`label` is not registered for the tenant, the patch sets a reserved property name "
+            "(`graphos_*`, `community_id`), or the database refused the write."
+        )},
+        **_NO_NODE_404,
+        **_NODE_CONFLICT_RESPONSE,
         **_PRECONDITION_RESPONSES,
+        **_PROPERTY_REFUSAL_RESPONSE,
     },
 )
 async def patch_node(  # noqa: PLR0913 — FastAPI route parameters
@@ -683,8 +757,14 @@ async def patch_node(  # noqa: PLR0913 — FastAPI route parameters
         "picks one; nothing is written."
     ),
     responses={
-        409: {"description": "The id exists in several labels; pass `label`."},
+        400: {"description": (
+            "`label` is not registered for the tenant, or a property name is reserved "
+            "(`graphos_*`, `community_id`)."
+        )},
+        **_NO_NODE_404,
+        **_NODE_CONFLICT_RESPONSE,
         **_PRECONDITION_RESPONSES,
+        **_PROPERTY_REFUSAL_RESPONSE,
     },
 )
 async def upsert_node_properties(  # noqa: PLR0913 — FastAPI route parameters
@@ -716,6 +796,10 @@ async def upsert_node_properties(  # noqa: PLR0913 — FastAPI route parameters
         raise _precondition_failed(exc) from exc
     except lookup.AmbiguousMatchError as exc:
         raise _node_ambiguous(external_id, exc) from exc
+    except CypherError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"property merge failed: {exc}",
+        ) from exc
     if node is None:
         # Node not found — distinguish from "found but unchanged" because
         # the caller may have a stale view of which nodes exist.
@@ -769,6 +853,14 @@ def _group_edges(edges: Iterable[EdgeUpsert]) -> dict[EdgeKey, list[dict[str, ob
         "skipped and counted in `edges_skipped` (graphos does not "
         "auto-create endpoints). Properties merge additively."
     ),
+    responses={
+        400: {"description": (
+            "A label or edge type not registered for the tenant, a label pair its type does "
+            "not declare (`strict_endpoints`), a reserved property name (`graphos_*`, "
+            "`community_id`), or a write the database refused."
+        )},
+        **_PROPERTY_REFUSAL_RESPONSE,
+    },
 )
 async def upsert_edges(
     tenant: Tenant,
@@ -946,7 +1038,7 @@ def _edge_response(  # noqa: PLR0913 — everything the response echoes
         "edge can match (409); `src_label` / `dst_label` pick one. Returns its properties, "
         "the labels of its ends and its revision, with its `ETag` for a later `If-Match`."
     ),
-    responses=_EDGE_RESPONSES,
+    responses={**_END_LABEL_400, **_EDGE_RESPONSES},
 )
 async def get_edge(  # noqa: PLR0913 — FastAPI route parameters
     tenant: Tenant,
@@ -984,7 +1076,16 @@ async def get_edge(  # noqa: PLR0913 — FastAPI route parameters
         "keys not in the patch are kept.  Returns the edge as written, with its "
         "new `ETag`."
     ),
-    responses={**_EDGE_RESPONSES, **_PRECONDITION_RESPONSES},
+    responses={
+        400: {"description": (
+            "`src_label` or `dst_label` is not registered for the tenant, the patch sets a "
+            "reserved property name (`graphos_*`, `community_id`), or the database refused "
+            "the write."
+        )},
+        **_EDGE_RESPONSES,
+        **_PRECONDITION_RESPONSES,
+        **_PROPERTY_REFUSAL_RESPONSE,
+    },
 )
 async def patch_edge(  # noqa: PLR0913 — FastAPI route parameters
     tenant: Tenant,
@@ -1033,6 +1134,10 @@ async def patch_edge(  # noqa: PLR0913 — FastAPI route parameters
         "(with `If-Match`, 412)."
     ),
     responses={
+        400: {"description": (
+            "`src_label` or `dst_label` is not registered for the tenant, or the database "
+            "refused the delete."
+        )},
         404: {"description": "Unregistered edge type."},
         409: _EDGE_RESPONSES[409],
         **_PRECONDITION_RESPONSES,
@@ -1090,6 +1195,9 @@ async def delete_edge(  # noqa: PLR0913 — FastAPI route parameters
         "example what an agent is about to state. Every type and label must be "
         "registered for the tenant (400 otherwise)."
     ),
+    responses={
+        400: {"description": "An edge type or label not registered for the tenant."},
+    },
 )
 async def check_edges(
     tenant: Tenant,
@@ -1162,6 +1270,7 @@ async def _check_one_edge(
         "them, with `direction` indicating which way the edge points "
         "relative to the requested node."
     ),
+    responses=_READ_FAILED_RESPONSE,
 )
 async def neighbors(
     tenant: Tenant,
@@ -1391,44 +1500,39 @@ async def induced_edges(
     started = time.perf_counter()
     pool = request.app.state.pool
 
-    # Build the agtype id set the same way community-ids does so the
-    # ``(properties->'"id"') = ANY (...)`` predicate matches the
-    # indexed expression.
-    unique_ids = list({i for i in body.node_ids if i})
-    if not unique_ids:
+    def answer(edges: list[EdgeHit]) -> InducedEdgesResponse:
         return InducedEdgesResponse(
-            tenant=tenant, limit=body.limit, truncated=False,
+            tenant=tenant,
+            node_count=len(body.node_ids),
+            rel_types=list(body.rel_types) if body.rel_types else None,
+            limit=body.limit,
+            truncated=len(edges) == body.limit,
             elapsed_ms=int((time.perf_counter() - started) * 1000),
-            edges=[],
+            edges=edges,
         )
 
+    unique_ids = sorted({i for i in body.node_ids if i})
+    if not unique_ids:
+        return answer([])
+
     async with pool.acquire() as conn:
+        # Ids JSON-encoded as every write encodes them, so the match is the
+        # one the per-label id index serves, for any id (quotes included).
+        # An id may name a node in several labels: every one of them counts.
         gid_rows = await conn.fetch(
             f"""
             SELECT
-              v.id::text                                            AS gid,
-              trim(both '"' from (v.properties->'"id"')::text)      AS ext_id
+              v.id::text                              AS gid,
+              v.properties::text::jsonb ->> 'id'      AS ext_id
             FROM "{tenant}"."_ag_label_vertex" v
-            WHERE (v.properties->'"id"') = ANY(
-              ARRAY(
-                SELECT ('"' || t || '"')::agtype
-                FROM unnest($1::text[]) AS t
-              )
-            );
+            WHERE {lookup.IDS_MATCH};
             """,
-            unique_ids,
+            [_json.dumps(i) for i in unique_ids],
         )
-        gid_by_ext: dict[str, int] = {
-            str(r["ext_id"]): int(r["gid"]) for r in gid_rows
-        }
-        if not gid_by_ext:
-            return InducedEdgesResponse(
-                tenant=tenant, limit=body.limit, truncated=False,
-                elapsed_ms=int((time.perf_counter() - started) * 1000),
-                edges=[],
-            )
-        ext_by_gid = {v: k for k, v in gid_by_ext.items()}
-        gid_set = list(gid_by_ext.values())
+        ext_by_gid: dict[int, str] = {int(r["gid"]): str(r["ext_id"]) for r in gid_rows}
+        if not ext_by_gid:
+            return answer([])
+        gid_set = list(ext_by_gid)
 
         # 2. Probe edges with both endpoints in the resolved gid set.
         #    The per-label ``(start_id, end_id)`` btrees are on the raw
@@ -1466,8 +1570,6 @@ async def induced_edges(
             *params,
         )
 
-    elapsed_ms = int((time.perf_counter() - started) * 1000)
-
     edges = []
     for r in edge_rows:
         # Map AGE graphids back to caller-facing external ids.  We
@@ -1486,16 +1588,7 @@ async def induced_edges(
             type=str(r["rel_type"]),
             properties=_safe_decode_props(r["rel_props_text"]),
         ))
-
-    return InducedEdgesResponse(
-        tenant=tenant,
-        node_count=len(body.node_ids),
-        rel_types=list(body.rel_types) if body.rel_types else None,
-        limit=body.limit,
-        truncated=len(edges) == body.limit,
-        elapsed_ms=elapsed_ms,
-        edges=edges,
-    )
+    return answer(edges)
 
 
 # ── Scoped subgraph ────────────────────────────────────────────────────────
@@ -1722,6 +1815,7 @@ async def catalogue(
         "expansions or — if the use case is permanent — request a graph-"
         "DB-specific optimisation."
     ),
+    responses=_READ_FAILED_RESPONSE,
 )
 async def expand(
     tenant: Tenant,
@@ -2053,6 +2147,7 @@ async def expand(
         "(e.g. edges between teams: `group_by_src=team, "
         "group_by_dst=team, require_different=true`)."
     ),
+    responses={400: {"description": "The database refused the aggregate query."}},
 )
 async def aggregate_edges(
     tenant: Tenant,
@@ -2255,6 +2350,7 @@ async def _aggregate_edge_groups(
         "and `distinct` every group, `limit` aside. A string value is "
         "returned as it is, any other value as JSON."
     ),
+    responses=_LABEL_400,
 )
 async def aggregate_nodes(
     tenant: Tenant,
@@ -2335,6 +2431,7 @@ def _group_value(text: str | None) -> str:
         "omitted, the endpoint discovers them via the edge histogram "
         "first.  Intended for feeding a graph visualisation."
     ),
+    responses=_READ_FAILED_RESPONSE,
 )
 async def sample_subgraph(
     tenant: Tenant,
@@ -2581,6 +2678,9 @@ async def sample_subgraph(
         "deleted only if it still has that ETag (412 otherwise)."
     ),
     responses={
+        400: {"description": (
+            "`label` is not registered for the tenant, or the database refused the delete."
+        )},
         409: {"description": "With `If-Match`: the id exists in several labels."},
         **_PRECONDITION_RESPONSES,
     },
@@ -2647,9 +2747,15 @@ _LOCK_CONFLICTS = frozenset({"40P01", "40001"})
         "single delete does. Every label must be registered for the tenant (400 "
         "otherwise, and nothing is deleted)."
     ),
-    responses={503: {
-        "description": "Lost to concurrent writes on the same edges; nothing was deleted. Retry.",
-    }},
+    responses={
+        400: {"description": (
+            "A label not registered for the tenant, or the database refused the delete; "
+            "nothing is deleted."
+        )},
+        503: {"description": (
+            "Lost to concurrent writes on the same edges; nothing was deleted. Retry."
+        )},
+    },
 )
 async def delete_nodes(
     tenant: Tenant,
@@ -2701,6 +2807,7 @@ async def delete_nodes(
         "`property_key=project_id`). The property key must match the "
         "standard identifier regex."
     ),
+    responses={400: {"description": "The database refused the delete."}},
 )
 async def delete_by_property(
     tenant: Tenant,
@@ -2868,9 +2975,8 @@ async def export_graph(
             key=str(r["id"]),
             attributes={
                 **(dict(r["props"] or {})),
-                # `label` is sigma.js's display field by convention; we
-                # populate it from `name` if available, else fall back to
-                # the AGE label name. The vertex label is also kept under
+                # `label` is sigma.js's display field by convention: the
+                # node's `name`, else its id. The vertex label is kept under
                 # `_kind` so consumers that care about typing can read it.
                 "label": dict(r["props"] or {}).get("name") or str(r["id"]),
                 "_kind": str(r["lbl"]),
@@ -3305,6 +3411,10 @@ _FILTER_OPERATOR_COST = "0.025"
         "leaf label.  Use ``/search`` for substring matching — "
         "``/nodes:scan`` is structural enumeration only."
     ),
+    responses={400: {"description": (
+        "A label not registered for the tenant, a `where` clause without the value its op "
+        "needs, or a cursor that is not valid or was issued for other labels or `order_by`."
+    )}},
 )
 async def scan_nodes(
     tenant: Tenant,
@@ -3738,6 +3848,10 @@ def _edge_scan_page_sql(
         "indexes + multi-key sort can be added later without breaking "
         "the v1 contract."
     ),
+    responses={400: {"description": (
+        "An edge type not registered for the tenant, a `where` clause without the value its "
+        "op needs, or a cursor that is not valid or was issued for other types."
+    )}},
 )
 async def scan_edges(
     tenant: Tenant,
@@ -3775,7 +3889,6 @@ async def scan_edges(
         # Position along the edge graphid order: the request cursor for
         # the first type, then the last edge fetched, page after page.
         after_gid: int | None = cursor_gid if ti == 0 else None
-        last_edge_gid: int | None = None
         while remaining > 0 and not truncated:
             params: list[Any] = []
             param_idx = 1
@@ -3819,6 +3932,9 @@ async def scan_edges(
 
             for row in rows:
                 edge_gid = int(row["edge_gid"])
+                # Where a next page starts if this row does not fit: before
+                # it, or at the type's first edge (graphids are positive).
+                before = after_gid if after_gid is not None else 0
                 after_gid = edge_gid
                 if row["src_label"] is None or row["dst_label"] is None:
                     # An endpoint vertex no longer exists: such edges were
@@ -3831,10 +3947,7 @@ async def scan_edges(
                     items
                     and accumulated_bytes + row_bytes > SCAN_PAYLOAD_CAP_BYTES
                 ):
-                    if last_edge_gid is not None:
-                        next_cursor = _encode_edge_scan_cursor(
-                            edge_type, last_edge_gid,
-                        )
+                    next_cursor = _encode_edge_scan_cursor(edge_type, before)
                     truncated = True
                     break
                 items.append(EdgesScanItem(
@@ -3845,7 +3958,6 @@ async def scan_edges(
                     type=edge_type,
                     properties=projected,
                 ))
-                last_edge_gid = edge_gid
                 accumulated_bytes += row_bytes
                 remaining -= 1
                 if remaining <= 0:
@@ -3893,7 +4005,14 @@ async def scan_edges(
         "an unchanged graph is a no-op.  With ``Prefer: respond-async`` it "
         "runs as a background job (202, see ``/v1/jobs``)."
     ),
-    responses=ACCEPTED_RESPONSE,
+    responses={
+        **ACCEPTED_RESPONSE,
+        400: {"description": (
+            "An edge type without a registered `resolve_rule`, a rule that does not compile, "
+            "or an insert the database refused."
+        )},
+        **CANCELLED_RESPONSE,
+    },
 )
 async def resolve_edges(
     tenant: Tenant,

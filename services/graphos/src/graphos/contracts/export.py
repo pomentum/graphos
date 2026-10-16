@@ -17,26 +17,50 @@ MAX_EXPORT_NODE_LIMIT = 50_000
 class GraphologyNode(BaseModel):
     """One node in the graphology serialization format."""
 
-    key: str
-    attributes: dict[str, object] = Field(default_factory=dict)
+    key: str = Field(..., description="The node's external id.")
+    attributes: dict[str, object] = Field(
+        default_factory=dict,
+        description=(
+            "The node's properties, plus `label` (its `name` property, else its id: what "
+            "sigma.js displays) and `_kind` (its vertex label)."
+        ),
+    )
 
 
 class GraphologyEdge(BaseModel):
     """One edge in the graphology serialization format."""
 
-    key: str
-    source: str
-    target: str
-    undirected: bool = False
-    attributes: dict[str, object] = Field(default_factory=dict)
+    key: str = Field(..., description="`e_<graph id>`: unique in the export.")
+    source: str = Field(..., description="The source node's external id.")
+    target: str = Field(..., description="The target node's external id.")
+    undirected: bool = Field(False, description="Always false: every edge is directed.")
+    attributes: dict[str, object] = Field(
+        default_factory=dict,
+        description="The edge's properties, plus `label` and `_type` (both its edge type).",
+    )
 
 
 class GraphologyExport(BaseModel):
     """Full graphology serialization. Consumable by ``Graph.from()``."""
 
-    attributes: dict[str, object] = Field(default_factory=dict)
-    options: dict[str, object] = Field(
-        default_factory=lambda: {"type": "directed", "multi": False, "allowSelfLoops": True},
+    attributes: dict[str, object] = Field(
+        default_factory=dict, description="Graph-level attributes; always empty.",
     )
-    nodes: list[GraphologyNode] = Field(default_factory=list)
-    edges: list[GraphologyEdge] = Field(default_factory=list)
+    options: dict[str, object] = Field(
+        default_factory=lambda: {"type": "directed", "multi": True, "allowSelfLoops": True},
+        description=(
+            "graphology's graph options: always `type` `directed`, `multi` true (two nodes can "
+            "be joined by edges of several types), `allowSelfLoops` true."
+        ),
+    )
+    nodes: list[GraphologyNode] = Field(
+        default_factory=list,
+        description=(
+            "At most `limit_nodes` nodes with an `id` (only those in `node_ids` when given); "
+            "empty when none match."
+        ),
+    )
+    edges: list[GraphologyEdge] = Field(
+        default_factory=list,
+        description="Every edge whose two ends are among `nodes`, of `rel_types` when given.",
+    )

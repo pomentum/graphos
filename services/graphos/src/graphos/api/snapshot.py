@@ -69,6 +69,50 @@ router = APIRouter(tags=["graph"], prefix="/{tenant}/graph")
 _MAX_ERROR_LINES = 50
 
 
+def _tagged(kind: str, schema: str) -> dict[str, Any]:
+    return {"allOf": [
+        {"$ref": f"#/components/schemas/{schema}"},
+        {"properties": {"_kind": {"const": kind}}},
+    ]}
+
+
+# One line of the stream: a node, an edge, or the header and end lines of an export.
+_SNAPSHOT_LINE = {
+    "description": (
+        "One JSON object per line, tagged with `_kind`: `node` (a `NodeUpsert`; a line "
+        "without `_kind` is a node), `edge` (an `EdgeUpsert`), and as `GET …/snapshot` "
+        f"writes them a first `header` line (`format` `{dataset.FORMAT}`, `version` at most "
+        f"{dataset.VERSION}) and a last `end` line."
+    ),
+    "anyOf": [
+        _tagged("node", "NodeUpsert"),
+        {**_tagged("edge", "EdgeUpsert"), "required": ["_kind"]},
+        {
+            "type": "object",
+            "required": ["_kind"],
+            "properties": {
+                "_kind": {"const": "header"},
+                "format": {"const": dataset.FORMAT},
+                "version": {"type": "integer", "minimum": 1},
+            },
+        },
+        {"type": "object", "required": ["_kind"], "properties": {"_kind": {"const": "end"}}},
+    ],
+}
+_SNAPSHOT_BODY = {"requestBody": {
+    "required": True,
+    "description": (
+        "NDJSON, or the same gzip-compressed (as `GET …/snapshot?gzip=true` exports it): a "
+        "body starting with the gzip magic bytes is decompressed whatever its `Content-Type`, "
+        "up to `GRAPHOS_IMPORT_MAX_BYTES`."
+    ),
+    "content": {
+        "application/x-ndjson": {"schema": _SNAPSHOT_LINE},
+        "application/gzip": {"schema": {"type": "string", "format": "binary"}},
+    },
+}}
+
+
 @router.get(
     "/snapshot",
     summary="Export the tenant's data as one NDJSON file",
@@ -173,6 +217,31 @@ async def _restore_edge_communities(pool: asyncpg.Pool, tenant: str) -> int:
         "COPY-staged SQL upserts as the other write endpoints, nodes "
         "before edges, with the same idempotency contract."
     ),
+    openapi_extra=_SNAPSHOT_BODY,
+    responses={
+        400: {"description": (
+            "The database refused a write, or the stream failed part-way; the chunks written "
+            "before it stay written."
+        )},
+        409: {
+            "description": (
+                "`mode=empty` and the tenant holds nodes. Or the write would give two nodes "
+                "the same values of a unique property index (`application/problem+json`)."
+            ),
+            "content": {
+                "application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}},
+                "application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}},
+            },
+        },
+        413: {"description": (
+            f"More than {MAX_SNAPSHOT_ROWS:,} lines, or past `GRAPHOS_IMPORT_MAX_BYTES` once "
+            "decompressed; the rows read before it stay written."
+        )},
+        422: {"description": (
+            "The request is not valid, or a `header` line of another format or a newer "
+            "version."
+        )},
+    },
 )
 async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; splitting harms readability
     tenant: Tenant,

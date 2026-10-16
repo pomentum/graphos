@@ -25,7 +25,16 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from graphos import __version__, api_docs, console, identity, node_properties, oidc, properties
+from graphos import (
+    __version__,
+    api_docs,
+    console,
+    identity,
+    node_properties,
+    oidc,
+    openapi,
+    properties,
+)
 from graphos.api import (
     access,
     bulk,
@@ -286,6 +295,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url=None,
     )
     api_docs.install(app)
+    openapi.install(app)
     app.state.settings = settings
     configure_metrics(betweenness_max_nodes=settings.betweenness_max_nodes)
 

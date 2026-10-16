@@ -67,19 +67,19 @@ under one version.
   node at that spot, and Alt-drag from one node onto another to connect them (only the type is
   asked; declared pairs first, refused ones blocked as in Connect).
 - **Web UI: CSV import.** On the Overview, beside the dataset upload, writers import a CSV file
-  without writing a loader: the separator (comma, semicolon or tab) is detected, quoted cells,
-  CRLF and a UTF-8 byte-order mark are read as RFC 4180 says. The rows are nodes of a label or
-  relationships of a type (rule-derived types left out, declared label pairs offered first); the
-  id columns are picked, and every other column is a property, named from its header, of a type
-  (auto, text, number, true / false) taken from the label's definitions where they declare one,
-  or left out. The first 20 rows are previewed as they will be written, and every row is checked:
-  empty, too long and repeated ids, cells that do not read as their type, names graphos keeps for
-  itself, and the declared definitions (required, type, allowed values, range) and label pairs.
-  Rows with the same id (or, for relationships, the same two ends) are sent as one, in file
-  order, a later non-empty cell winning; ids are trimmed. The rows go to `nodes:bulk` /
-  `edges:bulk` as NDJSON, with the upload's progress and graphos's answer (rows received,
-  written, refused, skipped for a missing endpoint, property violations and warnings, its first
-  errors, named by the file's row). The web UI's API layer has `bulkNodes()` and `bulkEdges()`.
+  without writing a loader. The page reads only the file's start, for its header, its separator
+  (comma, semicolon or tab, detected) and a preview of the first 20 rows; graphos reads the file
+  itself (`nodes:csv` / `edges:csv`). The rows are nodes of a label or relationships of a type
+  (rule-derived types left out, declared label pairs offered first); the id columns are picked,
+  and every other column is a property, named from its header, of a type (auto, text, number,
+  true / false) taken from the label's definitions where they declare one, or left out. With each
+  change of the mapping graphos checks the whole file in a dry run: rows and the records they
+  merge into, what would be written, refused or skipped, the issues it found (empty, too long and
+  repeated ids, ragged rows, cells that do not read as their type, undeclared label pairs), the
+  property definitions' verdicts and its first refusals; a mapping it refuses is shown by the
+  column grid. The import sends the file as it is, with the upload's progress, Cancel (nothing is
+  written before graphos has the whole file) and graphos's answer. The web UI's API layer has
+  `csvImport()`.
 - **Docs:** development guides, for people and coding agents: the rules for the whole repository
   ([docs/development.md](docs/development.md): docs, pictures and docs tools, test stacks, git,
   privacy) and a `DEVELOPMENT.md` in each package for the
@@ -94,6 +94,30 @@ under one version.
   no longer names tenants to anyone who reaches the port. It counts by `kind`, `outcome` and
   `rule`; per-tenant problems are in the write responses (`property_warnings`,
   `property_violations`). A dashboard that grouped by tenant must drop that grouping.
+- **The OpenAPI document is complete** (`/openapi.json`, `/docs`, `/redoc`):
+  - every error a route can answer is declared, with when it happens: 401 / 403 on every route
+    that needs a token, 404 for an unregistered tenant on every tenant route, 429 (the rate
+    limit), 504 (a statement timeout), and each route's own (400, 409, 413, …);
+  - every error has a body schema (`ErrorResponse`, `RateLimited`, RFC 7807 `Problem`), and a 422
+    is described as either FastAPI's validation error or the route's own refusal;
+  - the routes that take a file or a stream declare it: `application/x-ndjson` for `:bulk` and
+    `snapshot-import` (gzip accepted), `text/csv` for `:csv`;
+  - every schema and every field has a description.
+  Two tests keep it so: a route raising a code it does not declare, or a model or field without a
+  description, fails the build.
+
+### Fixed
+
+- `POST …/graph/induced_edges` answered 500 when none of the ids matched a node (the answer left
+  out `node_count`). It also missed ids holding a `"` or a `\`, reported them with their JSON
+  escapes, and, for an id in two labels, counted the edges of only one of its nodes.
+- `POST …/graph/edges:scan`: when the 10 MiB page cap was reached on the first row of the next edge
+  type, the page came back without a `next_cursor`, as if the scan were over; the rest of that type
+  and the types after it were never returned. The cursor now points to that row.
+- `GET …/graph/export` declares `multi: true`: two nodes can be joined by edges of several types,
+  which graphology refuses to load into a graph declared `multi: false`.
+- `POST …/graph/nodes/{id}/properties` answers 400 for a database error, as the other node writes
+  do, instead of an unhandled 500.
 
 ## 0.11.1 — 2026-10-16
 
