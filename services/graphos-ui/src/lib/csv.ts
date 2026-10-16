@@ -219,41 +219,6 @@ export function parseCsv(text: string, delimiter: CsvDelimiter = detectDelimiter
   return tableOf(parser, delimiter);
 }
 
-export interface ParseOptions {
-  delimiter?: CsvDelimiter;
-  /** Characters read between two pauses that let the page draw. */
-  slice?: number;
-  /** How much of the text is read, from 0 to 1. */
-  onProgress?: (share: number) => void;
-  signal?: AbortSignal;
-}
-
-const SLICE_CHARS = 2 * 1024 * 1024;
-
-/** `parseCsv` a slice at a time, pausing between slices so a large file does not freeze the page. */
-export async function parseCsvAsync(text: string, options: ParseOptions = {}): Promise<CsvTable> {
-  const delimiter = options.delimiter ?? detectDelimiter(text);
-  const slice = options.slice ?? SLICE_CHARS;
-  const parser = new CsvParser(delimiter);
-  for (let start = 0; start < text.length; start += slice) {
-    options.signal?.throwIfAborted();
-    parser.push(text.slice(start, start + slice));
-    options.onProgress?.(Math.min(1, (start + slice) / text.length));
-    if (start + slice < text.length) await pause();
-  }
-  return tableOf(parser, delimiter);
-}
-
-/** A CSV file read as UTF-8 and parsed (see `parseCsvAsync`). */
-export async function readCsvFile(file: Blob, options: ParseOptions = {}): Promise<CsvTable> {
-  return parseCsvAsync(await readFileText(file), options);
-}
-
-/** Lets the page draw before going on. */
-export function pause(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
 /** A file's text, read as UTF-8 (a byte-order mark dropped). */
 export function readFileText(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {

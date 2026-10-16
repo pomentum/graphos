@@ -1,4 +1,4 @@
-import { CsvParser, detectDelimiter, parseCsv, parseCsvAsync, readFileText } from "../src/lib/csv";
+import { CsvParser, detectDelimiter, parseCsv, readFileText } from "../src/lib/csv";
 
 /** The rows of `text` fed to the parser one character at a time. */
 function byCharacter(text: string, delimiter: "," | ";" | "\t" = ","): string[][] {
@@ -61,18 +61,6 @@ describe("reading CSV", () => {
     const open = parseCsv('a,b\n1,"never closed\n2,3\n');
     expect(open.openQuote).toBe(true);
     expect(open.rows).toEqual([["1", "never closed\n2,3\n"]]);
-  });
-
-  it("parses a slice at a time to the same table, reporting how far it is", async () => {
-    const lines = ["id,name"];
-    for (let i = 0; i < 500; i += 1) lines.push(`${i},"name, ${i}"`);
-    const text = lines.join("\r\n");
-    const shares: number[] = [];
-    const table = await parseCsvAsync(text, { slice: 777, onProgress: (share) => shares.push(share) });
-    expect(table).toEqual(parseCsv(text));
-    expect(table.rows).toHaveLength(500);
-    expect(shares.at(-1)).toBe(1);
-    expect(shares.length).toBeGreaterThan(5);
   });
 
   it("reads a file as UTF-8", async () => {

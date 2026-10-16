@@ -41,19 +41,19 @@ under one version.
   node at that spot, and Alt-drag from one node onto another to connect them (only the type is
   asked; declared pairs first, refused ones blocked as in Connect).
 - **Web UI: CSV import.** On the Overview, beside the dataset upload, writers import a CSV file
-  without writing a loader: the separator (comma, semicolon or tab) is detected, quoted cells,
-  CRLF and a UTF-8 byte-order mark are read as RFC 4180 says. The rows are nodes of a label or
-  relationships of a type (rule-derived types left out, declared label pairs offered first); the
-  id columns are picked, and every other column is a property, named from its header, of a type
-  (auto, text, number, true / false) taken from the label's definitions where they declare one,
-  or left out. The first 20 rows are previewed as they will be written, and every row is checked:
-  empty, too long and repeated ids, cells that do not read as their type, names graphos keeps for
-  itself, and the declared definitions (required, type, allowed values, range) and label pairs.
-  Rows with the same id (or, for relationships, the same two ends) are sent as one, in file
-  order, a later non-empty cell winning; ids are trimmed. The rows go to `nodes:bulk` /
-  `edges:bulk` as NDJSON, with the upload's progress and graphos's answer (rows received,
-  written, refused, skipped for a missing endpoint, property violations and warnings, its first
-  errors, named by the file's row). The web UI's API layer has `bulkNodes()` and `bulkEdges()`.
+  without writing a loader. The page reads only the file's start, for its header, its separator
+  (comma, semicolon or tab, detected) and a preview of the first 20 rows; graphos reads the file
+  itself (`nodes:csv` / `edges:csv`). The rows are nodes of a label or relationships of a type
+  (rule-derived types left out, declared label pairs offered first); the id columns are picked,
+  and every other column is a property, named from its header, of a type (auto, text, number,
+  true / false) taken from the label's definitions where they declare one, or left out. With each
+  change of the mapping graphos checks the whole file in a dry run: rows and the records they
+  merge into, what would be written, refused or skipped, the issues it found (empty, too long and
+  repeated ids, ragged rows, cells that do not read as their type, undeclared label pairs), the
+  property definitions' verdicts and its first refusals; a mapping it refuses is shown by the
+  column grid. The import sends the file as it is, with the upload's progress, Cancel (nothing is
+  written before graphos has the whole file) and graphos's answer. The web UI's API layer has
+  `csvImport()`.
 - **Docs:** development guides, for people and coding agents: the rules for the whole repository
   ([docs/development.md](docs/development.md): docs, pictures and docs tools, test stacks, git,
   privacy) and a `DEVELOPMENT.md` in each package for the

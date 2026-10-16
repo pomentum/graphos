@@ -1,8 +1,7 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { BulkEdgesResult, BulkNodesResult, Me, PropertyDefinitions, TenantSchema } from "../src/api/types";
-import { readFileText } from "../src/lib/csv";
+import type { CsvImportResult, Me, PropertyDefinitions, TenantSchema } from "../src/api/types";
 import { SessionProvider } from "../src/session/SessionProvider";
 import { theme } from "../src/theme/mantineTheme";
 import { CsvImportDialog } from "../src/views/overview/CsvImportDialog";
@@ -58,32 +57,35 @@ const DEFINITIONS: PropertyDefinitions = {
   edge: {},
 };
 
-const NODES_RESULT: BulkNodesResult = {
-  tenant: "acme",
-  rows_received: 3,
-  rows_invalid: 1,
-  nodes_upserted: 2,
-  by_label: { Person: 2 },
-  errors: ["line 3: id: String should have at least 1 character"],
-  elapsed_ms: 1200,
-  property_violations: {},
-  property_warnings: { "Person.age:type": 1 },
-};
+/** An answer of `nodes:csv` / `edges:csv`, nothing to report unless said. */
+function answer(extra: Partial<CsvImportResult> = {}): CsvImportResult {
+  return {
+    tenant: "acme",
+    dry_run: true,
+    delimiter: "comma",
+    rows: 2,
+    records: 2,
+    rows_invalid: 0,
+    written: 2,
+    edges_skipped: 0,
+    columns: [],
+    issues: [],
+    errors: [],
+    elapsed_ms: 1200,
+    property_violations: {},
+    property_warnings: {},
+    ...extra,
+  };
+}
 
-const EDGES_RESULT: BulkEdgesResult = {
-  tenant: "acme",
-  rows_received: 2,
-  rows_invalid: 0,
-  edges_upserted: 1,
-  edges_skipped: 1,
-  by_type: { WORKS_AT: 1 },
-  errors: [],
-  elapsed_ms: 300,
-};
+type Reply = { status: number; body: unknown } | null;
 
-/** An `XMLHttpRequest` that sends at once and answers what the test says. */
+/** How graphos answers an upload; `null` holds it for the test to answer. Every dry run passes by default. */
+let reply: (xhr: FakeXhr) => Reply = () => null;
+
+/** An `XMLHttpRequest`: half the file goes at once, then graphos answers as `reply` says. */
 class FakeXhr {
-  static last: FakeXhr | null = null;
+  static all: FakeXhr[] = [];
   upload: {
     onprogress?: (e: { loaded: number; total: number; lengthComputable: boolean }) => void;
     onload?: () => void;
@@ -96,6 +98,7 @@ class FakeXhr {
   url = "";
   headers: Record<string, string> = {};
   body: Blob | null = null;
+  aborted = false;
   open(_method: string, url: string) {
     this.url = url;
   }
@@ -104,19 +107,41 @@ class FakeXhr {
   }
   send(body: Blob) {
     this.body = body;
-    FakeXhr.last = this;
+    FakeXhr.all.push(this);
     this.upload.onprogress?.({ loaded: body.size / 2, total: body.size, lengthComputable: true });
+    const now = reply(this);
+    if (now) setTimeout(() => this.answer(now.body, now.status), 0);
   }
-  answer(result: unknown) {
+  /** The rest of the file goes. */
+  finish() {
+    const size = this.body!.size;
+    this.upload.onprogress?.({ loaded: size, total: size, lengthComputable: true });
     this.upload.onload?.();
-    this.status = 200;
-    this.responseText = JSON.stringify(result);
+  }
+  answer(body: unknown, status = 200) {
+    if (this.aborted) return;
+    this.finish();
+    this.status = status;
+    this.responseText = JSON.stringify(body);
     this.onload?.();
   }
   abort() {
+    this.aborted = true;
     this.onabort?.();
   }
+  get path(): string {
+    return new URL(this.url, "http://ui").pathname;
+  }
+  get query(): URLSearchParams {
+    return new URL(this.url, "http://ui").searchParams;
+  }
+  get dryRun(): boolean {
+    return this.query.get("dry_run") === "true";
+  }
 }
+
+const dryRuns = () => FakeXhr.all.filter((xhr) => xhr.dryRun);
+const imports = () => FakeXhr.all.filter((xhr) => !xhr.dryRun);
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -168,23 +193,21 @@ function schemaReads(): number {
     .mock.calls.filter(([input]) => new URL(String(input), "http://ui").pathname === "/api/v1/acme/schema").length;
 }
 
-async function sentLines(): Promise<unknown[]> {
-  const body = await readFileText(FakeXhr.last!.body!);
-  return body
-    .trimEnd()
-    .split("\n")
-    .map((line) => JSON.parse(line));
+/** "3 columns · 40 B (the first row is the header)", whatever the size. */
+function detected(columns: number): RegExp {
+  return new RegExp(`^${columns} columns · .+ \\(the first row is the header\\)$`);
 }
 
 beforeEach(() => {
-  FakeXhr.last = null;
+  FakeXhr.all = [];
+  reply = (xhr) => (xhr.dryRun ? { status: 200, body: answer() } : null);
   vi.stubGlobal("XMLHttpRequest", FakeXhr);
 });
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** Waits for the file to be read and the dialog to draw again, slowly while the whole suite runs. */
+/** Waits for the file to be read, a dry run's pause, and the dialog to draw again, slowly while the whole suite runs. */
 const READ = { timeout: 5000 };
 
 describe("the CSV import", { timeout: 20_000 }, () => {
@@ -197,123 +220,111 @@ describe("the CSV import", { timeout: 20_000 }, () => {
     expect(await screen.findByLabelText("CSV file")).toBeInTheDocument();
   });
 
-  it("maps a file's rows to nodes, previews and checks them, and sends them as NDJSON", async () => {
-    const onClose = vi.fn();
-    render(ui(<CsvImportDialog onClose={onClose} />));
+  it("has graphos check the file as mapped, again when the mapping changes, then sends it to nodes:csv", async () => {
+    const dry = answer({
+      delimiter: "semicolon",
+      rows: 3,
+      records: 3,
+      rows_invalid: 1,
+      written: 2,
+      issues: [
+        { code: "empty_id", refused: true, count: 1, examples: [{ row: 3, column: "id" }] },
+        { code: "bad_value", refused: false, count: 1, examples: [{ row: 2, column: "Age", value: "old" }] },
+        { code: "ragged", refused: false, count: 1, examples: [{ row: 1, cells: 3 }] },
+        { code: "brand_new", refused: false, count: 2, examples: [] },
+      ],
+      errors: ["row 3: id: String should have at least 1 character"],
+      property_warnings: { "Person.age:type": 1 },
+    });
+    reply = (xhr) => (xhr.dryRun && xhr.query.get("label") === "Person" ? { status: 200, body: dry } : null);
+    render(ui(<CsvImportDialog onClose={() => undefined} />));
     choose("\uFEFFname;id;Age;graphos_degree\r\nAda;p1;36;3\r\nBob;p2;old;1\r\nCy;;7;2\r\n");
 
-    expect(await screen.findByText("3 rows · 4 columns (the first row is the header)", {}, READ)).toBeInTheDocument();
+    expect(await screen.findByText(detected(4), {}, READ)).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Semicolon" })).toBeChecked();
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Label" })).toHaveValue("Company"));
     expect(screen.getByRole("textbox", { name: "Id column" })).toHaveValue("id");
+    await waitFor(() => expect(dryRuns()).toHaveLength(1), READ);
+    expect(screen.getByText("Sending the file for graphos to check · 50%")).toBeInTheDocument();
+    const first = dryRuns()[0]!;
+    expect(first.path).toBe("/api/v1/acme/graph/nodes:csv");
+    expect(first.headers["Content-Type"]).toBe("text/csv");
+    expect((first.body as File).name).toBe("people.csv");
 
+    // Another label: the stale check is dropped, graphos checks again.
     fireEvent.click(screen.getByRole("option", { name: "Person", hidden: true }));
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Label" })).toHaveValue("Person"));
-    // The header made a property name; its type from Person's definitions; graphos's own names left out.
-    expect(screen.getByRole("textbox", { name: "Property name for Age" })).toHaveValue("Age");
-    fireEvent.change(screen.getByRole("textbox", { name: "Property name for Age" }), { target: { value: "age" } });
-    expect(screen.getByText(/^Checking the rows · \d+%$/)).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Type of Age" })).toHaveValue("Number"));
-    expect(screen.getByRole("checkbox", { name: "Import graphos_degree" })).not.toBeChecked();
-    expect(screen.getByText("Declared: integer")).toBeInTheDocument();
+    await waitFor(() => expect(first.aborted).toBe(true));
+    await waitFor(() => expect(dryRuns()).toHaveLength(2), READ);
+    const second = dryRuns()[1]!.query;
+    expect([second.get("label"), second.get("id"), second.get("delimiter")]).toEqual(["Person", "id", "semicolon"]);
+    expect(JSON.parse(second.get("columns")!)).toEqual({
+      name: { property: "name", type: "auto" },
+      Age: { property: "Age", type: "auto" },
+      graphos_degree: { property: null, type: "auto" },
+    });
 
-    expect(screen.getByText("The first 3 of 3 rows, as they will be written.")).toBeInTheDocument();
-    expect(screen.getByTitle("Does not read as Number: left out")).toHaveTextContent("old");
-    expect(await screen.findByText("1 empty id", {}, READ)).toBeInTheDocument();
-    expect(screen.getByText("1 value does not read as its column's type: it is left out")).toBeInTheDocument();
-    expect(screen.getByText('For example: row 2 age "old"')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Import 3 rows" }));
-    expect(await screen.findByText("Sending · 50%", {}, READ)).toBeInTheDocument();
-    const xhr = FakeXhr.last!;
-    expect(xhr.url).toBe("/api/v1/acme/graph/nodes:bulk");
-    expect(xhr.headers["Content-Type"]).toBe("application/x-ndjson");
-    expect(await sentLines()).toEqual([
-      { id: "p1", label: "Person", properties: { name: "Ada", age: 36 } },
-      { id: "p2", label: "Person", properties: { name: "Bob" } },
-      { id: "", label: "Person", properties: { name: "Cy", age: 7 } },
-    ]);
-    act(() => xhr.answer(NODES_RESULT));
-    expect(await screen.findByText("3 rows received, 2 written, in 1 s.", {}, READ)).toBeInTheDocument();
-    expect(screen.getByText("1 row refused")).toBeInTheDocument();
+    expect(await screen.findByText("graphos's check of all 3 rows", {}, READ)).toBeInTheDocument();
+    expect(
+      screen.getByText("They make 3 records once rows repeating an id are merged; 2 would be written."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("1 record would be refused")).toBeInTheDocument();
+    expect(screen.getByText("1 empty id")).toBeInTheDocument();
+    expect(screen.getByText('For example: row 2 Age "old"')).toBeInTheDocument();
+    expect(screen.getByText("For example: row 1 (3 cells)")).toBeInTheDocument();
+    expect(screen.getByText("2 × brand_new")).toBeInTheDocument();
     expect(screen.getByText("Written with property warnings: Person.age:type (1)")).toBeInTheDocument();
-    expect(screen.getByText("Row 3: id: String should have at least 1 character")).toBeInTheDocument();
+    expect(screen.getByText("row 3: id: String should have at least 1 character")).toBeInTheDocument();
+
+    // The declared name and type: checked again with them.
+    fireEvent.change(screen.getByRole("textbox", { name: "Property name for Age" }), { target: { value: "age" } });
+    await waitFor(() => expect(dryRuns()).toHaveLength(3), READ);
+    expect(JSON.parse(dryRuns()[2]!.query.get("columns")!).Age).toEqual({ property: "age", type: "number" });
+    expect(screen.getByTitle("Does not read as Number: left out")).toHaveTextContent("old");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Import 3 rows" }, READ));
+    expect(await screen.findByText("Sending · 50%", {}, READ)).toBeInTheDocument();
+    const sent = imports()[0]!;
+    expect(sent.path).toBe("/api/v1/acme/graph/nodes:csv");
+    expect(sent.query.get("dry_run")).toBe("false");
+    expect(sent.query.get("label")).toBe("Person");
+    expect(sent.headers["Content-Type"]).toBe("text/csv");
+    act(() => sent.answer({ ...dry, dry_run: false }));
+    expect(
+      await screen.findByText("3 rows, 3 records once rows repeating an id are merged; 2 written, in 1 s.", {}, READ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("1 record refused")).toBeInTheDocument();
     expect(screen.getByText("Done")).toBeInTheDocument();
   });
 
-  it("sends rows with the same id as one node and names graphos's refusals by the file's row", async () => {
+  it("shows graphos's refusal of the mapping, and a file it cannot read", async () => {
+    reply = () => ({ status: 422, body: { detail: "column 'Age': 'bad name' is not a property name" } });
     render(ui(<CsvImportDialog onClose={() => undefined} />));
-    choose("id,name,city\na,Ada,Paris\n a ,,Lyon\n  ,Nobody,\nb,Bob,\n");
-    expect(await screen.findByText("4 rows · 3 columns (the first row is the header)", {}, READ)).toBeInTheDocument();
+    choose("id,Age\np1,3\n");
     expect(
       await screen.findByText(
-        "1 row repeats the id of an earlier row: rows with the same id are sent as one node, a later non-empty cell winning",
+        "graphos refuses this mapping: column 'Age': 'bad name' is not a property name",
         {},
         READ,
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("1 empty id")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Import 4 rows" }));
-    await waitFor(() => expect(FakeXhr.last).not.toBeNull());
-    expect(await sentLines()).toEqual([
-      { id: "a", label: "Company", properties: { name: "Ada", city: "Lyon" } },
-      { id: "", label: "Company", properties: { name: "Nobody" } },
-      { id: "b", label: "Company", properties: { name: "Bob" } },
-    ]);
-    act(() =>
-      FakeXhr.last!.answer({
-        ...NODES_RESULT,
-        rows_received: 3,
-        errors: ["line 2: id: String should have at least 1 character"],
-      }),
-    );
+    expect(screen.getByRole("button", { name: "Import" })).toBeDisabled();
+
+    reply = () => ({ status: 400, body: { detail: "a quoted cell is never closed" } });
+    choose("id,Age\np2,4\n", "other.csv");
     expect(
-      await screen.findByText(
-        "The file's 4 rows were sent as 3: rows with the same id, or the same source and target, merged into one.",
-        {},
-        READ,
-      ),
+      await screen.findByText("graphos couldn't check the file: a quoted cell is never closed", {}, READ),
     ).toBeInTheDocument();
-    expect(screen.getByText("Row 3: id: String should have at least 1 character")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Import" })).toBeEnabled();
   });
 
-  it("says rows may be written when stopped while sending, and shows the new data", async () => {
-    render(ui(<CsvImportDialog onClose={() => undefined} />));
-    choose("id\np1\np2\n");
-    expect(await screen.findByText("2 rows · 1 columns (the first row is the header)", {}, READ)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Import 2 rows" }));
-    expect(await screen.findByText("Sending · 50%", {}, READ)).toBeInTheDocument();
-    const before = schemaReads();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(
-      await screen.findByText("Stopped: rows sent before stopping may already be written", {}, READ),
-    ).toBeInTheDocument();
-    await waitFor(() => expect(schemaReads()).toBeGreaterThan(before));
-  });
-
-  it("drops a file's read when another file was chosen, or the choice cleared, before it finished", async () => {
-    render(ui(<CsvImportDialog onClose={() => undefined} />));
-    const releaseSlow = hold("slow.csv");
-    choose("a,b,c\n1,2,3\n", "slow.csv");
-    choose("x,y\n1,2\n3,4\n", "fast.csv");
-    expect(await screen.findByText("2 rows · 2 columns (the first row is the header)", {}, READ)).toBeInTheDocument();
-    await act(async () => releaseSlow());
-    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
-    expect(screen.getByText("2 rows · 2 columns (the first row is the header)")).toBeInTheDocument();
-    expect(screen.queryByText(/^1 row · 3 columns/)).not.toBeInTheDocument();
-
-    const releaseCleared = hold("cleared.csv");
-    choose("a,b,c\n1,2,3\n", "cleared.csv");
-    choose(null);
-    await act(async () => releaseCleared());
-    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
-    expect(screen.queryByText(/columns \(the first row is the header\)/)).not.toBeInTheDocument();
-  });
-
-  it("maps rows to relationships between declared labels and reports the skipped ones", async () => {
+  it("sends relationships to edges:csv with their type, labels and end columns", async () => {
+    reply = (xhr) =>
+      xhr.dryRun && xhr.path.endsWith("edges:csv")
+        ? { status: 200, body: answer({ written: 1, edges_skipped: 1 }) }
+        : null;
     render(ui(<CsvImportDialog onClose={() => undefined} />));
     choose("from,to,since\np1,c1,2020\np2,c9,2021\n", "jobs.csv");
-    expect(await screen.findByText("2 rows · 3 columns (the first row is the header)", {}, READ)).toBeInTheDocument();
+    expect(await screen.findByText(detected(3), {}, READ)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: "A relationship" }));
 
     // Rule-derived types are not offered; the declared pair is the default.
@@ -321,36 +332,84 @@ describe("the CSV import", { timeout: 20_000 }, () => {
     expect(screen.queryByRole("option", { name: "DERIVED", hidden: true })).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Source label" })).toHaveValue("Person");
     expect(screen.getByRole("textbox", { name: "Target label" })).toHaveValue("Company");
-    expect(screen.getByRole("textbox", { name: "Source id column" })).toHaveValue("from");
-    expect(screen.getByRole("textbox", { name: "Target id column" })).toHaveValue("to");
-    expect(await screen.findByText("Nothing to report: every row reads as mapped.", {}, READ)).toBeInTheDocument();
+    expect(
+      await screen.findByText("1 relationship would be skipped: its source or target node does not exist", {}, READ),
+    ).toBeInTheDocument();
+    const query = dryRuns().at(-1)!.query;
+    expect(Object.fromEntries(query)).toEqual({
+      type: "WORKS_AT",
+      src_label: "Person",
+      dst_label: "Company",
+      src: "from",
+      dst: "to",
+      columns: JSON.stringify({ since: { property: "since", type: "auto" } }),
+      delimiter: "comma",
+      dry_run: "true",
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Import 2 rows" }));
-    await waitFor(() => expect(FakeXhr.last).not.toBeNull());
-    expect(FakeXhr.last!.url).toBe("/api/v1/acme/graph/edges:bulk");
-    expect((await sentLines())[0]).toEqual({
-      src_id: "p1",
-      src_label: "Person",
-      dst_id: "c1",
-      dst_label: "Company",
-      type: "WORKS_AT",
-      properties: { since: 2020 },
-    });
-    act(() => FakeXhr.last!.answer(EDGES_RESULT));
+    await waitFor(() => expect(imports()).toHaveLength(1));
+    expect(imports()[0]!.path).toBe("/api/v1/acme/graph/edges:csv");
+    act(() => imports()[0]!.answer(answer({ dry_run: false, written: 1, edges_skipped: 1 })));
     expect(
       await screen.findByText("1 relationship skipped: its source or target node does not exist", {}, READ),
     ).toBeInTheDocument();
   });
 
-  it("reads the file again with another separator, and says when it has no rows", async () => {
+  it("says nothing is written when cancelled while sending, and that graphos may go on once it has the file", async () => {
+    render(ui(<CsvImportDialog onClose={() => undefined} />));
+    choose("id\np1\np2\n");
+    fireEvent.click(await screen.findByRole("button", { name: "Import 2 rows" }, READ));
+    expect(await screen.findByText("Sending · 50%", {}, READ)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(
+      await screen.findByText(
+        "Cancelled while sending the file: graphos writes nothing before it has all of it",
+        {},
+        READ,
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Import 2 rows" }));
+    await waitFor(() => expect(imports()).toHaveLength(2));
+    act(() => imports()[1]!.finish());
+    expect(await screen.findByText("graphos is writing the rows", {}, READ)).toBeInTheDocument();
+    const before = schemaReads();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(
+      await screen.findByText("Stopped waiting: graphos had the whole file and may still be writing it", {}, READ),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(schemaReads()).toBeGreaterThan(before));
+  });
+
+  it("reads the start again with another separator, and graphos is told the one chosen", async () => {
     render(ui(<CsvImportDialog onClose={() => undefined} />));
     choose("a;b\n1;2\n3;4\n");
-    expect(await screen.findByText("2 rows · 2 columns (the first row is the header)", {}, READ)).toBeInTheDocument();
+    expect(await screen.findByText(detected(2), {}, READ)).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Semicolon" })).toBeChecked();
     fireEvent.click(screen.getByRole("radio", { name: "Comma" }));
-    expect(await screen.findByText("2 rows · 1 columns (the first row is the header)", {}, READ)).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Comma" })).toBeChecked();
+    expect(await screen.findByText(detected(1), {}, READ)).toBeInTheDocument();
+    await waitFor(() => expect(dryRuns().at(-1)?.query.get("delimiter")).toBe("comma"), READ);
     choose("only,a,header\n");
     expect(await screen.findByText("The file has no rows under its header row.", {}, READ)).toBeInTheDocument();
+  });
+
+  it("drops a file's read when another file was chosen, or the choice cleared, before it finished", async () => {
+    render(ui(<CsvImportDialog onClose={() => undefined} />));
+    const releaseSlow = hold("slow.csv");
+    choose("a,b,c\n1,2,3\n", "slow.csv");
+    choose("x,y\n1,2\n3,4\n", "fast.csv");
+    expect(await screen.findByText(detected(2), {}, READ)).toBeInTheDocument();
+    await act(async () => releaseSlow());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.getByText(detected(2))).toBeInTheDocument();
+    expect(screen.queryByText(detected(3))).not.toBeInTheDocument();
+
+    const releaseCleared = hold("cleared.csv");
+    choose("a,b,c\n1,2,3\n", "cleared.csv");
+    choose(null);
+    await act(async () => releaseCleared());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.queryByText(/columns · /)).not.toBeInTheDocument();
   });
 });
