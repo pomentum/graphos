@@ -61,9 +61,21 @@ class ItemSpec(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    type: ItemType = "any"
-    enum: list[Scalar] | None = Field(None, min_length=1, max_length=MAX_ENUM)
-    pattern: str | None = Field(None, max_length=MAX_PATTERN)
+    type: ItemType = Field(
+        "any",
+        description=(
+            "Each item's JSON type: `string`, `number`, `integer`, `boolean` or `any` (the "
+            "default)."
+        ),
+    )
+    enum: list[Scalar] | None = Field(
+        None, min_length=1, max_length=MAX_ENUM,
+        description="The values an item may take (1 to 1000, of the item type).",
+    )
+    pattern: str | None = Field(
+        None, max_length=MAX_PATTERN,
+        description="A full match on string items (Python `re`); `string` or `any` items only.",
+    )
 
     @field_validator("pattern")
     @classmethod
@@ -91,7 +103,12 @@ class PropertySpec(BaseModel):
     recommended: bool = Field(
         False, description="Absent or `null` is counted as a warning only, in any mode.",
     )
-    enum: list[Scalar] | None = Field(None, min_length=1, max_length=MAX_ENUM)
+    enum: list[Scalar] | None = Field(
+        None, min_length=1, max_length=MAX_ENUM,
+        description=(
+            "The values allowed (1 to 1000, of the property's type); not for `array` or `object`."
+        ),
+    )
     pattern: str | None = Field(
         None, max_length=MAX_PATTERN, description="A full match, on strings (Python `re`).",
     )
@@ -101,7 +118,10 @@ class PropertySpec(BaseModel):
     minimum: float | None = Field(None, description="Inclusive, on numbers.")
     maximum: float | None = Field(None, description="Inclusive, on numbers.")
     items: ItemSpec | None = Field(None, description="For an `array`: what every item must be.")
-    description: str | None = Field(None, max_length=MAX_DESCRIPTION)
+    description: str | None = Field(
+        None, max_length=MAX_DESCRIPTION,
+        description="What the property holds; documentation only, never checked.",
+    )
 
     @field_validator("pattern")
     @classmethod
@@ -151,7 +171,13 @@ class LabelPropertiesSpec(BaseModel):
         None,
         description="Keys this entry does not declare: `allow` (the default), `warn` or `reject`.",
     )
-    properties: dict[str, PropertySpec] = Field(default_factory=dict)
+    properties: dict[str, PropertySpec] = Field(
+        default_factory=dict,
+        description=(
+            "The declared properties by name, at most 200. `id` may declare only a `pattern` "
+            "(and a description); `graphos_*` and `community_id` cannot be declared."
+        ),
+    )
 
     @field_validator("properties")
     @classmethod
@@ -181,9 +207,21 @@ class PropertySchemaSpec(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    mode: Mode | None = None
-    vertex: dict[str, LabelPropertiesSpec | None] = Field(default_factory=dict)
-    edge: dict[str, LabelPropertiesSpec | None] = Field(default_factory=dict)
+    mode: Mode | None = Field(
+        None,
+        description=(
+            "`off` (nothing checked), `warn` (checked, written anyway, counted) or `strict` "
+            "(violating rows refused); omitted, it stays as registered."
+        ),
+    )
+    vertex: dict[str, LabelPropertiesSpec | None] = Field(
+        default_factory=dict,
+        description="Entries by vertex label, or `*` for every label; `null` removes one.",
+    )
+    edge: dict[str, LabelPropertiesSpec | None] = Field(
+        default_factory=dict,
+        description="Entries by edge type, or `*` for every type; `null` removes one.",
+    )
 
     @field_validator("vertex", "edge")
     @classmethod
@@ -215,19 +253,37 @@ class EffectiveProperty(BaseModel):
 class EffectivePolicy(BaseModel):
     """How one vertex label's or edge type's writes are checked."""
 
-    mode: Mode
-    undeclared: Undeclared
-    undeclared_source: str
-    properties: dict[str, EffectiveProperty] = Field(default_factory=dict)
+    mode: Mode = Field(
+        ...,
+        description=(
+            "The mode its writes are checked in: `off`, `warn` or `strict` (the tenant's, unless "
+            "an entry overrides it)."
+        ),
+    )
+    undeclared: Undeclared = Field(
+        ...,
+        description="What happens to keys no definition names: `allow`, `warn` or `reject`.",
+    )
+    undeclared_source: str = Field(
+        ...,
+        description="The entry `undeclared` comes from: `*`, a label or a type (`*` by default).",
+    )
+    properties: dict[str, EffectiveProperty] = Field(
+        default_factory=dict, description="Each declared property's combined definition, by name.",
+    )
 
 
 class PropertyDefinitionsResponse(BaseModel):
     """``GET /v1/{tenant}/graph/properties``: every label's and type's definitions."""
 
-    tenant: str
+    tenant: str = Field(..., description="The tenant.")
     mode: Mode = Field(description="The tenant's mode; an entry may override it.")
-    vertex: dict[str, EffectivePolicy] = Field(default_factory=dict)
-    edge: dict[str, EffectivePolicy] = Field(default_factory=dict)
+    vertex: dict[str, EffectivePolicy] = Field(
+        default_factory=dict, description="Every registered vertex label's policy, by label.",
+    )
+    edge: dict[str, EffectivePolicy] = Field(
+        default_factory=dict, description="Every registered edge type's policy, by type.",
+    )
 
 
 # ── The report on stored data ────────────────────────────────────────────────
@@ -250,15 +306,26 @@ class PropertiesCheckRequest(BaseModel):
 class LabelCheck(BaseModel):
     """What one vertex label's or edge type's stored rows break."""
 
-    kind: Literal["vertex", "edge"]
-    name: str
+    kind: Literal["vertex", "edge"] = Field(
+        ..., description="`vertex` for a vertex label, `edge` for an edge type.",
+    )
+    name: str = Field(..., description="The vertex label or edge type.")
     rows: int = Field(description="Rows read (a node under its own label only).")
     rows_with_errors: int = Field(description="Rows strict would refuse.")
-    rows_with_warnings: int
+    rows_with_warnings: int = Field(
+        ...,
+        description=(
+            "Rows with at least one warning (a `recommended` property absent, an undeclared "
+            "key under `warn`)."
+        ),
+    )
     errors: dict[str, int] = Field(
         default_factory=dict, description="By `<label or *>.<property>:<rule>`.",
     )
-    warnings: dict[str, int] = Field(default_factory=dict)
+    warnings: dict[str, int] = Field(
+        default_factory=dict,
+        description="Warnings by `<label or *>.<property>:<rule>`, most frequent first.",
+    )
     examples: dict[str, list[str]] = Field(
         default_factory=dict,
         description="Per rule broken, some rows: a node's id, an edge as `src_id -> dst_id`.",
@@ -270,10 +337,16 @@ class LabelCheck(BaseModel):
 
 
 class PropertiesCheckResponse(BaseModel):
-    tenant: str
+    """What the stored rows break of the property schema; nothing is written."""
+
+    tenant: str = Field(..., description="The tenant.")
     mode: Mode = Field(description="The tenant's mode; the check reads as if every rule applied.")
-    rows: int
-    rows_with_errors: int
-    rows_with_warnings: int
-    labels: list[LabelCheck]
-    elapsed_ms: int
+    rows: int = Field(..., description="Rows read, over every label and type checked.")
+    rows_with_errors: int = Field(..., description="Rows strict would refuse, over all of them.")
+    rows_with_warnings: int = Field(
+        ..., description="Rows with at least one warning, over all of them.",
+    )
+    labels: list[LabelCheck] = Field(
+        ..., description="One entry per vertex label, then per edge type, checked.",
+    )
+    elapsed_ms: int = Field(..., description="Time the check took, in milliseconds.")

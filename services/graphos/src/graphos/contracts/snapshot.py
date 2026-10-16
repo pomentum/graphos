@@ -18,19 +18,49 @@ MAX_SNAPSHOT_ROWS = 50_000_000   # 50M rows per stream; larger streams get 413
 
 
 class SnapshotImportResponse(BaseModel):
-    tenant: str
-    nodes_received: int = 0
-    edges_received: int = 0
-    nodes_upserted: int = 0
-    edges_upserted: int = 0
-    edges_skipped: int = 0
-    by_node_label: dict[str, int] = Field(default_factory=dict)
-    by_edge_type: dict[str, int] = Field(default_factory=dict)
-    copy_ms: int = 0
-    merge_ms: int = 0
-    elapsed_ms: int = 0
-    errors: list[str] = Field(default_factory=list)
-    mode: Literal["merge", "empty"] = "merge"
+    """What a snapshot import read, wrote and refused."""
+
+    tenant: str = Field(..., description="The tenant.")
+    nodes_received: int = Field(
+        0, description="Node lines read (a line without `_kind` is a node), invalid ones included.",
+    )
+    edges_received: int = Field(0, description="Edge lines read, invalid ones included.")
+    nodes_upserted: int = Field(0, description="Nodes written: inserted, or merged into.")
+    edges_upserted: int = Field(0, description="Edges written: inserted, or merged into.")
+    edges_skipped: int = Field(
+        0, description="Valid edge lines not written because an end node does not exist.",
+    )
+    by_node_label: dict[str, int] = Field(
+        default_factory=dict, description="Nodes written per vertex label.",
+    )
+    by_edge_type: dict[str, int] = Field(
+        default_factory=dict, description="Edges written per edge type.",
+    )
+    copy_ms: int = Field(
+        0,
+        description=(
+            "Time reading the stream, in milliseconds, with the chunks written on the way "
+            "(every 5000 rows of a label or type)."
+        ),
+    )
+    merge_ms: int = Field(
+        0, description="Time writing the last, partly filled chunks, in milliseconds.",
+    )
+    elapsed_ms: int = Field(0, description="Total time, in milliseconds.")
+    errors: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Why lines were not written, as `line <n>: <reason>` (not JSON, invalid, an "
+            "unregistered label or type, a property violation); the first 50."
+        ),
+    )
+    mode: Literal["merge", "empty"] = Field(
+        "merge",
+        description=(
+            "The `mode` used: `merge` (into what the tenant holds) or `empty` (into a tenant "
+            "without nodes)."
+        ),
+    )
     header: dict[str, Any] | None = Field(
         default=None,
         description=(

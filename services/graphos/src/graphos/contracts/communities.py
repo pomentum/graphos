@@ -10,59 +10,101 @@ from pydantic import BaseModel, Field
 class CommunityRow(BaseModel):
     """One community in a /communities response."""
 
-    community_id: int
-    size: int
+    community_id: int = Field(
+        ..., description="The `community_id` the last Louvain recompute wrote on the members.",
+    )
+    size: int = Field(..., description="Nodes with this `community_id`.")
     sample_labels: list[str] = Field(
         default_factory=list,
-        description="Top labels among members, in descending frequency.",
+        description="Labels among the members, in alphabetical order, the first 5.",
     )
     member_ids: list[str] | None = Field(
         default=None,
-        description="Only populated when `include_members=true`.",
+        description=(
+            "Up to 500 member ids (nodes without an `id` are left out). Only populated when "
+            "`include_members=true`; null otherwise."
+        ),
     )
 
 
 class CommunitiesResponse(BaseModel):
-    tenant: str
-    min_size: int
-    n_communities: int
-    n_assigned_nodes: int
-    n_unassigned_nodes: int
-    elapsed_ms: int
-    communities: list[CommunityRow] = Field(default_factory=list)
+    """Communities from the last Louvain recompute, largest first."""
+
+    tenant: str = Field(..., description="The tenant.")
+    min_size: int = Field(
+        ..., description="The `min_size` applied: smaller communities are left out.",
+    )
+    n_communities: int = Field(
+        ..., description="Communities in this answer, after `min_size` and `limit`.",
+    )
+    n_assigned_nodes: int = Field(
+        ..., description="Nodes of the tenant with a `community_id`, over all communities.",
+    )
+    n_unassigned_nodes: int = Field(
+        ..., description="Nodes of the tenant without a `community_id`.",
+    )
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
+    communities: list[CommunityRow] = Field(
+        default_factory=list,
+        description="The communities, by size descending, then `community_id`.",
+    )
 
 
 class CommunitySummary(BaseModel):
-    tenant: str
-    n_communities: int
-    n_assigned_nodes: int
-    n_unassigned_nodes: int
-    largest_community_size: int
-    smallest_community_size: int
+    """Totals over the last Louvain recompute, and its largest communities."""
+
+    tenant: str = Field(..., description="The tenant.")
+    n_communities: int = Field(..., description="Distinct `community_id` values on the nodes.")
+    n_assigned_nodes: int = Field(..., description="Nodes with a `community_id`.")
+    n_unassigned_nodes: int = Field(..., description="Nodes without a `community_id`.")
+    largest_community_size: int = Field(
+        ..., description="Members of the largest community; 0 when there is none.",
+    )
+    smallest_community_size: int = Field(
+        ..., description="Members of the smallest community; 0 when there is none.",
+    )
     top: list[CommunityRow] = Field(
         default_factory=list,
-        description="Top-N communities by size (default N=10, capped).",
+        description="Top-N communities by size (`top`, default 10, at most 100).",
     )
-    elapsed_ms: int
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
 
 
 # ── Per-tenant graph stats ─────────────────────────────────────────────────
 
 
 class LabelCount(BaseModel):
-    label: str
+    """One label's storage table: its rows and size."""
+
+    label: str = Field(..., description="The vertex label or edge type.")
     kind: str = Field(..., description="`v` for vertex, `e` for edge")
-    count: int
-    total_bytes: int = 0
+    count: int = Field(
+        ...,
+        description=(
+            "Exact rows of the label's table. A parent label's count includes its child "
+            "labels' rows, so the counts can overlap."
+        ),
+    )
+    total_bytes: int = Field(
+        0,
+        description=(
+            "The label table's size on disk with its indexes and TOAST "
+            "(`pg_total_relation_size`), in bytes."
+        ),
+    )
 
 
 class TenantStatsResponse(BaseModel):
-    tenant: str
-    n_vertices: int
-    n_edges: int
-    total_bytes: int
-    labels: list[LabelCount] = Field(default_factory=list)
-    elapsed_ms: int
+    """A tenant's graph size: node and edge counts, and storage by label."""
+
+    tenant: str = Field(..., description="The tenant.")
+    n_vertices: int = Field(..., description="Nodes in the graph, each counted once.")
+    n_edges: int = Field(..., description="Edges in the graph, each counted once.")
+    total_bytes: int = Field(..., description="The sum of `total_bytes` over `labels`, in bytes.")
+    labels: list[LabelCount] = Field(
+        default_factory=list, description="Every label, by `total_bytes` descending.",
+    )
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
 
 
 # ── Batch community-id lookup ──────────────────────────────────────────────
@@ -83,8 +125,10 @@ class CommunityIdsRequest(BaseModel):
 
 
 class CommunityIdsResponse(BaseModel):
-    tenant: str
-    n_requested: int
+    """The `community_id` of each id looked up."""
+
+    tenant: str = Field(..., description="The tenant.")
+    n_requested: int = Field(..., description="Ids looked up: those sent, at most 500.")
     n_resolved: int = Field(
         ...,
         description=("Number of ids that found a community_id. "
@@ -100,7 +144,7 @@ class CommunityIdsResponse(BaseModel):
         description="True when more ids were sent than the per-request cap "
                     "and only the first ones were looked up.",
     )
-    elapsed_ms: int
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
 
 
 # ── Generic analytics primitives ───────────────────────────────────────────
@@ -113,17 +157,36 @@ class CommunityIdsResponse(BaseModel):
 
 
 class TopByEdgeRow(BaseModel):
+    """One node and its edge count."""
+
     node_id: str = Field(
         ...,
         description="External id (``properties.id``) of the parent node.",
     )
-    edge_count: int
+    edge_count: int = Field(
+        ...,
+        description=(
+            "Edges of type `by_edge` on the node in `direction`; with `both`, a self-loop "
+            "counts twice."
+        ),
+    )
 
 
 class TopByEdgeResponse(BaseModel):
-    tenant: str
-    label: str
-    by_edge: str
-    direction: str
-    rows: list[TopByEdgeRow] = Field(default_factory=list)
-    elapsed_ms: int
+    """The nodes of a label with the most edges of one type."""
+
+    tenant: str = Field(..., description="The tenant.")
+    label: str = Field(..., description="The vertex label counted.")
+    by_edge: str = Field(..., description="The edge type counted.")
+    direction: str = Field(
+        ...,
+        description="`out` (edges leaving the node), `in` (entering it) or `both`.",
+    )
+    rows: list[TopByEdgeRow] = Field(
+        default_factory=list,
+        description=(
+            "At most `k` nodes, by `edge_count` descending, then `node_id`; nodes without such "
+            "an edge are absent."
+        ),
+    )
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")

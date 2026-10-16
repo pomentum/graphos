@@ -15,6 +15,8 @@ DEFAULT_METRICS: list[Metric] = ["degree", "pagerank", "components"]
 
 
 class ComputeMetricsRequest(BaseModel):
+    """Which graph metrics to compute, over which edges (`POST …/graph/metrics:compute`)."""
+
     metrics: list[Metric] = Field(
         default_factory=lambda: list(DEFAULT_METRICS),
         min_length=1,
@@ -65,20 +67,39 @@ class ComputeMetricsRequest(BaseModel):
 
 
 class ComputeMetricsResponse(BaseModel):
-    tenant: str
-    metrics: list[Metric]
+    """What a metrics run computed, changed and how long each phase took."""
+
+    tenant: str = Field(..., description="The tenant.")
+    metrics: list[Metric] = Field(
+        ..., description="The metrics asked for, without repeats, in the order sent.",
+    )
     properties: list[str] = Field(description="The graphos_* properties computed.")
     n_nodes: int = Field(description="Nodes with at least one edge of the chosen types.")
-    n_edges_scanned: int
-    n_components: int | None = None
+    n_edges_scanned: int = Field(
+        ..., description="Edges read: those of the chosen types and node filter.",
+    )
+    n_components: int | None = Field(
+        None,
+        description="Weakly connected components found; null unless `components` was asked for.",
+    )
     n_changed: int = Field(description="Nodes whose values changed (written unless dry_run).")
     n_cleared: int = Field(
         description="Nodes that had values but no longer take part (values removed).",
     )
-    betweenness_skipped: bool = False
-    warnings: list[str] = Field(default_factory=list)
-    edge_stream_ms: int
-    compute_ms: int
-    writeback_ms: int
-    elapsed_ms: int
-    dry_run: bool
+    betweenness_skipped: bool = Field(
+        False,
+        description=(
+            "Betweenness was asked for but not computed: more nodes than "
+            "`GRAPHOS_BETWEENNESS_MAX_NODES`."
+        ),
+    )
+    warnings: list[str] = Field(
+        default_factory=list, description="Notes on the run, such as why betweenness was skipped.",
+    )
+    edge_stream_ms: int = Field(..., description="Time reading the edges, in milliseconds.")
+    compute_ms: int = Field(..., description="Time computing the metrics, in milliseconds.")
+    writeback_ms: int = Field(
+        ..., description="Time comparing and writing the values, in milliseconds.",
+    )
+    elapsed_ms: int = Field(..., description="Total time, in milliseconds.")
+    dry_run: bool = Field(..., description="Nothing was written: the request's `dry_run`.")
