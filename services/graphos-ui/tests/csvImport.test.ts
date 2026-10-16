@@ -306,6 +306,30 @@ describe("checking CSV rows", () => {
     expect(issue(off, "notInEnum")).toBeUndefined();
   });
 
+  it("checks required properties on the merged node: one row of a repeated id is enough", () => {
+    const named: NodePlan = {
+      kind: "nodes",
+      label: "Person",
+      id: 0,
+      columns: [{ index: 1, header: "name", property: "name", type: "text" }],
+    };
+    const rows = [
+      ["p1", "Ann"],
+      ["p1", ""],
+      ["p2", ""],
+      ["p2", ""],
+      ["", ""],
+    ];
+    const { issues } = checkRows(named, ["id", "name"], rows, PERSON);
+    expect(issue(issues, "required")).toMatchObject({
+      count: 2,
+      examples: [
+        { row: 5, column: "name" },
+        { row: 3, column: "name" },
+      ],
+    });
+  });
+
   it("refuses whitespace-only ids and reports an imported column without a name", () => {
     const plan: NodePlan = {
       kind: "nodes",

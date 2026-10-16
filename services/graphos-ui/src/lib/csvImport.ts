@@ -392,7 +392,8 @@ type EndpointSchema = Pick<TenantSchema, "edge_endpoints" | "label_hierarchy" | 
  * names graphos refuses or that are empty, and, unless the definitions are
  * off, the declared properties (required, type, allowed values, range;
  * patterns and formats are left to graphos). For relationships, the label
- * pair against the declared ones.
+ * pair against the declared ones. Required properties are checked on what is
+ * sent: rows repeating an id are merged first, so one of them is enough.
  */
 class RowChecker {
   private readonly issues = new Issues();
@@ -402,6 +403,8 @@ class RowChecker {
   private readonly required: string[];
   private readonly ids: number[];
   private readonly seen = new Set<string>();
+  /** For each id (or source and target), its first row and the required properties some row of it has. */
+  private readonly present = new Map<string, { row: number; names: Set<string> }>();
 
   constructor(
     private readonly plan: ImportPlan,
@@ -462,8 +465,8 @@ class RowChecker {
         if (id === "") issues.add("emptyId", true, { row: line, column: header[index] });
         else if (id.length > MAX_ID_LENGTH) issues.add("longId", true, { row: line, column: header[index] });
       }
-      if (keys.every(Boolean)) {
-        const key = keys.length === 1 ? keys[0]! : JSON.stringify(keys);
+      const key = keys.every(Boolean) ? (keys.length === 1 ? keys[0]! : JSON.stringify(keys)) : null;
+      if (key !== null) {
         if (this.seen.has(key)) {
           const code = this.plan.kind === "nodes" ? "duplicateId" : "duplicatePair";
           issues.add(code, false, { row: line, value: keys.join(" → ") });
@@ -485,13 +488,27 @@ class RowChecker {
         const broken = spec ? breaks(spec, value) : null;
         if (broken) issues.add(broken, strict, { row: line, column: name, value: text });
       });
-      for (const name of required) {
-        if (!present!.has(name)) issues.add("required", strict, { row: line, column: name });
+      if (!present) continue;
+      if (key === null) {
+        // Sent on its own (and refused for its id): checked as it is.
+        for (const name of required) {
+          if (!present.has(name)) issues.add("required", strict, { row: line, column: name });
+        }
+        continue;
       }
+      const merged = this.present.get(key);
+      if (merged) for (const name of present) merged.names.add(name);
+      else this.present.set(key, { row: line, names: present });
     }
   }
 
   result(rows: number): ImportCheck {
+    for (const { row, names } of this.present.values()) {
+      for (const name of this.required) {
+        if (!names.has(name)) this.issues.add("required", this.strict, { row, column: name });
+      }
+    }
+    this.present.clear();
     return { rows, issues: this.issues.list() };
   }
 }
