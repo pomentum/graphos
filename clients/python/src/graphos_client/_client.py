@@ -35,6 +35,7 @@ from graphos_client._models import (
     DeleteByPropertyResponse,
     DeleteEdgeResponse,
     DeleteNodeResponse,
+    DeleteNodesResponse,
     EdgeGetResponse,
     EdgesAggregateResponse,
     EdgesScanResponse,
@@ -50,6 +51,7 @@ from graphos_client._models import (
     NeighborsResponse,
     NodeGetResponse,
     NodePropertiesUpsertResponse,
+    NodeRef,
     NodesAggregateResponse,
     NodesScanResponse,
     NodesUpsertResponse,
@@ -1185,6 +1187,17 @@ class GraphosClient:
             headers=_if_match_header(if_match),
         )
         return DeleteNodeResponse.model_validate(resp.json())
+
+    async def delete_nodes(self, refs: Iterable[NodeRef]) -> DeleteNodesResponse:
+        """Delete up to 1000 nodes, each by label and id, with their edges, in
+        one transaction.  A node that does not exist is skipped.  The call is
+        retried on a lost connection or a 5xx; a retry after the first attempt
+        committed finds nothing left and reports zero deleted."""
+        body = {"nodes": [r.model_dump() for r in refs]}
+        resp = await self._request(
+            "POST", f"/v1/{self._tenant}/graph/nodes:delete", json_body=body,
+        )
+        return DeleteNodesResponse.model_validate(resp.json())
 
     async def delete_by_property(
         self, *, property_key: str, property_value: str,

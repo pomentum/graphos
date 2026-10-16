@@ -733,6 +733,14 @@ curl -s -X POST "$G/v1/acme_copy/graph/snapshot-import?mode=empty" \
 | `DELETE /v1/{t}/graph/nodes/{external_id}[?label=]` | Delete the node(s) with that external id (in any label, or only in `label`) and their edges, in one transaction; idempotent (`nodes_deleted: 0` if absent) |
 | `DELETE /v1/{t}/graph/edges/{type}?src=&dst=[&src_label=&dst_label=]` | Delete one edge; its end nodes stay; idempotent (`edges_deleted: 0` if absent); 409 when several edges match |
 | `DELETE /v1/{t}/graph/nodes?property_key=team&property_value=core` | Delete every node whose property equals that string, and their edges, in one transaction; returns node and edge counts (each edge once) |
+| `POST /v1/{t}/graph/nodes:delete` | Delete up to 1,000 nodes, each by `label` and `id`, and their edges, in one transaction; a label takes in its child labels' nodes; a node that does not exist is skipped; 400 (nothing deleted) when a label is not registered; 503 with `Retry-After` (nothing deleted) when concurrent writes on the same edges keep winning |
+
+```bash
+curl -s -X POST "$G/v1/acme/graph/nodes:delete" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"nodes": [{"label": "Document", "id": "d1"}, {"label": "User", "id": "u2"}]}'
+# → {"tenant":"acme","nodes_requested":2,"nodes_deleted":2,"edges_deleted":2,"elapsed_ms":3}
+```
 
 ---
 
@@ -1258,6 +1266,7 @@ Read access is enough for all four. A record:
 | edge upsert | one per committed batch and edge group: `edges` as `[src_id, dst_id]` pairs written (skipped rows are not listed), `src_label` / `dst_label` |
 | property merge, node or edge patch | `merge` / `patch` with the one id or pair and the new `rev` |
 | node delete (by id or by property) | `delete`, one per label, with the ids; `detail.edges_removed` counts the edges deleted with them (for the whole statement), `detail.where` the property for a delete by property |
+| batch node delete (`nodes:delete`) | `delete`, one per label, with the ids deleted; `detail.edges_removed` counts the edges deleted by that label's statement |
 | edge delete | `delete` with the pair |
 | `edges:resolve` | one `resolve` summary per edge type, `count` edges, no ids: re-read the type |
 | Louvain write-back | one `communities` summary, `count` nodes, no ids |

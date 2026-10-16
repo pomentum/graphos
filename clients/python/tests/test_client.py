@@ -16,9 +16,11 @@ import pytest
 from graphos_client import (
     BearerAuth,
     BulkNodesResponse,
+    DeleteNodesResponse,
     EdgeUpsert,
     GraphosClient,
     GraphosError,
+    NodeRef,
     NodesUpsertResponse,
     NodeUpsert,
     PasswordAuth,
@@ -1186,6 +1188,36 @@ async def test_aggregate_nodes_reads_total_and_distinct() -> None:
     assert captured["url"].endswith("/v1/demo/graph/nodes/aggregate")
     assert captured["body"]["missing"] is True
     assert (resp.total, resp.distinct, resp.truncated) == (9, 4, True)
+
+
+@pytest.mark.asyncio
+async def test_delete_nodes_posts_the_refs_in_one_request() -> None:
+    seen: list[tuple[str, str, dict]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path, json.loads(request.content)))
+        return httpx.Response(200, json={
+            "tenant": "demo", "nodes_requested": 2, "nodes_deleted": 1,
+            "edges_deleted": 3, "elapsed_ms": 2,
+        })
+
+    resp = await _client_for(handler).delete_nodes([
+        NodeRef(label="Doc", id="a/b"), NodeRef(label="Tag", id="x"),
+    ])
+    assert seen == [("POST", "/v1/demo/graph/nodes:delete", {"nodes": [
+        {"id": "a/b", "label": "Doc"}, {"id": "x", "label": "Tag"},
+    ]})]
+    assert isinstance(resp, DeleteNodesResponse)
+    assert (resp.nodes_requested, resp.nodes_deleted, resp.edges_deleted) == (2, 1, 3)
+
+
+@pytest.mark.asyncio
+async def test_delete_nodes_is_retried_on_5xx() -> None:
+    cli, calls = _counting_client(502)
+    with pytest.raises(GraphosError):
+        await cli.delete_nodes([NodeRef(label="Doc", id="a")])
+    assert len(calls) == 3          # idempotent: a node already gone is skipped
+    await cli.close()
 
 
 @pytest.mark.asyncio

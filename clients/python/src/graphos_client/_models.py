@@ -28,6 +28,13 @@ class NodeUpsert(BaseModel):
     properties: dict[str, object] = Field(default_factory=dict)
 
 
+class NodeRef(BaseModel):
+    """One node by its label and id, as :meth:`GraphosClient.delete_nodes` takes it."""
+
+    id: str
+    label: str
+
+
 class EdgeUpsert(BaseModel):
     src_id: str
     src_label: str
@@ -399,6 +406,14 @@ class BulkEdgesResponse(BaseModel):
 class DeleteNodeResponse(BaseModel):
     tenant: str
     node_id: str
+    nodes_deleted: int
+    edges_deleted: int
+    elapsed_ms: int
+
+
+class DeleteNodesResponse(BaseModel):
+    tenant: str
+    nodes_requested: int
     nodes_deleted: int
     edges_deleted: int
     elapsed_ms: int

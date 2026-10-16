@@ -34,6 +34,10 @@ import asyncpg
 # Matches a vertex by its id, served by each label's <Label>_id_unique index.
 ID_MATCH = "properties->'\"id\"' = $1::text::agtype"
 
+# Matches vertices by any of several ids (``$1``: JSON-encoded ids, as
+# ``text[]``), served by the same index.
+IDS_MATCH = "properties->'\"id\"' = ANY($1::text[]::agtype[])"
+
 # The revision column on every label table (added to AGE's parent tables at
 # bootstrap, so every label table inherits it).
 REV = "graphos_rev"

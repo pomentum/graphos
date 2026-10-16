@@ -470,6 +470,7 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `DELETE …/graph/nodes/{external_id}?label=` | Delete one node and its edges | tenant |
 | `DELETE …/graph/edges/{type}?src=&dst=&src_label=&dst_label=` | Delete one edge | tenant |
 | `DELETE …/graph/nodes?property_key=&property_value=` | Delete every node with that property value, and their edges | tenant |
+| `POST …/graph/nodes:delete` `{nodes: [{label, id}]}` | Delete up to 1,000 nodes and their edges, in one transaction | tenant |
 | **Computations** | | |
 | `POST /v1/{tenant}/recompute-communities` | Louvain (§5); 501 without the extra | `maintain` |
 | `POST …/graph/metrics:compute` | Degree, PageRank, weakly connected components and betweenness, stored on the nodes as `graphos_*` properties | `maintain` |

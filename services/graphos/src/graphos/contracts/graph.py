@@ -787,6 +787,49 @@ class DeleteNodeResponse(BaseModel):
     elapsed_ms: int
 
 
+class NodeRef(BaseModel):
+    """One node named by its label and consumer-assigned ``id``."""
+
+    id: str = Field(..., min_length=1, max_length=_NODE_ID_MAX_LEN)
+    label: str = Field(..., description="Vertex label; must be registered for the tenant.")
+
+    @field_validator("label")
+    @classmethod
+    def _validate_label(cls, v: str) -> str:
+        if not _LABEL_PATTERN.fullmatch(v):
+            raise ValueError(
+                f"label '{v}' must match {_LABEL_PATTERN.pattern} (UpperCamelCase)"
+            )
+        return v
+
+
+class NodesDeleteRequest(BaseModel):
+    """Body for POST /v1/{tenant}/graph/nodes:delete."""
+
+    nodes: list[NodeRef] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_NODES_UPSERT_BATCH,
+        description=(
+            f"Up to {MAX_NODES_UPSERT_BATCH} nodes, each by `label` and `id`. "
+            "A node that does not exist is skipped."
+        ),
+    )
+
+
+class DeleteNodesResponse(BaseModel):
+    """Response for POST /v1/{tenant}/graph/nodes:delete."""
+
+    tenant: str
+    nodes_requested: int = Field(..., description="Entries in the request, duplicates included.")
+    nodes_deleted: int
+    edges_deleted: int = Field(
+        ...,
+        description="Edges incident to the deleted nodes, removed with them (each counted once).",
+    )
+    elapsed_ms: int
+
+
 class DeleteByPropertyResponse(BaseModel):
     """Response for property-scoped tombstones (e.g. drop every node of one project)."""
 

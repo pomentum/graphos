@@ -88,6 +88,7 @@ def test_openapi_routes() -> None:
     assert "/v1/{tenant}/graph/nodes" in paths
     assert "/v1/{tenant}/graph/edges" in paths
     assert "/v1/{tenant}/graph/nodes:bulk" in paths
+    assert "post" in paths["/v1/{tenant}/graph/nodes:delete"]
     assert "/v1/{tenant}/graph/edges:bulk" in paths
     assert "/v1/{tenant}/graph/neighbors" in paths
     assert "/v1/{tenant}/graph/induced_edges" in paths
