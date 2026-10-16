@@ -41,7 +41,7 @@ from collections.abc import Awaitable, Callable
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from graphos.auth import ACCESS_SCOPE_KEY, Access
+from graphos.auth import ACCESS_SCOPE_KEY, MCP_TOOL_KEY, Access
 
 _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -180,6 +180,7 @@ def _emit(request: Request, args_hash: str, status: int, started: float) -> None
             **({"query": request.url.query} if read else {}),
             "tenant": _extract_tenant_from_path(request.url.path),
             "consumer": consumer,
+            **({"mcp_tool": request.scope[MCP_TOOL_KEY]} if MCP_TOOL_KEY in request.scope else {}),
             "args_hash": args_hash,
             "status": status,
             "elapsed_ms": int((time.perf_counter() - started) * 1000),

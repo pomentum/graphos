@@ -1316,6 +1316,23 @@ async def test_reconcile_node_edges_and_resolve_by_difference_send_their_options
 
 
 @pytest.mark.asyncio
+async def test_schema_summary_parses_labels_values_and_text() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/demo/schema/summary"
+        return httpx.Response(200, json={
+            "tenant": "demo", "labels_total": 1, "links_total": 0, "links": [],
+            "estimated": False, "text": "graphos tenant demo", "cached": False, "elapsed_ms": 3,
+            "labels": [{"label": "Doc", "count": 2, "properties_total": 1, "properties": [
+                {"name": "status", "records": 2, "distinct": 1,
+                 "values": [{"value": "ACT", "count": 2}]}]}],
+        })
+
+    summary = await _client_for(handler).schema_summary()
+    (doc,) = summary.labels
+    assert doc.properties[0].values[0].value == "ACT" and summary.text.startswith("graphos")
+
+
+@pytest.mark.asyncio
 async def test_import_csv_sends_the_file_and_the_mapping(tmp_path: Path) -> None:
     seen: list[tuple[str, dict[str, str], bytes, str]] = []
     answer = {

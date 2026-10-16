@@ -151,6 +151,9 @@ services:
       # The host names clients reach graphos by, against DNS rebinding; add
       # graphos-api when the bundled web UI proxies to it. Empty: any Host.
       GRAPHOS_ALLOWED_HOSTS: ${GRAPHOS_ALLOWED_HOSTS:-}
+      # The MCP endpoint for agents (docs/agents.md): set both to turn it on.
+      GRAPHOS_MCP: ${GRAPHOS_MCP:-false}
+      GRAPHOS_MCP_RESOURCE: ${GRAPHOS_MCP_RESOURCE:-}
       GRAPHOS_BIND_HOST: "0.0.0.0"
       GRAPHOS_BIND_PORT: "8080"
       GRAPHOS_LOG_LEVEL: info

@@ -1,6 +1,6 @@
 # ADR-0002: An MCP surface for agents, and a schema summary
 
-- **Status:** Proposed (2026-10-16)
+- **Status:** Accepted (2026-10-16)
 - **Scope:**
   - a new transport, `/mcp`, in the graphos app;
   - a new read endpoint, `GET /v1/{tenant}/schema/summary`;
@@ -77,9 +77,14 @@ model) or JSON.
 **The setting:** `GRAPHOS_MCP=true` mounts the SDK's Streamable HTTP app at `/mcp`, in stateless
 mode.
 
-**Tool calls go straight to graphos's service layer, with no HTTP hop:**
-- the same functions the REST routes call;
-- the same grants, timeouts and caps.
+**Each tool runs the REST route it wraps, in process, with no network hop:**
+- graphos's logic lives in its routes, so a tool calls its route through the app's own ASGI
+  interface, nothing reimplemented;
+- under a single-use token lent for the caller (256 random bits, valid in this process for that
+  one call, never sent anywhere), so the route holds the caller to its grants, timeouts and caps,
+  and the audit records the call with the tool's name;
+- this is not token passthrough: graphos lends the token to itself, the client's token stays at
+  `/mcp`.
 
 **Not a sidecar:**
 - the specification forbids a sidecar from passing the client's token through to graphos;
@@ -139,7 +144,7 @@ prompts (below).
 | `list_tenants` | the caller's grants |
 | `get_schema` | the schema summary (1) |
 | `search_nodes` | `graph/search` |
-| `get_nodes` | node by id, many ids per call |
+| `get_node` | one node by id (and label when the id is in several) |
 | `get_neighbors` | `graph/neighbors` |
 | `expand_subgraph` | `graph/expand` |
 | `shortest_paths` | `graph/paths` |

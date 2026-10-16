@@ -92,6 +92,22 @@ def test_signed_in_callers_are_bucketed_by_user_not_by_token() -> None:
         assert client.get("/v1/me", headers={"Authorization": "Bearer nope"}).status_code == 401
 
 
+def test_an_mcp_tool_call_counts_against_its_caller() -> None:
+    settings = Settings(
+        db_password="placeholder", rate_limit_enabled=True, rate_limit_rps=2,
+        rate_limit_window_s=60.0,
+    )
+    app = create_app(settings=settings)
+    caller = Principal.static("agent", admin=True)
+    app.state.authenticator = StaticAuthenticator({"tok": caller})
+    client = TestClient(app, raise_server_exceptions=False)
+    assert client.get("/v1/me", headers={"Authorization": "Bearer tok"}).status_code != 429
+    with app.state.lent_tokens.lend(caller, "list_tenants") as lent:
+        headers = {"Authorization": f"Bearer {lent}"}
+        assert client.get("/v1/me", headers=headers).status_code != 429
+        assert client.get("/v1/me", headers=headers).status_code == 429
+
+
 # ── Middleware end-to-end ──────────────────────────────────────────────────
 
 

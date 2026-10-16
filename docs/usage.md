@@ -134,6 +134,10 @@ password being its secret. Only a scrypt hash of it is stored.
 
 **Signing in.** `POST /v1/auth/login {"user", "password"}` answers an access token, valid
 `expires_in` seconds (`GRAPHOS_ACCESS_TOKEN_TTL_S`, 900). Send it as `Authorization: Bearer <token>`.
+A service account can also use OAuth client credentials: `POST /v1/auth/token`, form-encoded
+`grant_type=client_credentials`, `client_id` (its name), `client_secret`, and optionally
+`resource`, which picks the token's audience (the REST API by default, or the MCP endpoint for an
+agent; see [agents.md](agents.md)).
 A person also gets a `refresh_token`: `POST /v1/auth/refresh {"refresh_token"}` answers a new pair
 and the old refresh token stops working; one used twice ends the whole session (someone else has
 it). Sessions end after `GRAPHOS_SESSION_IDLE_S` (3600) without a refresh and
@@ -492,6 +496,27 @@ Any token on a tenant, read-only included, can read its shape with `GET /v1/{ten
 "edge_endpoints", "strict_endpoints", "display", "property_schema"}`. `display` and
 `property_schema` list only what was declared: a key left out of an entry is left out here too.
 It leaves out what only maintainers see (property indexes, generated columns, rule bodies, `meta`).
+
+**Schema summary, for a model.** `GET /v1/{tenant}/schema/summary` (`read`) answers what an agent
+needs before it writes a query, measured from the data rather than declared: each label with its
+node count, parent and properties (the declared type, `required` and enum; the rows that hold the
+property, its distinct values and, when there are at most 20, every value with its count), the
+label pairs per edge type with their counts, the search indexes, the saved queries with their
+parameters, and the `graphos_*` names graphos computes itself. Lists are capped (40 labels, 25
+properties a label, 60 label pairs) and say how many there were; labels above 50,000 nodes are read
+on a sample (`estimated`). `text` holds the same as compact text, and `?format=text` answers it
+alone. It is kept per tenant for `GRAPHOS_SCHEMA_SUMMARY_TTL_S` (300 s) and dropped when the
+schema changes.
+
+```text
+graphos tenant acme: 2 labels with nodes, 1 label pairs with edges.
+Labels (node count; property: type, rows, distinct values or the values):
+- Person (5,300): name: string required, 5,300 rows, 5,280 distinct; status: string, 5,300 rows, 'ACT' 4,100, 'OLD' 1,200
+- Doc (12,000): title: string, 12,000 rows, 11,950 distinct
+Relationships ((source)-[:TYPE]->(target) edge count):
+- (Person)-[:AUTHORED]->(Doc) 12,000
+Use label, type, property names and values exactly as written here; look a property's values up (get_property_values) before filtering on one.
+```
 
 **Export and import a schema.** `GET /v1/tenants/{name}/spec` answers the tenant's whole schema as
 a file (`<name>.schema.json`, format `graphos.schema`, version 1, or 2 when it carries a

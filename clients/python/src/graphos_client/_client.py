@@ -66,6 +66,7 @@ from graphos_client._models import (
     RecomputeCommunitiesResponse,
     ReconcileEdge,
     SampleSubgraphResponse,
+    SchemaSummaryResponse,
     SearchResponse,
     TenantInfo,
     TenantSchemaInfo,
@@ -1641,6 +1642,14 @@ class GraphosClient:
             "DELETE", path, params=params, headers=_if_match_header(if_match),
         )
         return DeleteEdgeResponse.model_validate(resp.json())
+
+    async def schema_summary(self) -> SchemaSummaryResponse:
+        """The tenant's schema as a model needs it before querying: labels with
+        counts and properties (declared type, rows, distinct values, the values
+        when few), label pairs per edge type, search indexes, saved queries;
+        ``.text`` is the compact form for a prompt."""
+        resp = await self._request("GET", f"/v1/{self._tenant}/schema/summary")
+        return SchemaSummaryResponse.model_validate(resp.json())
 
     async def check_edges(
         self, edges: Iterable[EdgeCheckItem], *, include_properties: bool = False,

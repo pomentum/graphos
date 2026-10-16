@@ -162,7 +162,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             # try to do it here.
             return await call_next(request)
         authenticator = getattr(request.app.state, "authenticator", None)
-        if authenticator is not None:
+        lent = getattr(request.app.state, "lent_tokens", None)
+        taken = lent.take(bearer) if lent is not None else None
+        if taken is not None:
+            # An MCP tool's call, made for its caller: counted as theirs.
+            token_id = _short_id(taken[0].consumer)
+        elif authenticator is not None:
             principal = await authenticator.authenticate(bearer)
             if principal is None:
                 # Unknown or expired token: auth answers 401.  Not bucketing

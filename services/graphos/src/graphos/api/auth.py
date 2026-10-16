@@ -19,17 +19,19 @@ import logging
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, TypeVar
+from typing import Annotated, Any, TypeVar
 from urllib.parse import urlsplit
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Form, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 
 from graphos import identity, oidc
 from graphos.auth import ReadPrincipal
 from graphos.config import Settings
 from graphos.contracts.auth import (
     AuthConfig,
+    ClientCredentialsForm,
     LoginRequest,
     LogoutRequest,
     LogoutResponse,
@@ -177,6 +179,81 @@ async def login(body: LoginRequest, request: Request, response: Response) -> Tok
     log.info("signed in", extra={"user": user.name, "kind": user.kind})
     tokens = await _tokens(d, user, session=True)
     return _in_cookie(response, d, tokens) if body.session_cookie else tokens
+
+
+def _oauth_error(code: int, error: str, description: str) -> JSONResponse:
+    """An OAuth 2.0 error (RFC 6749 §5.2), with ``detail`` as graphos's other errors."""
+    headers = {"WWW-Authenticate": "Basic"} if code == status.HTTP_401_UNAUTHORIZED else None
+    return JSONResponse(
+        status_code=code, headers=headers,
+        content={"error": error, "error_description": description, "detail": description},
+    )
+
+
+@router.post(
+    "/auth/token",
+    response_model=TokenResponse,
+    summary="An access token for a service account (OAuth client credentials)",
+    description=(
+        "OAuth 2.0 client credentials (RFC 6749 §4.4) for graphos's service accounts: "
+        "`grant_type=client_credentials`, `client_id` the account's name and `client_secret` "
+        "its secret (`POST /v1/users/{name}:reset-secret`), form-encoded. `resource` "
+        "(RFC 8707) picks the token's audience: the REST API when absent, or "
+        "`GRAPHOS_MCP_RESOURCE` for the MCP endpoint; a token for one is refused by the other. "
+        "No refresh token: a program asks again. Failures answer OAuth errors "
+        "(`invalid_client`, `unsupported_grant_type`, `invalid_target`)."
+    ),
+    responses={
+        400: {"description": "`unsupported_grant_type`, or a `resource` graphos does not serve."},
+        401: {"description": (
+            "`invalid_client`: the name or secret is wrong, the account is not a service "
+            "account, or it is locked or disabled."
+        )},
+        **_AUTH_OFF_404,
+        **_THROTTLED_429,
+    },
+)
+async def client_credentials_token(
+    request: Request, form: Annotated[ClientCredentialsForm, Form()],
+) -> TokenResponse | JSONResponse:
+    d = deps(request)
+    grant_type, client_id, client_secret, resource = (
+        form.grant_type, form.client_id, form.client_secret, form.resource,
+    )
+    if grant_type != "client_credentials":
+        return _oauth_error(
+            status.HTTP_400_BAD_REQUEST, "unsupported_grant_type",
+            "only grant_type=client_credentials is served here",
+        )
+    if resource in (None, "", identity.AUDIENCE):
+        audience = identity.AUDIENCE
+    elif d.settings.mcp_resource and resource == d.settings.mcp_resource:
+        audience = d.settings.mcp_resource
+    else:
+        return _oauth_error(
+            status.HTTP_400_BAD_REQUEST, "invalid_target", f"graphos does not serve {resource!r}",
+        )
+    client = request.client.host if request.client else "unknown"
+    if not d.throttle.admit(client):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="too many sign-in attempts; wait a minute",
+            headers={"Retry-After": "60"},
+        )
+    try:
+        user = await d.store.check_password(
+            client_id.strip().lower(), client_secret,
+            max_failures=d.settings.login_max_failures, lockout_s=d.settings.login_lockout_s,
+        )
+    except identity.AuthError:
+        user = None
+    if user is None or user.kind != "service":
+        return _oauth_error(
+            status.HTTP_401_UNAUTHORIZED, "invalid_client", identity.REFUSED_MESSAGE,
+        )
+    access, ttl = d.signer.issue(user, audience)
+    log.info("token issued", extra={"user": user.name, "audience": audience})
+    return TokenResponse(access_token=access, expires_in=ttl)
 
 
 @router.post(

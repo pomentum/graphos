@@ -139,6 +139,16 @@ class Settings(BaseSettings):
     # The master keys that seal the secrets graphos stores (graphos.vault):
     # signing keys and ID tokens.  Without it they are stored in clear.
     master_key_file: Path | None = None
+    # ── Agents (graphos.mcp_server, ADR-0002) ───────────────────────────
+    # Mount the MCP endpoint at /mcp (read tools only).
+    mcp: bool = False
+    # The MCP endpoint's public URL, e.g. https://graph.example.com/mcp: the
+    # audience its tokens must carry, and what its metadata names.
+    mcp_resource: str = ""
+    # Bytes of one tool result at most; a longer one is cut and says so.
+    mcp_max_result_bytes: int = Field(default=262_144, ge=4_096)
+    # How long GET /v1/{tenant}/schema/summary is kept per tenant.
+    schema_summary_ttl_s: int = Field(default=300, ge=0)
     # Edges an NDJSON ``edges:reconcile`` body may carry (held in memory).
     reconcile_max_edges: int = Field(default=2_000_000, ge=1)
     # Host names the API answers to (Starlette's TrustedHostMiddleware;

@@ -420,12 +420,15 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `GET /v1/tenants/{name}/spec` | The whole schema as a registration body (the schema file) | `maintain` |
 | `GET /v1/me` | The caller: user, kind, `admin`, `must_change`, its tenants, its level on each, `create_tenants` patterns, its web UI preferences | signed in |
 | `PATCH /v1/me/preferences` | Change one's web UI preferences (`theme`, `last_tenant`) | signed in |
+| `GET /v1/{tenant}/schema/summary[?format=text]` | The schema as a model needs it: labels with counts and properties (declared type, rows, distinct values, the values when few), label pairs per edge type, search indexes, saved queries; cached per tenant | tenant |
+| `/mcp` (MCP, `GRAPHOS_MCP=true`) | Read tools for agents over Streamable HTTP, each running the REST route it wraps as the caller (a single-use in-process token), audited with the tool's name; tokens for `GRAPHOS_MCP_RESOURCE` only ([agents.md](agents.md)) | per tool |
 | `GET /v1/{tenant}/schema` | Labels, label hierarchy, search indexes, rule-derived edge labels, declared edge endpoints and `strict_endpoints`, `display` and `property_schema` as declared (no DDL, rules or `meta`) | tenant |
 | `DELETE /v1/tenants/{name}/edge_endpoints` | Remove one declared pair | `maintain` |
 | `DELETE /v1/tenants/{name}[?drop_data=true]` | Unregister, keeping the data; or delete with the data (see below) | `owner` (an orphan: admin) |
 | `POST /v1/tenants/{name}/restore` | Register an unregistered tenant again, as it was | `owner` |
 | **Sign-in, users and grants** (§2.5.3) | | |
 | `POST /v1/auth/login`, `/refresh`, `/logout` | Access token (and a person's refresh token); renew; end a session (and the provider's URL to end it there) | none |
+| `POST /v1/auth/token` (form) | OAuth client credentials for a service account; `resource` picks the audience (the REST API, or `GRAPHOS_MCP_RESOURCE`) | none |
 | `GET /v1/auth/config`, `POST /v1/auth/oidc/start`, `/oidc/callback` | How to sign in; single sign-on with PKCE held by graphos | none |
 | `POST /v1/me/password` | Change one's password | signed in |
 | `GET/POST /v1/users`, `PATCH/DELETE /v1/users/{name}`, `POST /v1/users/{name}:reset-secret` | Users and service accounts | admin |

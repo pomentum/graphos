@@ -28,8 +28,10 @@ change records of the request's writes.
 
 from __future__ import annotations
 
+import contextlib
 import logging
-from collections.abc import Mapping
+import secrets
+from collections.abc import Iterator, Mapping
 from enum import StrEnum
 from typing import Annotated, Protocol
 
@@ -39,6 +41,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, SecurityS
 from graphos.changes import ACTOR, Actor
 from graphos.identity import (
     ANONYMOUS_ADMIN,
+    AUDIENCE,
     OIDC_SUB_PREFIX,
     AccessStore,
     Level,
@@ -74,7 +77,9 @@ MUST_CHANGE_ALLOWED = frozenset({"/v1/me", "/v1/me/password", "/v1/auth/logout"}
 
 
 class Authenticator(Protocol):
-    async def authenticate(self, bearer: str) -> Principal | None: ...
+    async def authenticate(
+        self, bearer: str, audience: str | None = None,
+    ) -> Principal | None: ...
 
 
 class TokenAuthenticator:
@@ -88,11 +93,14 @@ class TokenAuthenticator:
         self.store = store
         self.provider = provider
 
-    async def authenticate(self, bearer: str) -> Principal | None:
+    async def authenticate(self, bearer: str, audience: str | None = None) -> Principal | None:
+        """The principal of a token for ``audience`` (the REST API's by default):
+        a token for another audience is refused, so a token for one resource
+        never opens another."""
         try:
-            claims = self.signer.verify(bearer)
+            claims = self.signer.verify(bearer, audience or AUDIENCE)
         except TokenError:
-            return await self._provider_token(bearer)
+            return await self._provider_token(bearer, audience)
         subject = str(claims["sub"])
         if subject.startswith(OIDC_SUB_PREFIX):
             identity = claims.get("idn")
@@ -105,12 +113,15 @@ class TokenAuthenticator:
             return None
         return self.store.principal(user.name)
 
-    async def _provider_token(self, bearer: str) -> Principal | None:
-        """A program's token from the identity provider, for graphos's audience."""
+    async def _provider_token(self, bearer: str, audience: str | None = None) -> Principal | None:
+        """A program's token from the identity provider, for graphos's audience
+        (or ``audience``)."""
         if self.provider is None:
             return None
         try:
-            claims = await self.provider.validate(bearer, audience=self.provider.audience)
+            claims = await self.provider.validate(
+                bearer, audience=audience or self.provider.audience,
+            )
         except OidcError:
             return None
         person = any(claims.get(c) for c in ("preferred_username", "email", "name"))
@@ -119,13 +130,44 @@ class TokenAuthenticator:
         )
 
 
+class LentTokens:
+    """Single-use bearer strings for calls graphos makes to itself on someone's
+    behalf (an MCP tool runs the REST route it wraps, ADR-0002).
+
+    A lent token is 256 random bits, lives in this process only, for the one
+    call, and names the principal it was lent for and the tool: the route
+    then holds that principal to its grants, and the audit records the call
+    with the tool's name whatever ``GRAPHOS_AUDIT_READS`` says.  It never
+    leaves the process, so it is not a token passed through to anyone.
+    """
+
+    def __init__(self) -> None:
+        self._lent: dict[str, tuple[Principal, str]] = {}
+
+    @contextlib.contextmanager
+    def lend(self, principal: Principal, tool: str) -> Iterator[str]:
+        token = "lent." + secrets.token_urlsafe(32)
+        self._lent[token] = (principal, tool)
+        try:
+            yield token
+        finally:
+            self._lent.pop(token, None)
+
+    def take(self, bearer: str) -> tuple[Principal, str] | None:
+        return self._lent.get(bearer) if bearer.startswith("lent.") else None
+
+
+# Set in a request's scope when a lent token authenticated it: the tool name.
+MCP_TOOL_KEY = "graphos.mcp_tool"
+
+
 class StaticAuthenticator:
     """Fixed bearer strings for fixed principals: tests only, never configured."""
 
     def __init__(self, principals: Mapping[str, Principal]) -> None:
         self._principals = dict(principals)
 
-    async def authenticate(self, bearer: str) -> Principal | None:
+    async def authenticate(self, bearer: str, audience: str | None = None) -> Principal | None:
         return self._principals.get(bearer)
 
 
@@ -160,6 +202,15 @@ async def authenticate_request(request: Request, bearer: str | None) -> Principa
         return ANONYMOUS_ADMIN
     if not bearer:
         raise _unauthorized("missing or malformed Authorization header")
+    lent: LentTokens | None = getattr(request.app.state, "lent_tokens", None)
+    taken = lent.take(bearer.strip()) if lent is not None else None
+    if taken is not None:
+        principal, tool = taken
+        request.scope[MCP_TOOL_KEY] = tool
+        # Every MCP call is audited (the audit module's AUDIT_READ_KEY; it
+        # imports this module, so the key is spelled out here).
+        request.scope["graphos.audit_read"] = True
+        return principal
     principal = await authenticator.authenticate(bearer.strip())
     if principal is None:
         raise _unauthorized("invalid or expired token")

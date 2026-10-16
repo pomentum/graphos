@@ -740,6 +740,67 @@ class DeleteEdgeResponse(BaseModel):
     elapsed_ms: int
 
 
+class SummaryValueCount(BaseModel):
+    value: str
+    count: int
+
+
+class SummaryProperty(BaseModel):
+    name: str
+    type: str | None = None
+    required: bool = False
+    enum: list[Any] | None = None
+    records: int
+    distinct: int
+    values: list[SummaryValueCount] | None = None
+    estimated: bool = False
+
+
+class SummaryLabel(BaseModel):
+    label: str
+    count: int
+    parent: str | None = None
+    properties: list[SummaryProperty] = Field(default_factory=list)
+    properties_total: int
+
+
+class SummaryLink(BaseModel):
+    src_label: str
+    type: str
+    dst_label: str
+    count: int
+
+
+class SummarySearchIndex(BaseModel):
+    name: str
+    labels: list[str]
+    properties: list[str]
+    analyzer: str
+
+
+class SummarySavedQuery(BaseModel):
+    name: str
+    description: str = ""
+    params: dict[str, str] = Field(default_factory=dict)
+
+
+class SchemaSummaryResponse(BaseModel):
+    """``GET /v1/{tenant}/schema/summary``: the schema as a model needs it."""
+
+    tenant: str
+    labels: list[SummaryLabel]
+    labels_total: int
+    links: list[SummaryLink]
+    links_total: int
+    search_indexes: list[SummarySearchIndex] = Field(default_factory=list)
+    saved_queries: list[SummarySavedQuery] = Field(default_factory=list)
+    computed: list[str] = Field(default_factory=list)
+    estimated: bool
+    text: str
+    cached: bool
+    elapsed_ms: int
+
+
 class ReconcileEdge(BaseModel):
     """One wanted edge for :meth:`GraphosClient.reconcile_type_edges`; ``props``
     None keeps a stored edge's properties."""

@@ -56,12 +56,13 @@ from graphos.api import (
     paths,
     property_check,
     reconcile,
+    schema_summary,
     snapshot,
     tenants,
 )
 from graphos.api import auth as auth_api
 from graphos.api import cypher as cypher_api
-from graphos.auth import TokenAuthenticator
+from graphos.auth import LentTokens, TokenAuthenticator
 from graphos.bootstrap import (
     bootstrap_tenant,
     load_registered_tenants,
@@ -173,6 +174,16 @@ async def setup_identity(
 
 
 @asynccontextmanager
+async def mcp_running(endpoint: Any) -> AsyncIterator[None]:
+    """Runs the MCP SDK's session manager while the app runs, when ``/mcp`` is on."""
+    if endpoint is None:
+        yield
+        return
+    async with endpoint.manager.run():
+        yield
+
+
+@asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
 
@@ -263,7 +274,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
 
     try:
-        yield
+        async with mcp_running(getattr(app.state, "mcp", None)):
+            yield
     finally:
         property_backfill.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -315,6 +327,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api_docs.install(app)
     openapi.install(app)
     app.state.settings = settings
+    app.state.lent_tokens = LentTokens()
     configure_metrics(betweenness_max_nodes=settings.betweenness_max_nodes)
 
     async def _statement_timeout(request: Request, exc: Exception) -> JSONResponse:
@@ -426,6 +439,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(bulk.router, prefix="/v1")
     app.include_router(csv_import.router, prefix="/v1")
     app.include_router(reconcile.router, prefix="/v1")
+    app.include_router(schema_summary.router, prefix="/v1")
+    if settings.mcp:
+        # Imported only when on: the MCP SDK is not needed otherwise.
+        from graphos import mcp_server  # noqa: PLC0415
+
+        mcp_server.install(app, settings)
     app.include_router(db.router, prefix="/v1")
     app.include_router(louvain.router, prefix="/v1")
     app.include_router(graph_metrics.router, prefix="/v1")
