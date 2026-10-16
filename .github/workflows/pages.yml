@@ -3,11 +3,11 @@
 #
 # ── How ───────────────────────────────────────────────────────────────────────
 #
-# The site is one page, website/index.html, and the whitepaper beside it at
-# whitepaper/. website/build.py fills the page from what the repository
-# already has (the whitepaper's stylesheet, scripts and summary; the README's
-# features, screenshots, quickstart and docs table; the version), copies the
-# whitepaper and docs/images/, and needs nothing but Python's standard library.
+# The site is one page, website/index.html, with its stylesheet and theme
+# switch. website/build.py fills the page from what the repository already
+# has (the README's features, screenshots, quickstart and docs table; the
+# version), copies the pictures it shows from docs/images/, and needs nothing
+# but Python's standard library.
 #
 # ── What it checks ────────────────────────────────────────────────────────────
 #

@@ -1,22 +1,19 @@
 """Build the graphos website, https://pomentum.github.io/graphos/, into website/.build/site.
 
-The site is one page and the whitepaper. The page is ``website/index.html``, a frame
-whose ``{{ name }}`` slots this script fills from files the repository already has, so
+The site is one page, ``website/index.html``, with its stylesheet (``style.css``, in the
+whitepaper's design) and theme switch (``theme.js``). The page is a frame whose
+``{{ name }}`` slots this script fills from files the repository already has, so that
 nothing on it is written twice:
 
-- the whitepaper's stylesheet and theme script, so the page and the paper share their
-  colours, type and light/dark switch (and the reader's pick, kept under the same key);
-- the whitepaper's "In 30 seconds" summary;
 - the README's features (Build, Explore, Run), web UI screenshots and captions, first
   quickstart block and documentation table;
 - the version from ``services/graphos/pyproject.toml``.
 
-The whitepaper is published as it is, at ``whitepaper/``. Links into the repository
-(``docs/usage.md``) point to GitHub. Pictures come from ``docs/images/``.
+Links into the repository (``docs/usage.md``) point to GitHub. Only the pictures the page
+shows are copied from ``docs/images/``.
 
 The build fails when a slot is left unfilled or a local link or picture points at a file
-the site does not have: the check ``mkdocs --strict`` would have made. It uses the
-standard library only, so CI needs nothing but Python.
+the site does not have. It uses the standard library only, so CI needs nothing but Python.
 """
 
 from __future__ import annotations
@@ -32,12 +29,13 @@ REPO = Path(__file__).resolve().parent.parent
 WEBSITE = REPO / "website"
 OUT = WEBSITE / ".build" / "site"
 GITHUB = "https://github.com/pomentum/graphos"
-# Pages of the site that README links may point to, by repository path.
-ON_SITE = {"docs/whitepaper.html": "whitepaper/"}
 # README sections the page does not show, and where they live instead.
 README_ANCHORS = {"#python-client": f"{GITHUB}/tree/main/clients/python"}
 DOCS_COLUMNS = 2  # the README's documentation table: | Doc | Read it for |
-WHITEPAPER_SCRIPTS = 2  # the theme script in its head, the switch's script at its end
+# Rows of the README's documentation table the site leaves out.
+DOCS_LEFT_OUT = {"Whitepaper"}
+# Files of website/ published as they are.
+STATIC = ("style.css", "theme.js", "favicon.svg", "404.html")
 
 
 def repo_link(target: str, base: str = "") -> str:
@@ -48,8 +46,6 @@ def repo_link(target: str, base: str = "") -> str:
         return target
     path, hash_, fragment = target.partition("#")
     path = str(Path(base, path).as_posix()).removeprefix("./")
-    if path in ON_SITE:
-        return ON_SITE[path] + hash_ + fragment
     if path.startswith("docs/images/"):
         return path.removeprefix("docs/")
     kind = "tree" if (REPO / path).is_dir() else "blob"
@@ -137,28 +133,13 @@ def docs_table(body: str) -> str:
         if not name:
             continue
         label, target = name.groups()
-        if "vercel.app" in target:  # the whitepaper now lives on this site
-            target = "docs/whitepaper.html"
+        if label in DOCS_LEFT_OUT:
+            continue
         rows.append(
             f'<div><dt><a href="{repo_link(target)}">{html.escape(label)}</a></dt>'
             f"<dd>{inline(cells[1])}</dd></div>"
         )
     return "\n".join(rows)
-
-
-def whitepaper_parts(paper: str) -> dict[str, str]:
-    """The whitepaper's stylesheet, its theme scripts and its summary section."""
-    style = re.search(r"<style>(.*?)</style>", paper, re.DOTALL)
-    scripts = re.findall(r"<script>(.*?)</script>", paper, re.DOTALL)
-    summary = re.search(r'<section class="summary" id="summary">.*?</section>', paper, re.DOTALL)
-    if not (style and len(scripts) == WHITEPAPER_SCRIPTS and summary):
-        raise SystemExit("whitepaper: stylesheet, its two scripts or summary not found")
-    return {
-        "style": style.group(1),
-        "theme_script": scripts[0],
-        "page_script": scripts[1],
-        "summary": summary.group(0),
-    }
 
 
 def version() -> str:
@@ -187,34 +168,29 @@ def check_links(page: str) -> list[str]:
 
 def main() -> int:
     readme = sections((REPO / "README.md").read_text(encoding="utf-8"))
-    paper = (REPO / "docs" / "whitepaper.html").read_text(encoding="utf-8")
     values = {
-        **whitepaper_parts(paper),
         "version": version(),
         "features": features(readme["features"]),
         "shots": shots(readme["web ui"]),
         "quickstart": first_code_block(readme["quickstart"]),
         "docs": docs_table(readme["documentation"]),
     }
-
-    if OUT.exists():
-        shutil.rmtree(OUT)
-    (OUT / "whitepaper").mkdir(parents=True)
-    shutil.copytree(REPO / "docs" / "images", OUT / "images")
-    shutil.copyfile(REPO / "docs" / "whitepaper.html", OUT / "whitepaper" / "index.html")
-    shutil.copyfile(WEBSITE / "favicon.svg", OUT / "favicon.svg")
-    (OUT / ".nojekyll").write_text("", encoding="utf-8")
-
     frame = (WEBSITE / "index.html").read_text(encoding="utf-8")
     page = re.sub(r"\{\{ (\w+) \}\}", lambda m: values[m.group(1)], frame)
     if leftover := re.findall(r"\{\{ \w+ \}\}", page):
         raise SystemExit(f"unfilled slots: {leftover}")
+
+    if OUT.exists():
+        shutil.rmtree(OUT)
+    (OUT / "images").mkdir(parents=True)
     (OUT / "index.html").write_text(page, encoding="utf-8", newline="\n")
-    (OUT / "404.html").write_text(
-        (WEBSITE / "404.html").read_text(encoding="utf-8").replace("{{ style }}", values["style"]),
-        encoding="utf-8",
-        newline="\n",
-    )
+    (OUT / ".nojekyll").write_text("", encoding="utf-8")
+    for name in STATIC:
+        shutil.copyfile(WEBSITE / name, OUT / name)
+    for image in sorted(set(re.findall(r"/?images/([\w.-]+)", page))):
+        source = REPO / "docs" / "images" / image
+        if source.exists():
+            shutil.copyfile(source, OUT / "images" / image)
 
     if missing := check_links(page):
         print("links to files the site does not have:", *missing, sep="\n  ", file=sys.stderr)

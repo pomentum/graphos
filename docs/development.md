@@ -27,7 +27,7 @@ and [`CLAUDE.md`](../CLAUDE.md) point here and do not repeat them.
 | `scripts/` | `init-secrets.sh` / `.ps1`, `run-db-tests.sh`, benchmarks. | |
 | `tools/` | `docs/` (diagrams, UI screenshots, API docs assets), `release/version.mjs`, `export/ndjson_to_age.py`. | |
 | `docs/` | User and design documentation; [`README.md`](README.md) is its index. | |
-| `website/` | The website at `pomentum.github.io/graphos`: one page filled from the README and the whitepaper, and the whitepaper. | [§3](#pictures-and-docs-tools) |
+| `website/` | The website at `pomentum.github.io/graphos`: one page, filled from the README at build time. | [§3](#pictures-and-docs-tools) |
 | `docs/adrs/` | Architecture decision records: one file per decision. | [ADRs](adrs/README.md) |
 | `docs/images/` | Diagrams and UI screenshots, all made by `tools/docs/`. | [§3](#pictures-and-docs-tools) |
 
@@ -162,14 +162,18 @@ The `whitepaper` workflow publishes the page on every push to `main` that
 touches it, `docs/images/` or `tools/docs/`, so merging such a change
 publishes it.
 
-**The website** (`https://pomentum.github.io/graphos/`) is one page and the
-whitepaper, in the whitepaper's design. The page, `website/index.html`, is a
-frame: `website/build.py` fills it with the whitepaper's stylesheet, scripts
-and summary and with the README's features, screenshots, first quickstart
-block and documentation table, and publishes the whitepaper beside it at
-`whitepaper/`. Write in the README and the whitepaper, not in the frame; the
-few facts the frame states itself (At a glance) must match
-[`features.md`](features.md) or the README.
+**The website** (`https://pomentum.github.io/graphos/`) is one page,
+`website/index.html`, with its own stylesheet and theme switch
+(`website/style.css`, `website/theme.js`, in the whitepaper's design). The
+page is a frame: `website/build.py` fills it with the README's features,
+screenshots, first quickstart block and documentation table, and the
+version. Write those in the README, not in the frame. What the frame says
+itself must match the docs: At a glance matches [`features.md`](features.md)
+or the README, and each benchmark figure is quoted, with its setup, from
+[`apache-age.md`](apache-age.md), [`concept.md`](concept.md),
+[`features.md`](features.md) or
+[`upgrade-postgresql-18.md`](upgrade-postgresql-18.md); a new measurement
+goes into those docs first.
 
 ```bash
 bash website/build.sh                                 # standard library only; fails on a broken local link

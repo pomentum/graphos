@@ -62,9 +62,9 @@ under one version.
   [docs/adrs/](docs/adrs/README.md), with when one is needed and its template; `AGENTS.md` and
   `CLAUDE.md` at the root point to them.
 - **Docs:** a website for graphos on GitHub Pages (`website/`): one page in the whitepaper's
-  design, filled at build time from the README and the whitepaper (features, web UI, quickstart,
-  documentation), with the whitepaper published beside it. The `pages` workflow builds it,
-  refusing broken local links, and publishes it from `main`.
+  design, with features, measured benchmarks, the web UI, a quickstart and the documentation,
+  its README parts filled in at build time. The `pages` workflow builds it, refusing broken
+  local links, and publishes it from `main`.
 
 ## 0.11.1 — 2026-10-16
 
