@@ -4003,7 +4003,12 @@ async def scan_edges(
         "per-type edges-written counts.  Idempotent via "
         "``ON CONFLICT (start_id, end_id) DO NOTHING`` — re-running for "
         "an unchanged graph is a no-op.  With ``Prefer: respond-async`` it "
-        "runs as a background job (202, see ``/v1/jobs``)."
+        "runs as a background job (202, see ``/v1/jobs``).\n\n"
+        "Edges a rule writes carry ``graphos_derived: true``.  ``mode: "
+        "reconcile`` also deletes the marked edges no rule derives any more "
+        "(an edge a consumer wrote is never removed); ``adopt_unmarked`` takes "
+        "the unmarked edges between the rules' label pairs as derived; "
+        "``dry_run`` answers the counts and writes nothing."
     ),
     responses={
         **ACCEPTED_RESPONSE,
@@ -4126,7 +4131,7 @@ async def run_resolve(
 
     async def _run_one(edge_type: str) -> ResolveEdgesResult:
         rules = rules_by_type[edge_type]
-        written = 0
+        written = removed = marked = 0
         warning: str | None = None
         no_label_count = 0
         undeclared = 0
@@ -4166,9 +4171,17 @@ async def run_resolve(
             # plans globally and we pay one round-trip.  Bounded at 30 min
             # so a runaway plan still fails.
             try:
-                written += await writes.insert_resolved_edges(
-                    pool, tenant=tenant, compiled=compiled, timeout_s=1800.0,
-                )
+                if body.mode == "reconcile":
+                    added, removed, marked = await writes.reconcile_resolved_edges(
+                        pool, tenant=tenant, compiled=compiled,
+                        adopt_unmarked=body.adopt_unmarked, dry_run=body.dry_run,
+                        timeout_s=1800.0,
+                    )
+                    written += added
+                else:
+                    written += await writes.insert_resolved_edges(
+                        pool, tenant=tenant, compiled=compiled, timeout_s=1800.0,
+                    )
             except CypherError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -4194,6 +4207,8 @@ async def run_resolve(
         return ResolveEdgesResult(
             edge_type=edge_type,
             edges_written=written,
+            edges_removed=removed,
+            edges_marked=marked,
             duration_ms=et_elapsed,
             warning=warning,
         )
@@ -4210,5 +4225,6 @@ async def run_resolve(
         tenant=tenant,
         results=results,
         total_edges_written=total_written,
+        total_edges_removed=sum(r.edges_removed for r in results),
         total_duration_ms=total_elapsed,
     )

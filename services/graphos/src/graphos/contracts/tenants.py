@@ -927,6 +927,31 @@ class ResolveEdgesRequest(BaseModel):
             "Omit (or pass null) to resolve all registered types."
         ),
     )
+    mode: Literal["insert", "reconcile"] = Field(
+        "insert",
+        description=(
+            "`insert` adds the edges the rules derive and removes none. `reconcile` also "
+            "deletes the edges a rule derived (marked `graphos_derived`) that no rule derives "
+            "any more; an edge a consumer wrote is never removed."
+        ),
+    )
+    adopt_unmarked: bool = Field(
+        False,
+        description=(
+            "`reconcile` only: take the unmarked edges of the type between the rules' label "
+            "pairs as the rules' own (edges derived before the mark existed): those the rules "
+            "derive are marked, the others deleted. Try it with `dry_run` first."
+        ),
+    )
+    dry_run: bool = Field(
+        False, description="Compute and answer the counts; write nothing (`reconcile` only).",
+    )
+
+    @model_validator(mode="after")
+    def _reconcile_options(self) -> ResolveEdgesRequest:
+        if self.mode != "reconcile" and (self.adopt_unmarked or self.dry_run):
+            raise ValueError("`adopt_unmarked` and `dry_run` need `mode: reconcile`")
+        return self
 
     @field_validator("edge_types")
     @classmethod
@@ -948,6 +973,12 @@ class ResolveEdgesResult(BaseModel):
     edges_written: int = Field(
         ..., description="New edges created; edges that already existed are not counted.",
     )
+    edges_removed: int = Field(
+        0, description="`reconcile`: derived edges no rule derives any more, deleted.",
+    )
+    edges_marked: int = Field(
+        0, description="`reconcile` with `adopt_unmarked`: unmarked edges taken as derived.",
+    )
     duration_ms: int = Field(..., description="Time this type's rules took, in milliseconds.")
     warning: str | None = Field(
         None,
@@ -964,6 +995,7 @@ class ResolveEdgesResponse(BaseModel):
     tenant: str = Field(..., description="The tenant.")
     results: list[ResolveEdgesResult] = Field(..., description="One entry per edge type resolved.")
     total_edges_written: int = Field(..., description="The sum of `edges_written`.")
+    total_edges_removed: int = Field(0, description="The sum of `edges_removed`.")
     total_duration_ms: int = Field(
         ..., description="Time for the whole request, in milliseconds (types run in parallel).",
     )

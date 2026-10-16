@@ -51,6 +51,7 @@ import contextlib
 import json
 import logging
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import asyncpg
@@ -736,6 +737,328 @@ async def insert_resolved_edges(
                     label=compiled.edge_type, count=len(rows),
                 )
     return len(rows)
+
+
+# ── Reconciliation: make a stored edge set equal to a given one ─────────────
+#
+# ADR-0001.  The caller names a scope (one node's edges of a type towards a
+# label, or every edge of a type between two labels) and sends the whole set
+# it wants there; one transaction adds what is missing, rewrites what
+# changed and deletes the rest.  An edge kept unchanged is not written, so
+# its revision does not move.  Reconciliations of one type queue on an
+# advisory lock; other types run in parallel.
+
+# Edge ids listed in one change record at most; above, ``ids`` is left out
+# and ``count`` stays exact.
+RECONCILE_MAX_LISTED = 10_000
+
+
+class _DryRun(Exception):  # noqa: N818 — a control signal: roll back after counting
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class ReconcileCounts:
+    """What a reconciliation did (or, in a dry run, would do)."""
+
+    added: int
+    changed: int
+    kept: int
+    removed: int
+    skipped: list[tuple[str, str]]   # pairs whose end node does not exist, as sent
+    skipped_count: int
+
+
+async def _type_lock(conn: asyncpg.Connection, tenant: str, edge_type: str) -> None:
+    await conn.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0));",
+        f"graphos.reconcile:{tenant}:{edge_type}",
+    )
+
+
+def _listed(pairs: Sequence[tuple[str, str]]) -> list[list[str]] | None:
+    return [list(p) for p in pairs] if len(pairs) <= RECONCILE_MAX_LISTED else None
+
+
+async def reconcile_edges(  # noqa: PLR0913, PLR0915 — a scope has this many parts
+    pool: asyncpg.Pool,
+    *,
+    tenant: str,
+    edge_type: str,
+    src_label: str,
+    dst_label: str,
+    rows: Sequence[Mapping[str, Any]],
+    scope: str,
+    anchor: str | None = None,
+    props_mode: str = "merge",
+    dry_run: bool = False,
+    timeout_s: float | None = None,
+) -> ReconcileCounts:
+    """Make the ``edge_type`` edges of a scope exactly ``rows``.
+
+    Args:
+        rows: ``{"src_id", "dst_id", "props"}``; ``props`` absent or None
+            leaves a kept edge's properties as they are.
+        scope: ``type`` (every edge of the type from ``src_label`` to
+            ``dst_label``, child labels included), ``out`` (the edges from
+            the node ``anchor`` of ``src_label`` to ``dst_label``) or ``in``
+            (the edges from ``src_label`` into the node ``anchor`` of
+            ``dst_label``).
+        anchor: the anchor node's graphid, for ``out`` and ``in``.
+        props_mode: ``merge`` (into the kept edge's properties) or
+            ``replace`` (the given properties become all of them; graphos's
+            own ``graphos_*`` keys stay).
+
+    Returns:
+        The counts; with ``dry_run`` nothing is written.
+    """
+    records = [
+        (
+            str(r["src_id"]), str(r["dst_id"]),
+            None if r.get("props") is None else json.dumps(r["props"]),
+        )
+        for r in rows
+    ]
+    if scope == "type":
+        in_scope = (
+            f'EXISTS (SELECT 1 FROM "{tenant}"."{src_label}" s WHERE s.id = e.start_id) '
+            f'AND EXISTS (SELECT 1 FROM "{tenant}"."{dst_label}" d WHERE d.id = e.end_id)'
+        )
+    elif scope == "out":
+        in_scope = (
+            "e.start_id = $1::text::graphid "
+            f'AND EXISTS (SELECT 1 FROM "{tenant}"."{dst_label}" d WHERE d.id = e.end_id)'
+        )
+    elif scope == "in":
+        in_scope = (
+            "e.end_id = $1::text::graphid "
+            f'AND EXISTS (SELECT 1 FROM "{tenant}"."{src_label}" s WHERE s.id = e.start_id)'
+        )
+    else:
+        raise ValueError(f"unknown reconcile scope {scope!r}")
+    scope_args: tuple[Any, ...] = () if scope == "type" else (anchor,)
+    table = f'"{tenant}"."{edge_type}"'
+    detail = {"reconcile": "type" if scope == "type" else "node"}
+    if props_mode == "replace":
+        new_props = (
+            "w.props || COALESCE((SELECT jsonb_object_agg(k, v) "
+            "FROM jsonb_each(e.properties::text::jsonb) AS old(k, v) "
+            "WHERE k LIKE 'graphos\\_%'), '{}'::jsonb)"
+        )
+    else:
+        new_props = "e.properties::text::jsonb || w.props"
+
+    counts: ReconcileCounts | None = None
+    with _db_errors(
+        "edge reconcile failed", query=f"reconcile {edge_type}", graph=tenant,
+        edge_type=edge_type, scope=scope,
+    ):
+        try:
+            async with pool.acquire() as conn, conn.transaction():
+                await _set_timeout(conn, timeout_s)
+                await _type_lock(conn, tenant, edge_type)
+                await conn.execute("SET LOCAL enable_hashjoin = off;")
+                await conn.execute("SET LOCAL work_mem = '256MB';")
+                await conn.execute(
+                    "CREATE TEMP TABLE _stg_r (src_ext text, dst_ext text, props jsonb, "
+                    "n bigserial) ON COMMIT DROP;"
+                )
+                await conn.copy_records_to_table(
+                    "_stg_r", records=records, columns=("src_ext", "dst_ext", "props"),
+                )
+                # The wanted edges as graphids; the last row of a repeated pair wins.
+                await conn.execute(
+                    "CREATE TEMP TABLE _want ON COMMIT DROP AS "
+                    "SELECT src.id AS start_id, dst.id AS end_id, stg.src_ext, stg.dst_ext, "
+                    "       stg.props "
+                    "FROM (SELECT DISTINCT ON (src_ext, dst_ext) src_ext, dst_ext, props "
+                    "        FROM _stg_r ORDER BY src_ext, dst_ext, n DESC) stg "
+                    f'JOIN "{tenant}"."{src_label}" src '
+                    f"  ON src.properties->'\"id\"' = to_jsonb(stg.src_ext)::text::agtype "
+                    f'JOIN "{tenant}"."{dst_label}" dst '
+                    f"  ON dst.properties->'\"id\"' = to_jsonb(stg.dst_ext)::text::agtype;"
+                )
+                await conn.execute("CREATE INDEX ON _want (start_id, end_id);")
+                await conn.execute("ANALYZE _want;")
+                found = {
+                    (r["src_ext"], r["dst_ext"])
+                    for r in await conn.fetch("SELECT src_ext, dst_ext FROM _want;")
+                }
+                sent = list(dict.fromkeys((s, d) for s, d, _ in records))
+                skipped = [p for p in sent if p not in found]
+
+                # Remove what is in the scope and not wanted.
+                removed_rows = await conn.fetch(
+                    f"WITH gone AS ("
+                    f"  DELETE FROM ONLY {table} e WHERE {in_scope} "
+                    f"  AND NOT EXISTS (SELECT 1 FROM _want w "
+                    f"                  WHERE w.start_id = e.start_id AND w.end_id = e.end_id) "
+                    f"  RETURNING e.start_id, e.end_id) "
+                    f"SELECT s.properties::text::jsonb ->> 'id' AS src_ext, "
+                    f"       d.properties::text::jsonb ->> 'id' AS dst_ext "
+                    f'FROM gone JOIN "{tenant}"."_ag_label_vertex" s ON s.id = gone.start_id '
+                    f'JOIN "{tenant}"."_ag_label_vertex" d ON d.id = gone.end_id;',
+                    *scope_args,
+                )
+                removed = [(r["src_ext"], r["dst_ext"]) for r in removed_rows]
+
+                # Rewrite the kept edges whose properties change.
+                changed_rows = await conn.fetch(
+                    f"UPDATE {table} e SET properties = ({new_props})::text::agtype, {_BUMP} "
+                    f"FROM _want w "
+                    f"WHERE e.start_id = w.start_id AND e.end_id = w.end_id "
+                    f"AND w.props IS NOT NULL "
+                    f"AND ({new_props}) IS DISTINCT FROM e.properties::text::jsonb "
+                    f"RETURNING w.src_ext, w.dst_ext;"
+                )
+                changed = [(r["src_ext"], r["dst_ext"]) for r in changed_rows]
+
+                # Add the wanted edges that are not stored.
+                added_rows = await conn.fetch(
+                    f"INSERT INTO {table} (start_id, end_id, properties) "
+                    f"SELECT w.start_id, w.end_id, COALESCE(w.props, '{{}}'::jsonb)::text::agtype "
+                    f"FROM _want w "
+                    f"WHERE NOT EXISTS (SELECT 1 FROM {table} e "
+                    f"                  WHERE e.start_id = w.start_id AND e.end_id = w.end_id) "
+                    f"ON CONFLICT (start_id, end_id) DO NOTHING "
+                    f"RETURNING start_id, end_id;"
+                )
+                added_ids = {(str(r["start_id"]), str(r["end_id"])) for r in added_rows}
+                added = [
+                    (r["src_ext"], r["dst_ext"]) for r in await conn.fetch(
+                        "SELECT start_id::text AS s, end_id::text AS d, src_ext, dst_ext "
+                        "FROM _want;"
+                    ) if (r["s"], r["d"]) in added_ids
+                ]
+
+                written = [*added, *changed]
+                if written:
+                    await changes.record(
+                        conn, tenant=tenant, op="upsert", kind="edge", label=edge_type,
+                        src_label=src_label, dst_label=dst_label,
+                        ids=_listed(written), count=len(written), detail=detail,
+                    )
+                if removed:
+                    await changes.record(
+                        conn, tenant=tenant, op="delete", kind="edge", label=edge_type,
+                        src_label=src_label, dst_label=dst_label,
+                        ids=_listed(removed), count=len(removed), detail=detail,
+                    )
+                counts = ReconcileCounts(
+                    added=len(added), changed=len(changed),
+                    kept=len(found) - len(added) - len(changed), removed=len(removed),
+                    skipped=skipped[:100], skipped_count=len(skipped),
+                )
+                if dry_run:
+                    raise _DryRun
+        except _DryRun:
+            pass
+    assert counts is not None
+    return counts
+
+
+async def reconcile_resolved_edges(
+    pool: asyncpg.Pool,
+    *,
+    tenant: str,
+    compiled: CompiledEdgeType,
+    adopt_unmarked: bool,
+    dry_run: bool,
+    timeout_s: float,
+) -> tuple[int, int, int]:
+    """``edges:resolve`` by difference for one edge type (ADR-0001).
+
+    The rules' edges are computed into a staging table; marked edges
+    (``graphos_derived``) no rule derives any more are deleted, and the new
+    ones inserted, marked.  ``adopt_unmarked`` also takes the unmarked edges
+    of the type between the rules' label pairs as the rules' own: those the
+    rules derive are marked, the others deleted.  An edge a consumer wrote
+    is never removed otherwise.
+
+    Returns:
+        ``(added, removed, marked)``; with ``dry_run`` nothing is written.
+    """
+    if compiled.candidates_sql is None:
+        return 0, 0, 0
+    table = f'"{tenant}"."{compiled.edge_type}"'
+    marked_sql = "e.properties::text::jsonb @> '{\"graphos_derived\": true}'"
+    pairs_sql = " OR ".join(
+        f'(EXISTS (SELECT 1 FROM "{tenant}"."{sl}" s WHERE s.id = e.start_id) '
+        f'AND EXISTS (SELECT 1 FROM "{tenant}"."{dl}" d WHERE d.id = e.end_id))'
+        for sl, dl in compiled.label_pairs
+    ) or "false"
+    removable = f"({marked_sql})" + (f" OR (NOT {marked_sql} AND ({pairs_sql}))"
+                                      if adopt_unmarked else "")
+    result: tuple[int, int, int] | None = None
+    with _db_errors(
+        "resolve reconcile failed", query=f"resolve reconcile :{compiled.edge_type}",
+        edge_type=compiled.edge_type, arms=compiled.arm_count,
+    ):
+        try:
+            async with pool.acquire() as conn, conn.transaction():
+                await allow_long_statements(conn, timeout_s)
+                await _type_lock(conn, tenant, compiled.edge_type)
+                await conn.execute(
+                    f"CREATE TEMP TABLE _derived ON COMMIT DROP AS {compiled.candidates_sql};",
+                    *compiled.params, timeout=timeout_s,
+                )
+                await conn.execute("CREATE INDEX ON _derived (start_id, end_id);")
+                await conn.execute("ANALYZE _derived;")
+                removed = await conn.fetch(
+                    f"WITH gone AS ("
+                    f"  DELETE FROM ONLY {table} e WHERE ({removable}) "
+                    f"  AND NOT EXISTS (SELECT 1 FROM _derived w "
+                    f"                  WHERE w.start_id = e.start_id AND w.end_id = e.end_id) "
+                    f"  RETURNING e.start_id, e.end_id) "
+                    f"SELECT s.properties::text::jsonb ->> 'id' AS src_ext, "
+                    f"       d.properties::text::jsonb ->> 'id' AS dst_ext "
+                    f'FROM gone JOIN "{tenant}"."_ag_label_vertex" s ON s.id = gone.start_id '
+                    f'JOIN "{tenant}"."_ag_label_vertex" d ON d.id = gone.end_id;',
+                    timeout=timeout_s,
+                )
+                marked = 0
+                if adopt_unmarked:
+                    status = await conn.execute(
+                        f"UPDATE {table} e SET properties = "
+                        f"(e.properties::text::jsonb || '{{\"graphos_derived\": true}}')"
+                        f"::text::agtype, {_BUMP} "
+                        f"FROM _derived w WHERE e.start_id = w.start_id "
+                        f"AND e.end_id = w.end_id AND NOT {marked_sql};",
+                        timeout=timeout_s,
+                    )
+                    marked = _rows_written(status, default=0)
+                added = await conn.fetch(
+                    f"INSERT INTO {table} (start_id, end_id, properties) "
+                    f"SELECT start_id, end_id, '{{\"graphos_derived\": true}}'::agtype "
+                    f"FROM _derived ON CONFLICT (start_id, end_id) DO NOTHING RETURNING 1;",
+                    timeout=timeout_s,
+                )
+                detail = {"reconcile": "resolve"}
+                if added:
+                    await changes.record(
+                        conn, tenant=tenant, op="resolve", kind="edge",
+                        label=compiled.edge_type, count=len(added), detail=detail,
+                    )
+                if marked:
+                    await changes.record(
+                        conn, tenant=tenant, op="upsert", kind="edge",
+                        label=compiled.edge_type, count=marked,
+                        detail={**detail, "marked": True},
+                    )
+                if removed:
+                    pairs = [(r["src_ext"], r["dst_ext"]) for r in removed]
+                    await changes.record(
+                        conn, tenant=tenant, op="delete", kind="edge",
+                        label=compiled.edge_type, ids=_listed(pairs), count=len(pairs),
+                        detail=detail,
+                    )
+                result = (len(added), len(removed), marked)
+                if dry_run:
+                    raise _DryRun
+        except _DryRun:
+            pass
+    assert result is not None
+    return result
 
 
 # ── Community write-back ────────────────────────────────────────────────────

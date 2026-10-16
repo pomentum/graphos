@@ -1,6 +1,6 @@
 # ADR-0001: Edge reconciliation by difference
 
-- **Status:** Proposed (2026-10-16)
+- **Status:** Accepted (2026-10-16)
 - **Scope:** the data plane: a new write endpoint, a mode for `edges:resolve`, change records
 - **Related:** concept §8 limitation 4 (`edges:resolve` only inserts); an ADR on edge history (to
   write, see "Edge history" below)
@@ -65,7 +65,8 @@ the stored set equal to it in one transaction:
 }
 ```
 
-**A `type` set, as NDJSON:**
+**A `type` set**, as JSON (up to 10,000 edges, each `{"src_id", "dst_id", "props"}`) or, for a
+larger set, as NDJSON:
 - the first line is the header `{"scope": "type", "src_label", "type", "dst_label", "props"}`;
 - each following line is one edge `{"src_id", "dst_id", "props"}`;
 - the lines are COPYed into a staging table, so the set can be as large as the type.
@@ -136,9 +137,10 @@ Two existing ops, in the same transaction, so feed consumers need no new op:
 - An edge the consumer wrote itself is never removed by a rule.
 
 **Edges derived before this release** carry no mark:
-- The first `reconcile` run marks the derived edges it keeps.
-- It leaves unmarked edges alone, unless the request says `adopt_unmarked: true`. That takes every
-  unmarked edge of the type between the rule's labels as rule-owned.
+- A `reconcile` run leaves unmarked edges alone: it cannot tell an edge a rule derived before the
+  mark existed from one a consumer wrote.
+- `adopt_unmarked: true` takes every unmarked edge of the type between the rules' label pairs as
+  rule-owned: those the rules derive are marked, the others deleted.
 - `dry_run` shows the effect before adopting.
 
 This closes limitation 4.

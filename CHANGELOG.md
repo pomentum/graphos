@@ -8,6 +8,23 @@ under one version.
 
 ### Added
 
+- **Reconcile edges by difference** ([ADR-0001](docs/adrs/ADR-0001-edge-reconciliation.md)):
+  `POST …/graph/edges:reconcile` takes the complete set of edges wanted in a scope and makes the
+  stored set equal to it in one transaction: missing edges added, kept edges whose properties
+  change rewritten (`props`: `merge` or `replace`), the rest deleted; an unchanged edge keeps its
+  revision. Scopes: `node` (one node's edges of a type, in a direction, towards a label; JSON) and
+  `type` (every edge of a type between two labels; JSON up to 10,000 edges, or NDJSON up to
+  `GRAPHOS_RECONCILE_MAX_EDGES`, 2,000,000). The upsert checks apply; a wanted edge whose end does
+  not exist is skipped; `dry_run=true` answers the counts. The change feed gets one `upsert` and
+  one `delete` record with `detail.reconcile`. Client: `reconcile_node_edges()`,
+  `reconcile_type_edges()`, with the `ReconcileEdge` and `EdgesReconcileResponse` models.
+- **`edges:resolve` by difference**: edges a rule writes now carry `graphos_derived: true`, and
+  `"mode": "reconcile"` also deletes the marked edges no rule derives any more, never an edge a
+  consumer wrote. `"adopt_unmarked": true` takes the unmarked edges of the type between the rules'
+  label pairs as derived (edges resolved before this release); `"dry_run": true` answers
+  `edges_removed` and `edges_marked` and writes nothing. `insert` stays the default for this
+  release. Client: `resolve_edges(mode=, adopt_unmarked=, dry_run=)`.
+
 - **Secrets at rest**: the signing keys graphos signs tokens with and each session's ID token from
   the identity provider are stored sealed with a master key the database never sees
   (`GRAPHOS_MASTER_KEY_FILE`): AES-256-GCM, a key per row derived with HKDF, the row as associated

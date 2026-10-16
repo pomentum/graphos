@@ -10,7 +10,7 @@ import os
 from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from http import HTTPStatus
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, Literal
 from urllib.parse import quote
 from uuid import UUID
 
@@ -41,6 +41,7 @@ from graphos_client._models import (
     EdgeGetResponse,
     EdgesAggregateResponse,
     EdgesCheckResponse,
+    EdgesReconcileResponse,
     EdgesScanResponse,
     EdgesUpsertResponse,
     EdgeUpsert,
@@ -63,6 +64,7 @@ from graphos_client._models import (
     PropertiesCheckResponse,
     PropertyDefinitionsResponse,
     RecomputeCommunitiesResponse,
+    ReconcileEdge,
     SampleSubgraphResponse,
     SearchResponse,
     TenantInfo,
@@ -624,6 +626,9 @@ class GraphosClient:
         self,
         *,
         edge_types: Iterable[str] | None = None,
+        mode: Literal["insert", "reconcile"] = "insert",
+        adopt_unmarked: bool = False,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         """``POST /v1/{tenant}/graph/edges:resolve``.
 
@@ -636,6 +641,11 @@ class GraphosClient:
         already have a rule on the tenant spec); omit to resolve all
         registered types.
 
+        ``mode="reconcile"`` also deletes the edges a rule derived (marked
+        ``graphos_derived``) that no rule derives any more; ``adopt_unmarked``
+        takes unmarked edges between the rules' label pairs as derived;
+        ``dry_run`` answers the counts and writes nothing.
+
         Synchronous — each rule compiles to one parameterised INSERT,
         wall-clock budget is seconds even on large tenants.  Idempotent
         via ``ON CONFLICT (start_id, end_id) DO NOTHING``.
@@ -643,16 +653,77 @@ class GraphosClient:
         resp = await self._request(
             "POST",
             f"/v1/{self._tenant}/graph/edges:resolve",
-            json_body=_resolve_body(edge_types),
+            json_body=_resolve_body(edge_types, mode, adopt_unmarked, dry_run),
             idempotent=False,   # long-running: never re-run on a 5xx
         )
         return resp.json()
 
-    async def submit_resolve_edges(self, *, edge_types: Iterable[str] | None = None) -> Job:
+    async def submit_resolve_edges(
+        self,
+        *,
+        edge_types: Iterable[str] | None = None,
+        mode: Literal["insert", "reconcile"] = "insert",
+        adopt_unmarked: bool = False,
+        dry_run: bool = False,
+    ) -> Job:
         """:meth:`resolve_edges` as a background job; see :meth:`wait_for_job`."""
         return await self._submit(
-            f"/v1/{self._tenant}/graph/edges:resolve", _resolve_body(edge_types),
+            f"/v1/{self._tenant}/graph/edges:resolve",
+            _resolve_body(edge_types, mode, adopt_unmarked, dry_run),
         )
+
+    async def reconcile_node_edges(  # noqa: PLR0913 — the scope has this many parts
+        self,
+        *,
+        label: str,
+        node_id: str,
+        edge_type: str,
+        other_label: str,
+        targets: Iterable[str | tuple[str, Mapping[str, Any] | None]],
+        direction: Literal["out", "in"] = "out",
+        props: Literal["merge", "replace"] = "merge",
+        dry_run: bool = False,
+    ) -> EdgesReconcileResponse:
+        """Make the ``edge_type`` edges of one node towards ``other_label``
+        exactly ``targets`` (ids of the other end, or ``(id, properties)``), in
+        one transaction: missing ones added, the rest removed (ADR-0001)."""
+        edges = [
+            {"id": t} if isinstance(t, str) else {"id": t[0], "props": t[1]} for t in targets
+        ]
+        body = {
+            "scope": "node", "type": edge_type, "node": {"label": label, "id": node_id},
+            "direction": direction, "other_label": other_label, "edges": edges, "props": props,
+        }
+        resp = await self._request(
+            "POST", f"/v1/{self._tenant}/graph/edges:reconcile", json_body=body,
+            params={"dry_run": "true"} if dry_run else None,
+        )
+        return EdgesReconcileResponse.model_validate(resp.json())
+
+    async def reconcile_type_edges(  # noqa: PLR0913 — the scope has this many parts
+        self,
+        *,
+        edge_type: str,
+        src_label: str,
+        dst_label: str,
+        edges: Iterable[ReconcileEdge],
+        props: Literal["merge", "replace"] = "merge",
+        dry_run: bool = False,
+    ) -> EdgesReconcileResponse:
+        """Make every ``edge_type`` edge from ``src_label`` to ``dst_label``
+        exactly ``edges``, in one transaction (sent as NDJSON, so the set can be
+        as large as the type).  Safe to retry: the same set gives the same
+        result."""
+        header = {"scope": "type", "type": edge_type, "src_label": src_label,
+                  "dst_label": dst_label, "props": props}
+        lines = [json.dumps(header), *(json.dumps(e.model_dump(exclude_none=True)) for e in edges)]
+        resp = await self._request(
+            "POST", f"/v1/{self._tenant}/graph/edges:reconcile",
+            content=("\n".join(lines) + "\n").encode("utf-8"),
+            content_type="application/x-ndjson",
+            params={"dry_run": "true"} if dry_run else None,
+        )
+        return EdgesReconcileResponse.model_validate(resp.json())
 
     # ── writes ─────────────────────────────────────────────────────────────
 
@@ -1972,8 +2043,17 @@ class GraphosClient:
                 await asyncio.sleep(poll_s)
 
 
-def _resolve_body(edge_types: Iterable[str] | None) -> dict[str, Any]:
-    return {} if edge_types is None else {"edge_types": list(edge_types)}
+def _resolve_body(
+    edge_types: Iterable[str] | None, mode: str, adopt_unmarked: bool, dry_run: bool,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {} if edge_types is None else {"edge_types": list(edge_types)}
+    if mode != "insert":
+        body["mode"] = mode
+    if adopt_unmarked:
+        body["adopt_unmarked"] = True
+    if dry_run:
+        body["dry_run"] = True
+    return body
 
 
 def _vacuum_body(tables: list[str] | None, full: bool, analyze: bool) -> dict[str, Any]:

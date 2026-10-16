@@ -811,6 +811,40 @@ curl -s -X POST "$G/v1/acme_copy/graph/snapshot-import?mode=empty" \
 # → {"nodes_upserted":3,"edges_upserted":2,"complete":true,"header":{…},"mode":"empty",…}
 ```
 
+### Reconcile: make the stored edges equal to a set
+
+`POST /v1/{t}/graph/edges:reconcile` (`write`) takes the complete set of edges wanted in a scope
+and makes the stored set equal to it in one transaction: missing edges are added, kept edges whose
+properties change are rewritten, and the edges of the scope not in the set are deleted. A kept edge
+that does not change is not written, so its revision stays. It replaces "delete the run, then
+reload" (a full rebuild, with readers seeing missing data meanwhile) by the difference.
+
+| Scope | What the set replaces | Body |
+|---|---|---|
+| `node` | the edges of `type` at one `node`, in `direction` (`out`, the default, or `in`), whose other end has `other_label` | JSON; each edge names the other end by `id` |
+| `type` | every edge of `type` from `src_label` to `dst_label` | JSON up to 10,000 edges, or NDJSON: a header line `{"scope": "type", "type", "src_label", "dst_label", "props"}`, then one `{"src_id", "dst_id", "props"}` per line (up to `GRAPHOS_RECONCILE_MAX_EDGES`, 2,000,000) |
+
+Labels take in their child labels. Edges of the same type to other labels, and other types, are not
+touched. `props`: `merge` (the default) merges an edge's given properties into the stored ones,
+`replace` makes them all of them (`graphos_*` keys stay); an edge sent without `props` keeps its
+properties. A wanted edge whose end does not exist is skipped (counted, the first 100 listed),
+never created. The checks are an upsert's: registered type and labels, declared pairs under
+`strict_endpoints`, reserved names, the property schema. `?dry_run=true` answers the counts and
+writes nothing. Reconciliations of one type queue; other types run in parallel. The change feed
+gets one `upsert` (added and changed) and one `delete` (removed) record, each with
+`detail.reconcile` (`node` or `type`), ids listed up to 10,000.
+
+```bash
+curl -s -X POST "$G/v1/acme/graph/edges:reconcile" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"scope": "node", "type": "DEPENDS_ON", "node": {"label": "Service", "id": "billing"},
+       "other_label": "Service", "edges": [{"id": "ledger", "props": {"weight": 3}}, {"id": "auth"}]}'
+# → {"scope":"node","type":"DEPENDS_ON","added":1,"changed":1,"kept":0,"removed":2,"skipped":0,…}
+```
+
+Python: `g.reconcile_node_edges(label=, node_id=, edge_type=, other_label=, targets=[...])` and
+`g.reconcile_type_edges(edge_type=, src_label=, dst_label=, edges=[ReconcileEdge(...)])`.
+
 ### Deletes
 
 | Call | Effect |
@@ -1328,7 +1362,13 @@ curl -s -X POST "$G/v1/acme/graph/edges:resolve" \
 ```
 
 `edges:resolve` needs `write` on the tenant; an edge type without a rule returns 400. Inserts use
-`ON CONFLICT (start_id, end_id) DO NOTHING`, so re-runs only add missing edges. Candidate labels and
+`ON CONFLICT (start_id, end_id) DO NOTHING`, so re-runs only add missing edges. The edges a rule
+writes carry `graphos_derived: true`. With `"mode": "reconcile"` the run also deletes the marked
+edges no rule derives any more (a document dropped a tag): an edge a consumer wrote itself is never
+removed. Edges derived before the mark existed are unmarked: `"adopt_unmarked": true` takes the
+unmarked edges of the type between the rules' label pairs as the rules' own, marking those the
+rules derive and deleting the others; try it with `"dry_run": true` first, which answers
+`edges_removed` and `edges_marked` and writes nothing. `insert` stays the default for this release. Candidate labels and
 supporting indexes come from the property catalogue (`GET /graph/catalogue`). graphos records which
 labels carry which properties as nodes are written, so the catalogue is current after every commit;
 indexes are derived at registration, so re-register after loading data to get them. A property no
@@ -1368,7 +1408,8 @@ Read access is enough for all four. A record:
 | node delete (by id or by property) | `delete`, one per label, with the ids; `detail.edges_removed` counts the edges deleted with them (for the whole statement), `detail.where` the property for a delete by property |
 | batch node delete (`nodes:delete`) | `delete`, one per label, with the ids deleted; `detail.edges_removed` counts the edges deleted by that label's statement |
 | edge delete | `delete` with the pair |
-| `edges:resolve` | one `resolve` summary per edge type, `count` edges, no ids: re-read the type |
+| `edges:resolve` | one `resolve` summary per edge type, `count` edges, no ids: re-read the type; with `mode: reconcile`, a `delete` record of the removed edges and an `upsert` one of the adopted, each with `detail.reconcile: "resolve"` |
+| `edges:reconcile` | one `upsert` (added and changed) and one `delete` (removed) record, `detail.reconcile` `node` or `type`; ids up to 10,000 |
 | Louvain write-back | one `communities` summary, `count` nodes, no ids |
 | graph metrics write-back | one `metrics` summary, `count` nodes whose values changed, no ids |
 | schema change (registration that changes something, declared pair removed, unregister, restore) | `op: schema`, `kind: tenant`: `detail.added` / `detail.removed` per part (`vertex_labels`, `edge_labels`, `edge_endpoints`, `label_hierarchy`, `search_indexes`, `resolve_rules` by edge type, `property_indexes` as `Document(lang)` / `User(email) unique`, `generated_columns` as `Document.lang (text, from lang)`, `meta` by key, `display` and `property_schema` by entry as `vertex:Person` / `edge:AUTHORED`; records from before 0.6.0 hold `indexes` and `generated_columns` by count), `detail.changed` (`meta` keys whose text changed, `display` and `property_schema` entries declared again differently), `detail.strict_endpoints` and `detail.property_mode` as `[before, after]`, `detail.registered` / `detail.unregistered` / `detail.restored`. A re-registration that changes nothing records nothing |

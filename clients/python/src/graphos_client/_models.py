@@ -740,6 +740,31 @@ class DeleteEdgeResponse(BaseModel):
     elapsed_ms: int
 
 
+class ReconcileEdge(BaseModel):
+    """One wanted edge for :meth:`GraphosClient.reconcile_type_edges`; ``props``
+    None keeps a stored edge's properties."""
+
+    src_id: str
+    dst_id: str
+    props: dict[str, Any] | None = None
+
+
+class EdgesReconcileResponse(BaseModel):
+    """What ``POST …/graph/edges:reconcile`` did, or with ``dry_run`` would do."""
+
+    tenant: str
+    scope: Literal["node", "type"]
+    type: str
+    added: int
+    changed: int
+    kept: int
+    removed: int
+    skipped: int
+    skipped_edges: list[list[str]] = Field(default_factory=list)
+    dry_run: bool
+    elapsed_ms: int
+
+
 class EdgeCheckItem(BaseModel):
     """One edge to look for, as :meth:`GraphosClient.check_edges` takes it."""
 

@@ -260,7 +260,8 @@ batch or bulk, a merge-patch removing one included) is refused with `400`: compu
 collide with a consumer's own data. `community_id` is written by the community recompute only:
 a write that sets or removes it is refused the same way.
 Snapshot import is the exception: it writes both as the file has them, so a dataset export
-(`GET …/graph/snapshot`) restores with them.
+(`GET …/graph/snapshot`) restores with them. `graphos_derived` on an edge marks one a resolve rule
+wrote (`edges:resolve`), so a run by difference knows which edges are the rules' own.
 
 ## Sizing
 

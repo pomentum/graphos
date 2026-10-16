@@ -472,7 +472,8 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `POST …/graph/edges:csv?type=&src_label=&dst_label=` (CSV) | A CSV file as relationships, as `edges:bulk` writes them (§4) | tenant |
 | `POST …/graph/snapshot-import` (NDJSON) | Mixed node + edge import (§4); reads a dataset export's header and end lines, gzip, `?mode=empty` | tenant |
 | `GET …/graph/snapshot` | Dataset export: header, nodes, edges, end, as NDJSON (gzip optional), one consistent snapshot | tenant (`read`, audited) |
-| `POST …/graph/edges:resolve` `{edge_types?}` | Run registered resolve rules | tenant |
+| `POST …/graph/edges:resolve` `{edge_types?, mode?}` | Run registered resolve rules; `mode: reconcile` also removes derived edges no rule derives any more | tenant |
+| `POST …/graph/edges:reconcile` (JSON or NDJSON) | Make the stored edges of a scope (one node's, or a whole type's between two labels) exactly a given set, in one transaction (§4) | tenant |
 | `DELETE …/graph/nodes/{external_id}?label=` | Delete one node and its edges | tenant |
 | `DELETE …/graph/edges/{type}?src=&dst=&src_label=&dst_label=` | Delete one edge | tenant |
 | `DELETE …/graph/nodes?property_key=&property_value=` | Delete every node with that property value, and their edges | tenant |
@@ -1105,7 +1106,8 @@ closed, not reused. Every console query is in the audit log (§2.5.6).
 | `top`, `stats`, `communities`, `community-summary`, `community-ids`, `catalogue` | SQL |
 | `paths`, `map`, `map/hubs`, `communities/map`, `properties`, `properties:check`, dataset export (`snapshot`) | SQL |
 | Graph metrics edge stream and write-back | SQL (`COPY` + `UPDATE … FROM`) |
-| `edges:resolve` | SQL: one `INSERT … SELECT … ON CONFLICT (start_id, end_id) DO NOTHING` per edge type |
+| `edges:resolve` | SQL: one `INSERT … SELECT … ON CONFLICT (start_id, end_id) DO NOTHING` per edge type; `mode: reconcile`: the rules' edges staged, then a delete of marked edges not staged and an insert, in one transaction |
+| `edges:reconcile` | SQL: binary `COPY` of the set into a temp table, ids resolved, then one `DELETE` (the scope's edges not in the set), one `UPDATE` (kept edges whose properties change) and one `INSERT` (new edges), in one transaction under an advisory lock per edge type |
 | Louvain edge stream and writeback | SQL (`COPY` + `UPDATE … FROM`) |
 | Registration DDL, `/v1/db/*`, advisory locks | SQL |
 
@@ -1522,8 +1524,10 @@ Postgres instance.
 2. **Bulk writes are not atomic per request.** Each 500-row (bulk, CSV) or
    5,000-row (snapshot) flush commits independently.
 3. **One edge per type per ordered node pair** (§2.3).
-4. **`edges:resolve` only inserts.** Edges whose rule no longer matches are not
-   removed; delete them explicitly.
+4. **`edges:resolve` inserts by default.** Edges whose rule no longer matches are
+   removed only with `mode: reconcile`, and only the marked ones (`graphos_derived`):
+   edges derived before 0.13 need one `adopt_unmarked` run. `reconcile` becomes the
+   default in a later release.
 5. **Community freshness.** `end_community_id`, `start_community_id` and
    `community_id` change only when Louvain writes; new edges are invisible to community-scoped `expand`
    until then, and unassigned vertices keep old ids. `GET …/graph/stats` says how many rows were

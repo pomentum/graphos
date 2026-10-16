@@ -139,6 +139,8 @@ class Settings(BaseSettings):
     # The master keys that seal the secrets graphos stores (graphos.vault):
     # signing keys and ID tokens.  Without it they are stored in clear.
     master_key_file: Path | None = None
+    # Edges an NDJSON ``edges:reconcile`` body may carry (held in memory).
+    reconcile_max_edges: int = Field(default=2_000_000, ge=1)
     # Host names the API answers to (Starlette's TrustedHostMiddleware;
     # ``*.example.com`` wildcards), comma-separated.  Empty: any Host.  Behind
     # a proxy, the names clients use, as the proxy forwards them.

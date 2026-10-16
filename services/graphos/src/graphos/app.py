@@ -55,6 +55,7 @@ from graphos.api import (
     me,
     paths,
     property_check,
+    reconcile,
     snapshot,
     tenants,
 )
@@ -424,6 +425,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(graph_map.router, prefix="/v1")
     app.include_router(bulk.router, prefix="/v1")
     app.include_router(csv_import.router, prefix="/v1")
+    app.include_router(reconcile.router, prefix="/v1")
     app.include_router(db.router, prefix="/v1")
     app.include_router(louvain.router, prefix="/v1")
     app.include_router(graph_metrics.router, prefix="/v1")

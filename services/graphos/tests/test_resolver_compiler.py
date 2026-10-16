@@ -529,7 +529,8 @@ def test_collapsed_sql_snapshot_tagged_rule() -> None:
     expected = (
         'INSERT INTO "acme"."TAGGED" (start_id, end_id, properties) '
         "SELECT start_id, end_id, properties FROM ( "
-        "SELECT src.id AS start_id, dst.id AS end_id, '{}'::agtype AS properties "
+        "SELECT src.id AS start_id, dst.id AS end_id, "
+        "'{\"graphos_derived\": true}'::agtype AS properties "
         'FROM "acme"."Document" src CROSS JOIN "acme"."Tag" dst '
         ", jsonb_array_elements_text(((src.properties::text)::jsonb -> 'tag_keys')) AS elt(val) "
         "WHERE elt.val = ((dst.properties::text)::jsonb ->> 'collection') "

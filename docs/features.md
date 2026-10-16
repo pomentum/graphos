@@ -183,6 +183,12 @@ one id (or one src/dst pair) in a batch collapse into one row.
   - The answer: rows, records, written, refused, skipped (missing ends), the
     problems found (empty or repeated ids, cells that do not read as their
     type), the property violations, errors by CSV row.
+- **Reconcile** (`POST …/graph/edges:reconcile`): send the whole set of edges
+  wanted in a scope (one node's edges of a type towards a label, or every edge
+  of a type between two labels, as JSON or NDJSON) and graphos makes the stored
+  set equal to it in one transaction: missing edges added, changed ones
+  rewritten, the rest deleted; unchanged edges keep their revision. A reload
+  costs the difference instead of a rebuild. `dry_run` answers the counts.
 - **Dataset export** (`GET …/graph/snapshot`): the whole tenant as one NDJSON
   file (gzip optional), framed by a header (format, counts, the schema) and an
   end line; each node once with its own label, nodes before edges; one
@@ -525,8 +531,10 @@ POST /v1/acme/graph/edges:resolve
 - New edges have empty properties; self-loops are excluded.
 - Returns per-type `edges_written`, `duration_ms`, and `warning`, plus totals.
 - Requesting a type with no rule → 400.
-- Re-running adds only missing edges. Edges that no longer match are **not**
-  removed.
+- Re-running adds only missing edges. Edges a rule writes carry
+  `graphos_derived: true`; `"mode": "reconcile"` also removes the marked edges no
+  rule derives any more (never an edge a consumer wrote), `adopt_unmarked` takes
+  older unmarked ones as derived, and `dry_run` shows the effect first.
 
 ---
 

@@ -84,7 +84,7 @@ What has to be true for the decision to count as carried out (tests, docs).
 
 | ADR | Title | Status |
 |---|---|---|
-| [ADR-0001](ADR-0001-edge-reconciliation.md) | Edge reconciliation by difference | Proposed (2026-10-16) |
+| [ADR-0001](ADR-0001-edge-reconciliation.md) | Edge reconciliation by difference | Accepted (2026-10-16) |
 | [ADR-0002](ADR-0002-mcp-surface.md) | An MCP surface for agents, and a schema summary | Proposed (2026-10-16) |
 | [ADR-0003](ADR-0003-variable-length-cypher.md) | Variable-length Cypher patterns in the console | Proposed (2026-10-16) |
 | [ADR-0004](ADR-0004-team-annotations.md) | Team annotations: saved views, notes and flags | Proposed (2026-10-16) |

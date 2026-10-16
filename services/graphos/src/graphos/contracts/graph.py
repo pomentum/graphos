@@ -271,6 +271,142 @@ class DeleteEdgeResponse(BaseModel):
     elapsed_ms: int = Field(..., description="Time spent deleting, in milliseconds.")
 
 
+# ── Reconciliation (POST /edges:reconcile, ADR-0001) ───────────────────────
+
+# Edges a JSON reconcile body carries at most; larger sets go as NDJSON.
+MAX_RECONCILE_JSON_EDGES = 10_000
+
+
+def _check_label(v: str | None) -> str | None:
+    if v is not None and not _LABEL_PATTERN.fullmatch(v):
+        raise ValueError(f"label '{v}' must match {_LABEL_PATTERN.pattern}")
+    return v
+
+
+class ReconcileNode(BaseModel):
+    """The node whose edges a `node` reconciliation replaces."""
+
+    label: str = Field(..., description="The node's label; must be registered.")
+    id: str = Field(..., min_length=1, max_length=_NODE_ID_MAX_LEN, description="The node's `id`.")
+
+    _labels = field_validator("label")(classmethod(lambda cls, v: _check_label(v)))
+
+
+class ReconcileEdge(BaseModel):
+    """One wanted edge: by `id` of the other end (`node` scope), or by both ends (`type`)."""
+
+    id: str | None = Field(
+        None, min_length=1, max_length=_NODE_ID_MAX_LEN,
+        description="`node` scope: the `id` of the edge's other end.",
+    )
+    src_id: str | None = Field(
+        None, min_length=1, max_length=_NODE_ID_MAX_LEN, description="`type` scope: the source.",
+    )
+    dst_id: str | None = Field(
+        None, min_length=1, max_length=_NODE_ID_MAX_LEN, description="`type` scope: the target.",
+    )
+    props: dict[str, object] | None = Field(
+        None,
+        description=(
+            "The edge's properties, written per `props`; absent or null: a kept edge keeps "
+            "its properties and a new one has none."
+        ),
+    )
+
+
+class ReconcileTypeHeader(BaseModel):
+    """The first NDJSON line of a `type` reconciliation."""
+
+    scope: Literal["type"] = Field(..., description="Always `type` for an NDJSON body.")
+    type: str = Field(..., description="The edge type; must be registered.")
+    src_label: str = Field(..., description="Label of the edges' sources (child labels included).")
+    dst_label: str = Field(..., description="Label of the edges' targets (child labels included).")
+    props: Literal["merge", "replace"] = Field(
+        "merge",
+        description=(
+            "`merge` merges the given properties into a kept edge's; `replace` makes them all "
+            "of its properties (graphos's own `graphos_*` keys stay)."
+        ),
+    )
+
+    _labels = field_validator("type", "src_label", "dst_label")(
+        classmethod(lambda cls, v: _check_label(v)),
+    )
+
+
+class EdgesReconcileRequest(BaseModel):
+    """JSON body for POST /v1/{tenant}/graph/edges:reconcile."""
+
+    scope: Literal["node", "type"] = Field(
+        ...,
+        description=(
+            "`node`: the edges of `type` at `node`, in `direction`, whose other end has "
+            "`other_label`. `type`: every edge of `type` from `src_label` to `dst_label`."
+        ),
+    )
+    type: str = Field(..., description="The edge type; must be registered.")
+    node: ReconcileNode | None = Field(None, description="`node` scope: the node.")
+    direction: Literal["out", "in"] = Field(
+        "out", description="`node` scope: the node is the edges' source (`out`) or target (`in`).",
+    )
+    other_label: str | None = Field(
+        None, description="`node` scope: the label of the other end (child labels included).",
+    )
+    src_label: str | None = Field(None, description="`type` scope: the sources' label.")
+    dst_label: str | None = Field(None, description="`type` scope: the targets' label.")
+    edges: list[ReconcileEdge] = Field(
+        ...,
+        max_length=MAX_RECONCILE_JSON_EDGES,
+        description=(
+            f"The whole wanted set, up to {MAX_RECONCILE_JSON_EDGES:,} edges (more: send the "
+            "`type` scope as NDJSON). An empty list removes every edge of the scope."
+        ),
+    )
+    props: Literal["merge", "replace"] = Field(
+        "merge",
+        description=(
+            "`merge` merges the given properties into a kept edge's; `replace` makes them all "
+            "of its properties (graphos's own `graphos_*` keys stay)."
+        ),
+    )
+
+    _labels = field_validator("type", "other_label", "src_label", "dst_label")(
+        classmethod(lambda cls, v: _check_label(v)),
+    )
+
+    @model_validator(mode="after")
+    def _scope_fields(self) -> EdgesReconcileRequest:
+        if self.scope == "node":
+            if self.node is None or self.other_label is None:
+                raise ValueError("the node scope needs `node` and `other_label`")
+            if any(e.id is None for e in self.edges):
+                raise ValueError("in the node scope every edge names the other end by `id`")
+        else:
+            if self.src_label is None or self.dst_label is None:
+                raise ValueError("the type scope needs `src_label` and `dst_label`")
+            if any(e.src_id is None or e.dst_id is None for e in self.edges):
+                raise ValueError("in the type scope every edge names `src_id` and `dst_id`")
+        return self
+
+
+class EdgesReconcileResponse(BaseModel):
+    """What a reconciliation did, or with `dry_run` would do."""
+
+    tenant: str = Field(..., description="The tenant.")
+    scope: Literal["node", "type"] = Field(..., description="The scope reconciled.")
+    type: str = Field(..., description="The edge type.")
+    added: int = Field(..., description="Edges created.")
+    changed: int = Field(..., description="Kept edges whose properties were rewritten.")
+    kept: int = Field(..., description="Wanted edges already stored as wanted: not written.")
+    removed: int = Field(..., description="Stored edges of the scope not in the set: deleted.")
+    skipped: int = Field(..., description="Wanted edges an end of which does not exist: ignored.")
+    skipped_edges: list[list[str]] = Field(
+        default_factory=list, description="The first 100 skipped edges, as `[src_id, dst_id]`.",
+    )
+    dry_run: bool = Field(..., description="Nothing was written.")
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
+
+
 # ── Many edges checked at once (POST /edges:check) ─────────────────────────
 
 
