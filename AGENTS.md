@@ -11,9 +11,9 @@ and the commands.
 | Changing | Read |
 |---|---|
 | Anything | [`docs/development.md`](docs/development.md): layout, docs, test stacks, git, privacy |
-| `services/graphos/` | [`docs/development-service.md`](docs/development-service.md): data-model invariants, database tests |
-| `clients/python/` | [`docs/development-client.md`](docs/development-client.md): models mirror the service, retries |
-| `services/graphos-ui/` | [`docs/development-ui.md`](docs/development-ui.md): layers, text, screenshots |
+| `services/graphos/` | [`services/graphos/DEVELOPMENT.md`](services/graphos/DEVELOPMENT.md): data-model invariants, database tests |
+| `clients/python/` | [`clients/python/DEVELOPMENT.md`](clients/python/DEVELOPMENT.md): models mirror the service, retries |
+| `services/graphos-ui/` | [`services/graphos-ui/DEVELOPMENT.md`](services/graphos-ui/DEVELOPMENT.md): layers, text, screenshots |
 | `docs/images/`, the whitepaper, API docs assets | [`docs/development.md`, Pictures and docs tools](docs/development.md#pictures-and-docs-tools): never edit a picture by hand |
 | A design decision | [`docs/adrs/README.md`](docs/adrs/README.md): when an ADR is needed, its template |
 

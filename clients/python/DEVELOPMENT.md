@@ -2,8 +2,8 @@
 
 How to work on `graphos-client`, the async Python client in
 `clients/python/`. The rules for the whole repository (docs, test stacks,
-git, privacy) are in [`development.md`](development.md); they apply here too.
-Its users' guide is the [client README](../clients/python/README.md).
+git, privacy) are in [`development.md`](../../docs/development.md); they apply here too.
+Its users' guide is the [client README](README.md).
 
 ## 1. Where to look
 
@@ -58,7 +58,7 @@ against a running stack, set `GRAPHOS_URL` (default
   100, target `py311`, rules `E F I B UP SIM RET PL` (`PLR0913` ignored:
   methods mirror the API's parameters).
 - Module docstrings, typing and comments follow the service's conventions
-  ([development-service.md §4](development-service.md#4-code-conventions)).
+  ([services/graphos/DEVELOPMENT.md §4](../../services/graphos/DEVELOPMENT.md#4-code-conventions)).
 - Tests live in `clients/python/tests/test_<area>.py`; names say what is
   checked. A new method gets a test of its request and of its parsed
   response.
@@ -67,14 +67,14 @@ against a running stack, set `GRAPHOS_URL` (default
 
 ## 5. When the client changes
 
-Besides the shared list in [development.md §3](development.md#3-docs-discipline):
+Besides the shared list in [development.md §3](../../docs/development.md#3-docs-discipline):
 
 - the README's "What the client covers" table lists every method; "Not
   wrapped" lists what is left to plain HTTP;
 - the README's examples table lists every script in `examples/`;
 - a change in retries or errors updates the README's "Behaviour" section;
 - a change to what the client promises (async only, its dependencies, what
-  it retries) gets an [ADR](adrs/README.md) first.
+  it retries) gets an [ADR](../../docs/adrs/README.md) first.
 
 ## 6. Release
 
@@ -83,4 +83,4 @@ The client shares its version with the service and the UI
 hand: the `graphos-client-release` workflow, run from a version tag
 (`.github/workflows/client-release.yml`). A version tag does not publish it.
 Never tag or publish without the owner's approval
-([development.md §6](development.md#6-git)).
+([development.md §6](../../docs/development.md#6-git)).

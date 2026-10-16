@@ -6,9 +6,9 @@ summarises the hard rules for any agent. Do not repeat them here: change the
 guides instead. Before a design change, read [`docs/adrs/README.md`](docs/adrs/README.md).
 
 @docs/development.md
-@docs/development-service.md
-@docs/development-client.md
-@docs/development-ui.md
+@services/graphos/DEVELOPMENT.md
+@clients/python/DEVELOPMENT.md
+@services/graphos-ui/DEVELOPMENT.md
 
 ## Claude Code
 

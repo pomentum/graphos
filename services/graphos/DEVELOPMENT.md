@@ -2,7 +2,7 @@
 
 How to work on `graphos-api`, the FastAPI service in `services/graphos/`.
 The rules for the whole repository (docs, test stacks, git, privacy) are in
-[`development.md`](development.md); they apply here too.
+[`development.md`](../../docs/development.md); they apply here too.
 
 ## 1. Where to look
 
@@ -24,8 +24,8 @@ Paths are under `services/graphos/src/graphos/`.
 | Louvain, PageRank and other algorithms | `louvain*.py`, `graph_metrics*.py`, `graph_compute.py` |
 | Database roles and first-start SQL | `services/graphos/deploy/db-init/` |
 | The move from PostgreSQL 16 to 18 | `services/graphos/deploy/db-upgrade/` |
-| Architecture, write paths, limitations | [`concept.md`](concept.md) (§3 internal layout, §4 write paths, §8 known limitations) |
-| AGE behaviour, bugs and workarounds | [`apache-age.md`](apache-age.md), [`graph_age_practices.md`](graph_age_practices.md) |
+| Architecture, write paths, limitations | [`concept.md`](../../docs/concept.md) (§3 internal layout, §4 write paths, §8 known limitations) |
+| AGE behaviour, bugs and workarounds | [`apache-age.md`](../../docs/apache-age.md), [`graph_age_practices.md`](../../docs/graph_age_practices.md) |
 
 The module docstrings explain the why; read them before changing a module.
 
@@ -43,7 +43,7 @@ Without the `louvain` extra, `POST /v1/{tenant}/recompute-communities`
 answers 501; tests that need it skip.
 
 Database tests run against the compose stack, as a compose project of its
-own (see [development.md §5](development.md#5-test-harness-hygiene)):
+own (see [development.md §5](../../docs/development.md#5-test-harness-hygiene)):
 
 ```bash
 bash scripts/run-db-tests.sh                                 # all @db tests, PostgreSQL 18 / AGE 1.8
@@ -59,7 +59,7 @@ both. PostgreSQL 16 / AGE 1.6 is deprecated but still supported.
 ## 3. Data-model invariants
 
 These hold everywhere. Tests enforce most of them; do not work around them.
-Changing one takes an [ADR](adrs/README.md) first.
+Changing one takes an [ADR](../../docs/adrs/README.md) first.
 
 - **Every write to graph data goes through `writes.py`.** Nothing else
   inserts, updates or deletes rows of the AGE label tables
@@ -134,17 +134,17 @@ Changing one takes an [ADR](adrs/README.md) first.
 - Seed test data with SQL writes (through `writes.py`), not Cypher, so the
   suite runs on AGE 1.6 and 1.8.
 - Fixtures use neutral names (`acme`, `Doc`, `LINKS_TO`); see
-  [development.md §7](development.md#7-privacy).
+  [development.md §7](../../docs/development.md#7-privacy).
 
 ## 6. When the service changes
 
-Besides the shared list in [development.md §3](development.md#3-docs-discipline):
+Besides the shared list in [development.md §3](../../docs/development.md#3-docs-discipline):
 
 - an API change updates the client and its models
-  ([development-client.md](development-client.md)) and, when the UI uses
-  it, `services/graphos-ui/src/api/` ([development-ui.md](development-ui.md));
+  ([clients/python/DEVELOPMENT.md](../../clients/python/DEVELOPMENT.md)) and, when the UI uses
+  it, `services/graphos-ui/src/api/` ([services/graphos-ui/DEVELOPMENT.md](../graphos-ui/DEVELOPMENT.md));
 - a new setting lives in `config.py`; one users are likely to touch also
   goes into the README's Configuration table;
-- AGE behaviour found or re-verified goes into [`apache-age.md`](apache-age.md);
+- AGE behaviour found or re-verified goes into [`apache-age.md`](../../docs/apache-age.md);
 - a new endpoint family, a change of supported database or AGE version, or
-  a dependency with licence consequences gets an [ADR](adrs/README.md) first.
+  a dependency with licence consequences gets an [ADR](../../docs/adrs/README.md) first.

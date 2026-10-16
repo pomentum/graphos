@@ -2,8 +2,8 @@
 
 How to work on `graphos-ui`, the React UI in `services/graphos-ui/`. The
 rules for the whole repository (docs, test stacks, git, privacy) are in
-[`development.md`](development.md); they apply here too. The
-[UI README](../services/graphos-ui/README.md) describes its views, its
+[`development.md`](../../docs/development.md); they apply here too. The
+[UI README](README.md) describes its views, its
 stack, how its code is organised and how its text is keyed; read it first.
 
 ## 1. Where to look
@@ -79,14 +79,14 @@ workflow builds the UI image and smoke-tests it.
 
 ## 5. When the UI changes
 
-Besides the shared list in [development.md §3](development.md#3-docs-discipline):
+Besides the shared list in [development.md §3](../../docs/development.md#3-docs-discipline):
 
 - **Retake the screenshots** a visible change affects, of the demo tenant
   only, with `tools/docs/screenshots.py`, then embed them in the whitepaper
   with `node tools/docs/diagrams.mjs`. The steps are in
-  [development.md, Pictures and docs tools](development.md#pictures-and-docs-tools).
+  [development.md, Pictures and docs tools](../../docs/development.md#pictures-and-docs-tools).
 - Update the UI README when a view, a folder's job or the stack changes.
 - A UI that needs a new endpoint changes the service first
-  ([development-service.md](development-service.md)).
+  ([services/graphos/DEVELOPMENT.md](../graphos/DEVELOPMENT.md)).
 - A change to the layers, the stack or the no-other-origins rule gets an
-  [ADR](adrs/README.md) first.
+  [ADR](../../docs/adrs/README.md) first.

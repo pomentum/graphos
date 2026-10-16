@@ -4,12 +4,12 @@ The rules for working on this repository, for people and for coding agents.
 This file holds what applies to the whole repository; each component has a
 guide of its own:
 
-- **[development-service.md](development-service.md)**: the service
+- **[services/graphos/DEVELOPMENT.md](../services/graphos/DEVELOPMENT.md)**: the service
   (`services/graphos/`): where to look, database tests, the data-model
   invariants, Python conventions.
-- **[development-client.md](development-client.md)**: the Python client
+- **[clients/python/DEVELOPMENT.md](../clients/python/DEVELOPMENT.md)**: the Python client
   (`clients/python/`): models that mirror the service, retries, release.
-- **[development-ui.md](development-ui.md)**: the web UI
+- **[services/graphos-ui/DEVELOPMENT.md](../services/graphos-ui/DEVELOPMENT.md)**: the web UI
   (`services/graphos-ui/`): layers, text, screenshots.
 
 Together these files are the single source of truth: [`AGENTS.md`](../AGENTS.md)
@@ -19,9 +19,9 @@ and [`CLAUDE.md`](../CLAUDE.md) point here and do not repeat them.
 
 | Path | What it is | Guide |
 |---|---|---|
-| `services/graphos/` | The service, `graphos-api`: FastAPI on PostgreSQL + Apache AGE (Python 3.11+). | [service](development-service.md) |
-| `clients/python/` | The Python client, `graphos-client`, published on its own. | [client](development-client.md) |
-| `services/graphos-ui/` | The web UI: React, TypeScript, Vite, Mantine. | [UI](development-ui.md) |
+| `services/graphos/` | The service, `graphos-api`: FastAPI on PostgreSQL + Apache AGE (Python 3.11+). | [service](../services/graphos/DEVELOPMENT.md) |
+| `clients/python/` | The Python client, `graphos-client`, published on its own. | [client](../clients/python/DEVELOPMENT.md) |
+| `services/graphos-ui/` | The web UI: React, TypeScript, Vite, Mantine. | [UI](../services/graphos-ui/DEVELOPMENT.md) |
 | `docker-compose.graphos.yml` | The stack: `graphos-db` (PostgreSQL 18 + AGE 1.8), `graphos-api`, `graphos-ui` (profile `ui`), and the move from PostgreSQL 16. | |
 | `docker-compose.louvain.yml` | Adds python-igraph (GPL) to a published image at start, for Louvain. | |
 | `scripts/` | `init-secrets.sh` / `.ps1`, `run-db-tests.sh`, benchmarks. | |
@@ -73,9 +73,9 @@ A change is done when its docs are. With a feature change, update:
   limitations) when a limitation appears, changes or goes away;
 - [`usage.md`](usage.md) for new or changed endpoints;
 - the Python client and its models when the API changes
-  ([development-client.md §5](development-client.md#5-when-the-client-changes));
+  ([clients/python/DEVELOPMENT.md §5](../clients/python/DEVELOPMENT.md#5-when-the-client-changes));
 - the UI screenshots when the UI changes visibly
-  ([development-ui.md §5](development-ui.md#5-when-the-ui-changes));
+  ([services/graphos-ui/DEVELOPMENT.md §5](../services/graphos-ui/DEVELOPMENT.md#5-when-the-ui-changes));
 - an ADR in [`adrs/`](adrs/README.md) before the code, when the change
   alters an invariant, adds a public surface, changes the supported
   databases or reverses an earlier decision.
