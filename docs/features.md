@@ -165,6 +165,22 @@ one id (or one src/dst pair) in a batch collapse into one row.
   per line, flushed in 500-row batches per label / edge key, each batch in its
   own transaction. Invalid lines are skipped and reported (`rows_invalid`, up
   to 50 messages in `errors`).
+- **CSV import** (`POST …/graph/nodes:csv?label=`, `…/graph/edges:csv?type=&src_label=&dst_label=`):
+  the body is the CSV file itself; graphos reads it.
+  - Comma, semicolon or tab separated (detected), quoted cells, CRLF, a UTF-8
+    byte-order mark; the first row is the header.
+  - The id columns (`id`, or `src` / `dst` for relationships) default to
+    ones named `id`, `source` / `target`, `from` / `to`…; every other column
+    is a property named after its header and typed after its definition
+    (`auto`, `text`, `number`, `boolean`), unless `columns` (JSON) renames
+    it, types it or leaves it out.
+  - Rows repeating an id (or two ends) are merged into one record, a later
+    non-empty cell winning, so the definitions check what is written.
+  - Written through the `:bulk` path: the same checks, batches, change records
+    and revisions. `dry_run=true` checks every row and writes nothing.
+  - The answer: rows, records, written, refused, skipped (missing ends), the
+    problems found (empty or repeated ids, cells that do not read as their
+    type), the property violations, errors by CSV row.
 - **Dataset export** (`GET …/graph/snapshot`): the whole tenant as one NDJSON
   file (gzip optional), framed by a header (format, counts, the schema) and an
   end line; each node once with its own label, nodes before edges; one

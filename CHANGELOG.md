@@ -16,6 +16,17 @@ under one version.
   `Retry-After`, nothing deleted. Returns `nodes_requested`, `nodes_deleted` and `edges_deleted`. Client:
   `delete_nodes()`, with the `NodeRef` and `DeleteNodesResponse` models. The web UI's API layer
   has `deleteNodes()`.
+- **CSV import on the server**: `POST …/graph/nodes:csv?label=` and `…/graph/edges:csv?type=&src_label=&dst_label=`
+  take the CSV file itself (`text/csv`). graphos reads it (comma, semicolon or tab, detected;
+  quoted cells, CRLF, a byte-order mark), finds the id columns, maps every other column to a
+  property named after its header and typed after its definition unless `columns` (JSON) says
+  otherwise, trims ids, merges rows repeating an id (or two ends) into one record, and writes the
+  records through the `:bulk` path: the same checks, 500-row batches, change records and
+  revisions. `dry_run=true` checks every row and writes nothing (missing ends looked up). The
+  answer counts rows, records, written, refused and skipped, and lists the problems found with
+  CSV row numbers. Mapping errors are 422, an unreadable file 400 (a quoted cell never closed
+  included), a file over `GRAPHOS_CSV_MAX_BYTES` (256 MiB) 413. Client: `import_csv_nodes()`,
+  `import_csv_edges()`, with the `CsvImportResponse`, `CsvIssue` and `CsvColumnPlan` models.
 - **Web UI: several nodes at once on the canvas.** Ctrl, ⌘ or Shift click adds a node to the
   selection or takes it out; Shift-drag on the empty canvas draws a loop that selects what it
   encloses (with Ctrl or ⌘, added to the selection); Ctrl/⌘+A selects every node. A bar then

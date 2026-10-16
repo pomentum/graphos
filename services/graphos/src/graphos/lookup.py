@@ -213,3 +213,17 @@ async def find_edge(  # noqa: PLR0913 — the identity has this many parts
         rev=int(r["rev"]),
         properties=json.loads(r["props"]),
     )
+
+
+async def existing_ids(
+    conn: asyncpg.Connection, tenant: str, label: str, ids: list[str],
+) -> set[str]:
+    """Which of ``ids`` name a node of ``label`` (its child labels included)."""
+    if not ids:
+        return set()
+    rows = await conn.fetch(
+        f"SELECT properties::text::jsonb ->> 'id' AS id "
+        f'FROM "{tenant}"."{label}" WHERE {IDS_MATCH};',
+        [json.dumps(i) for i in ids],
+    )
+    return {r["id"] for r in rows}

@@ -464,6 +464,8 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `PATCH …/graph/edges/{type}?src=&dst=&src_label=&dst_label=` | JSON Merge Patch of one edge's properties (§4) | tenant |
 | `POST …/graph/nodes:bulk` (NDJSON) | Streamed node upsert (§4) | tenant |
 | `POST …/graph/edges:bulk` (NDJSON) | Streamed edge upsert (§4) | tenant |
+| `POST …/graph/nodes:csv?label=` (CSV) | A CSV file as nodes of a label: mapped, typed, repeated ids merged, written as `nodes:bulk` writes; `dry_run` checks only (§4) | tenant |
+| `POST …/graph/edges:csv?type=&src_label=&dst_label=` (CSV) | A CSV file as relationships, as `edges:bulk` writes them (§4) | tenant |
 | `POST …/graph/snapshot-import` (NDJSON) | Mixed node + edge import (§4); reads a dataset export's header and end lines, gzip, `?mode=empty` | tenant |
 | `GET …/graph/snapshot` | Dataset export: header, nodes, edges, end, as NDJSON (gzip optional), one consistent snapshot | tenant (`read`, audited) |
 | `POST …/graph/edges:resolve` `{edge_types?}` | Run registered resolve rules | tenant |
@@ -544,7 +546,7 @@ Error shapes:
 | 409 | A whole-graph job (Louvain, graph metrics) already running for the tenant; an id in several labels without `label`; a duplicate on a declared unique index; `mode=empty` into a tenant with nodes | `{"detail": "..."}`; the unique-index conflict as `application/problem+json` |
 | 410 | Change-feed cursor older than the retention | `{"detail": "..."}` |
 | 412 | `If-Match` does not match the row's ETag | `{"detail": "..."}` |
-| 413 | `snapshot-import` over 50,000,000 lines, or past `GRAPHOS_IMPORT_MAX_BYTES` after decompression | `{"detail": "..."}` |
+| 413 | `snapshot-import` over 50,000,000 lines, or past `GRAPHOS_IMPORT_MAX_BYTES` after decompression; a CSV file past `GRAPHOS_CSV_MAX_BYTES` | `{"detail": "..."}` |
 | 422 | Request validation; bad `label_hierarchy` at registration; a batch write refused by a `strict` property schema (with its `violations`) | `{"detail": [...]}` (FastAPI) or `{"detail": "..."}` |
 | 428 | `If-Match` missing with `GRAPHOS_REQUIRE_IF_MATCH=true` | `{"detail": "..."}` |
 | 429 | Rate limit (when enabled); the caller's console query still running, or no free console connection within `GRAPHOS_CYPHER_WAIT_S` | `{"detail": ..., "retry_after_s": ...}` + `Retry-After` (rate limit) or `{"detail": "..."}` |
@@ -1076,8 +1078,8 @@ closed, not reused. Every console query is in the audit log (§2.5.6).
 
 | Operation | Language |
 |---|---|
-| Every node upsert (`/nodes`, `nodes:bulk`, `snapshot-import`) | SQL: binary `COPY` into a temp table, `INSERT … ON CONFLICT ((properties->'"id"')) DO UPDATE` |
-| Every edge upsert (`/edges`, `edges:bulk`, `snapshot-import`) | SQL: binary `COPY` into a temp table, `INSERT … ON CONFLICT (start_id, end_id) DO UPDATE` |
+| Every node upsert (`/nodes`, `nodes:bulk`, `nodes:csv`, `snapshot-import`) | SQL: binary `COPY` into a temp table, `INSERT … ON CONFLICT ((properties->'"id"')) DO UPDATE` |
+| Every edge upsert (`/edges`, `edges:bulk`, `edges:csv`, `snapshot-import`) | SQL: binary `COPY` into a temp table, `INSERT … ON CONFLICT (start_id, end_id) DO UPDATE` |
 | `nodes/aggregate`, `export`, `communities?include_members=true` member lists | SQL |
 | Node deletes (by id, by property) | SQL: one statement deletes the matching nodes (unique `id` index, or GIN containment for other keys) and every edge touching them |
 | `search`, `nodes/{id}` (GET, PATCH), `nodes/{id}/properties`, `edges/{type}` (GET, PATCH, DELETE), `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `nodes:scan`, `edges:scan`, `edges/aggregate` | SQL |
@@ -1139,6 +1141,7 @@ into one row.
 |---|---|---|
 | `POST /nodes`, `/edges` | JSON, ≤1000 rows | One transaction per label (nodes) or per `(src_label, dst_label, type)` (edges). Unknown labels → 400 before any write. |
 | `POST /nodes:bulk`, `/edges:bulk` | NDJSON, one row per line | Buffers per label / per edge key; flushes every 500 rows and at end of stream. **Each flush is its own transaction**; an error stops the request but earlier flushes stay committed. Invalid lines are skipped (`rows_invalid`, first 50 in `errors`). |
+| `POST /nodes:csv`, `/edges:csv` | A CSV file (`text/csv`); the mapping in the query | The file is read whole (at most `GRAPHOS_CSV_MAX_BYTES`, 413 past it), rows repeating an id (or two ends) merged into one record, then every record goes through the `:bulk` path: the same checks, 500-row flushes, **each its own transaction**. Mapping errors → 422 and an unreadable file → 400, before any write. `dry_run=true` writes nothing. |
 | `POST /snapshot-import` | NDJSON lines tagged `"_kind": "node"` or `"edge"` (default node) | Buffers per label / edge key. When any node buffer reaches 5,000 rows all node buffers are flushed. Before every edge flush (an edge buffer reaching 5,000 rows, or end of stream) all buffered nodes are flushed first, so an edge never misses an endpoint sent earlier in the stream. Nodes and edges use the same COPY-staged SQL upsert as the other paths (below); one transaction per label / edge key per flush, so the import is not atomic. >50,000,000 lines → 413. |
 
 **graphos writes no rows through Cypher.** Every write is SQL in one module,
@@ -1497,7 +1500,7 @@ Postgres instance.
    one replica normally reaches the others within milliseconds, at worst
    within `GRAPHOS_REGISTRY_SYNC_S` / `GRAPHOS_CACHE_MAX_AGE_S`; the rate
    limiter and the sign-in throttle stay per replica (§2.5.7).
-2. **Bulk writes are not atomic per request.** Each 500-row (bulk) or
+2. **Bulk writes are not atomic per request.** Each 500-row (bulk, CSV) or
    5,000-row (snapshot) flush commits independently.
 3. **One edge per type per ordered node pair** (§2.3).
 4. **`edges:resolve` only inserts.** Edges whose rule no longer matches are not

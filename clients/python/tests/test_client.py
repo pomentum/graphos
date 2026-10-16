@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -16,6 +17,7 @@ import pytest
 from graphos_client import (
     BearerAuth,
     BulkNodesResponse,
+    CsvImportResponse,
     DeleteNodesResponse,
     EdgeUpsert,
     GraphosClient,
@@ -1218,6 +1220,49 @@ async def test_delete_nodes_is_retried_on_5xx() -> None:
         await cli.delete_nodes([NodeRef(label="Doc", id="a")])
     assert len(calls) == 3          # idempotent: a node already gone is skipped
     await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_import_csv_sends_the_file_and_the_mapping(tmp_path: Path) -> None:
+    seen: list[tuple[str, dict[str, str], bytes, str]] = []
+    answer = {
+        "tenant": "demo", "dry_run": True, "delimiter": "comma", "rows": 2, "records": 2,
+        "rows_invalid": 0, "written": 2, "elapsed_ms": 1,
+        "columns": [{"header": "name", "property": "name", "type": "text"}],
+        "issues": [{"code": "bad_value", "refused": False, "count": 1,
+                    "examples": [{"row": 2, "column": "age", "value": "x"}]}],
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((
+            request.url.path, dict(request.url.params), request.content,
+            request.headers["content-type"],
+        ))
+        return httpx.Response(200, json=answer)
+
+    cli = _client_for(handler)
+    path = tmp_path / "people.csv"
+    path.write_bytes(b"id,name\na,Ann\n")
+    resp = await cli.import_csv_nodes(
+        path, label="Person", columns={"age": {"property": None}}, dry_run=True,
+    )
+    assert isinstance(resp, CsvImportResponse)
+    assert (resp.written, resp.issues[0].code) == (2, "bad_value")
+    await cli.import_csv_edges(
+        "from,to\na,b\n", edge_type="KNOWS", src_label="Person", dst_label="Person",
+        delimiter="comma",
+    )
+    assert seen[0] == (
+        "/v1/demo/graph/nodes:csv",
+        {"label": "Person", "dry_run": "true", "columns": '{"age": {"property": null}}'},
+        b"id,name\na,Ann\n", "text/csv",
+    )
+    assert seen[1][:3] == (
+        "/v1/demo/graph/edges:csv",
+        {"type": "KNOWS", "src_label": "Person", "dst_label": "Person", "dry_run": "false",
+         "delimiter": "comma"},
+        b"from,to\na,b\n",
+    )
 
 
 @pytest.mark.asyncio

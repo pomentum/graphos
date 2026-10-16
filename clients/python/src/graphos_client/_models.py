@@ -400,6 +400,43 @@ class BulkEdgesResponse(BaseModel):
     property_warnings: dict[str, int] = Field(default_factory=dict)
 
 
+class CsvColumnPlan(BaseModel):
+    """One CSV column as it was imported: the property it filled, its type."""
+
+    header: str
+    property: str
+    type: str
+
+
+class CsvIssue(BaseModel):
+    """One kind of problem in the file (``empty_id``, ``bad_value``,
+    ``duplicate_id``, …), counted, with a few examples."""
+
+    code: str
+    refused: bool
+    count: int
+    examples: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class CsvImportResponse(BaseModel):
+    """What ``nodes:csv`` / ``edges:csv`` did (or, in a dry run, would do)."""
+
+    tenant: str
+    dry_run: bool
+    delimiter: str
+    rows: int
+    records: int
+    rows_invalid: int
+    written: int
+    edges_skipped: int = 0
+    columns: list[CsvColumnPlan] = Field(default_factory=list)
+    issues: list[CsvIssue] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    elapsed_ms: int
+    property_violations: dict[str, int] = Field(default_factory=dict)
+    property_warnings: dict[str, int] = Field(default_factory=dict)
+
+
 # ── Delete responses ────────────────────────────────────────────────────────
 
 

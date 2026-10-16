@@ -566,6 +566,7 @@ are 1–512 characters; labels and `type` must match `^[A-Z][A-Za-z0-9_]{0,62}$`
 | Patch a node | `PATCH /v1/{t}/graph/nodes/{external_id}[?label=]` | JSON Merge Patch | changing or removing properties of one node; returns the node as written |
 | Patch an edge | `PATCH /v1/{t}/graph/edges/{type}?src=&dst=[&src_label=&dst_label=]` | JSON Merge Patch | changing or removing properties of one edge; returns the edge as written |
 | NDJSON bulk | `POST /v1/{t}/graph/nodes:bulk`, `/edges:bulk` | NDJSON, one `NodeUpsert` / `EdgeUpsert` per line | large loads; bad lines are skipped and reported |
+| CSV import | `POST /v1/{t}/graph/nodes:csv?label=`, `/edges:csv?type=&src_label=&dst_label=` | the CSV file (`text/csv`); the mapping in the query | a spreadsheet or an export from another system, without a loader |
 | Snapshot import | `POST /v1/{t}/graph/snapshot-import` | NDJSON mixing nodes and edges, with `_kind` on each line | one request for a mixed file |
 
 **One node or edge by identity.** A node is named by its `id`, an edge by its type and the ids
@@ -639,6 +640,66 @@ curl -s -X POST "$G/v1/acme/graph/nodes:bulk" \
 Invalid lines are counted in `rows_invalid`; the first 50 are listed in `errors` as
 `"line N: …"`. If the stream itself fails, the response is 400 with the generic detail
 `"stream error (<ExceptionType>); see server log"` (`snapshot-import`: `"snapshot import failed (<ExceptionType>); see server log"`); database error text stays in the server log. From Python, use `g.bulk_upsert_nodes([...])` and `g.bulk_upsert_edges([...])`.
+
+### CSV import
+
+The body is the CSV file; the query says what its rows are. graphos reads the file (UTF-8; comma,
+semicolon or tab, detected, or `delimiter=comma|semicolon|tab`; the first row the header), maps
+the columns, merges rows that repeat an id, and writes the records through the `:bulk` path.
+
+| Query | Nodes (`nodes:csv`) | Relationships (`edges:csv`) |
+|---|---|---|
+| what the rows are | `label` | `type`, `src_label`, `dst_label` |
+| id columns (headers) | `id`: default a column named `id` or `key`, else the first | `src`, `dst`: default `src` / `source` / `from`… and `dst` / `target` / `to`… |
+| other columns | `columns`: JSON, header → `{"property": name or null, "type": "auto"\|"text"\|"number"\|"boolean"}` | the same |
+| check only | `dry_run=true` | the same (missing ends looked up) |
+
+Without `columns`, every other column is a property named after its header (`First name` →
+`First_name`; names graphos keeps for itself are left out) and typed after its declared definition,
+else `auto`. An empty cell leaves the property out. `auto` reads `true` / `false` and plain numbers
+(`42`, `-1.5`; `007`, `1e3` stay text); `number` takes plain decimals; `boolean` also
+`yes` / `no` / `1` / `0`. A cell that does not read as its type is left out and reported. Ids are
+trimmed. A leading `'` before `= + - @` (graphos's CSV export guards formulas so) is taken off.
+
+```bash
+cat > people.csv <<'EOF'
+id;Full name;age;notes
+p1;"Kim, J.";34;first
+p1;;35;
+p2;Lee;n/a;
+EOF
+curl -s -X POST "$G/v1/acme/graph/nodes:csv" \
+  --url-query label=Person --url-query dry_run=true \
+  --url-query 'columns={"notes": {"property": null}, "age": {"type": "number"}}' \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/csv" \
+  --data-binary @people.csv
+# → {"dry_run":true,"delimiter":"semicolon","rows":3,"records":2,"written":2,...}
+```
+
+`--url-query` (curl 7.87 or later) URL-encodes the mapping; with an older curl, encode the query
+string yourself.
+
+From Python:
+
+```python
+answer = await g.import_csv_nodes(
+    Path("people.csv"), label="Person", dry_run=True,
+    columns={"notes": {"property": None}, "age": {"type": "number"}},
+)
+# answer.rows == 3, answer.records == 2 (p1's rows merged: age 35, Full_name "Kim, J."),
+# answer.issues: duplicate_id (row 2), bad_value (row 3, age "n/a", left out)
+```
+
+Mapping errors (a header the file lacks, a name graphos refuses, two columns for one property, an
+undeclared label pair under `strict_endpoints`) answer 422, an unreadable file (not UTF-8, empty, a
+quoted cell never closed) 400, a file larger than `GRAPHOS_CSV_MAX_BYTES` (256 MiB) 413; nothing is
+written. Otherwise the answer counts `rows`, `records` (after merging), `written` (or, in a dry
+run, what would be), `rows_invalid`, `edges_skipped`, lists `issues` (`empty_id`, `long_id`
+refused; `ragged`, `bad_value`, `duplicate_id` / `duplicate_pair`, `undeclared_pair` written
+anyway; each with a count and up to 3 examples), the property violations and warnings as `:bulk`
+reports them, and `errors` as `"row N: …"`, rows counted from the first under the header (blank
+lines aside). As with `:bulk`, each 500-row batch commits on its own and sending the file again is
+safe.
 
 ### Snapshot import
 
@@ -1262,7 +1323,7 @@ Read access is enough for all four. A record:
 
 | Write | Records |
 |---|---|
-| node upsert (small batch, `nodes:bulk`, snapshot) | one per committed batch and label: `op: upsert`, `ids` of the nodes written |
+| node upsert (small batch, `nodes:bulk`, `nodes:csv`, snapshot) | one per committed batch and label: `op: upsert`, `ids` of the nodes written |
 | edge upsert | one per committed batch and edge group: `edges` as `[src_id, dst_id]` pairs written (skipped rows are not listed), `src_label` / `dst_label` |
 | property merge, node or edge patch | `merge` / `patch` with the one id or pair and the new `rev` |
 | node delete (by id or by property) | `delete`, one per label, with the ids; `detail.edges_removed` counts the edges deleted with them (for the whole statement), `detail.where` the property for a delete by property |
@@ -1545,7 +1606,7 @@ and the 422 of a `strict` property schema (with `violations` and `total`).
 | 409 | removing the last admin; a recompute or metrics run while one of either is running or queued for the tenant; cancelling a finished job, or a direct call whose job was cancelled; an id or edge that matches in several labels (pass `label` / `src_label` / `dst_label`); a write that would give two nodes the values of a unique property index (`application/problem+json`); `snapshot-import?mode=empty` into a tenant with nodes; registering or restoring a name that is kept unregistered for someone else, or is an orphan; `drop_data` while a job or a long query holds the tenant |
 | 410 | a change-feed cursor whose records were pruned (§10) |
 | 412 | `If-Match` did not match: the node or edge changed (or is gone) since it was read |
-| 413 | `snapshot-import` over 50M rows, or a body past `GRAPHOS_IMPORT_MAX_BYTES` |
+| 413 | `snapshot-import` over 50M rows, or a body past `GRAPHOS_IMPORT_MAX_BYTES`; a CSV file past `GRAPHOS_CSV_MAX_BYTES` |
 | 422 | body or query validation (patterns, ranges, `resolve_rule`, `label_hierarchy`), or `order_by: null` sent with a `cursor`; a registration that sends SQL (`indexes`, or a string in `generated_columns`), declares a property index or generated column on a label that is not a vertex label, changes a registered generated column, or declares a unique index over values nodes already share; a property-schema entry for an unregistered label, a pattern that does not compile, or a narrowing that changes a type; a write a `strict` property schema refuses (`application/problem+json` with `violations`) |
 | 428 | `If-Match` missing with `GRAPHOS_REQUIRE_IF_MATCH=true` |
 | 429 | rate limited (when enabled); too many sign-in attempts from one address; a console query over the per-user or pool limit |

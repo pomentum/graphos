@@ -355,6 +355,67 @@ class BulkEdgesResponse(BaseModel):
     )
 
 
+# ── CSV import (POST /nodes:csv, /edges:csv) ──────────────────────────────
+
+
+class CsvColumnPlan(BaseModel):
+    """One CSV column as it was imported: the property it filled, its type."""
+
+    header: str
+    property: str
+    type: Literal["auto", "text", "number", "boolean"]
+
+
+class CsvIssue(BaseModel):
+    """One kind of problem found in the file, counted, with a few examples."""
+
+    code: str = Field(
+        ...,
+        description=(
+            "`empty_id`, `long_id` (refused); `ragged` (a row of another length than the header), "
+            "`bad_value` (a cell that does not read as its column's type, left out), "
+            "`duplicate_id` / `duplicate_pair` (rows merged into one), `undeclared_pair`."
+        ),
+    )
+    refused: bool = Field(..., description="The rows it names are not written.")
+    count: int
+    examples: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Up to 3: the row (from 1, under the header), column, value.",
+    )
+
+
+class CsvImportResponse(BaseModel):
+    """Response for POST /v1/{tenant}/graph/nodes:csv and /edges:csv."""
+
+    tenant: str
+    dry_run: bool = Field(..., description="Checked only: nothing was written.")
+    delimiter: Literal["comma", "semicolon", "tab"]
+    rows: int = Field(..., description="Rows under the header (blank lines aside).")
+    records: int = Field(
+        ...,
+        description="Nodes (or relationships) the rows make once rows repeating an id are merged.",
+    )
+    rows_invalid: int = Field(..., description="Records refused; their errors are in `errors`.")
+    written: int = Field(
+        ..., description="Nodes or relationships upserted (in a dry run: that would be).",
+    )
+    edges_skipped: int = Field(
+        0, description="Relationships not written because an end does not exist.",
+    )
+    columns: list[CsvColumnPlan] = Field(
+        default_factory=list, description="The property columns, as the mapping resolved them.",
+    )
+    issues: list[CsvIssue] = Field(default_factory=list, description="Refusals first.")
+    errors: list[str] = Field(
+        default_factory=list,
+        description="The first 50 refused records, as 'row N: <message>' (the first of its rows).",
+    )
+    elapsed_ms: int
+    property_violations: dict[str, int] = Field(default_factory=dict)
+    property_warnings: dict[str, int] = Field(default_factory=dict)
+
+
 # ── Reads: neighbors + induced_edges ───────────────────────────────────────
 
 
