@@ -9,7 +9,7 @@ refuses to remove its last admin.
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, Response, status
 
@@ -35,6 +35,15 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["access"])
 
 UserName = Annotated[str, Path(description="The user's name.")]
+
+# Error responses the routes share (``responses=``).  Without authentication
+# there are no users or grants: every route answers 404.
+_AUTH_OFF_404: dict[int | str, dict[str, Any]] = {
+    404: {"description": "Authentication is disabled on this server (`GRAPHOS_AUTH_DISABLED`)."},
+}
+_NO_USER_404: dict[int | str, dict[str, Any]] = {
+    404: {"description": "No user of that name; or authentication is disabled on this server."},
+}
 
 
 def _user_info(user: identity.User) -> UserInfo:
@@ -85,6 +94,7 @@ def _keep_an_admin(store: identity.AccessStore, losing: str) -> None:
         "Admin only. Every user, sorted by name: its kind, whether it is disabled or must "
         "change its password, who created it and when it last signed in. No passwords."
     ),
+    responses=_AUTH_OFF_404,
 )
 async def list_users(request: Request, principal: AdminPrincipal) -> UserList:  # noqa: ARG001 — auth
     return UserList(users=[_user_info(u) for u in deps(request).store.users()])
@@ -99,6 +109,11 @@ async def list_users(request: Request, principal: AdminPrincipal) -> UserList:  
         "The answer carries the password once. A person must change it at the first sign-in; "
         "a service account keeps it as its secret. Grant access with `POST /v1/grants`."
     ),
+    responses={
+        **_AUTH_OFF_404,
+        409: {"description": "A user of that name exists."},
+        422: {"description": "The request is not valid, or the name is not a valid user name."},
+    },
 )
 async def create_user(body: UserCreate, request: Request, principal: AdminPrincipal) -> UserCreated:
     store = deps(request).store
@@ -127,6 +142,10 @@ async def create_user(body: UserCreate, request: Request, principal: AdminPrinci
         "sessions, and a disabled user cannot sign in. 404 for an unknown user, 409 when "
         "admins disable themselves or the only admin."
     ),
+    responses={
+        **_NO_USER_404,
+        409: {"description": "Admins cannot disable themselves, or the only admin."},
+    },
 )
 async def update_user(
     name: UserName, body: UserUpdate, request: Request, principal: AdminPrincipal,
@@ -158,6 +177,10 @@ async def update_user(
         "Admin only. Also ends the user's sessions and drops its preferences. 404 for an "
         "unknown user, 409 when admins delete themselves or the only admin."
     ),
+    responses={
+        **_NO_USER_404,
+        409: {"description": "Admins cannot delete themselves, or the only admin."},
+    },
 )
 async def delete_user(name: UserName, request: Request, principal: AdminPrincipal) -> None:
     store = deps(request).store
@@ -180,6 +203,7 @@ async def delete_user(name: UserName, request: Request, principal: AdminPrincipa
         "Shown once. Every token and session of the user stops working. A person must change "
         "it at the next sign-in; a service account uses it as its new secret."
     ),
+    responses=_NO_USER_404,
 )
 async def reset_secret(name: UserName, request: Request, principal: AdminPrincipal) -> UserCreated:
     store = deps(request).store
@@ -238,6 +262,7 @@ def _validate(store: identity.AccessStore, spec: GrantSpec) -> None:
     description=(
         "Admins see every grant. Others see their own, and every grant on the tenants they own."
     ),
+    responses=_AUTH_OFF_404,
 )
 async def list_grants(
     request: Request,
@@ -267,6 +292,17 @@ async def list_grants(
         "Admins grant anything. A tenant's owner grants levels on that tenant (exact name). "
         "Answers 200 when the grant already existed."
     ),
+    responses={
+        403: {"description": (
+            "Patterns and global rights are an admin's to grant, and a tenant's levels its "
+            "owner's; or the token's grants do not allow this operation."
+        )},
+        **_AUTH_OFF_404,
+        422: {"description": (
+            "The request is not valid: a subject that is not an existing user or a known "
+            "prefix, a tenant that is not a name or pattern, or `admin` on other than `*`."
+        )},
+    },
 )
 async def create_grant(
     spec: GrantSpec, request: Request, response: Response, principal: OwnerPrincipal,
@@ -295,6 +331,14 @@ async def create_grant(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Revoke a grant",
     description="The same rights as granting. Applies at the subject's next request.",
+    responses={
+        403: {"description": (
+            "Patterns and global rights are an admin's to revoke, and a tenant's levels its "
+            "owner's; or the token's grants do not allow this operation."
+        )},
+        404: {"description": "No such grant; or authentication is disabled on this server."},
+        409: {"description": "Revoking it would leave no admin."},
+    },
 )
 async def revoke_grant(
     request: Request,

@@ -13,7 +13,7 @@ endpoints. All pure reads — no writes, no advisory locks.
 from __future__ import annotations
 
 import time
-from typing import Annotated
+from typing import Annotated, Any
 
 import asyncpg
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
@@ -49,6 +49,11 @@ MAX_INCLUDED_MEMBERS_PER_COMMUNITY = 500
 # for callers that genuinely need the full enumeration.
 DEFAULT_COMMUNITY_LIMIT = 50
 MAX_COMMUNITY_LIMIT = 500
+
+# A registered tenant whose graph's tables are missing.
+_NO_GRAPH_400: dict[int | str, dict[str, Any]] = {
+    400: {"description": "The tenant's graph does not exist in the database."},
+}
 # Number of distinct label names to include in each community's
 # ``sample_labels``.  Matches the prior _sample_labels(limit=5) call.
 SAMPLE_LABELS_PER_COMMUNITY = 5
@@ -166,6 +171,7 @@ async def _communities_with_labels(
         "`include_members=true` to return up to "
         f"{MAX_INCLUDED_MEMBERS_PER_COMMUNITY} member ids per community."
     ),
+    responses=_NO_GRAPH_400,
 )
 async def list_communities(
     tenant: Tenant,
@@ -244,6 +250,7 @@ async def list_communities(
         "community sizes, and the `top` largest communities with a few sample labels each. "
         "400 when the tenant's graph does not exist."
     ),
+    responses=_NO_GRAPH_400,
 )
 async def community_summary(
     tenant: Tenant,
@@ -537,6 +544,10 @@ def _check_label(tenant: str, label: str, *, kind: str) -> None:
         "Uses the ``(start_id, end_id)`` btree on the edge label table "
         "for an index-scan ``GROUP BY``."
     ),
+    responses={400: {"description": (
+        "`label` is not a vertex label, or `by_edge` not an edge type, registered for the "
+        "tenant."
+    )}},
 )
 async def label_top_by_edge(
     tenant: Tenant,

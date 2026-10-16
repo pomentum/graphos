@@ -40,7 +40,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import ValidationError
 
 from graphos import lookup, properties, reserved, writes
-from graphos.api.graph import _check_tenant
+from graphos.api.graph import UNIQUE_VIOLATION_RESPONSE, _check_tenant
 from graphos.auth import Tenant, WritePrincipal
 from graphos.bootstrap import registered_tenants
 from graphos.contracts.graph import (
@@ -281,6 +281,28 @@ PASSED_THROUGH = (
 )
 
 
+def _ndjson_body(schema: str, row: str) -> dict[str, Any]:
+    """The ``requestBody`` of an NDJSON route: one ``schema`` object per line."""
+    return {"requestBody": {
+        "required": True,
+        "description": (
+            f"NDJSON (`application/x-ndjson`): one {row} per line, as a `{schema}`. "
+            "Blank lines are skipped."
+        ),
+        "content": {
+            "application/x-ndjson": {"schema": {"$ref": f"#/components/schemas/{schema}"}},
+        },
+    }}
+
+
+_BULK_RESPONSES: dict[int | str, dict[str, Any]] = {
+    400: {"description": (
+        "The database refused a write, or the stream failed part-way; the batches flushed "
+        "before it stay written."
+    )},
+}
+
+
 # ── Nodes bulk ──────────────────────────────────────────────────────────────
 
 
@@ -296,6 +318,8 @@ PASSED_THROUGH = (
         "commits on its own: a failure part-way leaves earlier chunks "
         "written, and re-sending the stream is safe (idempotent upserts)."
     ),
+    openapi_extra=_ndjson_body("NodeUpsert", "node"),
+    responses={**_BULK_RESPONSES, **UNIQUE_VIOLATION_RESPONSE},
 )
 async def upsert_nodes_bulk(
     tenant: Tenant,
@@ -345,6 +369,8 @@ async def upsert_nodes_bulk(
         f"chunks of {BULK_FLUSH_CHUNK} rows. Missing-endpoint rows are "
         "counted in `edges_skipped` (same as the small-batch endpoint)."
     ),
+    openapi_extra=_ndjson_body("EdgeUpsert", "edge"),
+    responses=_BULK_RESPONSES,
 )
 async def upsert_edges_bulk(
     tenant: Tenant,

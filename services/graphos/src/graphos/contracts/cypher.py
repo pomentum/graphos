@@ -17,7 +17,10 @@ class CypherRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    query: str = Field(..., min_length=1, max_length=MAX_QUERY_CHARS)
+    query: str = Field(
+        ..., min_length=1, max_length=MAX_QUERY_CHARS,
+        description="The Cypher text, at most 20000 characters; it must only read.",
+    )
     params: dict[str, Any] = Field(
         default_factory=dict, description="Parameters, used in the query as `$name`.",
     )
@@ -44,13 +47,21 @@ class CypherResult(BaseModel):
         description="`nodes` returned, and `edges` whose two ends are among them.",
     )
     truncated: bool = Field(description="More rows matched than were returned.")
-    elapsed_ms: int
+    elapsed_ms: int = Field(..., description="Time the query took, in milliseconds.")
 
 
 class SavedQueryParam(BaseModel):
+    """A parameter a saved query declares: its type, and a label for the UI's form."""
+
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["string", "number", "boolean", "list"] = "string"
+    type: Literal["string", "number", "boolean", "list"] = Field(
+        "string",
+        description=(
+            "The JSON type its value must have when the query is run: `string`, `number` "
+            "(not a boolean), `boolean` or `list`; another type answers 422."
+        ),
+    )
     label: str | None = Field(None, max_length=200, description="Shown in the form.")
 
 
@@ -59,16 +70,30 @@ class SavedQueryBody(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    description: str = Field("", max_length=2_000)
-    query: str = Field(..., min_length=1, max_length=MAX_QUERY_CHARS)
-    params: dict[str, SavedQueryParam] = Field(default_factory=dict)
-    show: Literal["table", "graph"] = "table"
+    description: str = Field("", max_length=2_000, description="What the query is for.")
+    query: str = Field(
+        ..., min_length=1, max_length=MAX_QUERY_CHARS,
+        description=(
+            "The Cypher text, at most 20000 characters; not run or checked until it is run."
+        ),
+    )
+    params: dict[str, SavedQueryParam] = Field(
+        default_factory=dict,
+        description="The parameters it takes, by name (used in the query as `$name`).",
+    )
+    show: Literal["table", "graph"] = Field(
+        "table", description="How the UI shows its result: as a `table` or as a `graph`.",
+    )
 
 
 class SavedQuery(SavedQueryBody):
-    name: str
-    created_by: str | None = None
-    updated_at: datetime | None = None
+    """A saved, named Cypher query of a tenant."""
+
+    name: str = Field(..., description="Its name, unique in the tenant.")
+    created_by: str | None = Field(
+        None, description="The consumer that saved it last (a replace changes it).",
+    )
+    updated_at: datetime | None = Field(None, description="When it was last saved.")
 
 
 class SavedQueryRun(BaseModel):
@@ -76,5 +101,14 @@ class SavedQueryRun(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    params: dict[str, Any] = Field(default_factory=dict)
-    limit: int | None = Field(None, ge=1, le=100_000)
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "A value for every parameter the saved query declares, of its type, and no other "
+            "(else 422)."
+        ),
+    )
+    limit: int | None = Field(
+        None, ge=1, le=100_000,
+        description="Rows to return at most (the server's `GRAPHOS_CYPHER_MAX_ROWS` caps it).",
+    )

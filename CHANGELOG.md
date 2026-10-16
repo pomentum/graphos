@@ -62,6 +62,25 @@ under one version.
   [docs/adrs/](docs/adrs/README.md), with when one is needed and its template; `AGENTS.md` and
   `CLAUDE.md` at the root point to them.
 
+### Changed
+
+- **The OpenAPI document is complete** (`/openapi.json`, `/docs`, `/redoc`):
+  - every error a route can answer is declared, with when it happens: 401 / 403 on every route
+    that needs a token, 404 for an unregistered tenant on every tenant route, 429 (the rate
+    limit), 504 (a statement timeout), and each route's own (400, 409, 413, …);
+  - every error has a body schema (`ErrorResponse`, `RateLimited`, RFC 7807 `Problem`), and a 422
+    is described as either FastAPI's validation error or the route's own refusal;
+  - the routes that take a file or a stream declare it: `application/x-ndjson` for `:bulk` and
+    `snapshot-import` (gzip accepted), `text/csv` for `:csv`;
+  - every schema and every field has a description.
+  Two tests keep it so: a route raising a code it does not declare, or a model or field without a
+  description, fails the build.
+
+### Fixed
+
+- `POST …/graph/nodes/{id}/properties` answers 400 for a database error, as the other node writes
+  do, instead of an unhandled 500.
+
 ## 0.11.1 — 2026-10-16
 
 A fix for databases moved from PostgreSQL 16 / AGE 1.6: their label tables now get the

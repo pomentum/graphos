@@ -14,6 +14,8 @@ NodeFilterValue = str | int | float | bool | list[str | int | float | bool]
 
 
 class RecomputeCommunitiesRequest(BaseModel):
+    """A Louvain community recompute over the tenant's edges (`POST …/recompute-communities`)."""
+
     rel_types: list[str] | None = Field(
         default=None,
         description="Restrict the edge stream to these types. Default: all.",
@@ -66,16 +68,40 @@ class RecomputeCommunitiesRequest(BaseModel):
 
 
 class RecomputeCommunitiesResponse(BaseModel):
-    tenant: str
-    n_nodes: int
-    n_edges_scanned: int
-    n_communities: int
-    n_assigned: int
-    n_singletons: int
-    largest_community_size: int
-    modularity: float
-    edge_stream_ms: int
-    igraph_ms: int
-    writeback_ms: int
-    elapsed_ms: int
-    dry_run: bool
+    """What a Louvain recompute found and how long each phase took."""
+
+    tenant: str = Field(..., description="The tenant.")
+    n_nodes: int = Field(..., description="Nodes clustered: the ends of the edges read.")
+    n_edges_scanned: int = Field(
+        ..., description="Edges read: those of `rel_types` whose ends match `node_filter`.",
+    )
+    n_communities: int = Field(
+        ..., description="Communities of at least `min_community_size` members.",
+    )
+    n_assigned: int = Field(
+        ...,
+        description=(
+            "Nodes in those communities, given a `community_id` (unless `dry_run`; only the "
+            "changed values are written)."
+        ),
+    )
+    n_singletons: int = Field(
+        ...,
+        description=(
+            "Groups Louvain found that are smaller than `min_community_size`; their nodes get "
+            "no `community_id`. A count of groups, not of nodes."
+        ),
+    )
+    largest_community_size: int = Field(
+        ..., description="Members of the largest community; 0 when there is none.",
+    )
+    modularity: float = Field(
+        ..., description="The partition's weighted modularity; 0 when no edge was read.",
+    )
+    edge_stream_ms: int = Field(..., description="Time reading the edges, in milliseconds.")
+    igraph_ms: int = Field(..., description="Time running Louvain, in milliseconds.")
+    writeback_ms: int = Field(
+        ..., description="Time writing `community_id` and the community map, in milliseconds.",
+    )
+    elapsed_ms: int = Field(..., description="Total time, in milliseconds.")
+    dry_run: bool = Field(..., description="Nothing was written: the request's `dry_run`.")

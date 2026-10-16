@@ -25,10 +25,19 @@ class ChangeItem(BaseModel):
             "New values may be added: treat an unknown op as informational."
         ),
     )
-    kind: Literal["node", "edge", "tenant"]
+    kind: Literal["node", "edge", "tenant"] = Field(
+        ...,
+        description=(
+            "What was written: `node`, `edge`, or `tenant` (the schema, with op `schema`)."
+        ),
+    )
     label: str | None = Field(None, description="The node label or edge type.")
-    src_label: str | None = None
-    dst_label: str | None = None
+    src_label: str | None = Field(
+        None, description="Edge records: the source node's label; null when not known.",
+    )
+    dst_label: str | None = Field(
+        None, description="Edge records: the target node's label; null when not known.",
+    )
     ids: list[str] | None = Field(
         None, description="Node ids written (node records); null for a summary record.",
     )
@@ -46,27 +55,39 @@ class ChangeItem(BaseModel):
         ),
     )
     consumer: str | None = Field(None, description="Token consumer that made the write.")
-    trace_id: str | None = None
+    trace_id: str | None = Field(
+        None,
+        description=(
+            "The trace id of the request that made the write (from its `traceparent` header), "
+            "or `job:<id>` for a background job; null when the request had none."
+        ),
+    )
 
 
 class ChangesResponse(BaseModel):
-    tenant: str
-    changes: list[ChangeItem]
+    """A page of the change feed, oldest first."""
+
+    tenant: str = Field(..., description="The tenant.")
+    changes: list[ChangeItem] = Field(..., description="The records after `after`, in feed order.")
     next: str = Field(..., description="Pass as `after` for the next page.")
     more: bool = Field(..., description="The page was full: more records may be ready now.")
 
 
 class ChangesHistory(BaseModel):
-    tenant: str
+    """A page of the change feed read backwards, newest first."""
+
+    tenant: str = Field(..., description="The tenant.")
     changes: list[ChangeItem] = Field(..., description="Newest first.")
     older: str | None = Field(
         None, description="Pass as `before` for the page before this one; null at the end.",
     )
-    more: bool
+    more: bool = Field(..., description="The page was full: older records may exist.")
 
 
 class ChangesHead(BaseModel):
-    tenant: str
+    """The position to start following the feed from."""
+
+    tenant: str = Field(..., description="The tenant.")
     cursor: str = Field(
         ..., description="A position before every change not yet visible: start a sync here.",
     )
