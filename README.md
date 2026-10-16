@@ -249,7 +249,7 @@ python tools/docs/screenshots.py --ui <url>     # retake the UI screenshots (doc
 (cd services/graphos-ui && npm ci && npm test)  # the web UI: tests (npm run dev to run it)
 ```
 
-`run-db-tests.sh` starts the same compose project (`graphos-db` on the volume `graphos_data_pg18`; a PostgreSQL 16 database on `graphos_data` is moved there on that start, as on any `up`), and `--down-volumes` deletes the project's volumes (`graphos_data_pg18`, `graphos_data` and `graphos_upgrade`): do not run it on a machine where that stack holds data you want to keep. `--db-image IMAGE` runs the tests on another database image (CI: PostgreSQL 16 / AGE 1.6), on a volume of its own (`graphos_test_db`).
+`run-db-tests.sh` starts the compose file as a project of its own, `graphos-test`, sharing nothing with a graphos stack on the same machine: containers `graphos-test-*`, volumes `graphos_test_*`, networks `graphos-test-internal` and `graphos-test-net`, the API on `127.0.0.1:18089` (`GRAPHOS_TEST_API_PORT`) built as `graphos-api:test`. `--down-volumes` deletes only those volumes (the script refuses any other). `--db-image IMAGE` runs the tests on another database image (CI: PostgreSQL 16 / AGE 1.6), on a volume of its own (`graphos_test_db`).
 
 ## License
 
