@@ -18,7 +18,7 @@
 <meta property="og:title" content="graphos">
 <meta property="og:description" content="A multi-tenant property-graph service: PostgreSQL and Apache AGE behind a typed HTTP API.">
 <meta property="og:url" content="https://pomentum.github.io/graphos/">
-<meta property="og:image" content="https://pomentum.github.io/graphos/images/graphos-infographic.png">
+<meta property="og:image" content="https://pomentum.github.io/graphos/images/ui-explore-graph-dark.png">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <script>{{ theme_script }}</script>
 <style>
@@ -39,8 +39,6 @@ h1{font-size:clamp(3.2rem,10vw,5.6rem)}
 .btn:hover{border-color:var(--accent); color:var(--accent)}
 .btn.primary{background:var(--accent); border-color:var(--accent); color:var(--ground)}
 .btn.primary:hover{background:transparent; color:var(--accent)}
-.hero-fig{margin-top:40px}
-.hero-fig img{border-radius:4px}
 .group h3{font-family:var(--mono); font-weight:500; font-size:11.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--accent); margin:30px 0 12px}
 .cards{display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr)); gap:12px}
 .card{background:var(--surface); border:1px solid var(--rule); border-radius:4px; padding:16px 18px}
@@ -87,7 +85,6 @@ footer .cols{display:flex; flex-wrap:wrap; gap:8px 22px; margin-bottom:10px}
       <a class="btn" href="whitepaper/">Read the whitepaper</a>
       <a class="btn" href="https://github.com/pomentum/graphos">GitHub</a>
     </div>
-    <figure class="fig hero-fig"><img src="images/graphos-infographic.svg" width="1600" height="1060" alt="graphos capabilities: a typed HTTP API over PostgreSQL 18 + Apache AGE 1.8. Build: tenants and schema, bulk writes and data transfer, composable reads, rule-derived edges. Explore: graph map and aggregates, Louvain and graph metrics, an opt-in read-only Cypher console, the web UI. Run: users, SSO and grants, change feed, operations, the Python client."></figure>
   </header>
 
   <div class="prose">
