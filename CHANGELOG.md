@@ -87,6 +87,12 @@ under one version.
   [web UI](services/graphos-ui/DEVELOPMENT.md); architecture decision records in
   [docs/adrs/](docs/adrs/README.md), with when one is needed and its template; `AGENTS.md` and
   `CLAUDE.md` at the root point to them.
+- **Docs:** the first five architecture decision records, all proposed: edge reconciliation by
+  difference ([ADR-0001](docs/adrs/ADR-0001-edge-reconciliation.md)), an MCP surface for agents and
+  a schema summary ([ADR-0002](docs/adrs/ADR-0002-mcp-surface.md)), variable-length Cypher patterns
+  in the console ([ADR-0003](docs/adrs/ADR-0003-variable-length-cypher.md)), team annotations
+  ([ADR-0004](docs/adrs/ADR-0004-team-annotations.md)) and a geographic view with no third-party
+  calls from the UI by default ([ADR-0005](docs/adrs/ADR-0005-geo-view-and-external-calls.md)).
 
 ### Changed
 
