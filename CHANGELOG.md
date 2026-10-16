@@ -6,6 +6,11 @@ under one version.
 
 ## Unreleased
 
+A fix for databases moved from PostgreSQL 16 / AGE 1.6: their label tables now get the
+cache-invalidation trigger AGE 1.8 gives its own, from the compose's import, from graphos-api at
+start, and from the manual steps of the upgrade guide. The integration-test script no longer
+shares anything with a graphos stack running on the same machine.
+
 ### Fixed
 
 - **AGE 1.8's cache-invalidation trigger on databases moved from PostgreSQL 16 / AGE 1.6.** AGE
@@ -18,6 +23,20 @@ under one version.
   database moved by hand runs the same block ([Upgrading the
   database](docs/upgrade-postgresql-18.md#age-18s-cache-trigger)). Nothing graphos does changed:
   it never reads AGE's in-memory graph; anything else that does now sees graphos's writes.
+- **`scripts/run-db-tests.sh` runs as a compose project of its own**, `graphos-test`. It started
+  the compose file as the `graphos` project, with its container names, volumes, networks and port:
+  on a machine running graphos it replaced that stack's database, started the move of its
+  PostgreSQL 16 data, and `--down-volumes` deleted `graphos_data` with the test volumes. Its
+  containers, volumes, networks, API port (`127.0.0.1:18089`, `GRAPHOS_TEST_API_PORT`) and image
+  tag (`graphos-api:test`) are now its own, and it refuses to remove any volume not named
+  `graphos_test_*`. It also finds a working Python on Windows, where `python3` can be the
+  Microsoft Store stub.
+
+### Changed
+
+- **Docs:** the upgrade guide, the installation guide, the concept, features and AGE notes say
+  what the import does with the trigger, how to check it after a move, and that a hand-made
+  restore of a 1.6 dump needs it; the README describes the isolated integration-test stack.
 
 ## 0.11.0 — 2026-10-15
 

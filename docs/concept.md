@@ -338,10 +338,14 @@ nothing to move:
   the `graphos_upgrade` volume and stops it;
 - `graphos-db-import` (the PostgreSQL 18 image) restores the dump into a
   database of its own, points AGE's catalogue (`ag_graph.graphid`,
-  `ag_label.graph`) at the restored schemas' new OIDs, puts it in place of
-  the new, empty `graphos` database, and gathers planner statistics in
-  parallel;
-- `graphos-api` waits for the import to succeed.
+  `ag_label.graph`) at the restored schemas' new OIDs, adds AGE 1.8's
+  statement-level `_age_cache_invalidate` trigger to every label table
+  lacking it (AGE's own upgrade script would; a restore runs none), puts it
+  in place of the new, empty `graphos` database, and gathers planner
+  statistics in parallel;
+- `graphos-api` waits for the import to succeed. At every start it also adds
+  that trigger, where missing, to its registered tenants' label tables
+  (`bootstrap.ensure_cache_invalidation_triggers`; nothing before AGE 1.8).
 
 A failed import leaves nothing behind and runs again on the next `up`; the
 dump is never loaded over a database graphos has used; `graphos_data` is only
@@ -1517,7 +1521,8 @@ Postgres instance.
 10. **Backups** are operator-owned: `pg_dump` / `pg_basebackup` or a snapshot of
    the `graphos_data_pg18` volume (`graphos_data` on PostgreSQL 16). A
    restore needs AGE's catalogue pointed at the restored schemas' new OIDs
-   and fresh planner statistics
+   and fresh planner statistics; restoring an AGE 1.6 dump into AGE 1.8
+   also needs AGE 1.8's cache-invalidation trigger on the label tables
    ([upgrade-postgresql-18.md](upgrade-postgresql-18.md#a-database-you-run-yourself)).
 11. **No variable-length Cypher patterns** on graphos's tables: AGE refuses
    to build its in-memory graph from label tables with extra columns

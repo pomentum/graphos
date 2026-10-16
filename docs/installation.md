@@ -263,7 +263,8 @@ the communities. Then open the UI, pick `demo`, and use *Explore → Graph → C
 - **Sizing and backups.** Raise the database's memory settings for large graphs
   ([tuning](apache-age.md)); back up the `graphos_data_pg18` volume or the database with the tools
   you use for any PostgreSQL (`pg_dump -Fc` and a restore are what the
-  [upgrade](upgrade-postgresql-18.md) itself runs, then AGE's catalogue fix).
+  [upgrade](upgrade-postgresql-18.md) itself runs, then AGE's catalogue fix; from an AGE 1.6 dump,
+  also AGE 1.8's cache trigger).
 - **Several replicas** of graphos-api can share one database behind a load balancer
   ([usage §11](usage.md#several-replicas)).
 

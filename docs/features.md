@@ -545,8 +545,9 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   services move a PostgreSQL 16 stack's data by themselves:
   `graphos-db-export` (PostgreSQL 16, no network) dumps the old volume, and
   `graphos-db-import` restores it into PostgreSQL 18, repoints AGE's catalogue
-  at the restored schemas (a restore changes their OIDs) and gathers planner
-  statistics; `graphos-api` waits for them. A failed import leaves nothing
+  at the restored schemas (a restore changes their OIDs), adds AGE 1.8's
+  cache-invalidation trigger to the label tables (a restore does not run
+  AGE's upgrade script, which would) and gathers planner statistics; `graphos-api` waits for them. A failed import leaves nothing
   behind and runs again on the next `up`; the dump is never loaded over a
   database graphos has used; the PostgreSQL 16 volume `graphos_data` is kept
   unchanged, as the way back

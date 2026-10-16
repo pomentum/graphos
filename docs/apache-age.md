@@ -614,6 +614,9 @@ refuses AGE's `ag_graph.namespace` (type `regnamespace`), and AGE's
 `age_prepare_pg_upgrade()` exists from 1.8 only. A restore gives every schema
 a new OID, which AGE's catalogue records: point `ag_graph.graphid` and
 `ag_label.graph` at `ag_graph.namespace`, as `age_finish_pg_upgrade()` does.
+A restore also runs none of AGE's upgrade scripts, so the label tables of a
+1.6 dump lack the `_age_cache_invalidate` trigger 1.8 gives its own: the
+import adds it, as AGE's 1.7.0 to 1.8.0 script does.
 
 ---
 

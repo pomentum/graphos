@@ -122,6 +122,8 @@ curl -s http://127.0.0.1:8080/v1/info
 - `/v1/info` shows `postgres_version` 18.x, `age_version` 1.8.x and `database_deprecated: null`.
 - Sign in as usual: users, grants and sessions came across, and tokens issued before the move
   still verify (the signing key is in the database).
+- Optionally check that no label table lacks AGE 1.8's cache trigger (the query in
+  [AGE 1.8's cache trigger](#age-18s-cache-trigger) returns 0).
 - Optionally compare a few counts with your own reads, or a dataset export of a tenant before and
   after.
 
