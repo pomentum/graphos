@@ -428,6 +428,15 @@ export interface DeleteNodeResponse {
   edges_deleted: number;
 }
 
+/** `POST /graph/nodes:delete`: a node that does not exist is skipped. */
+export interface DeleteNodesResponse {
+  tenant: string;
+  nodes_requested: number;
+  nodes_deleted: number;
+  edges_deleted: number;
+  elapsed_ms: number;
+}
+
 export interface PathsRequest {
   src: string;
   dst: string;
@@ -576,6 +585,33 @@ export interface DatasetImportResult {
   complete: boolean | null;
   errors: string[];
   elapsed_ms: number;
+}
+
+/** `POST …/graph/nodes:bulk` and `…/edges:bulk`: what an NDJSON load wrote. */
+interface BulkResult {
+  tenant: string;
+  rows_received: number;
+  /** Lines refused (invalid, reserved names, unknown labels, property schema under strict). */
+  rows_invalid: number;
+  /** The first 50 refusals, as `line N: <message>`. */
+  errors: string[];
+  elapsed_ms: number;
+  /** Refused rows' property errors, by `<label or *>.<property>:<rule>`. */
+  property_violations?: Record<string, number>;
+  /** Written rows' property problems, by `<label or *>.<property>:<rule>`. */
+  property_warnings?: Record<string, number>;
+}
+
+export interface BulkNodesResult extends BulkResult {
+  nodes_upserted: number;
+  by_label: Record<string, number>;
+}
+
+export interface BulkEdgesResult extends BulkResult {
+  edges_upserted: number;
+  /** Rows whose source or target node does not exist. */
+  edges_skipped: number;
+  by_type: Record<string, number>;
 }
 
 /** `POST /v1/tenants?dry_run=true`: what importing a schema would change. */

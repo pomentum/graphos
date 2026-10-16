@@ -167,12 +167,13 @@ export function canvasSvg(
 /**
  * The graph on the canvas as JSON: its nodes (graphos id, label, properties)
  * and edges (ends and type, properties); "+N more" placeholders left out.
+ * With `only`, just those nodes and the edges between them.
  */
-export function canvasJson(graph: Graph<NodeAttributes, EdgeAttributes>): string {
+export function canvasJson(graph: Graph<NodeAttributes, EdgeAttributes>, only?: ReadonlySet<string>): string {
   const nodes: { id: string; label: string; properties: unknown }[] = [];
   const refs = new Map<string, { id: string; label: string }>();
   graph.forEachNode((key, node) => {
-    if (node.more !== undefined) return;
+    if (node.more !== undefined || (only && !only.has(key))) return;
     refs.set(key, { id: node.id, label: node.vertexLabel });
     nodes.push({ id: node.id, label: node.vertexLabel, properties: node.properties });
   });

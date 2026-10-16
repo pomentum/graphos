@@ -20,6 +20,8 @@ export interface NewEdgeDialogProps {
   error: string | null;
   onCancel: () => void;
   onCreate: (type: string, to: SearchHit) => void;
+  /** The node the edge points to, when already chosen (drawn on the canvas); no search then. */
+  target?: SearchHit;
 }
 
 /**
@@ -40,6 +42,7 @@ export function NewEdgeDialog({
   error,
   onCancel,
   onCreate,
+  target,
 }: NewEdgeDialogProps) {
   const { t } = useTranslation();
   const fitting = edgeTypes.filter((type) => endpoints.startsFrom(type, fromLabel));
@@ -48,7 +51,7 @@ export function NewEdgeDialog({
   const [chosen, setType] = useState<string | null>(null);
   // The first type until one is chosen (the types may arrive after the dialog).
   const type = chosen && offered.includes(chosen) ? chosen : (offered[0] ?? null);
-  const [to, setTo] = useState<SearchHit | null>(null);
+  const [to, setTo] = useState<SearchHit | null>(target ?? null);
   const coverage = type && to ? endpoints.check(type, fromLabel, to.label) : null;
   const refused = strict && coverage?.status === "undeclared";
   const allowed = type ? endpoints.declared.get(type) : undefined;
@@ -87,13 +90,19 @@ export function NewEdgeDialog({
           </Text>
         ) : null}
         <Input.Wrapper label={t("components.newEdgeDialog.to")} error={error}>
-          <NodeSearch
-            placeholder={t("components.newEdgeDialog.findNode")}
-            keepSelection
-            scoped
-            width="100%"
-            onPick={(hit) => setTo(hit)}
-          />
+          {target ? (
+            <Text size="sm">
+              {String(target.properties.name ?? target.properties.id)} ({target.label})
+            </Text>
+          ) : (
+            <NodeSearch
+              placeholder={t("components.newEdgeDialog.findNode")}
+              keepSelection
+              scoped
+              width="100%"
+              onPick={(hit) => setTo(hit)}
+            />
+          )}
         </Input.Wrapper>
         {to ? (
           <Text size="xs" c="dimmed">

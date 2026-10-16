@@ -1,5 +1,6 @@
 import { CloseButton } from "@mantine/core";
 import { useHotkeys } from "@mantine/hooks";
+import { notifications } from "@mantine/notifications";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
@@ -10,11 +11,12 @@ import { CanvasExportMenu } from "../../components/CanvasExportMenu";
 import { CanvasLegend } from "../../components/CanvasLegend";
 import { EdgeInspector } from "../../components/EdgeInspector";
 import { ExpandDialog } from "../../components/ExpandDialog";
+import { holdView } from "../../components/canvasGestures";
 import { GraphCanvas } from "../../components/GraphCanvas";
 import { Inspector } from "../../components/Inspector";
-import { NewEdgeDialog } from "../../components/NewEdgeDialog";
+import { NewEdgeDialog, type NewEdgeDialogProps } from "../../components/NewEdgeDialog";
 import { NewNodeDialog } from "../../components/NewNodeDialog";
-import { useCreateEdge, useCreateNode, useLabelStyles, useSchema } from "../../data/queries";
+import { useCreateEdge, useCreateNode, useDeleteNodes, useLabelStyles, useSchema } from "../../data/queries";
 import { circular, force, layered, type CanvasLayout } from "../../graph/canvasLayouts";
 import { categorize, styleMaxima } from "../../graph/canvasStyle";
 import {
@@ -25,6 +27,10 @@ import {
   type NodeAttributes,
   type NodeRef,
 } from "../../graph/GraphModel";
+import { selectedNodes, selectionCsv, toggled } from "../../graph/selection";
+import { canvasJson } from "../../lib/canvasExport";
+import { CSV_TYPE, exportName } from "../../lib/csv";
+import { saveFile } from "../../lib/download";
 import { Endpoints } from "../../lib/endpoints";
 import { SIZE_MODES, type SizeBy } from "../../lib/metrics";
 import { useWorkspace } from "../../graph/WorkspaceProvider";
@@ -36,6 +42,7 @@ import classes from "./ExploreView.module.css";
 import { GroupsMode } from "./GroupsMode";
 import { MapView } from "./MapView";
 import { ModeSwitch } from "./ModeSwitch";
+import { SelectionBar } from "./SelectionBar";
 import { useExpandNode } from "./useExpandNode";
 import { useFreshNodes } from "./useFreshNodes";
 import { useRecentlyChanged } from "./useRecentlyChanged";
@@ -43,6 +50,8 @@ import { useWholeGraph } from "./useWholeGraph";
 
 /** The best-connected nodes on the canvas are labelled while nothing is selected. */
 const HUB_LABELS = 12;
+/** Nodes of a selection expanded at once: each is one request. */
+const EXPAND_MANY = 20;
 
 /**
  * Explore: the canvas (the whole graph on arrival, or nodes found by search
@@ -55,7 +64,14 @@ const HUB_LABELS = 12;
  * Focus shows only the selection's neighbourhood, and only the hubs, the
  * selection and new nodes carry labels.
  *
- * Keys: Escape deselects, F focus, E expand, C collapse, H hide, Ctrl/⌘+Z back.
+ * Several nodes are picked with Ctrl, ⌘ or Shift click, or by drawing a loop
+ * with Shift-drag on the empty canvas; the selection bar then expands, hides,
+ * exports or deletes them together. With write access, a double-click on the
+ * empty canvas creates a node there, and Alt-drag from one node onto another
+ * connects them.
+ *
+ * Keys: Escape deselects, F focus, E expand, C collapse, H hide, Ctrl/⌘+A
+ * select all, Ctrl/⌘+Z back.
  */
 export function ExploreView() {
   const { t } = useTranslation();
@@ -63,8 +79,22 @@ export function ExploreView() {
   const workspace = useWorkspace();
   // The canvas's renderer, for saving it as a picture.
   const renderer = useRef<Sigma<NodeAttributes, EdgeAttributes> | null>(null);
-  const { model, version, selected, select, selectedEdge, selectEdge, colorBy, sizeBy, open, overview, frameOn, mode } =
-    workspace;
+  const {
+    model,
+    version,
+    selected,
+    select,
+    selectedEdge,
+    selectEdge,
+    multi,
+    setMulti,
+    colorBy,
+    sizeBy,
+    open,
+    overview,
+    frameOn,
+    mode,
+  } = workspace;
   const { load } = useWholeGraph();
   const palette = usePalette();
   const schema = useSchema();
@@ -82,7 +112,12 @@ export function ExploreView() {
     },
     [model, select, markFresh, frameOn],
   );
-  const { expand, dialog, isExpanding } = useExpandNode(model, onExpanded);
+  const { expand, expandMany, dialog, isExpanding } = useExpandNode(model, onExpanded);
+  const [expandingMany, setExpandingMany] = useState(false);
+  const deleteNodes = useDeleteNodes();
+  // Where a double-click asked for a new node, and a link drawn between two nodes.
+  const [createAt, setCreateAt] = useState<{ x: number; y: number } | null>(null);
+  const [link, setLink] = useState<{ src: string; dst: string } | null>(null);
   const [creating, setCreating] = useState<"node" | "edge" | null>(null);
   // A new key per opening: each dialog starts empty, without the last one's values or error.
   const [dialogKey, setDialogKey] = useState(0);
@@ -122,8 +157,23 @@ export function ExploreView() {
       sizes,
       styles,
       styleMax,
+      multi,
     }),
-    [model, selected, selectedEdge, categories, recent, fresh, hubs, focusOnly, sizes, styles, styleMax, version],
+    [
+      model,
+      selected,
+      selectedEdge,
+      categories,
+      recent,
+      fresh,
+      hubs,
+      focusOnly,
+      sizes,
+      styles,
+      styleMax,
+      multi,
+      version,
+    ],
   );
 
   const selectedNode = selected ? model.graph.getNodeAttributes(selected) : null;
@@ -139,7 +189,9 @@ export function ExploreView() {
     renderer.current?.getCamera().animatedReset({ duration: 400 });
   };
 
-  const startCreating = (kind: "node" | "edge") => {
+  /** Opens a dialog; a node is placed `at` a point of the canvas when given, else beside the selection. */
+  const startCreating = (kind: "node" | "edge", at: { x: number; y: number } | null = null) => {
+    setCreateAt(at);
     createNode.reset();
     createEdge.reset();
     setExisting(null);
@@ -166,7 +218,12 @@ export function ExploreView() {
       return;
     }
     if (!(await createNode.mutateAsync(node).catch(() => null))) return;
-    open({ id: node.id, label: node.label }, { ...node.properties, id: node.id });
+    const ref = { id: node.id, label: node.label };
+    const properties = { ...node.properties, id: node.id };
+    if (createAt && renderer.current)
+      select(holdView(renderer.current, () => model.addNodeAt(ref, properties, createAt)));
+    else open(ref, properties);
+    setCreateAt(null);
     setCreating(null);
   };
 
@@ -179,6 +236,11 @@ export function ExploreView() {
     model.removeNode(key);
     select(null);
   };
+  const hideMany = () => {
+    model.removeNodes(multi);
+    setMulti(new Set());
+  };
+  const selectAll = () => setMulti(new Set(model.graph.filterNodes((_, node) => node.more === undefined)));
   const graphKeys = mode === "graph";
   useHotkeys(
     graphKeys
@@ -188,7 +250,8 @@ export function ExploreView() {
           ["F", () => selected && setFocusOnly((on) => !on)],
           ["E", () => selected && void expand(selected)],
           ["C", () => selected && model.collapse(selected)],
-          ["H", () => selected && hide(selected)],
+          ["H", () => (multi.size > 0 ? hideMany() : selected && hide(selected))],
+          ["mod+A", selectAll],
         ]
       : [],
   );
@@ -196,13 +259,14 @@ export function ExploreView() {
   if (mode === "map") return <MapView onMode={workspace.setMode} />;
   if (mode === "groups") return <GroupsMode onMode={workspace.setMode} />;
 
-  const connect = async (type: string, to: SearchHit) => {
-    if (!selected || !selectedNode) return;
+  const connect = async (from: string | null, type: string, to: SearchHit) => {
+    if (!from || !model.graph.hasNode(from)) return;
+    const source = model.graph.getNodeAttributes(from);
     const target = { id: String(to.properties.id ?? to.id), label: to.label };
     const result = await createEdge
       .mutateAsync({
-        src_id: selectedNode.id,
-        src_label: selectedNode.vertexLabel,
+        src_id: source.id,
+        src_label: source.vertexLabel,
         dst_id: target.id,
         dst_label: target.label,
         type,
@@ -210,9 +274,37 @@ export function ExploreView() {
       })
       .catch(() => null);
     if (!result || result.edges_upserted === 0) return;
-    const targetKey = model.addNode(target, to.properties, selected);
-    model.addEdge(type, selected, targetKey);
+    const targetKey = model.addNode(target, to.properties, from);
+    model.addEdge(type, from, targetKey);
     setCreating(null);
+    setLink(null);
+  };
+
+  const startLink = (src: string, dst: string) => {
+    createEdge.reset();
+    setDialogKey((k) => k + 1);
+    setLink({ src, dst });
+  };
+
+  const expandSelection = async () => {
+    const keys = selectedNodes(model, multi).slice(0, EXPAND_MANY);
+    setExpandingMany(true);
+    const added = await expandMany(keys).finally(() => setExpandingMany(false));
+    frameOn([...keys, ...added]);
+  };
+
+  const deleteSelection = async () => {
+    const keys = selectedNodes(model, multi);
+    const refs = keys.map((key) => {
+      const node = model.graph.getNodeAttributes(key);
+      return { id: node.id, label: node.vertexLabel };
+    });
+    // Each batch graphos deleted leaves the canvas, even when a later one fails.
+    const onDeleted = (count: number) => model.forget(...keys.splice(0, count));
+    const deleted = await deleteNodes.mutateAsync({ nodes: refs, onDeleted }).catch(() => null);
+    if (deleted === null) return;
+    setMulti(new Set());
+    notifications.show({ message: t("notices.nodesDeleted", { count: deleted }), color: "green" });
   };
 
   const inspectorOpen = Boolean(selected || selectedEdge);
@@ -223,16 +315,48 @@ export function ExploreView() {
           model={model}
           emphasis={emphasis}
           palette={palette}
-          onSelect={(key) => {
+          onSelect={(key, additive) => {
+            if (key && additive) {
+              setMulti(toggled(multi.size > 0 ? multi : new Set(selected ? [selected] : []), [key]));
+              return;
+            }
             select(key);
             if (!key) setFocusOnly(false);
           }}
+          onLasso={(keys, additive) =>
+            setMulti(additive ? new Set([...multi, ...(selected ? [selected] : []), ...keys]) : new Set(keys))
+          }
           onSelectEdge={selectEdge}
           onExpand={(key) => void expand(key)}
+          onCreateAt={
+            canWrite
+              ? (point) => {
+                  setNewLabel(undefined);
+                  startCreating("node", point);
+                }
+              : undefined
+          }
+          onLink={canWrite ? startLink : undefined}
           frame={workspace.frame}
           rendererRef={renderer}
+          minimap
         />
         <CanvasStatus overview={overview} isEmpty={model.isEmpty} onLoad={() => void load()} />
+        {multi.size > 0 ? (
+          <SelectionBar
+            count={multi.size}
+            canWrite={canWrite}
+            expandLimit={EXPAND_MANY}
+            expanding={expandingMany}
+            deleting={deleteNodes.isPending}
+            onExpand={() => void expandSelection()}
+            onHide={hideMany}
+            onExportJson={() => saveFile(exportName([tenant, "selection"], "json"), canvasJson(model.graph, multi))}
+            onExportCsv={() => saveFile(exportName([tenant, "selection"], "csv"), selectionCsv(model, multi), CSV_TYPE)}
+            onDelete={() => void deleteSelection()}
+            onClear={() => setMulti(new Set())}
+          />
+        ) : null}
         <CanvasLegend categories={categories} styles={styles} />
         <ExploreActions
           leading={<ModeSwitch mode="graph" onChange={workspace.setMode} />}
@@ -308,7 +432,10 @@ export function ExploreView() {
           void api.node(ref.id, ref.label).then((record) => open(ref, record.properties));
           setCreating(null);
         }}
-        onCancel={() => setCreating(null)}
+        onCancel={() => {
+          setCreating(null);
+          setCreateAt(null);
+        }}
         onCreate={(node) => void createNewNode(node)}
       />
       {selectedNode ? (
@@ -329,10 +456,52 @@ export function ExploreView() {
                 : null
           }
           onCancel={() => setCreating(null)}
-          onCreate={(type, to) => void connect(type, to)}
+          onCreate={(type, to) => void connect(selected, type, to)}
+        />
+      ) : null}
+      {link && model.graph.hasNode(link.src) && model.graph.hasNode(link.dst) ? (
+        <LinkDialog
+          key={`link-${dialogKey}`}
+          model={model}
+          link={link}
+          endpoints={endpoints}
+          edgeTypes={(schema.data?.edge_labels ?? []).filter((type) => !schema.data?.rule_edge_labels.includes(type))}
+          strict={Boolean(schema.data?.strict_endpoints)}
+          saving={createEdge.isPending}
+          error={createEdge.error ? createEdge.error.message : null}
+          onCancel={() => setLink(null)}
+          onCreate={(type, to) => void connect(link.src, type, to)}
         />
       ) : null}
     </div>
+  );
+}
+
+/** Connects two nodes drawn on the canvas: only the relationship type is asked. */
+function LinkDialog({
+  model,
+  link,
+  ...props
+}: { model: GraphModel; link: { src: string; dst: string } } & Omit<
+  NewEdgeDialogProps,
+  "opened" | "fromName" | "fromLabel" | "target"
+>) {
+  const source = model.graph.getNodeAttributes(link.src);
+  const target = model.graph.getNodeAttributes(link.dst);
+  return (
+    <NewEdgeDialog
+      {...props}
+      opened
+      fromName={displayName(source.properties, source.id)}
+      fromLabel={source.vertexLabel}
+      target={{
+        id: 0,
+        label: target.vertexLabel,
+        properties: { ...target.properties, id: target.id },
+        score: null,
+        matched: null,
+      }}
+    />
   );
 }
 

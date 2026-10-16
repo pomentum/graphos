@@ -40,6 +40,9 @@ interface WorkspaceValue {
   select: (key: string | null) => void;
   selectedEdge: string | null;
   selectEdge: (key: string | null) => void;
+  /** Nodes picked together (Ctrl or Shift click, lasso); empty when one node or none is selected. */
+  multi: ReadonlySet<string>;
+  setMulti: (keys: ReadonlySet<string>) => void;
   colorBy: ColorBy;
   setColorBy: (colorBy: ColorBy) => void;
   /** What nodes are sized by: their connections on the canvas, or a graph metric. */
@@ -67,6 +70,7 @@ interface WorkspaceValue {
 }
 
 const WorkspaceContext = createContext<WorkspaceValue | null>(null);
+const NONE: ReadonlySet<string> = new Set();
 
 /**
  * Holds what the user is working on in Explore: the nodes on the canvas, the
@@ -79,6 +83,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [overview, setOverview] = useState<Overview>({ status: "idle" });
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
+  const [multi, setMultiState] = useState<ReadonlySet<string>>(NONE);
   const [colorBy, setColorBy] = useState<ColorBy>("none");
   const [sizeBy, setSizeBy] = useState<SizeBy>("connections");
   const [lens, setLens] = useState<Lens>("groups");
@@ -92,11 +97,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
   const select = useCallback((key: string | null) => {
     setSelected(key);
+    setMultiState(NONE);
     if (key) setSelectedEdge(null);
   }, []);
   const selectEdge = useCallback((key: string | null) => {
     setSelectedEdge(key);
+    setMultiState(NONE);
     if (key) setSelected(null);
+  }, []);
+  // Several nodes replace the single selection; one is the single selection.
+  const setMulti = useCallback((keys: ReadonlySet<string>) => {
+    setSelectedEdge(null);
+    if (keys.size === 1) {
+      setSelected([...keys][0]!);
+      setMultiState(NONE);
+    } else {
+      setSelected(null);
+      setMultiState(keys.size === 0 ? NONE : keys);
+    }
   }, []);
   const version = useSyncExternalStore(
     useCallback((onChange: () => void) => model.subscribe(onChange), [model]),
@@ -107,6 +125,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     model.clear();
     setSelected(null);
     setSelectedEdge(null);
+    setMultiState(NONE);
     setOverview({ status: "idle" });
     setMode("graph");
     setMapLabel(null);
@@ -117,7 +136,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (selected && !model.graph.hasNode(selected)) setSelected(null);
     if (selectedEdge && !model.graph.hasEdge(selectedEdge)) setSelectedEdge(null);
-  }, [model, selected, selectedEdge, version]);
+    if ([...multi].some((key) => !model.graph.hasNode(key))) {
+      setMultiState(new Set([...multi].filter((key) => model.graph.hasNode(key))));
+    }
+  }, [model, selected, selectedEdge, multi, version]);
 
   const open = useCallback(
     (ref: NodeRef, properties: Properties) => {
@@ -145,6 +167,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       select,
       selectedEdge: liveSelectedEdge,
       selectEdge,
+      multi,
+      setMulti,
       colorBy,
       setColorBy,
       sizeBy,
@@ -170,6 +194,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       select,
       liveSelectedEdge,
       selectEdge,
+      multi,
+      setMulti,
       colorBy,
       sizeBy,
       lens,

@@ -33,6 +33,10 @@ export interface Emphasis {
   styles?: LabelStyles;
   /** The largest value on the canvas of each property a label is sized by (`size_by`). */
   styleMax?: Map<string, number>;
+  /** Nodes picked together (Ctrl or Shift click, lasso), drawn like the selection. */
+  multi?: ReadonlySet<string>;
+  /** Zoomed far out: pictograms and the hubs' labels would be specks, so they are left out. */
+  far?: boolean;
 }
 
 export interface NodeDisplay {
@@ -60,6 +64,8 @@ export interface EdgeDisplay {
   hidden?: boolean;
   /** Drawn along the edge: its type's caption property, while the edge is in the focus. */
   label?: string;
+  /** Draw the label whatever the ends show (the edge under the pointer). */
+  forceLabel?: boolean;
 }
 
 /** A label's icon, drawn on its disc: white reads on every category colour. */
@@ -88,7 +94,7 @@ export function nodeDisplay(key: string, node: NodeAttributes, emphasis: Emphasi
     ...display,
     label: middleEllipsis(display.label, LABEL_CHARS),
     fullLabel: display.label,
-    ...(icon && !display.hidden
+    ...(icon && !display.hidden && !emphasis.far
       ? { type: "icon", image: iconImage(icon), pictoColor: PICTOGRAM }
       : { type: "circle", image: undefined }),
   };
@@ -111,6 +117,10 @@ function nodeDisplayUncut(key: string, node: NodeAttributes, emphasis: Emphasis,
   if (key === emphasis.selected) {
     return { color: palette.accent, size: size + 3, label: name, forceLabel: true, zIndex: 3 };
   }
+  if (emphasis.multi?.has(key)) {
+    const fewEnough = emphasis.multi.size <= FOCUS_LABEL_LIMIT;
+    return { color: palette.accent, size: size + 2, label: name, forceLabel: fewEnough, zIndex: 3 };
+  }
   if (focused && !inFocus && emphasis.isolate) {
     return { color: palette.nodeIdle, size, label: name, forceLabel: false, zIndex: 0, hidden: true };
   }
@@ -131,7 +141,7 @@ function nodeDisplayUncut(key: string, node: NodeAttributes, emphasis: Emphasis,
     color: focused ? mix(idle, palette.canvas, DIM) : idle,
     size,
     label: name,
-    forceLabel: !focused && (fresh || (emphasis.hubs?.has(key) ?? false)),
+    forceLabel: !focused && (fresh || (!emphasis.far && (emphasis.hubs?.has(key) ?? false))),
     zIndex: 0,
   };
 }

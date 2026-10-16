@@ -9,6 +9,8 @@ from graphos.contracts.graph import (
     MAX_NODES_UPSERT_BATCH,
     EdgesUpsertRequest,
     EdgeUpsert,
+    NodeRef,
+    NodesDeleteRequest,
     NodesUpsertRequest,
     NodeUpsert,
 )
@@ -149,6 +151,41 @@ def test_node_upsert_rejects_bad_label(bad_label: str) -> None:
 def test_node_upsert_rejects_empty_id() -> None:
     with pytest.raises(ValueError):
         NodeUpsert(id="", label="Document")
+
+
+# ── Batch node delete ───────────────────────────────────────────────────────
+
+
+def test_valid_delete_batch() -> None:
+    body = NodesDeleteRequest.model_validate({"nodes": [
+        {"label": "Document", "id": "demo/svc/foo.py:Bar.baz"},
+        {"label": "Collection", "id": "cmp-001"},
+    ]})
+    assert [(n.label, n.id) for n in body.nodes] == [
+        ("Document", "demo/svc/foo.py:Bar.baz"), ("Collection", "cmp-001"),
+    ]
+
+
+def test_delete_batch_must_hold_one_to_the_upsert_cap() -> None:
+    with pytest.raises(ValueError):
+        NodesDeleteRequest(nodes=[])
+    NodesDeleteRequest(nodes=[NodeRef(id=f"id-{i}", label="Document")
+                              for i in range(MAX_NODES_UPSERT_BATCH)])
+    with pytest.raises(ValueError):
+        NodesDeleteRequest(nodes=[NodeRef(id=f"id-{i}", label="Document")
+                                  for i in range(MAX_NODES_UPSERT_BATCH + 1)])
+
+
+@pytest.mark.parametrize(
+    ("label", "node_id"),
+    [("document", "x"), ("Document!", "x"), ("1Document", "x"),
+     ("Document", ""), ("Document", "x" * 513)],
+)
+def test_node_ref_is_validated_like_an_upsert(label: str, node_id: str) -> None:
+    with pytest.raises(ValueError):
+        NodeRef(id=node_id, label=label)
+    with pytest.raises(ValueError):
+        NodeUpsert(id=node_id, label=label)
 
 
 # ── Edge upsert ─────────────────────────────────────────────────────────────

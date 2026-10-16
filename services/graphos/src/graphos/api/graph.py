@@ -10,6 +10,7 @@ Core surface (see the module for the full list):
 
 - ``GET  /v1/{tenant}/graph/search``         — substring search by `name`.
 - ``POST /v1/{tenant}/graph/nodes``          — small-batch node upsert.
+- ``POST /v1/{tenant}/graph/nodes:delete``   — batch node delete, by label and id.
 - ``POST /v1/{tenant}/graph/edges``          — small-batch edge upsert.
 - ``GET  /v1/{tenant}/graph/neighbors``      — 1-hop in/out edges around a node.
 - ``POST /v1/{tenant}/graph/induced_edges``  — edges among a supplied id set.
@@ -66,6 +67,7 @@ from graphos.contracts.graph import (
     MAX_EXPAND_HOPS,
     MAX_EXPAND_LIMIT,
     MAX_NEIGHBORS_LIMIT,
+    MAX_NODES_UPSERT_BATCH,
     MAX_SEARCH_LIMIT,
     SCAN_PAYLOAD_CAP_BYTES,
     AggregateRow,
@@ -73,6 +75,7 @@ from graphos.contracts.graph import (
     DeleteByPropertyResponse,
     DeleteEdgeResponse,
     DeleteNodeResponse,
+    DeleteNodesResponse,
     EdgeGetResponse,
     EdgeHit,
     EdgesAggregateRequest,
@@ -94,6 +97,7 @@ from graphos.contracts.graph import (
     NodePropertiesUpsertResponse,
     NodesAggregateRequest,
     NodesAggregateResponse,
+    NodesDeleteRequest,
     NodesScanItem,
     NodesScanRequest,
     NodesScanResponse,
@@ -2540,6 +2544,66 @@ async def delete_node(  # noqa: PLR0913 — FastAPI route parameters
     return DeleteNodeResponse(
         tenant=tenant,
         node_id=external_id,
+        nodes_deleted=nodes_n,
+        edges_deleted=edges_n,
+        elapsed_ms=elapsed_ms,
+    )
+
+
+# A deadlock, a serialization failure.
+_LOCK_CONFLICTS = frozenset({"40P01", "40001"})
+
+
+@router.post(
+    "/nodes:delete",
+    response_model=DeleteNodesResponse,
+    summary="Delete a batch of nodes and their edges by label and id",
+    description=(
+        "Removes each node named by `label` and `id`, together with all its "
+        "incident edges, in one transaction: all of them or none. "
+        f"Up to {MAX_NODES_UPSERT_BATCH} nodes per request.\n\n"
+        "Idempotent: a node that does not exist is skipped, so a repeat "
+        "deletes nothing. A label takes in its child labels' nodes, as the "
+        "single delete does. Every label must be registered for the tenant (400 "
+        "otherwise, and nothing is deleted)."
+    ),
+    responses={503: {
+        "description": "Lost to concurrent writes on the same edges; nothing was deleted. Retry.",
+    }},
+)
+async def delete_nodes(
+    tenant: Tenant,
+    body: NodesDeleteRequest,
+    request: Request,
+    principal: WritePrincipal,
+) -> DeleteNodesResponse:
+    _check_tenant(tenant, principal)
+    for label in sorted({n.label for n in body.nodes}):
+        _check_vertex_label(tenant, label)
+
+    pool = request.app.state.pool
+    started = time.perf_counter()
+    try:
+        nodes_n, edges_n = await writes.delete_nodes_by_ref(
+            pool, tenant=tenant, refs=[(n.label, n.id) for n in body.nodes],
+        )
+    except CypherError as exc:
+        if exc.sqlstate in _LOCK_CONFLICTS:
+            # Lost to another delete every time: nothing was deleted, and a retry is safe.
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="another write held these nodes' edges; nothing was deleted, try again",
+                headers={"Retry-After": "1"},
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"cypher error: {exc}",
+        ) from exc
+
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    return DeleteNodesResponse(
+        tenant=tenant,
+        nodes_requested=len(body.nodes),
         nodes_deleted=nodes_n,
         edges_deleted=edges_n,
         elapsed_ms=elapsed_ms,

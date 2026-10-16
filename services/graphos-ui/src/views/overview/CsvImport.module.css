@@ -1,0 +1,31 @@
+/* The column grid and the preview: compact rows, the cells' text cut rather than wrapped. */
+.table th {
+  background: var(--gx-group);
+  font-weight: 600;
+  font-size: var(--mantine-font-size-xs);
+  color: var(--gx-muted);
+  white-space: nowrap;
+}
+
+.table td,
+.table th {
+  border-color: var(--gx-separator);
+}
+
+.cell {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.invalid {
+  color: var(--mantine-color-red-text);
+  text-decoration: line-through;
+}
+
+.issues {
+  border: 0.5px solid var(--gx-separator);
+  border-radius: var(--mantine-radius-md);
+  padding: 8px 12px;
+}

@@ -46,6 +46,7 @@ and DDL are not graph data and stay with their owners (``bootstrap``,
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -578,7 +579,7 @@ _DELETE_NODES_SQL = """
 
 
 async def _delete_nodes_recorded(
-    conn: asyncpg.Connection, tenant: str, sql: str, arg: str,
+    conn: asyncpg.Connection, tenant: str, sql: str, arg: str | list[str],
     detail: dict[str, Any] | None = None,
 ) -> tuple[int, int]:
     """Run a node delete and record one change per label it deleted from.
@@ -637,6 +638,66 @@ async def delete_nodes(
                 conn, tenant, sql, arg,
                 None if property_key == "id" else {"where": {property_key: property_value}},
             )
+
+
+async def delete_nodes_by_ref(
+    pool: asyncpg.Pool,
+    *,
+    tenant: str,
+    refs: Iterable[tuple[str, str]],
+) -> tuple[int, int]:
+    """Delete the nodes named by ``(label, id)`` pairs, with every edge that
+    touches one of them, in one transaction.
+
+    One statement per label, its ids matched with ``= ANY(...)``, which the
+    label's ``<Label>_id_unique`` index serves.  A label takes in its child
+    labels' nodes too, as the single delete does.  A pair that names no node
+    is skipped, so a repeat deletes nothing.  An edge between nodes of two
+    labels goes with the first label's statement and is counted once;
+    ``edges_removed`` in each label's change record is that statement's count.
+
+    Two batches deleting nodes joined by edges can lock each other's edges
+    (a deadlock, or a serialization failure): the whole transaction is rolled
+    back and run again, up to :data:`DELETE_ATTEMPTS` times.
+
+    Returns:
+        ``(nodes_deleted, edges_deleted)``.
+    """
+    by_label: dict[str, set[str]] = {}
+    for label, external_id in refs:
+        by_label.setdefault(label, set()).add(external_id)
+    with _db_errors("node delete failed", query="DELETE <label> by ids", graph=tenant):
+        for attempt in range(1, DELETE_ATTEMPTS + 1):
+            try:
+                return await _delete_by_label(pool, tenant, by_label)
+            except (asyncpg.exceptions.DeadlockDetectedError,
+                    asyncpg.exceptions.SerializationError):
+                if attempt == DELETE_ATTEMPTS:
+                    raise
+                await asyncio.sleep(0.05 * attempt)
+    raise AssertionError("unreachable")
+
+
+# Runs of a batch delete that lost a deadlock before the error is returned.
+DELETE_ATTEMPTS = 3
+
+
+async def _delete_by_label(
+    pool: asyncpg.Pool, tenant: str, by_label: dict[str, set[str]],
+) -> tuple[int, int]:
+    """One transaction of :func:`delete_nodes_by_ref`."""
+    nodes = edges = 0
+    async with pool.acquire() as conn, conn.transaction():
+        for label in sorted(by_label):
+            n, e = await _delete_nodes_recorded(
+                conn, tenant,
+                _DELETE_NODES_SQL.format(table=f'"{tenant}"."{label}"',
+                                         tenant=tenant, match=lookup.IDS_MATCH),
+                sorted(json.dumps(i) for i in by_label[label]),
+            )
+            nodes += n
+            edges += e
+    return nodes, edges
 
 
 # ── Rule-resolved edges ─────────────────────────────────────────────────────

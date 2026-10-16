@@ -249,6 +249,13 @@ export class GraphModel {
     });
   }
 
+  /** Adds a node at a point of the canvas (graph coordinates), e.g. where the user double-clicked. */
+  addNodeAt(ref: NodeRef, properties: Properties, position: { x: number; y: number }): string {
+    return this.track(t("views.explore.history.open", { name: displayName(properties, ref.id) }), () =>
+      this.putNode(ref, properties, undefined, position),
+    );
+  }
+
   /** Adds one edge between two nodes already on the canvas. */
   addEdge(type: string, srcKey: string, dstKey: string, properties: Properties = {}): string {
     return this.track(t("views.explore.history.connect", { type }), () =>
@@ -273,6 +280,18 @@ export class GraphModel {
     });
   }
 
+  /** Takes several nodes off the canvas as one step; Back puts them all back. */
+  removeNodes(keys: Iterable<string>): void {
+    const present = [...keys].filter((key) => this.graph.hasNode(key));
+    if (present.length === 0) return;
+    this.track(t("views.explore.history.hideMany", { count: present.length }), () => {
+      for (const key of present) {
+        this.dropNode(key);
+        this.dropNode(moreKey(key));
+      }
+    });
+  }
+
   /** Takes an edge off the canvas; Back puts it back. */
   removeEdge(key: string): void {
     if (!this.graph.hasEdge(key)) return;
@@ -285,10 +304,12 @@ export class GraphModel {
    * Takes a node or edge that was deleted in graphos off the canvas. Not
    * recorded: Back must not bring back something that no longer exists.
    */
-  forget(key: string): void {
-    if (this.graph.hasNode(key)) this.graph.dropNode(key);
-    if (this.graph.hasNode(moreKey(key))) this.graph.dropNode(moreKey(key));
-    if (this.graph.hasEdge(key)) this.graph.dropEdge(key);
+  forget(...keys: string[]): void {
+    for (const key of keys) {
+      if (this.graph.hasNode(key)) this.graph.dropNode(key);
+      if (this.graph.hasNode(moreKey(key))) this.graph.dropNode(moreKey(key));
+      if (this.graph.hasEdge(key)) this.graph.dropEdge(key);
+    }
     this.resize();
     this.notify();
   }

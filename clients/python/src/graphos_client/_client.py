@@ -31,10 +31,12 @@ from graphos_client._models import (
     CommunityMap,
     CommunitySummary,
     ComputeMetricsResponse,
+    CsvImportResponse,
     CypherResult,
     DeleteByPropertyResponse,
     DeleteEdgeResponse,
     DeleteNodeResponse,
+    DeleteNodesResponse,
     EdgeGetResponse,
     EdgesAggregateResponse,
     EdgesScanResponse,
@@ -50,6 +52,7 @@ from graphos_client._models import (
     NeighborsResponse,
     NodeGetResponse,
     NodePropertiesUpsertResponse,
+    NodeRef,
     NodesAggregateResponse,
     NodesScanResponse,
     NodesUpsertResponse,
@@ -688,6 +691,87 @@ class GraphosClient:
         )
         return BulkEdgesResponse.model_validate(resp.json())
 
+    async def import_csv_nodes(  # noqa: PLR0913 — the mapping has this many parts
+        self,
+        data: bytes | str | os.PathLike[str],
+        *,
+        label: str,
+        id_column: str | None = None,
+        columns: Mapping[str, Mapping[str, Any]] | None = None,
+        delimiter: str | None = None,
+        dry_run: bool = False,
+    ) -> CsvImportResponse:
+        """Import a CSV file as nodes of ``label`` (``POST …/graph/nodes:csv``).
+
+        ``data`` is the file's bytes, its text, or a path to it.  graphos
+        reads it: the id column (``id_column``, else one named ``id`` or
+        ``key``, else the first), every other column a property named after
+        its header unless ``columns`` maps it (header → ``{"property": name or
+        None, "type": "auto" | "text" | "number" | "boolean"}``).  Rows
+        repeating an id are merged.  ``dry_run`` checks every row and writes
+        nothing.
+        """
+        params = {"label": label, "id": id_column}
+        return await self._import_csv(
+            "nodes:csv", data, params=params, columns=columns, delimiter=delimiter, dry_run=dry_run,
+        )
+
+    async def import_csv_edges(  # noqa: PLR0913 — the mapping has this many parts
+        self,
+        data: bytes | str | os.PathLike[str],
+        *,
+        edge_type: str,
+        src_label: str,
+        dst_label: str,
+        src_column: str | None = None,
+        dst_column: str | None = None,
+        columns: Mapping[str, Mapping[str, Any]] | None = None,
+        delimiter: str | None = None,
+        dry_run: bool = False,
+    ) -> CsvImportResponse:
+        """Import a CSV file as relationships of ``edge_type`` from
+        ``src_label`` to ``dst_label`` nodes (``POST …/graph/edges:csv``), as
+        :meth:`import_csv_nodes` does nodes.  The end columns default to ones
+        named ``src`` / ``source`` / ``from`` and ``dst`` / ``target`` / ``to``.
+        A relationship whose end does not exist is counted in
+        ``edges_skipped``.
+        """
+        params = {
+            "type": edge_type, "src_label": src_label, "dst_label": dst_label,
+            "src": src_column, "dst": dst_column,
+        }
+        return await self._import_csv(
+            "edges:csv", data, params=params, columns=columns, delimiter=delimiter, dry_run=dry_run,
+        )
+
+    async def _import_csv(  # noqa: PLR0913 — one call's parts
+        self,
+        endpoint: str,
+        data: bytes | str | os.PathLike[str],
+        *,
+        params: dict[str, Any],
+        columns: Mapping[str, Mapping[str, Any]] | None,
+        delimiter: str | None,
+        dry_run: bool,
+    ) -> CsvImportResponse:
+        if isinstance(data, os.PathLike):
+            body = Path(data).read_bytes()
+        else:
+            body = data.encode("utf-8") if isinstance(data, str) else data
+        query = {
+            **{k: v for k, v in params.items() if v is not None},
+            "dry_run": str(dry_run).lower(),
+        }
+        if columns is not None:
+            query["columns"] = json.dumps({k: dict(v) for k, v in columns.items()})
+        if delimiter is not None:
+            query["delimiter"] = delimiter
+        resp = await self._request(
+            "POST", f"/v1/{self._tenant}/graph/{endpoint}",
+            params=query, content=body, content_type="text/csv",
+        )
+        return CsvImportResponse.model_validate(resp.json())
+
     async def snapshot_import(
         self,
         nodes: Iterable[NodeUpsert] = (),
@@ -1185,6 +1269,17 @@ class GraphosClient:
             headers=_if_match_header(if_match),
         )
         return DeleteNodeResponse.model_validate(resp.json())
+
+    async def delete_nodes(self, refs: Iterable[NodeRef]) -> DeleteNodesResponse:
+        """Delete up to 1000 nodes, each by label and id, with their edges, in
+        one transaction.  A node that does not exist is skipped.  The call is
+        retried on a lost connection or a 5xx; a retry after the first attempt
+        committed finds nothing left and reports zero deleted."""
+        body = {"nodes": [r.model_dump() for r in refs]}
+        resp = await self._request(
+            "POST", f"/v1/{self._tenant}/graph/nodes:delete", json_body=body,
+        )
+        return DeleteNodesResponse.model_validate(resp.json())
 
     async def delete_by_property(
         self, *, property_key: str, property_value: str,

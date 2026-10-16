@@ -1,7 +1,10 @@
 import type { HttpClient, Tagged } from "./http";
 import type {
   AuthConfig,
+  BulkEdgesResult,
+  BulkNodesResult,
   DeleteNodeResponse,
+  DeleteNodesResponse,
   EdgeRecord,
   EdgeUpsert,
   GraphExport,
@@ -51,6 +54,12 @@ export interface SearchParams {
   fuzzy?: boolean;
   /** Without `index`: the property to match by substring (default `name`). */
   property?: string;
+}
+
+/** How far an upload is, and how to stop it. */
+export interface UploadProgress {
+  onSent?: (bytes: number, total: number) => void;
+  signal?: AbortSignal;
 }
 
 export interface EdgeKey {
@@ -235,6 +244,11 @@ export class GraphosApi {
       query: { label: options.label },
       headers: options.etag ? { "If-Match": options.etag } : undefined,
     });
+  }
+
+  /** Deletes up to 1000 nodes and every edge touching them, in one transaction. */
+  deleteNodes(nodes: { id: string; label: string }[]): Promise<DeleteNodesResponse> {
+    return this.http.post(`${this.graph}/nodes:delete`, { nodes });
   }
 
   /** Creates (or updates, merging properties) one node. */
@@ -427,6 +441,22 @@ export class GraphosApi {
     return this.http.upload<DatasetImportResult>(`/v1/${enc(this.tenant)}/graph/snapshot-import`, file, {
       contentType: "application/x-ndjson",
       query: { mode },
+      ...progress,
+    });
+  }
+
+  /** Upserts nodes sent as NDJSON, one `{id, label, properties}` per line (`write`). */
+  bulkNodes(file: Blob, progress: UploadProgress = {}): Promise<BulkNodesResult> {
+    return this.http.upload<BulkNodesResult>(`${this.graph}/nodes:bulk`, file, {
+      contentType: "application/x-ndjson",
+      ...progress,
+    });
+  }
+
+  /** Upserts edges sent as NDJSON, one `{src_id, src_label, dst_id, dst_label, type, properties}` per line. */
+  bulkEdges(file: Blob, progress: UploadProgress = {}): Promise<BulkEdgesResult> {
+    return this.http.upload<BulkEdgesResult>(`${this.graph}/edges:bulk`, file, {
+      contentType: "application/x-ndjson",
       ...progress,
     });
   }

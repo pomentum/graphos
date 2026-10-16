@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     # decompression: a compressed body that would expand past it (a zip
     # bomb) stops there with 413.
     import_max_bytes: int = Field(default=16 * 1024**3, gt=0)
+    # The most bytes ``nodes:csv`` / ``edges:csv`` read from one file (413
+    # past it): the rows are held in memory to merge repeated ids.
+    csv_max_bytes: int = Field(default=256 * 1024**2, gt=0)
     # PostgreSQL JIT compilation for graphos's connections.  Off: it showed
     # no gain on the heaviest queries and cost seconds on small ones.
     db_jit: bool = False

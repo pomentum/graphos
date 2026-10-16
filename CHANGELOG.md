@@ -8,6 +8,52 @@ under one version.
 
 ### Added
 
+- **Batch node delete**: `POST …/graph/nodes:delete` deletes up to 1,000 nodes, each by `label`
+  and `id`, with their edges, in one transaction. One statement per label, served by the label's
+  unique id index (a label takes in its child labels' nodes); one change record per label. A
+  node that does not exist is skipped, so a repeat deletes nothing. Two batches that block each
+  other on shared edges are run again (three times at most), then answered 503 with
+  `Retry-After`, nothing deleted. Returns `nodes_requested`, `nodes_deleted` and `edges_deleted`. Client:
+  `delete_nodes()`, with the `NodeRef` and `DeleteNodesResponse` models. The web UI's API layer
+  has `deleteNodes()`.
+- **CSV import on the server**: `POST …/graph/nodes:csv?label=` and `…/graph/edges:csv?type=&src_label=&dst_label=`
+  take the CSV file itself (`text/csv`). graphos reads it (comma, semicolon or tab, detected;
+  quoted cells, CRLF, a byte-order mark), finds the id columns, maps every other column to a
+  property named after its header and typed after its definition unless `columns` (JSON) says
+  otherwise, trims ids, merges rows repeating an id (or two ends) into one record, and writes the
+  records through the `:bulk` path: the same checks, 500-row batches, change records and
+  revisions. `dry_run=true` checks every row and writes nothing (missing ends looked up). The
+  answer counts rows, records, written, refused and skipped, and lists the problems found with
+  CSV row numbers. Mapping errors are 422, an unreadable file 400 (a quoted cell never closed
+  included), a file over `GRAPHOS_CSV_MAX_BYTES` (256 MiB) 413. Client: `import_csv_nodes()`,
+  `import_csv_edges()`, with the `CsvImportResponse`, `CsvIssue` and `CsvColumnPlan` models.
+- **Web UI: several nodes at once on the canvas.** Ctrl, ⌘ or Shift click adds a node to the
+  selection or takes it out; Shift-drag on the empty canvas draws a loop that selects what it
+  encloses (with Ctrl or ⌘, added to the selection); Ctrl/⌘+A selects every node. A bar then
+  expands them (the first 20, a page of neighbours each), hides them (one step for Back), exports
+  them as JSON (with the edges between them) or CSV, or, for writers, deletes them and their
+  relationships through `nodes:delete`, after asking (in batches of 1,000; a failure part-way
+  leaves the nodes already deleted off the canvas).
+- **Web UI: reading and drawing on the canvas.** A minimap of the whole canvas from 40 nodes,
+  with the part on screen framed; a click or drag on it moves the camera, and a button hides it.
+  The relationship under the pointer shows its type (and its caption). Zoomed far out, the label
+  pictograms and the hubs' names are left out. Writers double-click the empty canvas to create a
+  node at that spot, and Alt-drag from one node onto another to connect them (only the type is
+  asked; declared pairs first, refused ones blocked as in Connect).
+- **Web UI: CSV import.** On the Overview, beside the dataset upload, writers import a CSV file
+  without writing a loader: the separator (comma, semicolon or tab) is detected, quoted cells,
+  CRLF and a UTF-8 byte-order mark are read as RFC 4180 says. The rows are nodes of a label or
+  relationships of a type (rule-derived types left out, declared label pairs offered first); the
+  id columns are picked, and every other column is a property, named from its header, of a type
+  (auto, text, number, true / false) taken from the label's definitions where they declare one,
+  or left out. The first 20 rows are previewed as they will be written, and every row is checked:
+  empty, too long and repeated ids, cells that do not read as their type, names graphos keeps for
+  itself, and the declared definitions (required, type, allowed values, range) and label pairs.
+  Rows with the same id (or, for relationships, the same two ends) are sent as one, in file
+  order, a later non-empty cell winning; ids are trimmed. The rows go to `nodes:bulk` /
+  `edges:bulk` as NDJSON, with the upload's progress and graphos's answer (rows received,
+  written, refused, skipped for a missing endpoint, property violations and warnings, its first
+  errors, named by the file's row). The web UI's API layer has `bulkNodes()` and `bulkEdges()`.
 - **Docs:** development guides, for people and coding agents: the rules for the whole repository
   ([docs/development.md](docs/development.md): docs, pictures and docs tools, test stacks, git,
   privacy) and a `DEVELOPMENT.md` in each package for the
