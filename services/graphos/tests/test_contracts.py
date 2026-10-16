@@ -7,6 +7,7 @@ import pytest
 from graphos.contracts.graph import (
     MAX_EDGES_UPSERT_BATCH,
     MAX_NODES_UPSERT_BATCH,
+    EdgesCheckRequest,
     EdgesUpsertRequest,
     EdgeUpsert,
     NodeRef,
@@ -305,3 +306,14 @@ def test_build_node_filter_sql_list() -> None:
 def test_build_node_filter_sql_empty() -> None:
     assert _build_node_filter_sql(None) == ([], [])
     assert _build_node_filter_sql({}) == ([], [])
+
+
+def test_a_check_takes_between_one_and_a_thousand_edges() -> None:
+    one = {"type": "CITES", "src_id": "a", "dst_id": "b"}
+    assert len(EdgesCheckRequest(edges=[one] * 1000).edges) == 1000
+    with pytest.raises(ValueError):
+        EdgesCheckRequest(edges=[])
+    with pytest.raises(ValueError):
+        EdgesCheckRequest(edges=[one] * 1001)
+    with pytest.raises(ValueError):
+        EdgesCheckRequest(edges=[{**one, "type": "not-a-type"}])

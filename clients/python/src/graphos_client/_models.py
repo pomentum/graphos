@@ -740,6 +740,40 @@ class DeleteEdgeResponse(BaseModel):
     elapsed_ms: int
 
 
+class EdgeCheckItem(BaseModel):
+    """One edge to look for, as :meth:`GraphosClient.check_edges` takes it."""
+
+    type: str
+    src_id: str
+    dst_id: str
+    src_label: str | None = None
+    dst_label: str | None = None
+
+
+class EdgeCheckResult(BaseModel):
+    """One requested edge: ``present``, ``absent`` or ``ambiguous``."""
+
+    type: str
+    src_id: str
+    dst_id: str
+    status: Literal["present", "absent", "ambiguous"]
+    src_label: str | None = None
+    dst_label: str | None = None
+    rev: int | None = None
+    etag: str | None = None
+    properties: dict[str, Any] | None = None
+    candidates: list[str] | None = None
+
+
+class EdgesCheckResponse(BaseModel):
+    tenant: str
+    results: list[EdgeCheckResult]
+    present: int
+    absent: int
+    ambiguous: int
+    elapsed_ms: int
+
+
 # ── Schema-agnostic K/V cache ────────────────────────────────────────
 
 
@@ -768,12 +802,24 @@ class LabelCount(BaseModel):
     total_bytes: int = 0
 
 
+class AnalysisFreshness(BaseModel):
+    """When an analysis (``metrics``, ``communities``) last wrote, and the
+    rows written since; ``stale`` is None when that is unknown."""
+
+    computed_at: datetime
+    scope: dict[str, Any] | None = None
+    rows_written_since: int | None = None
+    at_least: bool = False
+    stale: bool | None = None
+
+
 class TenantStatsResponse(BaseModel):
     tenant: str
     n_vertices: int
     n_edges: int
     total_bytes: int
     labels: list[LabelCount] = Field(default_factory=list)
+    analyses: dict[str, AnalysisFreshness] = Field(default_factory=dict)
     elapsed_ms: int
 
 

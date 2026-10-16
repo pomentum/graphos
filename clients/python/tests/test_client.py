@@ -19,6 +19,8 @@ from graphos_client import (
     BulkNodesResponse,
     CsvImportResponse,
     DeleteNodesResponse,
+    EdgeCheckItem,
+    EdgesCheckResponse,
     EdgeUpsert,
     GraphosClient,
     GraphosError,
@@ -1220,6 +1222,37 @@ async def test_delete_nodes_is_retried_on_5xx() -> None:
         await cli.delete_nodes([NodeRef(label="Doc", id="a")])
     assert len(calls) == 3          # idempotent: a node already gone is skipped
     await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_check_edges_posts_the_edges_and_parses_each_status() -> None:
+    seen: list[tuple[str, str, dict]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path, json.loads(request.content)))
+        return httpx.Response(200, json={
+            "tenant": "demo", "present": 1, "absent": 0, "ambiguous": 1, "elapsed_ms": 1,
+            "results": [
+                {"type": "CITES", "src_id": "a", "dst_id": "b", "status": "present",
+                 "src_label": "Doc", "dst_label": "Doc", "rev": 2, "etag": '"1.2"',
+                 "properties": {"w": 1}},
+                {"type": "CITES", "src_id": "a", "dst_id": "s", "status": "ambiguous",
+                 "candidates": ["Doc->Doc", "Doc->Tag"]},
+            ],
+        })
+
+    resp = await _client_for(handler).check_edges([
+        EdgeCheckItem(type="CITES", src_id="a", dst_id="b"),
+        EdgeCheckItem(type="CITES", src_id="a", dst_id="s", dst_label="Tag"),
+    ], include_properties=True)
+    assert seen == [("POST", "/v1/demo/graph/edges:check", {"include_properties": True, "edges": [
+        {"type": "CITES", "src_id": "a", "dst_id": "b"},
+        {"type": "CITES", "src_id": "a", "dst_id": "s", "dst_label": "Tag"},
+    ]})]
+    assert isinstance(resp, EdgesCheckResponse)
+    present, ambiguous = resp.results
+    assert (present.status, present.rev, present.properties) == ("present", 2, {"w": 1})
+    assert ambiguous.status == "ambiguous" and ambiguous.candidates == ["Doc->Doc", "Doc->Tag"]
 
 
 @pytest.mark.asyncio

@@ -30,7 +30,7 @@ from typing import Any
 
 import asyncpg
 
-from graphos import analysis, community_map, graph_compute, louvain_compute, writes
+from graphos import analysis, changes, community_map, graph_compute, louvain_compute, writes
 
 # python-igraph is an optional extra (``pip install "graphos[louvain]"``)
 # because it is GPL-licensed; the rest of graphos is Apache-2.0 and must
@@ -251,6 +251,14 @@ _build_node_filter_sql = analysis.build_node_filter_sql
 _stream_semantic_edges = analysis.stream_edges
 
 
+def _scope(
+    rel_types: list[str] | None, node_filter: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    """The part of the graph a run read, when it did not read all of it."""
+    scope = {"rel_types": rel_types, "node_filter": dict(node_filter) if node_filter else None}
+    return {k: v for k, v in scope.items() if v} or None
+
+
 async def recompute_communities(
     pool: asyncpg.Pool,
     *,
@@ -275,6 +283,8 @@ async def recompute_communities(
                without persisting `community_id`. Used for dry-run inspect.
     """
     t0 = _t.perf_counter()
+    async with pool.acquire() as conn:
+        started_at = await changes.head(conn)
     edges = await _stream_semantic_edges(
         pool, tenant=tenant, rel_types=rel_types, node_filter=node_filter,
     )
@@ -296,6 +306,10 @@ async def recompute_communities(
         )
         await _store_community_map(
             pool, tenant, edges, assignments, final_of_raw, modularity=result.modularity,
+        )
+        await analysis.record_run(
+            pool, tenant, "communities", started_at,
+            scope=_scope(rel_types, node_filter),
         )
     t3 = _t.perf_counter()
 

@@ -242,6 +242,83 @@ class DeleteEdgeResponse(BaseModel):
     elapsed_ms: int
 
 
+# ── Many edges checked at once (POST /edges:check) ─────────────────────────
+
+
+class EdgeCheckItem(BaseModel):
+    """One edge to look for, named as in ``GET /edges/{type}``."""
+
+    type: str = Field(..., description="Edge type; must be registered for the tenant.")
+    src_id: str = Field(..., min_length=1, max_length=_NODE_ID_MAX_LEN)
+    dst_id: str = Field(..., min_length=1, max_length=_NODE_ID_MAX_LEN)
+    src_label: str | None = Field(
+        None, description="Source label; needed only when the id is in several labels.",
+    )
+    dst_label: str | None = Field(
+        None, description="Target label; needed only when the id is in several labels.",
+    )
+
+    @field_validator("type", "src_label", "dst_label")
+    @classmethod
+    def _validate_label(cls, v: str | None) -> str | None:
+        if v is not None and not _LABEL_PATTERN.fullmatch(v):
+            raise ValueError(
+                f"label '{v}' must match {_LABEL_PATTERN.pattern} (UpperCamelCase / SNAKE_CASE)"
+            )
+        return v
+
+
+class EdgesCheckRequest(BaseModel):
+    """Body for POST /v1/{tenant}/graph/edges:check."""
+
+    edges: list[EdgeCheckItem] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_NODES_UPSERT_BATCH,
+        description=f"Up to {MAX_NODES_UPSERT_BATCH} edges, each by type and the ids of its ends.",
+    )
+    include_properties: bool = Field(
+        False, description="Return each present edge's properties too.",
+    )
+
+
+class EdgeCheckResult(BaseModel):
+    """What was found for one requested edge, in request order."""
+
+    type: str
+    src_id: str
+    dst_id: str
+    status: Literal["present", "absent", "ambiguous"] = Field(
+        ...,
+        description=(
+            "`present`: the edge exists. `absent`: no such edge, or an end does not exist. "
+            "`ambiguous`: an end id is in several labels and more than one edge matches; "
+            "`candidates` lists the label pairs, and `src_label` / `dst_label` pick one."
+        ),
+    )
+    src_label: str | None = None
+    dst_label: str | None = None
+    rev: int | None = Field(None, description="The present edge's revision.")
+    etag: str | None = Field(None, description="The present edge's ETag, for a later `If-Match`.")
+    properties: dict[str, object] | None = Field(
+        None, description="The present edge's properties, when `include_properties` is set.",
+    )
+    candidates: list[str] | None = Field(
+        None, description="For `ambiguous`: the `<src label>-><dst label>` pairs that match.",
+    )
+
+
+class EdgesCheckResponse(BaseModel):
+    """Response for POST /v1/{tenant}/graph/edges:check."""
+
+    tenant: str
+    results: list[EdgeCheckResult] = Field(..., description="One per requested edge, in order.")
+    present: int
+    absent: int
+    ambiguous: int
+    elapsed_ms: int
+
+
 # ── Edge upsert ────────────────────────────────────────────────────────────
 
 

@@ -896,6 +896,32 @@ class ResolveEdgesResponse(BaseModel):
     total_duration_ms: int
 
 
+class BreakingChange(BaseModel):
+    """One change in a dry run that makes something that worked stop working."""
+
+    part: Literal["vertex", "edge", "tenant"]
+    name: str | None = Field(description="The label or edge type; null for the tenant.")
+    change: str = Field(
+        description=(
+            "A stable code: `label_removed`, `search_index_removed`, `hierarchy_removed`, "
+            "`resolve_rule_removed`, `strict_endpoints_on`, `endpoint_removed`, `mode_strict`, "
+            "`undeclared_rejected`, `property_added_required`, `property_required`, "
+            "`type_changed`, `enum_narrowed`, `pattern_changed`, `format_changed`, "
+            "`items_changed`, `minimum_raised`, `maximum_lowered`."
+        ),
+    )
+    detail: str = Field(description="What stops working, in a sentence.")
+    rows: int | None = Field(
+        None,
+        description=(
+            "About how many nodes or edges of the label or type exist (an estimate); null "
+            "when the change is not about one. Rows are never rewritten by a registration: "
+            "a tighter rule refuses their next write, and `properties:check` counts the rows "
+            "that already break it."
+        ),
+    )
+
+
 class RegisterDryRunResponse(BaseModel):
     """``POST /v1/tenants?dry_run=true``: what the registration would change."""
 
@@ -920,6 +946,14 @@ class RegisterDryRunResponse(BaseModel):
         default_factory=list,
         description=(
             "What applying it would cost (a table rewrite, a long build) or could still fail on."
+        ),
+    )
+    breaking: list[BreakingChange] = Field(
+        default_factory=list,
+        description=(
+            "The changes that refuse writes or calls that worked before, or change what a read "
+            "returns: removed labels, indexes, rules or pairs, and property rules that refuse "
+            "more where the mode is strict. Additions and relaxations are never listed."
         ),
     )
     status: str = "dry_run"

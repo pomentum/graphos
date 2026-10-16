@@ -17,6 +17,7 @@ from graphos_client._client import (
 )
 from graphos_client._models import (
     AggregateRow,
+    AnalysisFreshness,
     BulkEdgesResponse,
     BulkNodesResponse,
     ChangeItem,
@@ -38,10 +39,13 @@ from graphos_client._models import (
     DeleteEdgeResponse,
     DeleteNodeResponse,
     DeleteNodesResponse,
+    EdgeCheckItem,
+    EdgeCheckResult,
     EdgeEndpoint,
     EdgeGetResponse,
     EdgeHit,
     EdgesAggregateResponse,
+    EdgesCheckResponse,
     EdgesScanItem,
     EdgesScanResponse,
     EdgesUpsertResponse,
@@ -96,6 +100,7 @@ from graphos_client._pool import GraphosPool, TenantSchema, is_schema_drift
 __version__ = "0.11.1"
 
 __all__ = [
+    "AnalysisFreshness",
     "CommunityHub",
     "CommunityLink",
     "CommunityMap",
@@ -132,7 +137,10 @@ __all__ = [
     "DeleteEdgeResponse",
     "DeleteNodeResponse",
     "DeleteNodesResponse",
+    "EdgeCheckItem",
+    "EdgeCheckResult",
     "EdgeGetResponse",
+    "EdgesCheckResponse",
     "EdgeHit",
     "EdgeUpsert",
     "EdgesAggregateResponse",

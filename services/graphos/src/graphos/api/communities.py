@@ -18,10 +18,12 @@ from typing import Annotated
 import asyncpg
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 
+from graphos import analysis
 from graphos.api.graph import _check_tenant
 from graphos.auth import ReadPrincipal, Tenant
 from graphos.bootstrap import registered_tenants
 from graphos.contracts.communities import (
+    AnalysisFreshness,
     CommunitiesResponse,
     CommunityIdsRequest,
     CommunityIdsResponse,
@@ -303,7 +305,9 @@ async def community_summary(
         "Exact `count(*)` per label over AGE's per-label storage tables "
         "(cheaper than Cypher `count()`). `total_bytes` is the rolled-up "
         "`pg_total_relation_size` across all of the tenant's "
-        "`_ag_label_*` tables."
+        "`_ag_label_*` tables. `analyses` says, for graph metrics and "
+        "communities, when their stored values were computed and how many "
+        "nodes and edges were written since (`stale`)."
     ),
 )
 async def tenant_stats(
@@ -369,6 +373,14 @@ async def tenant_stats(
         n_edges = int(await conn.fetchval(
             f'SELECT count(*) FROM "{tenant}"."_ag_label_edge"',
         ) or 0)
+        analyses = {
+            kind: AnalysisFreshness(
+                computed_at=f.computed_at, scope=f.scope,
+                rows_written_since=f.rows_written_since, at_least=f.at_least,
+                stale=None if f.rows_written_since is None else f.rows_written_since > 0,
+            )
+            for kind, f in (await analysis.freshness(conn, tenant)).items()
+        }
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     return TenantStatsResponse(
@@ -377,6 +389,7 @@ async def tenant_stats(
         n_edges=n_edges,
         total_bytes=total_bytes,
         labels=labels,
+        analyses=analyses,
         elapsed_ms=elapsed_ms,
     )
 

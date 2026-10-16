@@ -12,6 +12,7 @@ Core surface (see the module for the full list):
 - ``POST /v1/{tenant}/graph/nodes``          — small-batch node upsert.
 - ``POST /v1/{tenant}/graph/nodes:delete``   — batch node delete, by label and id.
 - ``POST /v1/{tenant}/graph/edges``          — small-batch edge upsert.
+- ``POST /v1/{tenant}/graph/edges:check``    — which of many edges exist.
 - ``GET  /v1/{tenant}/graph/neighbors``      — 1-hop in/out edges around a node.
 - ``POST /v1/{tenant}/graph/induced_edges``  — edges among a supplied id set.
 - ``GET  /v1/{tenant}/graph/catalogue``      — resolver property→labels map.
@@ -76,10 +77,14 @@ from graphos.contracts.graph import (
     DeleteEdgeResponse,
     DeleteNodeResponse,
     DeleteNodesResponse,
+    EdgeCheckItem,
+    EdgeCheckResult,
     EdgeGetResponse,
     EdgeHit,
     EdgesAggregateRequest,
     EdgesAggregateResponse,
+    EdgesCheckRequest,
+    EdgesCheckResponse,
     EdgesScanItem,
     EdgesScanRequest,
     EdgesScanResponse,
@@ -527,7 +532,7 @@ async def upsert_nodes(
         total += n
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
-    record_property_tally(tenant, "node", tally)
+    record_property_tally("node", tally)
     return NodesUpsertResponse(
         tenant=tenant,
         nodes_upserted=total,
@@ -838,7 +843,7 @@ async def upsert_edges(
         total_skipped += skipped
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
-    record_property_tally(tenant, "edge", tally)
+    record_property_tally("edge", tally)
     return EdgesUpsertResponse(
         tenant=tenant,
         edges_upserted=total_merged,
@@ -1067,6 +1072,81 @@ async def delete_edge(  # noqa: PLR0913 — FastAPI route parameters
         edges_deleted=deleted,
         elapsed_ms=int((time.perf_counter() - started) * 1000),
     )
+
+
+@router.post(
+    "/edges:check",
+    response_model=EdgesCheckResponse,
+    summary="Check which of many edges exist",
+    description=(
+        "Looks up each edge by its type and the ids of its two ends, as "
+        "`GET /edges/{type}` does, and answers `present` (with its labels, "
+        "revision and ETag), `absent` (no such edge, or an end does not exist) "
+        "or `ambiguous` (an end id is in several labels and more than one edge "
+        "matches; `src_label` / `dst_label` pick one). One answer per requested "
+        f"edge, in order; up to {MAX_NODES_UPSERT_BATCH} edges, read from one "
+        "snapshot.\n\n"
+        "Meant for checking a set of facts against the graph in one call, for "
+        "example what an agent is about to state. Every type and label must be "
+        "registered for the tenant (400 otherwise)."
+    ),
+)
+async def check_edges(
+    tenant: Tenant,
+    body: EdgesCheckRequest,
+    request: Request,
+    principal: ReadPrincipal,
+) -> EdgesCheckResponse:
+    _check_tenant(tenant, principal)
+    spec = registered_tenants()[tenant]
+    unknown_types = sorted({e.type for e in body.edges} - set(spec.edge_labels))
+    if unknown_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"edge types {unknown_types} are not registered for tenant '{tenant}'",
+        )
+    for label in sorted({lbl for e in body.edges for lbl in (e.src_label, e.dst_label) if lbl}):
+        _check_vertex_label(tenant, label)
+
+    started = time.perf_counter()
+    results: list[EdgeCheckResult] = []
+    async with request.app.state.pool.acquire() as conn, conn.transaction(
+        isolation="repeatable_read", readonly=True,
+    ):
+        for item in body.edges:
+            results.append(await _check_one_edge(conn, tenant, item, body.include_properties))
+    statuses = [r.status for r in results]
+    return EdgesCheckResponse(
+        tenant=tenant,
+        results=results,
+        present=statuses.count("present"),
+        absent=statuses.count("absent"),
+        ambiguous=statuses.count("ambiguous"),
+        elapsed_ms=int((time.perf_counter() - started) * 1000),
+    )
+
+
+async def _check_one_edge(
+    conn: asyncpg.Connection, tenant: str, item: EdgeCheckItem, include_properties: bool,
+) -> EdgeCheckResult:
+    found = EdgeCheckResult(
+        type=item.type, src_id=item.src_id, dst_id=item.dst_id,
+        src_label=item.src_label, dst_label=item.dst_label, status="absent",
+    )
+    try:
+        edge = await lookup.find_edge(
+            conn, tenant=tenant, edge_type=item.type, src_id=item.src_id, dst_id=item.dst_id,
+            src_label=item.src_label, dst_label=item.dst_label,
+        )
+    except lookup.AmbiguousMatchError as exc:
+        return found.model_copy(update={"status": "ambiguous", "candidates": exc.candidates})
+    if edge is None:
+        return found
+    return found.model_copy(update={
+        "status": "present", "src_label": edge.src_label, "dst_label": edge.dst_label,
+        "rev": edge.rev, "etag": edge.etag,
+        "properties": edge.properties if include_properties else None,
+    })
 
 
 # ── Neighbors ──────────────────────────────────────────────────────────────

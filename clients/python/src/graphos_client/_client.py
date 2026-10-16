@@ -37,8 +37,10 @@ from graphos_client._models import (
     DeleteEdgeResponse,
     DeleteNodeResponse,
     DeleteNodesResponse,
+    EdgeCheckItem,
     EdgeGetResponse,
     EdgesAggregateResponse,
+    EdgesCheckResponse,
     EdgesScanResponse,
     EdgesUpsertResponse,
     EdgeUpsert,
@@ -385,8 +387,9 @@ class GraphosClient:
         What is declared is added to what is registered; ``force_shrink=True``
         replaces the stored schema instead (labels left out keep their tables
         and data).  ``dry_run=True`` registers nothing and answers what the call
-        would change (``changes``, as the change feed would record it) and what
-        applying it would cost (``warnings``).
+        would change (``changes``, as the change feed would record it), what
+        applying it would cost (``warnings``) and what would stop working
+        (``breaking``: removed labels, indexes or rules, tighter strict rules).
 
         ``meta`` holds free-form notes about the tenant; keys are added or
         overwritten, and a key given as ``None`` is removed.
@@ -1567,6 +1570,23 @@ class GraphosClient:
             "DELETE", path, params=params, headers=_if_match_header(if_match),
         )
         return DeleteEdgeResponse.model_validate(resp.json())
+
+    async def check_edges(
+        self, edges: Iterable[EdgeCheckItem], *, include_properties: bool = False,
+    ) -> EdgesCheckResponse:
+        """Check which of up to 1000 edges exist, each by type and the ids of
+        its ends: one result per edge, in order, ``present`` (with its
+        revision and ETag), ``absent`` or ``ambiguous`` (an end id is in
+        several labels; ``src_label`` / ``dst_label`` pick one).  A read, so it
+        is retried like one."""
+        body = {
+            "edges": [e.model_dump(exclude_none=True) for e in edges],
+            "include_properties": include_properties,
+        }
+        resp = await self._request(
+            "POST", f"/v1/{self._tenant}/graph/edges:check", json_body=body,
+        )
+        return EdgesCheckResponse.model_validate(resp.json())
 
     # ── Shortest paths ─────────────────────────────────────────────────────
 

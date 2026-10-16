@@ -108,7 +108,8 @@ On every start `graphos-api` also runs idempotent DDL for its internal tables
 property record (`node_properties`, `node_properties_complete`), background
 `jobs`, the change feed (`changes`, `change_horizon`), the community map
 (`community_map`, `community_links`, `community_map_runs`, written by each
-Louvain recompute), identity (`users`, `grants`, `sessions`, `signing_keys`,
+Louvain recompute), the last written run of each analysis with its change-feed position
+(`analysis_runs`), identity (`users`, `grants`, `sessions`, `signing_keys`,
 `oidc_pending`), `user_preferences` and the console's `saved_queries`, so
 an existing volume picks up new internal tables without re-initialisation.
 
@@ -155,7 +156,9 @@ existing one; §2.5.3) carries the tenant spec:
   them: `off`, `warn` or `strict`, §4); see
   [features.md §2](features.md#2-tenant-model).
 - `?dry_run=true` checks the spec as a registration would and answers what it
-  would change and cost, writing nothing. `GET /v1/tenants/{name}/spec`
+  would change and cost, and what would stop working (`breaking`,
+  `schema_breaking.py`: compared on the compiled property rules, so `*` and the
+  label hierarchy count as they do on writes), writing nothing. `GET /v1/tenants/{name}/spec`
   (`maintain`) exports the whole stored spec as a registration body.
 
 `bootstrap.py::bootstrap_tenant` then applies the spec under a per-tenant
@@ -411,7 +414,7 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `GET /v1/info` | Service, Postgres and AGE versions, `database_deprecated` (the reason, or `null`), `tenants` (a count), `features.louvain`, `features.metrics`, `features.cypher` | none |
 | `GET /metrics` | Prometheus exposition (§2.5.6) | none |
 | **Tenant control** | | |
-| `POST /v1/tenants[?force_shrink=true][&dry_run=true]` | Register / re-apply a spec (§2.2); a dry run answers what it would change and cost | new: `create_tenants` (the caller becomes owner); existing: `maintain` |
+| `POST /v1/tenants[?force_shrink=true][&dry_run=true]` | Register / re-apply a spec (§2.2); a dry run answers what it would change, cost and break | new: `create_tenants` (the caller becomes owner); existing: `maintain` |
 | `GET /v1/tenants[?unregistered=true]` | The registered tenants the caller may maintain; also the unregistered ones it owns | signed in |
 | `GET /v1/tenants/{name}` | One tenant's spec summary | `maintain` |
 | `GET /v1/tenants/{name}/spec` | The whole schema as a registration body (the schema file) | `maintain` |
@@ -432,6 +435,7 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `GET …/graph/search?q=&index=&label=&fuzzy=&min_score=&limit=` | Ranked search through a named search index (`identifier` or `text` analyzer); hits carry `score` and `matched` | tenant |
 | `GET …/graph/nodes/{external_id}?label=` | One node by external id; 409 if the id is in several labels and `label` is absent | tenant |
 | `GET …/graph/edges/{type}?src=&dst=&src_label=&dst_label=` | One edge by type and end ids; 409 if several match | tenant |
+| `POST …/graph/edges:check` `{edges: [{type, src_id, dst_id}]}` | Up to 1,000 edges, each `present`, `absent` or `ambiguous`, from one snapshot | tenant |
 | `GET …/graph/neighbors?node_id=&rel_types=&limit=` | 1-hop out + in edges; limit default 50, ≤500; capped in graph-id order (§3.1) | tenant |
 | `GET …/graph/expand?node_id=&seeds=&rel_types=&max_hops=&direction=&communities=&limit=` | BFS; `max_hops` default 2, ≤5; limit default 100, ≤1000; capped in graph-id order (§3.1) | tenant |
 | `POST …/graph/induced_edges` `{node_ids, rel_types?, limit}` | Edges with both ends in the set; ≤1000 ids, limit ≤5000 | tenant |
@@ -447,7 +451,7 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `POST …/graph/nodes/aggregate` `{label, group_by, values?, missing?, limit}` | Group one label by a property; `missing` counts the nodes without it under `""`; returns `total` (every node counted) and `distinct` (distinct values), both before `limit` cuts the groups; non-string values as JSON | tenant |
 | `POST …/graph/edges/aggregate` | Group edges by endpoint properties and type | tenant |
 | `GET …/graph/labels/{label}/top?by_edge=&direction=&k=` | Top-k nodes by degree on one edge type; k default 20, ≤200 | tenant |
-| `GET …/graph/stats` | Exact per-label row counts (a parent includes its children) and bytes; totals count each node and edge once | tenant |
+| `GET …/graph/stats` | Exact per-label row counts (a parent includes its children) and bytes; totals count each node and edge once; when metrics and communities were computed and the rows written since (`analyses`) | tenant |
 | `GET …/graph/map?exact=` | Labels with their own node counts, and edge counts per (source label, type, target label); large edge tables sampled and flagged `estimated` unless `exact` | tenant |
 | `GET …/graph/map/hubs?label=&limit=` | A label's best-connected nodes; limit default 40, ≤200 | tenant |
 | `GET …/graph/communities?min_size=&include_members=&limit=` | Communities from the last Louvain write | tenant |
@@ -720,9 +724,11 @@ instead, and a watchdog (§3.1).
 | `graphos_db_pool_size` (refreshed on scrape) | `state` = `total` / `idle` / `active` |
 | `graphos_registered_tenants` | — |
 | `graphos_rate_limited_total` | `token_id` (first 12 hex characters of the SHA-256 of the user name) |
-| `graphos_property_violations_total` | `tenant`, `kind`, `outcome` (`refused` or `warned`), `rule` |
+| `graphos_property_violations_total` | `kind`, `outcome` (`refused` or `warned`), `rule` |
 
-Requests to `/metrics` itself are not counted.
+Requests to `/metrics` itself are not counted. `/metrics` needs no sign-in, so no metric names a
+tenant or a user: per-tenant property problems are in the write responses, and
+`graphos_rate_limited_total` carries a hash, not the user name.
 
 **Logging.** structlog over stdlib logging; JSON to stdout by default
 (`GRAPHOS_LOG_JSON=false` for console output). Each request binds `method`
@@ -1082,7 +1088,7 @@ closed, not reused. Every console query is in the audit log (§2.5.6).
 | Every edge upsert (`/edges`, `edges:bulk`, `edges:csv`, `snapshot-import`) | SQL: binary `COPY` into a temp table, `INSERT … ON CONFLICT (start_id, end_id) DO UPDATE` |
 | `nodes/aggregate`, `export`, `communities?include_members=true` member lists | SQL |
 | Node deletes (by id, by property) | SQL: one statement deletes the matching nodes (unique `id` index, or GIN containment for other keys) and every edge touching them |
-| `search`, `nodes/{id}` (GET, PATCH), `nodes/{id}/properties`, `edges/{type}` (GET, PATCH, DELETE), `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `nodes:scan`, `edges:scan`, `edges/aggregate` | SQL |
+| `search`, `nodes/{id}` (GET, PATCH), `nodes/{id}/properties`, `edges/{type}` (GET, PATCH, DELETE), `edges:check`, `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `nodes:scan`, `edges:scan`, `edges/aggregate` | SQL |
 | `top`, `stats`, `communities`, `community-summary`, `community-ids`, `catalogue` | SQL |
 | `paths`, `map`, `map/hubs`, `communities/map`, `properties`, `properties:check`, dataset export (`snapshot`) | SQL |
 | Graph metrics edge stream and write-back | SQL (`COPY` + `UPDATE … FROM`) |
@@ -1507,7 +1513,9 @@ Postgres instance.
    removed; delete them explicitly.
 5. **Community freshness.** `end_community_id`, `start_community_id` and
    `community_id` change only when Louvain writes; new edges are invisible to community-scoped `expand`
-   until then, and unassigned vertices keep old ids.
+   until then, and unassigned vertices keep old ids. `GET …/graph/stats` says how many rows were
+   written since the last run (`analyses.communities`, and `analyses.metrics` for the `graphos_*`
+   metrics), so a consumer knows when to recompute.
 6. **`DELETE /v1/tenants/{name}` keeps data** unless `drop_data=true` (§2.5.1).
 7. **Generated columns on tables that already hold rows** rewrite the table;
    add them early.

@@ -147,7 +147,7 @@ class NodeWriter(_Writer):
         """Writes what is still buffered."""
         for label in list(self._buffers):
             await self._flush(label)
-        record_property_tally(self.tenant, "node", self.tally)
+        record_property_tally("node", self.tally)
 
     async def _flush(self, label: str) -> None:
         rows = self._buffers.pop(label, None)
@@ -224,7 +224,7 @@ class EdgeWriter(_Writer):
         """Writes what is still buffered."""
         for key in list(self._buffers):
             await self._flush(key)
-        record_property_tally(self.tenant, "edge", self.tally)
+        record_property_tally("edge", self.tally)
 
     async def _flush(self, key: tuple[str, str, str]) -> None:
         rows = self._buffers.pop(key, None)

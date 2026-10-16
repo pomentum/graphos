@@ -70,8 +70,10 @@ carries).
 - **Schema as a file.** `GET /v1/tenants/{name}/spec` exports the whole schema
   (rules, pairs, indexes, columns and `meta` included) as a registration body;
   posting it imports it, into the same tenant or, renamed, another one.
-  `?dry_run=true` on a registration answers what it would change and what
-  applying it would cost, writing nothing. The web UI's Schema page has
+  `?dry_run=true` on a registration answers what it would change, what
+  applying it would cost and what would stop working (`breaking`: labels,
+  indexes, rules or pairs removed, property rules that refuse more where the
+  mode is strict, each with its label's row estimate), writing nothing. The web UI's Schema page has
   Export and Import (with that preview).
 - **No client SQL.** Indexes and generated columns are declared
   (`{label, properties, kind, unique}`, `{label, column, property, type}`) and
@@ -228,6 +230,10 @@ reported in the response.
   creates on every vertex label. `property=` matches another property
   instead, read row by row (no index). Each hit's `id` is the AGE internal graphid
   (an integer); the caller's external id is in `properties.id`.
+- **Check many edges** (`POST …/graph/edges:check`): up to 1,000 edges, each
+  by type and end ids, answered in order from one snapshot as `present` (with
+  revision and ETag), `absent` or `ambiguous`: checking a set of facts, such
+  as what an agent is about to state, in one call.
 - **Ranked search** (`GET …/graph/search?index=`): through a named search
   index the tenant declares at registration, as with Neo4j's full-text
   indexes: chosen labels (or all) and properties, and an analyzer.
@@ -237,7 +243,8 @@ reported in the response.
   with `fuzzy=true` also finds misspellings when nothing matches literally. `text` is Postgres
   full-text search with stemming and web-search syntax. Each hit has a
   `score` in [0, 1] and the property it `matched`; the indexes are Postgres
-  GIN indexes, updated in the same transaction as the write.
+  GIN indexes, updated in the same transaction as the write. A labelled query set
+  holds the ranking to recall@10 and MRR floors in the test suite.
 - **Point read** (`GET …/graph/nodes/{external_id}`): one node with label and
   properties. Ids may contain `/` (file paths): the rest of the path is the id.
 - **Neighbors** (`GET …/graph/neighbors`): one hop, outgoing and incoming, with
@@ -418,7 +425,9 @@ pattern.
   of edges of one type (`out|in|both`).
 - **Tenant stats** (`GET …/graph/stats`): exact row count and total bytes per
   vertex and edge label (a parent label includes its children), and tenant
-  totals that count each node and edge once.
+  totals that count each node and edge once; and, for graph metrics and
+  communities, when they were computed and how many nodes and edges were
+  written since (`analyses`, `stale`).
 - **Graph map** (`GET …/graph/map`): every label with its own node count and
   every (source label, type, target label) with its edge count, read from
   AGE's storage without joins (an edge's ends carry their labels in their
@@ -660,8 +669,8 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   - `graphos_registered_tenants`;
   - `graphos_rate_limited_total` (`token_id` = first 12 hex characters of the
     SHA-256 of the user name);
-  - `graphos_property_violations_total` (tenant, kind, outcome, rule): rows
-    the property schema refused or warned about.
+  - `graphos_property_violations_total` (kind, outcome, rule): rows the
+    property schema refused or warned about. No metric names a tenant.
 - **Logging:** structured JSON. Each request's lines carry `method`, `route`,
   and `trace_id` taken from an inbound W3C `traceparent` (echoed back). No
   spans are produced.

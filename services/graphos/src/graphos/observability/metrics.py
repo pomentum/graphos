@@ -51,7 +51,10 @@ REQUESTS_TOTAL = Counter(
 PROPERTY_VIOLATIONS = Counter(
     "graphos_property_violations_total",
     "Property-schema problems in written rows: refused (strict) or warned.",
-    labelnames=("tenant", "kind", "outcome", "rule"),
+    # No tenant label: /metrics needs no sign-in, and tenant names are not
+    # for anyone who can reach the port.  Per-tenant detail is in the write
+    # responses (property_warnings, property_violations).
+    labelnames=("kind", "outcome", "rule"),
 )
 
 REQUEST_DURATION = Histogram(
@@ -160,10 +163,10 @@ async def metrics_handler(request: Request) -> Response:
     )
 
 
-def record_property_tally(tenant: str, kind: str, tally: Any) -> None:
+def record_property_tally(kind: str, tally: Any) -> None:
     """Count a request's property problems (``graphos.properties.Tally``) by rule,
     not by property, to keep the label set small."""
     for outcome, counts in (("refused", tally.violations), ("warned", tally.warnings)):
         for key, n in counts.items():
             rule = key.rsplit(":", 1)[-1]
-            PROPERTY_VIOLATIONS.labels(tenant=tenant, kind=kind, outcome=outcome, rule=rule).inc(n)
+            PROPERTY_VIOLATIONS.labels(kind=kind, outcome=outcome, rule=rule).inc(n)

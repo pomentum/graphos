@@ -425,7 +425,7 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
         },
     )
 
-    record_property_tally(tenant, "snapshot", tally)
+    record_property_tally("snapshot", tally)
     return SnapshotImportResponse(
         tenant=tenant,
         nodes_received=nodes_received,

@@ -625,6 +625,21 @@ export interface SchemaDryRun {
   changes: SchemaChangeDetail | null;
   /** What applying it would cost (a table rewrite, a long build) or could still fail on. */
   warnings: string[];
+  /** Changes that refuse writes or calls that worked, or change what a read returns. */
+  breaking?: SchemaBreakingChange[];
+}
+
+/** One breaking change in a schema dry run. */
+export interface SchemaBreakingChange {
+  part: "vertex" | "edge" | "tenant";
+  /** The label or edge type; null for the tenant. */
+  name: string | null;
+  /** A stable code, e.g. `property_required`. */
+  change: string;
+  /** What stops working, in a sentence. */
+  detail: string;
+  /** About how many nodes or edges of the label or type exist. */
+  rows?: number | null;
 }
 
 export interface SchemaAddition {

@@ -741,6 +741,7 @@
         "willCreate": "Creates the tenant {{name}}.",
         "nothingChanges": "Nothing would change.",
         "warnings": "Before you import",
+        "breaking": "What stops working",
         "previewFirst": "Preview the import to see what it changes."
       },
       "sections": {

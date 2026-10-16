@@ -8,16 +8,26 @@ stream, and stable ids across runs.
   tenant, into compact :class:`~graphos.graph_compute.EdgeArrays`.
 * :func:`greene_match`: carries group ids (communities, components) over from
   the previous run, so an unchanged graph keeps its ids.
+* :func:`record_run` / :func:`freshness`: when each analysis last wrote its
+  results and how much was written since (``graphos_meta.analysis_runs``).
+  The position is taken before the run reads, so a write that raced the run
+  counts as "since": a run may be reported stale, never fresh by mistake.
+  A metrics run that changes nothing records no change, so the change feed
+  alone cannot say when one ran; this table can.
 """
 
 from __future__ import annotations
 
 import contextlib
+import json
 from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import asyncpg
 
+from graphos import changes
 from graphos.contracts.graph import _validate_prop_key
 from graphos.db import allow_long_statements
 from graphos.graph_compute import EdgeArrays
@@ -319,3 +329,56 @@ async def stream_edges(
                 edges.dst.append(dst_gid)
                 edges.rel.append(code)
     return edges
+
+
+# ── When each analysis last ran ────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class Freshness:
+    """An analysis's last written run, and what was written to the graph since."""
+
+    computed_at: datetime
+    scope: dict[str, Any] | None
+    rows_written_since: int | None    # None: the records since were pruned
+    at_least: bool                    # the count stopped at its cap
+
+
+async def record_run(
+    pool: asyncpg.Pool, tenant: str, kind: str, started_at: changes.Cursor,
+    scope: Mapping[str, Any] | None = None,
+) -> None:
+    """Remember that ``kind`` (``metrics`` or ``communities``) wrote its results,
+    computed from data as of the feed position ``started_at``."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO graphos_meta.analysis_runs (tenant, kind, computed_at, txid, seq, scope)
+            VALUES ($1, $2, now(), $3::text::xid8, $4, $5::jsonb)
+            ON CONFLICT (tenant, kind) DO UPDATE
+              SET computed_at = now(), txid = EXCLUDED.txid, seq = EXCLUDED.seq,
+                  scope = EXCLUDED.scope
+            """,
+            tenant, kind, str(started_at.txid), started_at.seq,
+            json.dumps(dict(scope)) if scope else None,
+        )
+
+
+async def freshness(conn: asyncpg.Connection, tenant: str) -> dict[str, Freshness]:
+    """Each analysis of ``tenant`` that has run, by kind."""
+    out: dict[str, Freshness] = {}
+    for r in await conn.fetch(
+        "SELECT kind, computed_at, txid::text AS txid_text, seq, scope::text AS scope_text "
+        "FROM graphos_meta.analysis_runs WHERE tenant = $1 ORDER BY kind;",
+        tenant,
+    ):
+        since = await changes.written_since(
+            conn, tenant, changes.Cursor(int(r["txid_text"]), int(r["seq"])),
+        )
+        out[r["kind"]] = Freshness(
+            computed_at=r["computed_at"],
+            scope=json.loads(r["scope_text"]) if r["scope_text"] else None,
+            rows_written_since=None if since is None else since[0],
+            at_least=bool(since and since[1]),
+        )
+    return out

@@ -27,6 +27,32 @@ under one version.
   CSV row numbers. Mapping errors are 422, an unreadable file 400 (a quoted cell never closed
   included), a file over `GRAPHOS_CSV_MAX_BYTES` (256 MiB) 413. Client: `import_csv_nodes()`,
   `import_csv_edges()`, with the `CsvImportResponse`, `CsvIssue` and `CsvColumnPlan` models.
+- **Check many edges at once**: `POST …/graph/edges:check` looks up to 1,000 edges, each by type
+  and the ids of its ends as `GET …/graph/edges/{type}` names one, from one snapshot, and answers
+  each in order: `present` (with its labels, revision, ETag and, with `include_properties`, its
+  properties), `absent`, or `ambiguous` (an end id in several labels; the matching label pairs
+  are listed). Meant for checking a set of facts against the graph in one call, such as what an
+  agent is about to state. Read access. Client: `check_edges()`, with the `EdgeCheckItem`,
+  `EdgeCheckResult` and `EdgesCheckResponse` models.
+- **What a schema change breaks, in the dry run**: `POST /v1/tenants?dry_run=true` answers
+  `breaking` beside `changes` and `warnings`: each change that refuses writes or calls that
+  worked, or changes what a read returns (a label or type left out of a replaced schema, a search
+  index, label-hierarchy pair or resolve rule removed, `strict_endpoints` turned on or a declared
+  pair removed under it, and property rules that refuse more where the mode is `strict`: the
+  mode becoming strict, a property made required, a new required property, a type changed, an
+  enum narrowed, a pattern, format or item rule changed, a minimum raised, a maximum lowered,
+  undeclared keys rejected). Each has a stable `change` code, a sentence and the label's or
+  type's row estimate. Additions and relaxations are never listed. The web UI's schema import
+  shows them before the warnings.
+- **Are the metrics and communities current?** `GET …/graph/stats` answers `analyses`: for graph
+  metrics and Louvain communities that have written results, when (`computed_at`), over what
+  part of the graph (`scope`), how many nodes and edges were written since
+  (`rows_written_since`, from the change feed, null past its retention) and `stale`. A metrics run
+  that changes no value counts as a run. Stored in `graphos_meta.analysis_runs`. Client:
+  `TenantStatsResponse.analyses`, with the `AnalysisFreshness` model.
+- **Search quality held to floors**: a labelled query set (literal identifiers, misspellings with
+  `fuzzy`, English sentences with the `text` analyzer) runs through `graph/search` in the
+  database tests, which fail when recall@10 or MRR drops below its floor.
 - **Web UI: several nodes at once on the canvas.** Ctrl, ⌘ or Shift click adds a node to the
   selection or takes it out; Shift-drag on the empty canvas draws a loop that selects what it
   encloses (with Ctrl or ⌘, added to the selection); Ctrl/⌘+A selects every node. A bar then
@@ -61,6 +87,13 @@ under one version.
   [web UI](services/graphos-ui/DEVELOPMENT.md); architecture decision records in
   [docs/adrs/](docs/adrs/README.md), with when one is needed and its template; `AGENTS.md` and
   `CLAUDE.md` at the root point to them.
+
+### Changed
+
+- `graphos_property_violations_total` loses its `tenant` label: `/metrics` needs no sign-in, so it
+  no longer names tenants to anyone who reaches the port. It counts by `kind`, `outcome` and
+  `rule`; per-tenant problems are in the write responses (`property_warnings`,
+  `property_violations`). A dashboard that grouped by tenant must drop that grouping.
 
 ## 0.11.1 — 2026-10-16
 

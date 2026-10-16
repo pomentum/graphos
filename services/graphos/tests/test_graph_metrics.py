@@ -49,6 +49,7 @@ async def _fresh(pool: asyncpg.Pool) -> None:
         await conn.execute(
             "DELETE FROM graphos_meta.unregistered_tenants WHERE name = $1;", TENANT,
         )
+        await conn.execute("DELETE FROM graphos_meta.analysis_runs WHERE tenant = $1;", TENANT)
     forget(TENANT)
 
 
@@ -270,3 +271,30 @@ async def test_writes_cannot_use_graphos_properties(api: httpx.AsyncClient) -> N
     # Ordinary names still work.
     ok = await api.post(f"{graph}/nodes/hub/properties", json={"properties": {"graphos": 1}})
     assert ok.status_code == HTTPStatus.OK, ok.text
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_stats_say_whether_the_metrics_are_current(api: httpx.AsyncClient) -> None:
+    async def analyses() -> dict[str, Any]:
+        resp = await api.get(f"/v1/{TENANT}/graph/stats")
+        assert resp.status_code == HTTPStatus.OK, resp.text
+        return resp.json()["analyses"]
+
+    assert await analyses() == {}
+    await _compute(api, metrics=["degree"], dry_run=True)
+    assert await analyses() == {}                      # a dry run writes no results
+    await _compute(api, metrics=["degree"])
+    fresh = (await analyses())["metrics"]
+    assert (fresh["stale"], fresh["rows_written_since"], fresh["scope"]) == (False, 0, None)
+
+    resp = await api.post(f"/v1/{TENANT}/graph/edges", json={"edges": [_edge("alone", "hub")]})
+    assert resp.status_code == HTTPStatus.OK, resp.text
+    stale = (await analyses())["metrics"]
+    assert stale["stale"] is True and stale["rows_written_since"] >= 1
+
+    # A run that changes nothing still makes the values current again.
+    await _compute(api, metrics=["degree"])
+    await _compute(api, metrics=["degree"], rel_types=["CALLS"])
+    again = (await analyses())["metrics"]
+    assert again["stale"] is False and again["scope"] == {"rel_types": ["CALLS"]}

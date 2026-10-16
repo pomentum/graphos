@@ -26,7 +26,7 @@ from collections.abc import Sequence
 import asyncpg
 import numpy as np
 
-from graphos import analysis, graph_compute, graph_metrics_compute, writes
+from graphos import analysis, changes, graph_compute, graph_metrics_compute, writes
 from graphos.contracts.graph_metrics import ComputeMetricsRequest, ComputeMetricsResponse
 from graphos.db import allow_long_statements
 
@@ -128,6 +128,8 @@ async def run_metrics(
 ) -> ComputeMetricsResponse:
     """Compute the requested metrics and write back what changed."""
     started = time.perf_counter()
+    async with pool.acquire() as conn:
+        started_at = await changes.head(conn)
     edges = await analysis.stream_edges(
         pool, tenant=tenant, rel_types=body.rel_types, node_filter=body.node_filter,
     )
@@ -166,6 +168,11 @@ async def run_metrics(
     if not body.dry_run:
         written = await writes.set_node_metrics(
             pool, tenant=tenant, patches=patches, clears=outside, names=names,
+        )
+        # Recorded even when nothing changed: the values are current as of the run.
+        scope = {"rel_types": body.rel_types, "node_filter": body.node_filter}
+        await analysis.record_run(
+            pool, tenant, "metrics", started_at, scope={k: v for k, v in scope.items() if v},
         )
     t_write = time.perf_counter()
     log.info(

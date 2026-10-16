@@ -242,6 +242,19 @@ CREATE TABLE IF NOT EXISTS graphos_meta.community_map_runs (
     modularity   double precision
 );
 
+-- The last written run of each analysis (``metrics``, ``communities``) and
+-- the change-feed position it started from: the writes after that position
+-- are what its results do not know about (``graphos.changes.written_since``).
+CREATE TABLE IF NOT EXISTS graphos_meta.analysis_runs (
+    tenant       text NOT NULL,
+    kind         text NOT NULL,
+    computed_at  timestamptz NOT NULL,
+    txid         xid8 NOT NULL,
+    seq          bigint NOT NULL,
+    scope        jsonb,
+    PRIMARY KEY (tenant, kind)
+);
+
 -- Background jobs (``graphos.jobs``): long operations a caller asked to
 -- run asynchronously.  ``tenant`` is NULL for instance-wide jobs (vacuum).
 -- ``heartbeat_at`` is refreshed by the process running the job; a running

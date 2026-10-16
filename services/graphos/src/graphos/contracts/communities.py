@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 # ── Communities list / summary ─────────────────────────────────────────────
@@ -56,12 +59,47 @@ class LabelCount(BaseModel):
     total_bytes: int = 0
 
 
+class AnalysisFreshness(BaseModel):
+    """How current an analysis's stored results are."""
+
+    computed_at: datetime = Field(description="When the last run wrote its results.")
+    scope: dict[str, Any] | None = Field(
+        None, description="`rel_types` / `node_filter` of that run; null when it read everything.",
+    )
+    rows_written_since: int | None = Field(
+        ...,
+        description=(
+            "Nodes and edges written, patched or deleted since the run read the graph (from the "
+            "change feed); null when those records are past the feed's retention."
+        ),
+    )
+    at_least: bool = Field(
+        False, description="The count stopped at 10,000 change records: there were more.",
+    )
+    stale: bool | None = Field(
+        ...,
+        description=(
+            "Whether the graph changed since the run: `rows_written_since > 0`; null when "
+            "unknown. A write racing the run counts as since, so a run is never called "
+            "current by mistake."
+        ),
+    )
+
+
 class TenantStatsResponse(BaseModel):
     tenant: str
     n_vertices: int
     n_edges: int
     total_bytes: int
     labels: list[LabelCount] = Field(default_factory=list)
+    analyses: dict[str, AnalysisFreshness] = Field(
+        default_factory=dict,
+        description=(
+            "For `metrics` (`graph/metrics:compute`) and `communities` (Louvain) that have "
+            "written results: when, and how much the graph changed since. Absent until a run "
+            "writes."
+        ),
+    )
     elapsed_ms: int
 
 

@@ -274,6 +274,35 @@ async def history(
     return HistoryPage(changes, older=changes[-1].cursor if changes and more else None, more=more)
 
 
+# The ops that change graph data; ``metrics``, ``communities`` and ``schema``
+# records are graphos's own analyses or the schema, not data.
+DATA_OPS = ("upsert", "merge", "patch", "delete", "resolve")
+
+
+async def written_since(
+    conn: asyncpg.Connection, tenant: str, after: Cursor, *, cap: int = 10_000,
+) -> tuple[int, bool] | None:
+    """Rows written to ``tenant``'s graph after ``after``: the sum of the data
+    records' counts, over at most ``cap`` records, and whether the cap was
+    reached.  ``None`` when records after ``after`` were pruned, so the
+    answer is unknown."""
+    if after < await horizon(conn, tenant):
+        return None
+    row = await conn.fetchrow(
+        """
+        SELECT count(*) AS n, coalesce(sum(r.count), 0) AS rows FROM (
+            SELECT c.count FROM graphos_meta.changes c
+            WHERE c.tenant = $1
+              AND (c.txid, c.seq) > ($2::text::xid8, $3::bigint)
+              AND c.op = ANY($4::text[])
+            LIMIT $5
+        ) r;
+        """,
+        tenant, str(after.txid), after.seq, list(DATA_OPS), cap,
+    )
+    return int(row["rows"]), int(row["n"]) >= cap
+
+
 async def head(conn: asyncpg.Connection) -> Cursor:
     """A position before every change not yet visible.
 
