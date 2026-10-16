@@ -1,8 +1,14 @@
 # graphos
 
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![Version](https://img.shields.io/github/v/tag/pomentum/graphos?sort=semver&label=version)](CHANGELOG.md)
+[![Whitepaper](https://img.shields.io/badge/whitepaper-read-1D5BD6)](https://graphos-pomentum.vercel.app)
+
 A multi-tenant property-graph service: **PostgreSQL + [Apache AGE](https://age.apache.org/) behind a typed HTTP API.**
 
 Your services send JSON over HTTP. graphos owns the database, writes the SQL against AGE's tables, enforces tenant isolation, and gives you bulk loading, traversal, aggregation, graph algorithms (communities, PageRank, betweenness, components) and a web UI. Consumers never get a connection string; raw Cypher runs only in an opt-in, read-only console that graphos controls.
+
+<img src="docs/images/graphos-infographic.svg" width="100%" alt="graphos capabilities: a typed HTTP API over PostgreSQL 18 + Apache AGE 1.8. Build: tenants and schema, bulk writes and data transfer, composable reads, rule-derived edges. Explore: graph map and aggregates, Louvain and graph metrics, an opt-in read-only Cypher console, the web UI. Run: users, SSO and grants, change feed, operations, the Python client.">
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture-dark.svg">
@@ -13,24 +19,31 @@ Your services send JSON over HTTP. graphos owns the database, writes the SQL aga
 
 ## Features
 
-- **Tenants are isolated AGE graphs.** Each consumer registers its own labels; access is a level granted per tenant (`read`, `write`, `maintain`, `owner`; no access → `403`, unknown → `404`).
-- **Schema-agnostic.** No built-in labels or property names. Every endpoint takes label / property / edge names as parameters.
-- **Fast, idempotent writes:** small batches, NDJSON streaming bulk and single-file snapshot import all go through COPY-staged SQL upserts (`INSERT … ON CONFLICT`); in our measurements this was 37–156× faster than per-row Cypher `MERGE` (see [AGE notes](docs/apache-age.md)).
-- **Ranked search:** declare named search indexes over chosen labels and properties; `identifier` finds `getUserById` from `get user by id` or `getUsrById`, `text` is stemmed full-text search. Plain Postgres indexes, updated with the write. Without an index, search matches any one property by substring.
-- **Web UI (optional):** a large graph opens on a map of its labels or of its communities; search, expand a page of neighbours at a time with undo, colour by label or community, lay the canvas out by force, on a circle or in layers, inspect and edit nodes and relationships, find paths, ask Cypher questions where the console is on, browse a label as a table, see and extend the schema in a diagram, follow changes live, and save what is on screen (any Explore view as PNG, SVG with its icons and font, or JSON; tables as CSV). Each person signs in as themselves, with a password or single sign-on, so a reader gets a read-only UI. `docker compose ... --profile ui up -d`; see [below](#web-ui) and [the UI README](services/graphos-ui/README.md).
-- **Composable reads:** search, neighbors, multi-hop expand, shortest paths, induced subgraph, paginated node scan, stratified sampling, graphology export (sigma.js / Gephi). When a cap cuts `neighbors` or `expand`, the rows returned are the first in graph-id order, so the same graph gives the same answer however its tables are stored (after a dump and restore, or the move to PostgreSQL 18).
-- **Cypher console (opt-in):** for people who know Cypher, `GRAPHOS_CYPHER=true` runs read-only Cypher on one tenant's graph, with `$name` parameters, a row cap, a timeout and a watchdog, and saved queries the tenant's readers run with a form. graphos refuses write clauses (`CREATE`, `MERGE`, `SET`, `DELETE`, `DETACH`, `REMOVE`), functions that are not Cypher's and the patterns AGE cannot run on its tables before a query reaches the database, whichever AGE runs; writes stay on the API. The web UI's Query page colours Cypher and suggests the tenant's labels and properties as you type ([usage](docs/usage.md#cypher-console-opt-in)).
-- **Label styles:** a tenant declares how each label and relationship type is drawn (a colour, an icon, a caption and a size property), kept with its schema and seen by everyone on it, in the canvas, the legend, the schema diagram and query results.
-- **Property schema (opt-in):** declare the properties each label and relationship type carries (type, required or recommended, allowed values, patterns, dates, bounds), combined down the label hierarchy, and hold writes to them: `warn` writes and counts, `strict` refuses, on every write path. Check the stored data against them before turning them on, and edit them in the web UI's schema view ([usage](docs/usage.md#3-tenant-registration)).
-- **Edit in place, safely:** read, patch (JSON Merge Patch) or delete one node or edge; each carries a revision and an `ETag`, and `If-Match` turns a concurrent edit into a `412` instead of a lost update.
-- **Graph analytics:** a graph map (every label with its node count and the edge counts between labels, plus a label's best-connected nodes: about a second on ten million edges), top-K by degree, node and edge aggregates (counts per property value, including the nodes without it).
-- **Graph algorithms, next to the data** ([what each one gives you](docs/algorithms.md)): Louvain communities (optional extra) with ids that stay stable across runs, plus a community map (sizes, members per label, hubs, edges between communities); PageRank (what everything depends on), betweenness (bridges and bottlenecks), connected components (islands, orphans) and degree, written onto the nodes as `graphos_*` properties, a name space consumers cannot write. Each runs in a separate process so the API keeps serving, gives the same result on the same graph, and writes only what changed.
-- **Copy, back up and restore a tenant:** export its schema as a file that is itself a registration (with a dry run of what importing it changes), and its data as one NDJSON file (nodes, edges, the schema in the first line; gzip optional) that imports back, into an empty tenant for an exact restore. From the API, the Python client or the web UI. The same file loads into a plain AGE graph without graphos ([`tools/export/ndjson_to_age.py`](tools/export/ndjson_to_age.py), see [Reading graphos's data without graphos](docs/without-graphos.md)).
-- **Rule-based edge derivation:** declare a property-match rule once at registration; `edges:resolve` writes the edges server-side in one SQL statement.
-- **Change feed:** every write is recorded in the same transaction; read what changed after a cursor, or follow it live (Server-Sent Events, resumable), with no committed change ever skipped.
-- **Background jobs:** long operations (community recompute, graph metrics, edge resolution, vacuum) run as jobs with `Prefer: respond-async`: answered `202` at once, polled at `/v1/jobs/{id}`, cancellable.
-- **Safe by default:** sign-in required: people and service accounts get short-lived tokens (15 minutes; no static tokens), each with a level per tenant (read, write, maintain, owner); people can sign in through any OpenID Connect provider (single sign-on), with access granted to its groups and roles; every query is SQL under a server-side `statement_timeout` (504 when exceeded), registration DDL validated, the database on a network consumers cannot reach.
-- **Operable by people who don't know your domain:** Prometheus metrics, JSON logs with W3C `traceparent`, an audit log naming the caller (writes, exports and console queries; every data read on demand), per-user rate limiting, users and grants managed at runtime (UI or API).
+The picture above is the map; each line below links to the section that covers it, and the [feature survey](docs/features.md) lists every capability.
+
+**Build**
+
+- **Tenants and schema:** each tenant is its own AGE graph with its own labels; no built-in labels or property names; optional property rules, `warn` or `strict` ([usage](docs/usage.md#3-tenant-registration)).
+- **Fast, idempotent writes:** batches, NDJSON bulk and snapshot import as COPY-staged upserts, 37–156× faster than per-row Cypher `MERGE` in our measurements ([usage](docs/usage.md#4-writing-data), [AGE notes](docs/apache-age.md)).
+- **Edit in place, safely:** patch or delete one node or edge; `If-Match` turns a concurrent edit into a `412` instead of a lost update ([usage](docs/usage.md#4-writing-data)).
+- **Composable reads:** search (substring or ranked indexes), neighbors, multi-hop expand, shortest paths, scans and subgraphs ([usage](docs/usage.md#5-reads-that-compose)).
+- **Rule-derived edges:** declare a property-match rule once; `edges:resolve` writes the edges in SQL ([usage](docs/usage.md#9-rule-based-edges-resolve_rule)).
+- **Copy, back up and restore:** a tenant's schema and data as files, restored exactly or loaded into plain AGE ([usage](docs/usage.md#dataset-export-and-import), [without graphos](docs/without-graphos.md)).
+- **Python client:** async and typed; signs in and renews its token by itself ([below](#python-client)).
+
+**Explore**
+
+- **Graph analytics:** a map of every label and the edges between them (about a second on ten million edges), aggregates, top-K by degree ([usage](docs/usage.md#6-aggregates)).
+- **Graph algorithms:** Louvain communities (optional extra), PageRank, betweenness, components and degree, run beside the API and written onto the nodes ([what each finds](docs/algorithms.md)).
+- **Cypher console (opt-in):** read-only Cypher on one tenant, write clauses refused, with a timeout, a row cap and saved queries ([usage](docs/usage.md#cypher-console-opt-in)).
+- **Web UI (optional):** explore, inspect and edit, query, extend the schema, follow changes live and export what is on screen ([below](#web-ui)).
+
+**Run**
+
+- **Safe by default:** 15-minute tokens for people and service accounts, single sign-on, a level per tenant, statement timeouts, the database out of reach ([installation](docs/installation.md#8-before-other-people-use-it), [single sign-on](docs/sso.md)).
+- **Change feed:** every write recorded in its transaction; read after a cursor or follow live ([usage](docs/usage.md#10-change-feed)).
+- **Background jobs:** long operations answer `202` at once, then can be polled and cancelled ([usage](docs/usage.md#background-jobs)).
+- **Operable:** Prometheus metrics, JSON logs with `traceparent`, an audit log and per-user rate limiting ([usage](docs/usage.md#11-operations)).
 
 ## Web UI
 
