@@ -239,6 +239,8 @@ is deprecated; a stack on it moves to 18 by itself on `docker compose up` ([upgr
 
 ## Development
 
+The rules for working on graphos, for people and coding agents, are in [docs/development.md](docs/development.md), with a `DEVELOPMENT.md` in each package; [AGENTS.md](AGENTS.md) sums up the hard rules.
+
 ```bash
 pip install -e "services/graphos[dev,louvain]" -e "clients/python[dev]"
 pytest -m "not db" services/graphos/tests      # unit tests, no database

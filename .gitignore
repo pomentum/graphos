@@ -37,5 +37,8 @@ Thumbs.db
 .env.local
 docker-compose.override.yml
 
+# Local design notes, never committed
+docs/design/
+
 # Crash dumps from Windows / Cygwin tools
 *.stackdump

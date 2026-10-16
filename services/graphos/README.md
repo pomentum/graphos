@@ -16,6 +16,8 @@ pytest -v
 
 The `louvain` extra pulls in python-igraph (GPL-2.0-or-later); without it `POST /v1/{tenant}/recompute-communities` answers 501. Tests marked `db` need a live database and are skipped unless `GRAPHOS_TEST_DSN` is set.
 
+Before changing the service, read [DEVELOPMENT.md](DEVELOPMENT.md): where to look, the data-model invariants, the database tests and the conventions.
+
 ## Run
 
 Point the service at a PostgreSQL 18 + AGE 1.8 database (16 + 1.6 is deprecated) and give it its credentials:

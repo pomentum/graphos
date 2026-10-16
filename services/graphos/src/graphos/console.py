@@ -1,8 +1,8 @@
 """The Cypher console: read-only Cypher on one tenant's graph.
 
 Off unless ``GRAPHOS_CYPHER=true``.  graphos runs the query, so graphos
-decides what runs and how (see docs/design, "queries, label styles and
-exports", §6):
+decides what runs and how (see docs/concept.md §3.1, "Cypher / SQL
+boundary"):
 
 - **Only Cypher's own functions.**  AGE lets a Cypher expression call a
   PostgreSQL function by its schema-qualified name (``pg_catalog.x()``), and

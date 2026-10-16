@@ -136,6 +136,10 @@ Not wrapped (use HTTP, see the [usage guide](https://github.com/pomentum/graphos
 - **One tenant per client.** The tenant is part of every data-plane URL; what a token may touch is enforced by the server.
 - **Connections.** One pooled `httpx.AsyncClient` per client; use `async with` or call `close()`. Pass `transport=` to supply your own `httpx` transport (tests, proxies).
 
+## Development
+
+Working on the client: see [DEVELOPMENT.md](https://github.com/pomentum/graphos/blob/main/clients/python/DEVELOPMENT.md) in the repository.
+
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

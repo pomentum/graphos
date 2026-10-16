@@ -79,6 +79,7 @@ GRAPHOS_API_URL=http://127.0.0.1:8080 npm run dev
 ```
 
 `npm test` runs the tests, `npm run lint` checks formatting and types, `npm run format` formats.
+The rules for changing the UI (layers, text, screenshots) are in [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## What graphos needs to provide
 
