@@ -16,9 +16,9 @@ import pytest
 
 from graphos import writes
 from graphos.api.communities import list_communities
-from graphos.api.graph import aggregate_nodes, export_graph
+from graphos.api.graph import aggregate_nodes, export_graph, induced_edges
 from graphos.bootstrap import TenantSpec, register_tenant
-from graphos.contracts.graph import NodesAggregateRequest
+from graphos.contracts.graph import InducedEdgesRequest, NodesAggregateRequest
 from graphos.cypher import query_cypher
 from graphos.identity import Principal
 
@@ -152,6 +152,8 @@ async def test_export_matches_cypher(db_pool: asyncpg.Pool, node_ids, rel_types)
     assert any(e.source == e.target for e in out.edges) == any(
         r["s"] == r["d"] for r in ref_edges
     )
+    # Two nodes can be joined by edges of several types: graphology needs `multi`.
+    assert out.options["multi"] is True
 
 
 @requires_db
@@ -168,6 +170,8 @@ async def test_community_members_match_cypher(db_pool: asyncpg.Pool) -> None:
             ["id"], cid=row.community_id,
         )
         assert sorted(row.member_ids) == sorted(str(r["id"]) for r in ref)
+        # The ids as stored, not their quoted agtype text.
+        assert set(row.member_ids) <= {f"d{i}" for i in range(10)} | {"c0", "c1"}
     without = await list_communities(
         T, _request(db_pool), ADMIN, min_size=1, include_members=False, limit=0,
     )
@@ -228,3 +232,39 @@ async def test_edges_aggregate_matches_reference(db_pool: asyncpg.Pool, options)
     resp = await aggregate_edges(T, req, _request(db_pool), ADMIN)
     assert [(g.src_value, g.dst_value, g.rel_type, g.count) for g in resp.groups] == expected
     assert resp.truncated == more
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_induced_edges_answers_in_full_when_no_id_matches(db_pool: asyncpg.Pool) -> None:
+    await _seed(db_pool)
+    for ids in (["nope", "missing"], [""]):
+        resp = await induced_edges(T, InducedEdgesRequest(node_ids=ids), _request(db_pool), ADMIN)
+        assert (resp.node_count, resp.edges, resp.truncated) == (len(ids), [], False)
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_induced_edges_matches_any_id_in_every_label(db_pool: asyncpg.Pool) -> None:
+    await _seed(db_pool)
+    quoted = 'q"uote\\d'
+    await writes.upsert_nodes(db_pool, tenant=T, label="Document", rows=[
+        {"id": quoted, "props": {}}, {"id": "c1", "props": {}},
+    ])
+    await writes.upsert_edges(
+        db_pool, tenant=T, src_label="Document", dst_label="Document", edge_type="CITES",
+        rows=[{"src_id": quoted, "dst_id": "d0", "props": {}},
+              {"src_id": "c1", "dst_id": "d1", "props": {}}],
+    )
+    await writes.upsert_edges(
+        db_pool, tenant=T, src_label="Document", dst_label="Collection", edge_type="PART_OF",
+        rows=[{"src_id": "d0", "dst_id": "c1", "props": {}}],
+    )
+    resp = await induced_edges(
+        T, InducedEdgesRequest(node_ids=[quoted, "d0", "d1", "c1"]), _request(db_pool), ADMIN,
+    )
+    # c1 is both a Collection and a Document: edges at either count.
+    assert {(e.src_id, e.dst_id, e.type) for e in resp.edges} == {
+        (quoted, "d0", "CITES"), ("d0", "d1", "CITES"),
+        ("c1", "d1", "CITES"), ("d0", "c1", "PART_OF"),
+    }

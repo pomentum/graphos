@@ -78,6 +78,14 @@ under one version.
 
 ### Fixed
 
+- `POST …/graph/induced_edges` answered 500 when none of the ids matched a node (the answer left
+  out `node_count`). It also missed ids holding a `"` or a `\`, reported them with their JSON
+  escapes, and, for an id in two labels, counted the edges of only one of its nodes.
+- `POST …/graph/edges:scan`: when the 10 MiB page cap was reached on the first row of the next edge
+  type, the page came back without a `next_cursor`, as if the scan were over; the rest of that type
+  and the types after it were never returned. The cursor now points to that row.
+- `GET …/graph/export` declares `multi: true`: two nodes can be joined by edges of several types,
+  which graphology refuses to load into a graph declared `multi: false`.
 - `POST …/graph/nodes/{id}/properties` answers 400 for a database error, as the other node writes
   do, instead of an unhandled 500.
 

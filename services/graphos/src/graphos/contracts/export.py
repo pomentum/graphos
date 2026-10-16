@@ -47,10 +47,10 @@ class GraphologyExport(BaseModel):
         default_factory=dict, description="Graph-level attributes; always empty.",
     )
     options: dict[str, object] = Field(
-        default_factory=lambda: {"type": "directed", "multi": False, "allowSelfLoops": True},
+        default_factory=lambda: {"type": "directed", "multi": True, "allowSelfLoops": True},
         description=(
-            "graphology's graph options: always `type` `directed`, `multi` false, "
-            "`allowSelfLoops` true."
+            "graphology's graph options: always `type` `directed`, `multi` true (two nodes can "
+            "be joined by edges of several types), `allowSelfLoops` true."
         ),
     )
     nodes: list[GraphologyNode] = Field(

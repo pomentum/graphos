@@ -1417,44 +1417,39 @@ async def induced_edges(
     started = time.perf_counter()
     pool = request.app.state.pool
 
-    # Build the agtype id set the same way community-ids does so the
-    # ``(properties->'"id"') = ANY (...)`` predicate matches the
-    # indexed expression.
-    unique_ids = list({i for i in body.node_ids if i})
-    if not unique_ids:
+    def answer(edges: list[EdgeHit]) -> InducedEdgesResponse:
         return InducedEdgesResponse(
-            tenant=tenant, limit=body.limit, truncated=False,
+            tenant=tenant,
+            node_count=len(body.node_ids),
+            rel_types=list(body.rel_types) if body.rel_types else None,
+            limit=body.limit,
+            truncated=len(edges) == body.limit,
             elapsed_ms=int((time.perf_counter() - started) * 1000),
-            edges=[],
+            edges=edges,
         )
 
+    unique_ids = sorted({i for i in body.node_ids if i})
+    if not unique_ids:
+        return answer([])
+
     async with pool.acquire() as conn:
+        # Ids JSON-encoded as every write encodes them, so the match is the
+        # one the per-label id index serves, for any id (quotes included).
+        # An id may name a node in several labels: every one of them counts.
         gid_rows = await conn.fetch(
             f"""
             SELECT
-              v.id::text                                            AS gid,
-              trim(both '"' from (v.properties->'"id"')::text)      AS ext_id
+              v.id::text                              AS gid,
+              v.properties::text::jsonb ->> 'id'      AS ext_id
             FROM "{tenant}"."_ag_label_vertex" v
-            WHERE (v.properties->'"id"') = ANY(
-              ARRAY(
-                SELECT ('"' || t || '"')::agtype
-                FROM unnest($1::text[]) AS t
-              )
-            );
+            WHERE {lookup.IDS_MATCH};
             """,
-            unique_ids,
+            [_json.dumps(i) for i in unique_ids],
         )
-        gid_by_ext: dict[str, int] = {
-            str(r["ext_id"]): int(r["gid"]) for r in gid_rows
-        }
-        if not gid_by_ext:
-            return InducedEdgesResponse(
-                tenant=tenant, limit=body.limit, truncated=False,
-                elapsed_ms=int((time.perf_counter() - started) * 1000),
-                edges=[],
-            )
-        ext_by_gid = {v: k for k, v in gid_by_ext.items()}
-        gid_set = list(gid_by_ext.values())
+        ext_by_gid: dict[int, str] = {int(r["gid"]): str(r["ext_id"]) for r in gid_rows}
+        if not ext_by_gid:
+            return answer([])
+        gid_set = list(ext_by_gid)
 
         # 2. Probe edges with both endpoints in the resolved gid set.
         #    The per-label ``(start_id, end_id)`` btrees are on the raw
@@ -1492,8 +1487,6 @@ async def induced_edges(
             *params,
         )
 
-    elapsed_ms = int((time.perf_counter() - started) * 1000)
-
     edges = []
     for r in edge_rows:
         # Map AGE graphids back to caller-facing external ids.  We
@@ -1512,16 +1505,7 @@ async def induced_edges(
             type=str(r["rel_type"]),
             properties=_safe_decode_props(r["rel_props_text"]),
         ))
-
-    return InducedEdgesResponse(
-        tenant=tenant,
-        node_count=len(body.node_ids),
-        rel_types=list(body.rel_types) if body.rel_types else None,
-        limit=body.limit,
-        truncated=len(edges) == body.limit,
-        elapsed_ms=elapsed_ms,
-        edges=edges,
-    )
+    return answer(edges)
 
 
 # ── Scoped subgraph ────────────────────────────────────────────────────────
@@ -2908,9 +2892,8 @@ async def export_graph(
             key=str(r["id"]),
             attributes={
                 **(dict(r["props"] or {})),
-                # `label` is sigma.js's display field by convention; we
-                # populate it from `name` if available, else fall back to
-                # the AGE label name. The vertex label is also kept under
+                # `label` is sigma.js's display field by convention: the
+                # node's `name`, else its id. The vertex label is kept under
                 # `_kind` so consumers that care about typing can read it.
                 "label": dict(r["props"] or {}).get("name") or str(r["id"]),
                 "_kind": str(r["lbl"]),
@@ -3823,7 +3806,6 @@ async def scan_edges(
         # Position along the edge graphid order: the request cursor for
         # the first type, then the last edge fetched, page after page.
         after_gid: int | None = cursor_gid if ti == 0 else None
-        last_edge_gid: int | None = None
         while remaining > 0 and not truncated:
             params: list[Any] = []
             param_idx = 1
@@ -3867,6 +3849,9 @@ async def scan_edges(
 
             for row in rows:
                 edge_gid = int(row["edge_gid"])
+                # Where a next page starts if this row does not fit: before
+                # it, or at the type's first edge (graphids are positive).
+                before = after_gid if after_gid is not None else 0
                 after_gid = edge_gid
                 if row["src_label"] is None or row["dst_label"] is None:
                     # An endpoint vertex no longer exists: such edges were
@@ -3879,10 +3864,7 @@ async def scan_edges(
                     items
                     and accumulated_bytes + row_bytes > SCAN_PAYLOAD_CAP_BYTES
                 ):
-                    if last_edge_gid is not None:
-                        next_cursor = _encode_edge_scan_cursor(
-                            edge_type, last_edge_gid,
-                        )
+                    next_cursor = _encode_edge_scan_cursor(edge_type, before)
                     truncated = True
                     break
                 items.append(EdgesScanItem(
@@ -3893,7 +3875,6 @@ async def scan_edges(
                     type=edge_type,
                     properties=projected,
                 ))
-                last_edge_gid = edge_gid
                 accumulated_bytes += row_bytes
                 remaining -= 1
                 if remaining <= 0:

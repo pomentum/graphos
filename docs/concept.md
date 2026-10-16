@@ -1428,7 +1428,7 @@ It is consumable by `Graph.from()` in graphology / sigma.js.
 ```json
 {
   "attributes": {},
-  "options": {"type": "directed", "multi": false, "allowSelfLoops": true},
+  "options": {"type": "directed", "multi": true, "allowSelfLoops": true},
   "nodes": [{"key": "u-1",
              "attributes": {"id": "u-1", "name": "Ada", "label": "Ada", "_kind": "User"}}],
   "edges": [{"key": "e_1125899906842625", "source": "u-1", "target": "doc-42",
