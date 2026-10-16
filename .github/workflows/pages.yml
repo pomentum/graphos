@@ -3,18 +3,17 @@
 #
 # ── How ───────────────────────────────────────────────────────────────────────
 #
-# website/assemble.py copies the repository's own docs (docs/*.md, the
-# component READMEs, the changelog, docs/images/, the whitepaper) into
-# website/.build/docs and fixes their links; MkDocs with the Material theme
-# renders them, with the landing page filled from the README. Nothing on the
-# site is written twice: change the docs, and the next push to main publishes
-# them.
+# The site is one page, website/index.html, and the whitepaper beside it at
+# whitepaper/. website/build.py fills the page from what the repository
+# already has (the whitepaper's stylesheet, scripts and summary; the README's
+# features, screenshots, quickstart and docs table; the version), copies the
+# whitepaper and docs/images/, and needs nothing but Python's standard library.
 #
 # ── What it checks ────────────────────────────────────────────────────────────
 #
-# `mkdocs build --strict` fails on a broken link or a missing anchor between
-# the pages, so a page that would send readers nowhere is refused. Pull
-# requests that touch the site build it the same way and publish nothing.
+# The build fails when a slot of the page is left unfilled, or when the page
+# links to a picture or page the site does not have. Pull requests that touch
+# the site build it the same way and publish nothing.
 #
 # ── What it needs ─────────────────────────────────────────────────────────────
 #
@@ -62,13 +61,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
-          cache-dependency-path: website/requirements.txt
 
-      - name: Install the site's build, pinned
-        run: pip install -r website/requirements.txt
-
-      - name: Assemble the docs and build the site
+      - name: Build the site
         run: bash website/build.sh python
 
       - uses: actions/upload-pages-artifact@v5

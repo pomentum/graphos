@@ -1,0 +1,153 @@
+<!doctype html>
+<!--
+  The graphos website's page. website/build.py fills every double-brace slot from the
+  repository: the whitepaper's stylesheet, scripts and summary, the README's
+  features, screenshots, quickstart and documentation table, the version.
+  Write product text in the README or the whitepaper, not here; the few facts
+  written here (At a glance) must match docs/features.md or the README.
+-->
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>graphos: a property-graph service on PostgreSQL and Apache AGE</title>
+<meta name="description" content="graphos is a multi-tenant property-graph service: PostgreSQL and Apache AGE behind a typed HTTP API. Apache-2.0.">
+<link rel="canonical" href="https://pomentum.github.io/graphos/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="graphos">
+<meta property="og:title" content="graphos">
+<meta property="og:description" content="A multi-tenant property-graph service: PostgreSQL and Apache AGE behind a typed HTTP API.">
+<meta property="og:url" content="https://pomentum.github.io/graphos/">
+<meta property="og:image" content="https://pomentum.github.io/graphos/images/graphos-infographic.png">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<script>{{ theme_script }}</script>
+<style>
+/* The whitepaper's own stylesheet (docs/whitepaper.html), so page and paper look the same. */
+{{ style }}
+/* What the page adds: a wider column, the bar's links, buttons and the feature cards. */
+.wrap, .bar-inner{max-width:1080px}
+.prose{max-width:70ch}
+.bar-links{display:flex; gap:18px; margin-right:6px}
+.bar-links a{font-family:var(--mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-soft); text-decoration:none}
+.bar-links a:hover{color:var(--accent)}
+@media (max-width:760px){ .bar-links a:not(.keep){display:none} }
+header.top{padding-top:64px}
+h1{font-size:clamp(3.2rem,10vw,5.6rem)}
+.lede{font-size:clamp(1.25rem,2.4vw,1.6rem); max-width:34ch}
+.cta{display:flex; flex-wrap:wrap; gap:10px; margin:26px 0 8px}
+.btn{display:inline-flex; align-items:center; gap:8px; font-family:var(--mono); font-size:12px; font-weight:500; letter-spacing:.08em; text-transform:uppercase; text-decoration:none; padding:11px 16px; border:1px solid var(--rule); border-radius:4px; color:var(--ink)}
+.btn:hover{border-color:var(--accent); color:var(--accent)}
+.btn.primary{background:var(--accent); border-color:var(--accent); color:var(--ground)}
+.btn.primary:hover{background:transparent; color:var(--accent)}
+.hero-fig{margin-top:40px}
+.hero-fig img{border-radius:4px}
+.group h3{font-family:var(--mono); font-weight:500; font-size:11.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--accent); margin:30px 0 12px}
+.cards{display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr)); gap:12px}
+.card{background:var(--surface); border:1px solid var(--rule); border-radius:4px; padding:16px 18px}
+.card h4{font-family:var(--display); font-weight:800; font-size:1.02rem; letter-spacing:-.01em; margin:0 0 6px}
+.card p{font-size:15px; color:var(--ink-soft); margin:0}
+.card a{color:var(--accent)}
+.shots{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px 24px}
+@media (max-width:820px){ .shots{grid-template-columns:minmax(0,1fr)} }
+dl.gloss.glance{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:820px){ dl.gloss.glance{grid-template-columns:repeat(2,minmax(0,1fr))} }
+@media (max-width:520px){ dl.gloss.glance{grid-template-columns:minmax(0,1fr)} }
+dl.gloss.docs{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (max-width:640px){ dl.gloss.docs{grid-template-columns:minmax(0,1fr)} }
+ol.next{padding-left:1.2em}
+footer .cols{display:flex; flex-wrap:wrap; gap:8px 22px; margin-bottom:10px}
+</style>
+</head>
+<body>
+
+<div class="bar"><div class="bar-inner">
+  <a class="bar-name" href="#top">graphos</a>
+  <nav class="bar-links" aria-label="Sections">
+    <a href="#features">Features</a>
+    <a href="#ui">Web UI</a>
+    <a href="#start">Get started</a>
+    <a href="#docs">Docs</a>
+    <a class="keep" href="whitepaper/">Whitepaper</a>
+  </nav>
+  <div class="mode" role="group" aria-label="Colour theme">
+    <button type="button" data-set="light" aria-pressed="false">Light</button><button type="button" data-set="dark" aria-pressed="false">Dark</button>
+  </div>
+</div></div>
+
+<div class="wrap">
+<main>
+  <header class="top" id="top">
+    <p class="eyebrow">Open source · Apache-2.0 · version {{ version }}</p>
+    <p class="repo"><a href="https://github.com/pomentum/graphos" rel="noopener" aria-label="Read the source on GitHub: pomentum/graphos"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg><span>pomentum/graphos</span></a></p>
+    <h1>graphos</h1>
+    <p class="lede">A multi-tenant property-graph service: PostgreSQL + Apache AGE behind a typed HTTP API.</p>
+    <p class="meta prose">Your services send JSON over HTTP. graphos owns the database, writes the SQL against AGE's tables, enforces tenant isolation, and gives you bulk loading, traversal, aggregation, graph algorithms and a web UI. Consumers never get a connection string.</p>
+    <div class="cta">
+      <a class="btn primary" href="#start">Get started</a>
+      <a class="btn" href="whitepaper/">Read the whitepaper</a>
+      <a class="btn" href="https://github.com/pomentum/graphos">GitHub</a>
+    </div>
+    <figure class="fig hero-fig"><img src="images/graphos-infographic.svg" width="1600" height="1060" alt="graphos capabilities: a typed HTTP API over PostgreSQL 18 + Apache AGE 1.8. Build: tenants and schema, bulk writes and data transfer, composable reads, rule-derived edges. Explore: graph map and aggregates, Louvain and graph metrics, an opt-in read-only Cypher console, the web UI. Run: users, SSO and grants, change feed, operations, the Python client."></figure>
+  </header>
+
+  <div class="prose">
+{{ summary }}
+  </div>
+
+  <h2 id="glance"><span class="sec"><span class="num">01 · At a glance</span></span>What graphos is made of</h2>
+  <dl class="gloss glance">
+    <div><dt>Storage</dt><dd>PostgreSQL 18 with Apache AGE 1.8; each tenant is its own AGE graph</dd></div>
+    <div><dt>API</dt><dd>Typed HTTP (FastAPI), JSON and NDJSON; the contract at <code>/openapi.json</code></dd></div>
+    <div><dt>Access</dt><dd>Users and service accounts, 15-minute tokens, OpenID Connect sign-on, a level per tenant</dd></div>
+    <div><dt>Algorithms</dt><dd>Louvain (optional extra), PageRank, betweenness, components, degree</dd></div>
+    <div><dt>Clients</dt><dd>An async, typed Python client; an optional web UI; plain HTTP</dd></div>
+    <div><dt>Images</dt><dd><code>ghcr.io/pomentum/graphos-api</code> and <code>graphos-ui</code>, amd64 and arm64</dd></div>
+    <div><dt>Licence</dt><dd>Apache-2.0</dd></div>
+    <div><dt>Latest</dt><dd>{{ version }}</dd></div>
+    <div><dt>Source</dt><dd><a href="https://github.com/pomentum/graphos">github.com/pomentum/graphos</a></dd></div>
+  </dl>
+
+  <h2 id="features"><span class="sec"><span class="num">02 · Features</span></span>Build, explore, run</h2>
+{{ features }}
+
+  <h2 id="how"><span class="sec"><span class="num">03 · How it fits</span></span>One service owns the graph</h2>
+  <figure class="fig pic">
+    <img class="pic-light" src="images/architecture-light.svg" alt="Consumers call graphos-api over the graphos-net network with a bearer token. graphos-api checks tenant scope and read/write access, validates typed contracts, builds SQL internally, times out bad queries and emits metrics and audit logs. Only graphos-api reaches PostgreSQL 18 with Apache AGE on an internal network; each tenant is its own AGE graph.">
+    <img class="pic-dark" src="images/architecture-dark.svg" alt="" aria-hidden="true">
+  </figure>
+
+  <h2 id="ui"><span class="sec"><span class="num">04 · Web UI</span></span>Explore, edit, query</h2>
+  <div class="shots">
+{{ shots }}
+  </div>
+
+  <h2 id="start"><span class="sec"><span class="num">05 · Get started</span></span>Run it on your machine</h2>
+  <p class="prose">Docker with Compose v2 and about 4 GB of memory for Docker.</p>
+  <pre class="record">{{ quickstart }}</pre>
+  <ol class="next prose">
+    <li>Sign in to the UI at <code>http://127.0.0.1:8081</code> as <code>graphos</code> / <code>graphos</code> and choose a new password: the <a href="https://github.com/pomentum/graphos/blob/main/docs/installation.md">installation guide</a>.</li>
+    <li>Register a tenant, write nodes and edges, read them back: the <a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md">usage guide</a>, or the <a href="https://github.com/pomentum/graphos/tree/main/clients/python">Python client</a>.</li>
+    <li>Load the demo tenant to explore: <a href="https://github.com/pomentum/graphos/blob/main/clients/python/examples/08_demo_ecosystem.py"><code>08_demo_ecosystem.py</code></a>.</li>
+  </ol>
+
+  <h2 id="docs"><span class="sec"><span class="num">06 · Documentation</span></span>Read further</h2>
+  <dl class="gloss docs">
+{{ docs }}
+  </dl>
+</main>
+
+<footer>
+  <div class="cols">
+    <a href="https://github.com/pomentum/graphos">Source</a>
+    <a href="whitepaper/">Whitepaper</a>
+    <a href="https://github.com/pomentum/graphos/blob/main/CHANGELOG.md">Changelog</a>
+    <a href="https://github.com/pomentum/graphos/blob/main/LICENSE">Licence</a>
+    <a href="https://pomentum.github.io/">Pomentum</a>
+  </div>
+  <p>graphos is licensed under the Apache License 2.0. Apache AGE is a project of the Apache Software Foundation, licensed under Apache 2.0, and is not affiliated with graphos.</p>
+</footer>
+</div>
+
+<script>{{ page_script }}</script>
+</body>
+</html>
