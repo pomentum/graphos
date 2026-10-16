@@ -43,5 +43,3 @@ docs/design/
 # Crash dumps from Windows / Cygwin tools
 *.stackdump
 
-# The website build (website/assemble.py, mkdocs)
-website/.build/

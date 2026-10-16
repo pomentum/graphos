@@ -61,10 +61,10 @@ under one version.
   [web UI](services/graphos-ui/DEVELOPMENT.md); architecture decision records in
   [docs/adrs/](docs/adrs/README.md), with when one is needed and its template; `AGENTS.md` and
   `CLAUDE.md` at the root point to them.
-- **Docs:** a website for graphos on GitHub Pages (`website/`): one page in the whitepaper's
-  design, with features, measured benchmarks, the web UI, a quickstart and the documentation,
-  its README parts filled in at build time. The `pages` workflow builds it, refusing broken
-  local links, and publishes it from `main`.
+- **Docs:** a website for graphos on GitHub Pages, served from `docs/` on `main`: one page in
+  the whitepaper's design, with features, measured benchmarks, the web UI, a quickstart and the
+  documentation. `tools/docs/site.py` writes `docs/index.html` from the README and the version
+  (`--check` tells when it is out of date); no workflow builds or deploys it.
 
 ## 0.11.1 — 2026-10-16
 
