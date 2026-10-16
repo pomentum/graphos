@@ -110,7 +110,7 @@ CURRENT_AGE = (1, 8)
 
 def deprecated_database(postgres_version: str, age_version: str | None) -> str | None:
     """Why this PostgreSQL / AGE pair is deprecated for graphos, or ``None``."""
-    major = int(postgres_version.split()[0].split(".")[0])
+    major = int(postgres_version.split(maxsplit=1)[0].split(".", maxsplit=1)[0])
     age = tuple(int(p) for p in (age_version or "0").split(".")[:2] if p.isdigit())
     if major < CURRENT_POSTGRES_MAJOR or age < CURRENT_AGE:
         return (
