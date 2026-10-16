@@ -4,7 +4,15 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.12.0 — 2026-10-16
+
+Team tools in the web UI and the server work behind them: select several nodes on the canvas,
+draw nodes and relationships, read a large canvas with a minimap, delete a batch of nodes, and
+import a CSV file that graphos reads, checks and writes itself. For agents and schema owners: one
+call checks many edges, a schema dry run lists what a change would break, and the stats say
+whether metrics and communities are still current. The OpenAPI document now describes every
+route, field and error, `/metrics` no longer names tenants, and the first architecture decision
+records are published.
 
 ### Added
 
