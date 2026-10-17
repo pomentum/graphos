@@ -10,17 +10,22 @@ under one version.
 
 - **An MCP endpoint for agents** ([ADR-0002](docs/adrs/ADR-0002-mcp-surface.md),
   [agents guide](docs/agents.md)): `GRAPHOS_MCP=true` mounts `/mcp` in the API, over the MCP
-  Python SDK's Streamable HTTP transport in stateless mode. 16 read tools (`list_tenants`,
-  `get_schema`, `search_nodes`, `get_node`, `get_neighbors`, `expand_subgraph`, `shortest_paths`,
+  Python SDK's Streamable HTTP transport in stateless mode. 22 read tools (`list_tenants`,
+  `get_schema`, `get_graph_map`, `get_property_definitions`, `get_graph_stats`, `recent_changes`,
+  `search_nodes`, `get_node`, `get_neighbors`, `expand_subgraph`, `shortest_paths`,
   `aggregate_nodes`, `get_property_values`, `aggregate_edges`, `scan_nodes`, `check_edges`,
-  `list_communities`, `community_summary`, `list_saved_queries`, `run_saved_query`) and two
-  resources (`graphos://{tenant}/schema/summary`, `graphos://{tenant}/properties`). Each tool runs
+  `list_communities`, `community_summary`, `list_saved_queries`, `get_saved_query`,
+  `run_saved_query`, and `run_cypher` where the read-only console is on, through its guard) and
+  three resources (`graphos://{tenant}/schema/summary`, `…/properties`, `…/saved-queries`). Each tool runs
   the REST route it wraps, in process and as the caller, so grants, caps and timeouts are the
   route's; every call is audited with `mcp_tool`, reads included. The tool list carries no tenant
   data. Results over `GRAPHOS_MCP_MAX_RESULT_BYTES` (256 KiB) are cut and say so. Tokens must
   carry `GRAPHOS_MCP_RESOURCE` as their audience (protected-resource metadata at
   `/.well-known/oauth-protected-resource[/mcp]`, 401 with `resource_metadata`); a browser
   `Origin` must be an allowed host. New dependency: `mcp` 2.3 (MIT).
+- **One saved query by name**: `GET /v1/{tenant}/cypher/saved/{name}` (text, description,
+  parameters), with the access running it needs; 404 while the console is off or when there is
+  none.
 - **OAuth client credentials for service accounts**: `POST /v1/auth/token`
   (`grant_type=client_credentials`, `client_id`, `client_secret`, `resource`), form-encoded.
   `resource` picks the token's audience: the REST API, or the MCP endpoint; a token for one is

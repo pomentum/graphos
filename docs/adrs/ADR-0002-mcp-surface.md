@@ -153,6 +153,10 @@ prompts (below).
 | `list_communities`, `community_summary` | `graph/communities`, `graph/community-summary` |
 | `list_saved_queries`, `run_saved_query` | `cypher/saved`, `cypher/saved/{name}:run`, typed parameters only |
 | `get_property_values` | `graph/nodes/aggregate` with `distinct`: the values a property really takes, with counts |
+| `get_graph_map`, `get_property_definitions`, `get_graph_stats` | `graph/map`, `graph/properties`, `graph/stats` |
+| `recent_changes` | `changes/history`: the latest writes, newest first |
+| `get_saved_query` | `cypher/saved/{name}`: one saved query's text and parameters |
+| `run_cypher` | `POST /v1/{tenant}/cypher`, through the console's guard; offered only where the console is on |
 | `check_edges` | `graph/edges:check`: for up to 1,000 `(src, type, dst)` triples, whether each edge is present, with its revision |
 
 **How they behave:**
@@ -171,11 +175,13 @@ prompts (below).
   - capped by `GRAPHOS_MCP_MAX_RESULT_BYTES` (default 256 KiB);
   - a capped result says so and how to page (`truncated`, the next cursor).
 
-**Version 1.1:**
-- **`run_cypher`:**
-  - only where the console is on (`GRAPHOS_CYPHER=true`) and the caller's grant allows it;
-  - it goes through the same guard, timeout, row cap and watchdog, in `BEGIN READ ONLY`;
-  - variable-length patterns follow ADR-0003.
+**`run_cypher`** (brought forward from version 1.1 into version 1):
+- only where the console is on (`GRAPHOS_CYPHER=true`) and the caller's grant allows it
+  (`GRAPHOS_CYPHER_LEVEL`);
+- it goes through the same guard, timeout, row cap and watchdog, in `BEGIN READ ONLY`;
+- variable-length patterns follow ADR-0003.
+
+**Later:**
 - **Query-time analyses** (impact, dominators, personalized PageRank, weighted paths), as tools,
   once their REST endpoints exist.
 

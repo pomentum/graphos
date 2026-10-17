@@ -1333,6 +1333,18 @@ async def test_schema_summary_parses_labels_values_and_text() -> None:
 
 
 @pytest.mark.asyncio
+async def test_saved_query_reads_one_by_name_and_none_when_missing() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.raw_path.endswith(b"/cypher/saved/docs%20of"):
+            return httpx.Response(200, json={"name": "docs of", "query": "MATCH (n) RETURN n"})
+        return httpx.Response(404, json={"detail": "no saved query"})
+
+    cli = _client_for(handler)
+    assert (await cli.saved_query("docs of"))["query"] == "MATCH (n) RETURN n"
+    assert await cli.saved_query("nope") is None
+
+
+@pytest.mark.asyncio
 async def test_import_csv_sends_the_file_and_the_mapping(tmp_path: Path) -> None:
     seen: list[tuple[str, dict[str, str], bytes, str]] = []
     answer = {

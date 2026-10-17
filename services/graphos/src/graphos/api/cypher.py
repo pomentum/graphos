@@ -140,6 +140,32 @@ async def list_saved(
     return [_saved(r) for r in rows]
 
 
+@router.get(
+    "/{tenant}/cypher/saved/{name}",
+    summary="One saved Cypher query",
+    description=(
+        "Its text, description, parameters and how to show its result, and who saved it "
+        "last. Needs what running a query needs; 404 while the console is off, or when there "
+        "is no such query."
+    ),
+    responses={404: {"description": "The console is off, or no saved query has this name."}},
+)
+async def get_saved(
+    tenant: Tenant, name: SavedName, request: Request, principal: ReadPrincipal,
+) -> SavedQuery:
+    _console(request, principal, tenant)
+    row = await request.app.state.pool.fetchrow(
+        "SELECT name, definition::text AS definition, created_by, updated_at "
+        "FROM graphos_meta.saved_queries WHERE tenant = $1 AND name = $2;",
+        tenant, name,
+    )
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"no saved query {name!r}",
+        )
+    return _saved(row)
+
+
 @router.put(
     "/{tenant}/cypher/saved/{name}",
     summary="Save a Cypher query under a name (replaces one of that name)",

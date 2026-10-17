@@ -93,6 +93,8 @@ class ToolSpec:
     route: Callable[[dict[str, Any]], tuple[str, str, dict[str, Any], Any]]
     access: str = "read"
     needs_tenant: bool = True
+    # Offered only where the Cypher console is on (GRAPHOS_CYPHER=true).
+    needs_console: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -112,6 +114,39 @@ TOOLS: tuple[ToolSpec, ...] = (
         "label pairs with counts, search indexes and saved queries. Call it first.",
         _schema(["tenant"], tenant=_TENANT),
         lambda a: ("GET", f"{_t(a)}/schema/summary", {}, None),
+    ),
+    ToolSpec(
+        "get_graph_map",
+        "Every label with its node count, and every (source label, edge type, target label) "
+        "with its edge count: the whole graph at a glance.",
+        _schema(["tenant"], tenant=_TENANT),
+        lambda a: ("GET", f"{_t(a)}/graph/map", {}, None),
+    ),
+    ToolSpec(
+        "get_property_definitions",
+        "The declared property definitions of each label and edge type: types, required, "
+        "allowed values, patterns, and the mode they are checked in.",
+        _schema(["tenant"], tenant=_TENANT),
+        lambda a: ("GET", f"{_t(a)}/graph/properties", {}, None),
+    ),
+    ToolSpec(
+        "get_graph_stats",
+        "Node and edge counts per label, and whether the stored metrics and communities are "
+        "current (`analyses`: when computed, rows written since).",
+        _schema(["tenant"], tenant=_TENANT),
+        lambda a: ("GET", f"{_t(a)}/graph/stats", {}, None),
+    ),
+    ToolSpec(
+        "recent_changes",
+        "The tenant's latest writes, newest first (what changed, who, when), from the change "
+        "feed; `before` pages back.",
+        _schema(["tenant"], tenant=_TENANT,
+                op={"type": "array", "items": {"type": "string"},
+                    "description": "Only these ops (upsert, merge, patch, delete, resolve, ...)."},
+                before={"type": "string", "description": "A cursor (`older`) from a page."},
+                limit={"type": "integer", "description": "Records, at most the feed's cap."}),
+        lambda a: ("GET", f"{_t(a)}/changes/history", _drop_none({
+            "op": a.get("op"), "before": a.get("before"), "limit": a.get("limit")}), None),
     ),
     ToolSpec(
         "search_nodes",
@@ -244,6 +279,13 @@ TOOLS: tuple[ToolSpec, ...] = (
         lambda a: ("GET", f"{_t(a)}/cypher/saved", {}, None),
     ),
     ToolSpec(
+        "get_saved_query",
+        "One saved Cypher query by name: its text, description and typed parameters.",
+        _schema(["tenant", "name"], tenant=_TENANT,
+                name={"type": "string", "description": "The saved query's name."}),
+        lambda a: ("GET", f"{_t(a)}/cypher/saved/{_q(a['name'])}", {}, None),
+    ),
+    ToolSpec(
         "run_saved_query", "Run a saved Cypher query with its typed parameters.",
         _schema(["tenant", "name"], tenant=_TENANT,
                 name={"type": "string", "description": "The saved query's name."},
@@ -252,10 +294,29 @@ TOOLS: tuple[ToolSpec, ...] = (
         lambda a: ("POST", f"{_t(a)}/cypher/saved/{_q(a['name'])}:run", {}, _drop_none({
             "params": a.get("params") or {}, "limit": a.get("limit")})),
     ),
+    ToolSpec(
+        "run_cypher",
+        "Run a read-only openCypher query on a tenant's graph, with `$name` parameters. Write "
+        "clauses, non-Cypher functions and variable-length patterns (-[*1..3]->) are refused; "
+        "use expand_subgraph or shortest_paths for those. Rows are capped and the query is "
+        "stopped after the console's timeout.",
+        _schema(["tenant", "query"], tenant=_TENANT,
+                query={"type": "string", "description": "The Cypher query."},
+                params={"type": "object", "description": "Values for `$name` parameters."},
+                limit={"type": "integer", "description": "Rows, at most the console's cap."}),
+        lambda a: ("POST", f"{_t(a)}/cypher", {}, _drop_none({
+            "query": a["query"], "params": a.get("params") or {}, "limit": a.get("limit")})),
+        needs_console=True,
+    ),
 )
 _BY_NAME = {t.name: t for t in TOOLS}
 
 RESOURCES = (
+    mt.ResourceTemplate(
+        name="saved_queries", uri_template="graphos://{tenant}/saved-queries",
+        description="A tenant's saved Cypher queries with their text and parameters, as JSON.",
+        mime_type="application/json",
+    ),
     mt.ResourceTemplate(
         name="schema_summary", uri_template="graphos://{tenant}/schema/summary",
         description="A tenant's schema summary, as get_schema returns it, as text.",
@@ -269,8 +330,15 @@ RESOURCES = (
 )
 
 
-def tool_list() -> list[mt.Tool]:
-    """The tools, the same for every caller and every tenant."""
+def offered(settings: Settings | None = None) -> tuple[ToolSpec, ...]:
+    """The tools this server offers: every one, ``run_cypher`` only with the console on."""
+    console = bool(settings and settings.cypher)
+    return tuple(t for t in TOOLS if console or not t.needs_console)
+
+
+def tool_list(settings: Settings | None = None) -> list[mt.Tool]:
+    """The tools, the same for every caller and every tenant (they depend on the
+    server's settings only, never on tenant data)."""
     return [
         mt.Tool(
             name=t.name, description=t.description, input_schema=t.input_schema,
@@ -279,7 +347,7 @@ def tool_list() -> list[mt.Tool]:
                 idempotent_hint=True, open_world_hint=False,
             ),
         )
-        for t in TOOLS
+        for t in offered(settings)
     ]
 
 
@@ -354,7 +422,7 @@ class McpEndpoint:
     # ── MCP handlers ────────────────────────────────────────────────────
 
     async def _list_tools(self, ctx: Any, params: Any) -> mt.ListToolsResult:
-        return mt.ListToolsResult(tools=tool_list())
+        return mt.ListToolsResult(tools=tool_list(self.settings))
 
     async def _list_templates(self, ctx: Any, params: Any) -> mt.ListResourceTemplatesResult:
         return mt.ListResourceTemplatesResult(resource_templates=list(RESOURCES))
@@ -362,7 +430,7 @@ class McpEndpoint:
     async def _call_tool(self, ctx: Any, params: mt.CallToolRequestParams) -> mt.CallToolResult:
         spec = _BY_NAME.get(params.name)
         args = dict(params.arguments or {})
-        if spec is None:
+        if spec is None or spec not in offered(self.settings):
             return _error(f"unknown tool {params.name!r}")
         missing = [k for k in spec.input_schema.get("required", []) if k not in args]
         if missing:
@@ -388,6 +456,11 @@ class McpEndpoint:
             )
             text = payload.get("text", "") if isinstance(payload, dict) else ""
             mime = "text/plain"
+        elif parts.path == "/saved-queries":
+            status, payload = await self._run(
+                ctx, "resource:saved_queries", "GET", f"/v1/{_q(tenant)}/cypher/saved", {}, None,
+            )
+            text, mime = json.dumps(payload), "application/json"
         elif parts.path == "/properties":
             status, payload = await self._run(
                 ctx, "resource:properties", "GET", f"/v1/{_q(tenant)}/graph/properties", {}, None,

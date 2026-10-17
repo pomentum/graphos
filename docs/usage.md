@@ -1149,7 +1149,7 @@ curl -s -X POST "$G/v1/acme/cypher" -H "Authorization: Bearer $TOKEN" -H 'Conten
 **Saved queries** are named, parameterised queries a tenant's maintainers keep for its readers:
 `PUT /v1/{tenant}/cypher/saved/{name}` with `{"description", "query", "params": {"kind":
 {"type": "string", "label": "Kind"}}, "show": "table" | "graph"}` (`maintain`);
-`GET /v1/{tenant}/cypher/saved`; `POST /v1/{tenant}/cypher/saved/{name}:run` with `{"params": …}`
+`GET /v1/{tenant}/cypher/saved` (or one: `GET /v1/{tenant}/cypher/saved/{name}`); `POST /v1/{tenant}/cypher/saved/{name}:run` with `{"params": …}`
 (every declared parameter, each of its type: `string`, `number`, `boolean` or `list`, and no
 other; 422 otherwise); `DELETE …/saved/{name}` (`maintain`). A name is a letter or digit, then up
 to 62 of those, `_` or `-`. While the console is off, all of them answer 404. They go with the

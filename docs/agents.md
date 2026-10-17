@@ -74,6 +74,10 @@ as the caller, so it answers exactly what the route does (§ references are to [
 |---|---|---|
 | `list_tenants` | the tenants the caller may read, with its level | `GET /v1/me` |
 | `get_schema` | labels, counts, properties and their real values, label pairs, search indexes, saved queries | `GET /v1/{t}/schema/summary` |
+| `get_graph_map` | every label with its node count, every label pair per edge type with its count | `GET …/graph/map` |
+| `get_property_definitions` | the declared property definitions and their modes | `GET …/graph/properties` |
+| `get_graph_stats` | counts per label, and whether metrics and communities are current | `GET …/graph/stats` |
+| `recent_changes` | the latest writes, newest first: what, who, when | `GET /v1/{t}/changes/history` |
 | `search_nodes` | nodes by text, or ranked through a search index | `GET …/graph/search` |
 | `get_node` | one node by id | `GET …/graph/nodes/{id}` |
 | `get_neighbors` | one node's edges and the nodes at their other end | `GET …/graph/neighbors` |
@@ -84,10 +88,17 @@ as the caller, so it answers exactly what the route does (§ references are to [
 | `scan_nodes` | nodes matching property filters, by pages | `POST …/graph/nodes:scan` |
 | `check_edges` | whether each of up to 1,000 edges exists | `POST …/graph/edges:check` |
 | `list_communities`, `community_summary` | the communities of the last recompute | `GET …/graph/communities`, `…/community-summary` |
-| `list_saved_queries`, `run_saved_query` | the tenant's saved Cypher queries, run with typed parameters | `…/cypher/saved` (needs the console on) |
+| `list_saved_queries`, `get_saved_query`, `run_saved_query` | the tenant's saved Cypher queries (text, description, typed parameters), one by name, run with its parameters | `…/cypher/saved[/{name}[:run]]` (needs the console on) |
+| `run_cypher` | a read-only openCypher query with `$name` parameters | `POST /v1/{t}/cypher`; offered only with `GRAPHOS_CYPHER=true`, held to `GRAPHOS_CYPHER_LEVEL` |
 
-Resources: `graphos://{tenant}/schema/summary` (the summary as text) and
-`graphos://{tenant}/properties` (the property definitions), each with a `ttlMs`.
+Resources: `graphos://{tenant}/schema/summary` (the summary as text),
+`graphos://{tenant}/properties` (the property definitions) and `graphos://{tenant}/saved-queries`
+(the saved queries), each with a `ttlMs`.
+
+`run_cypher` goes through the console's guard unchanged: write clauses, schema-qualified and
+non-Cypher functions and variable-length patterns are refused before the database; the query runs
+in a read-only transaction on the console's own pool, with its row cap, timeout and watchdog; one
+query at a time per caller; its text is audited.
 
 The schema summary is also a REST endpoint for anyone writing prompts by hand:
 `GET /v1/{tenant}/schema/summary` (JSON, with the compact text in `text`) or
@@ -101,6 +112,6 @@ The schema summary is also a REST endpoint for anyone writing prompts by hand:
 - **Every call is audited**, reads included, whatever `GRAPHOS_AUDIT_READS` says: the audit line
   carries the consumer and `mcp_tool`.
 - **Grants hold as on REST**: a tenant the caller has no grant on is refused like a missing one.
-- **Reads only.** Writes, and Cypher outside saved queries, are not offered over MCP.
+- **Reads only.** No tool writes; Cypher is read-only and only where the console is on.
 - **Limits**: the routes' own caps and timeouts, the result byte cap, and the rate limiter when
   on.

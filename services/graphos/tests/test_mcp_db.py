@@ -10,10 +10,12 @@ endpoint), so the audience rules are those of a real deployment.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import AsyncIterator
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 import asyncpg
 import httpx
@@ -23,6 +25,7 @@ import pytest_asyncio
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 
+from graphos import console as console_mod
 from graphos import writes
 from graphos.app import create_app, setup_identity
 from graphos.bootstrap import TenantSpec, forget, register_tenant
@@ -67,9 +70,11 @@ async def app(db_pool: asyncpg.Pool, tmp_path: Path) -> AsyncIterator[Any]:
     )
     password_file = tmp_path / "admin_password"
     password_file.write_text(FIRST + "\n")
+    dsn = urlparse(os.environ["GRAPHOS_TEST_DSN"])
     settings = Settings(
-        db_password="placeholder", admin_password_file=password_file,
-        mcp=True, mcp_resource=RESOURCE,
+        db_host=dsn.hostname, db_port=dsn.port or 5432, db_name=dsn.path.lstrip("/"),
+        db_user=unquote(dsn.username or ""), db_password=unquote(dsn.password or ""),
+        admin_password_file=password_file, mcp=True, mcp_resource=RESOURCE,
     )
     application = create_app(settings)
     application.state.pool = db_pool
@@ -82,8 +87,9 @@ def _rest(app: Any) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost")
 
 
-async def _service_secret(rest: httpx.AsyncClient) -> str:
-    """Admin signs in, creates service account "agent" with read on TENANT: its secret."""
+async def _service_secret(rest: httpx.AsyncClient, saved: dict[str, Any] | None = None) -> str:
+    """Admin signs in, creates service account "agent" with read on TENANT (and saves
+    ``saved`` as query "active_docs"): its secret."""
     first = (await rest.post("/v1/auth/login", json={"user": "graphos", "password": FIRST})).json()
     admin = (await rest.post(
         "/v1/me/password", headers={"Authorization": f"Bearer {first['access_token']}"},
@@ -96,6 +102,9 @@ async def _service_secret(rest: httpx.AsyncClient) -> str:
         "subject": "user:agent", "tenant": TENANT, "level": "read",
     })
     assert granted.status_code in (HTTPStatus.OK, HTTPStatus.CREATED), granted.text
+    if saved is not None:
+        put = await rest.put(f"/v1/{TENANT}/cypher/saved/active_docs", headers=auth, json=saved)
+        assert put.status_code in (HTTPStatus.OK, HTTPStatus.CREATED), put.text
     return str(created.json()["password"])
 
 
@@ -146,6 +155,12 @@ async def test_an_agent_reads_a_granted_tenant_and_every_call_is_audited(
         assert refused.is_error                        # no grant on the other tenant
         summary = await client.read_resource(f"graphos://{TENANT}/schema/summary")
         assert "Doc" in summary.contents[0].text
+        graph_map = await client.call_tool("get_graph_map", {"tenant": TENANT})
+        assert graph_map.structured_content["labels"] == [{"label": "Doc", "count": 3}]
+        stats = await client.call_tool("get_graph_stats", {"tenant": TENANT})
+        assert stats.structured_content["n_vertices"] == 3  # noqa: PLR2004
+        changes = await client.call_tool("recent_changes", {"tenant": TENANT, "limit": 5})
+        assert not changes.is_error, changes.content
     tools = [r.mcp_tool for r in caplog.records if hasattr(r, "mcp_tool")]
     assert {"list_tenants", "get_schema", "search_nodes", "check_edges"} <= set(tools)
     assert all(getattr(r, "consumer", None) == "agent"
@@ -173,3 +188,48 @@ async def test_a_token_opens_only_the_resource_it_was_issued_for(app: Any) -> No
             "grant_type": "client_credentials", "client_id": "graphos", "client_secret": SECOND,
         })
         assert person.status_code == HTTPStatus.UNAUTHORIZED     # not a service account
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_run_cypher_is_offered_with_the_console_and_keeps_its_guard(
+    app: Any, db_pool: asyncpg.Pool,
+) -> None:
+    settings = app.state.settings.model_copy(update={"cypher": True})
+    app.state.settings = settings
+    app.state.mcp.settings = settings
+    app.state.console = await console_mod.start(settings, db_pool)
+    try:
+        saved = {"description": "Documents in a status", "params": {"s": {"type": "string"}},
+                 "query": "MATCH (d:Doc) WHERE d.status = $s RETURN d.name ORDER BY d.name"}
+        async with _rest(app) as rest:
+            secret = await _service_secret(rest, saved)
+            token = (await _token(rest, secret, RESOURCE)).json()["access_token"]
+        async with app.state.mcp.manager.run(), _mcp(app, token) as client:
+            assert "run_cypher" in [t.name for t in (await client.list_tools()).tools]
+            listed = await client.call_tool("list_saved_queries", {"tenant": TENANT})
+            assert [q["name"] for q in listed.structured_content["result"]] == ["active_docs"]
+            one = await client.call_tool(
+                "get_saved_query", {"tenant": TENANT, "name": "active_docs"},
+            )
+            assert one.structured_content["query"] == saved["query"]
+            ran = await client.call_tool("run_saved_query", {
+                "tenant": TENANT, "name": "active_docs", "params": {"s": "ACT"},
+            })
+            assert ran.structured_content["rows"] == [["alpha"], ["beta"]]
+            missing = await client.call_tool("get_saved_query", {"tenant": TENANT, "name": "nope"})
+            assert missing.is_error
+            resource = await client.read_resource(f"graphos://{TENANT}/saved-queries")
+            assert "active_docs" in resource.contents[0].text
+            counted = await client.call_tool("run_cypher", {
+                "tenant": TENANT, "query": "MATCH (d:Doc) WHERE d.status = $s RETURN count(d)",
+                "params": {"s": "ACT"},
+            })
+            assert not counted.is_error, counted.content
+            assert counted.structured_content["rows"] == [[2]]
+            for query in ("CREATE (n:Doc {id: 'x'}) RETURN n",
+                          "MATCH (a:Doc)-[*1..3]->(b) RETURN b"):
+                refused = await client.call_tool("run_cypher", {"tenant": TENANT, "query": query})
+                assert refused.is_error, query
+    finally:
+        await app.state.console.pool.close()

@@ -576,6 +576,19 @@ class GraphosClient:
         resp = await self._request("GET", f"/v1/{self._tenant}/cypher/saved")
         return list(resp.json())
 
+    async def saved_query(self, name: str) -> dict[str, Any] | None:
+        """One saved Cypher query by name (its text, description, parameters);
+        None when there is none."""
+        try:
+            resp = await self._request(
+                "GET", f"/v1/{self._tenant}/cypher/saved/{quote(name, safe='')}",
+            )
+        except GraphosError as exc:
+            if getattr(exc, "status_code", None) == HTTPStatus.NOT_FOUND:
+                return None
+            raise
+        return dict(resp.json())
+
     async def save_query(  # noqa: PLR0913 — a saved query's fields
         self,
         name: str,
