@@ -104,7 +104,7 @@ async def create_pool(settings: Settings) -> asyncpg.Pool:
 # The oldest database graphos starts on (ADR-0007), the one it ships with
 # (docker-compose.graphos.yml). PostgreSQL 16 has no AGE after 1.6, which carries
 # out some Cypher writes in a read-only transaction and can wedge a database
-# process on a variable-length pattern (docs/apache-age.md).
+# process on a variable-length pattern (docs/guide/apache-age.md).
 MIN_POSTGRES_MAJOR = 18
 MIN_AGE = (1, 8)
 
@@ -126,7 +126,7 @@ def unsupported_database(postgres_version: str, age_version: str | None) -> str 
         return (
             f"PostgreSQL {major} with AGE {age_version or '(none)'} is not supported: graphos "
             f"needs PostgreSQL {MIN_POSTGRES_MAJOR} with AGE {'.'.join(map(str, MIN_AGE))} or "
-            "later. To move, see docs/upgrade-postgresql-18.md"
+            "later. To move, see docs/guide/upgrade-postgresql-18.md"
         )
     return None
 

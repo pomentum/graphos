@@ -22,7 +22,7 @@ and the old line removed.  Losing the file means losing what it sealed:
 graphos refuses to start on sealed signing keys it cannot open.  To
 recover, delete the rows of ``graphos_meta.signing_keys`` (graphos makes a
 new key; everyone signs in again) and null ``id_token`` in
-``graphos_meta.sessions`` (docs/installation.md §8).
+``graphos_meta.sessions`` (docs/guide/installation.md §8).
 
 **Without a master key** values are stored as they are, as before, with a
 warning at start.  A value that is not sealed is read as it is, so rows

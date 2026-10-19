@@ -86,7 +86,7 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Diagrams and whitepaper figures are up to date
+      - name: Diagrams are up to date
         run: node tools/docs/diagrams.mjs --check
 
       - name: One version across server, client and UI

@@ -62,7 +62,7 @@ services:
       - graphos-internal
     # Sized to start on a laptop (about 4 GB free for Docker).  For graphs
     # with millions of edges raise shared_buffers (4GB), effective_cache_size
-    # (6GB) and this limit (6g) together: see docs/apache-age.md, tuning.
+    # (6GB) and this limit (6g) together: see docs/guide/apache-age.md, tuning.
     mem_limit: 2g
     mem_reservation: 512m
     # Raise ``/dev/shm`` from the Docker default 64 MB to 1 GB. Large
@@ -151,7 +151,7 @@ services:
       # The host names clients reach graphos by, against DNS rebinding; add
       # graphos-api when the bundled web UI proxies to it. Empty: any Host.
       GRAPHOS_ALLOWED_HOSTS: ${GRAPHOS_ALLOWED_HOSTS:-}
-      # The MCP endpoint for agents at /mcp (docs/agents.md); false turns it off.
+      # The MCP endpoint for agents at /mcp (docs/guide/agents.md); false turns it off.
       GRAPHOS_MCP: ${GRAPHOS_MCP:-true}
       GRAPHOS_BIND_HOST: "0.0.0.0"
       GRAPHOS_BIND_PORT: "8080"
@@ -192,7 +192,7 @@ services:
 
   # The web UI: static files and a same-origin proxy to graphos-api, no state of
   # its own. Opt in with `--profile ui`. Users sign in with their graphos user name and password,
-  # or through single sign-on when graphos-api has GRAPHOS_OIDC_* set (docs/installation.md).
+  # or through single sign-on when graphos-api has GRAPHOS_OIDC_* set (docs/guide/installation.md).
   graphos-ui:
     profiles: ["ui"]
     image: graphos-ui:${GRAPHOS_UI_TAG:-dev}

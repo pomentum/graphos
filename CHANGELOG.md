@@ -8,8 +8,8 @@ under one version.
 
 ### Added
 
-- **An MCP endpoint for agents** ([ADR-0002](docs/adrs/ADR-0002-mcp-surface.md),
-  [ADR-0008](docs/adrs/ADR-0008-mcp-uses-the-api-tokens.md), [agents guide](docs/agents.md)):
+- **An MCP endpoint for agents** ([ADR-0002](docs/guide/adrs/ADR-0002-mcp-surface.md),
+  [ADR-0008](docs/guide/adrs/ADR-0008-mcp-uses-the-api-tokens.md), [agents guide](docs/guide/agents.md)):
   `/mcp` in the API, on unless `GRAPHOS_MCP=false`, over the MCP Python SDK's Streamable HTTP
   transport in stateless mode. 22 read tools (`list_tenants`,
   `get_schema`, `get_graph_map`, `get_property_definitions`, `get_graph_stats`, `recent_changes`,
@@ -51,7 +51,7 @@ under one version.
   five minutes and dropped when the schema changes. Client:
   `schema_summary()`, with the `SchemaSummaryResponse` models.
 
-- **Reconcile edges by difference** ([ADR-0001](docs/adrs/ADR-0001-edge-reconciliation.md)):
+- **Reconcile edges by difference** ([ADR-0001](docs/guide/adrs/ADR-0001-edge-reconciliation.md)):
   `POST …/graph/edges:reconcile` takes the complete set of edges wanted in a scope and makes the
   stored set equal to it in one transaction: missing edges added, kept edges whose properties
   change rewritten (`props`: `merge` or `replace`), the rest deleted; an unchanged edge keeps its
@@ -83,7 +83,7 @@ under one version.
   requests for any other `Host` with 400, against DNS rebinding; `localhost` and `127.0.0.1` are
   always allowed. Empty (the default): off.
 
-- **Docs:** a guide for connecting AI agents, `docs/agents.md` (where `/mcp` is, the tokens it
+- **Docs:** a guide for connecting AI agents, `docs/guide/agents.md` (where `/mcp` is, the tokens it
   takes, how MCP clients sign people in through graphos or single sign-on with Keycloak's
   settings, the tools and their security); ADR-0006, ADR-0007 and ADR-0008 accepted, ADR-0001
   and ADR-0002 updated; the installation guide's checklist covers what is on by default.
@@ -91,17 +91,31 @@ under one version.
   must do itself, known security limits), `CONTRIBUTING.md` (where the rules are, how to open a
   pull request), issue templates for bugs and feature requests, and a pull request template.
 
+- **Docs:** a website for graphos on GitHub Pages, served from `docs/` on `main`: one page with
+  features, measured benchmarks, the web UI, a quickstart and the documentation. `tools/docs/site.py` writes `docs/index.html` from the README and the version
+  (`--check` tells when it is out of date); no workflow builds or deploys it.
+
 ### Changed
 
+- **Docs:** the guides and the ADRs moved from `docs/` to `docs/guide/` (`docs/guide/adrs/`), so
+  `docs/` holds only the website and the pictures. Every link in the repository follows, and the
+  server's PostgreSQL 16 refusal names `docs/guide/upgrade-postgresql-18.md`. Links from outside
+  to `docs/<guide>.md` on GitHub now need `docs/guide/<guide>.md`.
+
+- **Docs:** the whitepaper and its Vercel deployment are gone; the website takes their place.
+  `diagrams.mjs` draws the diagrams only, `screenshots.py` writes PNGs only (the JPEG copies were
+  the whitepaper's), and a release no longer dates a page. The README's badge and "Website" line
+  point to the website.
+
 - **PostgreSQL 16 / AGE 1.6 is no longer supported**
-  ([ADR-0007](docs/adrs/ADR-0007-drop-postgresql-16.md)): graphos-api refuses to start on
+  ([ADR-0007](docs/guide/adrs/ADR-0007-drop-postgresql-16.md)): graphos-api refuses to start on
   PostgreSQL before 18 or AGE before 1.8, naming the versions it found and the
-  [upgrade guide](docs/upgrade-postgresql-18.md), where it used to start with a warning. **A
+  [upgrade guide](docs/guide/upgrade-postgresql-18.md), where it used to start with a warning. **A
   stack still on PostgreSQL 16 must move before or as it upgrades**: with the compose file,
   `docker compose up -d` moves it by itself, as since 0.10.0 (`graphos-db-export` and
   `graphos-db-import` stay). `GET /v1/info` no longer has `database_deprecated`. CI runs the
   integration tests on PostgreSQL 18 / AGE 1.8 only.
-- **The Cypher console is on by default** ([ADR-0006](docs/adrs/ADR-0006-console-on-by-default.md)):
+- **The Cypher console is on by default** ([ADR-0006](docs/guide/adrs/ADR-0006-console-on-by-default.md)):
   `GRAPHOS_CYPHER` now defaults to `true`, so the UI's Query page, saved queries and the MCP
   `run_cypher` tool work on a fresh install. Its guard, limits, audit and level
   (`GRAPHOS_CYPHER_LEVEL`, `read`) are unchanged, and its pool opens no connection until a query
@@ -202,18 +216,18 @@ records are published.
   written before graphos has the whole file) and graphos's answer. The web UI's API layer has
   `csvImport()`.
 - **Docs:** development guides, for people and coding agents: the rules for the whole repository
-  ([docs/development.md](docs/development.md): docs, pictures and docs tools, test stacks, git,
+  ([docs/guide/development.md](docs/guide/development.md): docs, pictures and docs tools, test stacks, git,
   privacy) and a `DEVELOPMENT.md` in each package for the
   [service](services/graphos/DEVELOPMENT.md), the [client](clients/python/DEVELOPMENT.md) and the
   [web UI](services/graphos-ui/DEVELOPMENT.md); architecture decision records in
-  [docs/adrs/](docs/adrs/README.md), with when one is needed and its template; `AGENTS.md` and
+  [docs/guide/adrs/](docs/guide/adrs/README.md), with when one is needed and its template; `AGENTS.md` and
   `CLAUDE.md` at the root point to them.
 - **Docs:** the first five architecture decision records, all proposed: edge reconciliation by
-  difference ([ADR-0001](docs/adrs/ADR-0001-edge-reconciliation.md)), an MCP surface for agents and
-  a schema summary ([ADR-0002](docs/adrs/ADR-0002-mcp-surface.md)), variable-length Cypher patterns
-  in the console ([ADR-0003](docs/adrs/ADR-0003-variable-length-cypher.md)), team annotations
-  ([ADR-0004](docs/adrs/ADR-0004-team-annotations.md)) and a geographic view with no third-party
-  calls from the UI by default ([ADR-0005](docs/adrs/ADR-0005-geo-view-and-external-calls.md)).
+  difference ([ADR-0001](docs/guide/adrs/ADR-0001-edge-reconciliation.md)), an MCP surface for agents and
+  a schema summary ([ADR-0002](docs/guide/adrs/ADR-0002-mcp-surface.md)), variable-length Cypher patterns
+  in the console ([ADR-0003](docs/guide/adrs/ADR-0003-variable-length-cypher.md)), team annotations
+  ([ADR-0004](docs/guide/adrs/ADR-0004-team-annotations.md)) and a geographic view with no third-party
+  calls from the UI by default ([ADR-0005](docs/guide/adrs/ADR-0005-geo-view-and-external-calls.md)).
 
 ### Changed
 
@@ -263,7 +277,7 @@ shares anything with a graphos stack running on the same machine.
   it where missing, as AGE's script does, and graphos-api adds it at start to the label tables of
   every registered tenant (one catalogue read when nothing is missing; nothing before AGE 1.8). A
   database moved by hand runs the same block ([Upgrading the
-  database](docs/upgrade-postgresql-18.md#age-18s-cache-trigger)). Nothing graphos does changed:
+  database](docs/guide/upgrade-postgresql-18.md#age-18s-cache-trigger)). Nothing graphos does changed:
   it never reads AGE's in-memory graph; anything else that does now sees graphos's writes.
 - **`scripts/run-db-tests.sh` runs as a compose project of its own**, `graphos-test`. It started
   the compose file as the `graphos` project, with its container names, volumes, networks and port:
@@ -330,7 +344,7 @@ in line with the code throughout.
 - **Docs**, checked against the code: the configuration table lists every setting; status codes,
   permissions, the Cypher console's refusals, the move to PostgreSQL 18 and the client's coverage
   are brought up to date. A logical restore must be serial: `pg_restore -j` fails on AGE's catalog
-  tables ([Upgrading the database](docs/upgrade-postgresql-18.md)).
+  tables ([Upgrading the database](docs/guide/upgrade-postgresql-18.md)).
 
 ## 0.10.0 — 2026-10-15
 
@@ -345,7 +359,7 @@ runs on either database: CI runs the server's tests against both.
 - **`tools/export/ndjson_to_age.py`**: loads a dataset export into a plain Apache AGE graph,
   without graphos: one label table per label and type, with AGE's own columns only, so AGE's
   variable-length patterns work on it. For leaving graphos, or for analysis in plain AGE. See
-  [Reading graphos's data without graphos](docs/without-graphos.md).
+  [Reading graphos's data without graphos](docs/guide/without-graphos.md).
 - **Docs:** direct SQL readers (a read-only role per tenant, AGE 1.8 required; installation §8);
   an application that forwards its users' tokens, so the audit names the person (sso §4a);
   measurements on PostgreSQL 18 / AGE 1.8 (apache-age.md §12).
@@ -385,7 +399,7 @@ runs on either database: CI runs the server's tests against both.
   Cypher writes in a read-only transaction and can wedge a database process on a variable-length
   pattern. graphos logs `database deprecated` at start, and `GET /v1/info` reports
   `database_deprecated` (the reason, or `null`). Move with `docker compose up`: see
-  [Upgrading the database](docs/upgrade-postgresql-18.md).
+  [Upgrading the database](docs/guide/upgrade-postgresql-18.md).
 - **`GET /v1/{tenant}/graph/labels/{label}/histogram`**: `nodes/aggregate` with `missing: true`
   gives the same counts (`total` for `n_total`). The client's `label_histogram` warns. Both stay
   until a later release.
@@ -412,7 +426,7 @@ runs on either database: CI runs the server's tests against both.
 
 - **Compose:** update the files and run `docker compose -f docker-compose.graphos.yml up -d`. The
   first start moves the data (about as long as a dump and a restore); see
-  [Upgrading the database](docs/upgrade-postgresql-18.md). Once content, remove
+  [Upgrading the database](docs/guide/upgrade-postgresql-18.md). Once content, remove
   the old data: `docker volume rm graphos_data graphos_upgrade`.
 - **Your own database:** graphos still runs on PostgreSQL 16 with AGE 1.6; to move it to 18, see
   the same section.
@@ -867,7 +881,7 @@ incoming edges. Run a community recompute once after upgrading (see *Upgrading f
 
 ### Added
 
-- **Docs: using the results in a client** ([graph algorithms](docs/algorithms.md#using-the-results-in-a-client)):
+- **Docs: using the results in a client** ([graph algorithms](docs/guide/algorithms.md#using-the-results-in-a-client)):
   ranking search hits by PageRank, focusing a walk on a community, one hit per community,
   bridges by betweenness, keeping hubs in check; with
   `clients/python/examples/09_better_answers.py` running each on the demo tenant.
@@ -887,7 +901,7 @@ incoming edges. Run a community recompute once after upgrading (see *Upgrading f
   metrics in plain words, read-only; the raw `graphos_*` and `community_id` rows are no longer
   listed with the properties one edits.
 - Docs: running the published images with Louvain, with a tested compose override
-  ([installation guide](docs/installation.md#louvain-with-the-published-images)).
+  ([installation guide](docs/guide/installation.md#louvain-with-the-published-images)).
 
 ### Changed
 
@@ -995,9 +1009,9 @@ for every deployment (see *Upgrading* below).
   `GET /v1/jobs` takes `status` more than once.
 - **Feed history:** `GET /v1/{tenant}/changes/history?before=&op=&limit=` reads the feed newest
   first. Python client: `changes_history(…)`, `ChangesHistory`; `list_jobs(status=[…])`.
-- **Docs:** an [installation guide](docs/installation.md) (first sign-in, users, single sign-on with
+- **Docs:** an [installation guide](docs/guide/installation.md) (first sign-in, users, single sign-on with
   every `GRAPHOS_OIDC_*` setting, production settings, upgrading), a page on the
-  [graph algorithms](docs/algorithms.md) and what each one is for, and screenshots of the UI in the
+  [graph algorithms](docs/guide/algorithms.md) and what each one is for, and screenshots of the UI in the
   README, the UI README and the whitepaper.
 - **Demo tenant:** `clients/python/examples/08_demo_ecosystem.py` loads an invented open-source
   ecosystem (about 450 nodes in six ecosystems) and runs every algorithm on it; the docs'

@@ -27,7 +27,7 @@ once it runs is in the [usage guide](usage.md).
 | `graphos-api` | built from `services/graphos` (published: `ghcr.io/<owner>/graphos-api`) | The REST API, sign-in and the background jobs. Listens on `127.0.0.1:8080`. |
 | `graphos-ui` (optional) | built from `services/graphos-ui` (published: `ghcr.io/<owner>/graphos-ui`) | The web UI: static files and a same-origin proxy to the API, no state of its own. Listens on `127.0.0.1:8081`. |
 
-[`docker-compose.graphos.yml`](../docker-compose.graphos.yml) runs all of them.
+[`docker-compose.graphos.yml`](../../docker-compose.graphos.yml) runs all of them.
 
 **Requirements:** Docker with Compose v2, and about 4 GB of memory for Docker (the defaults are
 laptop-sized; [tuning](apache-age.md) covers graphs of millions of edges). For single sign-on, an
@@ -237,7 +237,7 @@ python clients/python/examples/08_demo_ecosystem.py
 It registers the tenant `demo`, loads it, computes the graph metrics and, with the Louvain extra,
 the communities. Then open the UI, pick `demo`, and use *Explore → Graph → Colours → By group*.
 
-![The Explore view of the demo tenant, coloured by community](images/ui-explore-graph-dark.png)
+![The Explore view of the demo tenant, coloured by community](../images/ui-explore-graph-dark.png)
 
 ## 8. Before other people use it
 
@@ -324,7 +324,7 @@ in graphos's audit log; use PostgreSQL's logging (`log_statement`, `pgaudit`) if
 
 ## 9. Settings for sign-in and access
 
-All settings are environment variables prefixed `GRAPHOS_` ([`config.py`](../services/graphos/src/graphos/config.py)
+All settings are environment variables prefixed `GRAPHOS_` ([`config.py`](../../services/graphos/src/graphos/config.py)
 lists every one; the README the most common). Those for sign-in, besides the OIDC ones in §5:
 
 | Variable | Default | Meaning |
@@ -358,7 +358,7 @@ lists every one; the README the most common). Those for sign-in, besides the OID
   no Louvain; with the compose file, run the published images and add Louvain as in
   [§6](#louvain-with-the-published-images).
 - **Without containers.** `pip install "./services/graphos[louvain]"`, point `GRAPHOS_DB_*` at the
-  database, and run `python -m graphos` (see [services/graphos](../services/graphos/README.md)).
+  database, and run `python -m graphos` (see [services/graphos](../../services/graphos/README.md)).
 
 ## 11. Upgrading from PostgreSQL 16
 
@@ -390,7 +390,7 @@ database you run yourself.
 4. Give each consumer its account: with the Python client, `GRAPHOS_USER` and `GRAPHOS_PASSWORD`
    (or `auth=PasswordAuth(...)`) instead of a token.
 
-The [changelog](../CHANGELOG.md) lists every other change.
+The [changelog](../../CHANGELOG.md) lists every other change.
 
 ## 13. Locked out
 

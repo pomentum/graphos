@@ -4,31 +4,32 @@ The rules for working on this repository, for people and for coding agents.
 This file holds what applies to the whole repository; each component has a
 guide of its own:
 
-- **[services/graphos/DEVELOPMENT.md](../services/graphos/DEVELOPMENT.md)**: the service
+- **[services/graphos/DEVELOPMENT.md](../../services/graphos/DEVELOPMENT.md)**: the service
   (`services/graphos/`): where to look, database tests, the data-model
   invariants, Python conventions.
-- **[clients/python/DEVELOPMENT.md](../clients/python/DEVELOPMENT.md)**: the Python client
+- **[clients/python/DEVELOPMENT.md](../../clients/python/DEVELOPMENT.md)**: the Python client
   (`clients/python/`): models that mirror the service, retries, release.
-- **[services/graphos-ui/DEVELOPMENT.md](../services/graphos-ui/DEVELOPMENT.md)**: the web UI
+- **[services/graphos-ui/DEVELOPMENT.md](../../services/graphos-ui/DEVELOPMENT.md)**: the web UI
   (`services/graphos-ui/`): layers, text, screenshots.
 
-Together these files are the single source of truth: [`AGENTS.md`](../AGENTS.md)
-and [`CLAUDE.md`](../CLAUDE.md) point here and do not repeat them.
+Together these files are the single source of truth: [`AGENTS.md`](../../AGENTS.md)
+and [`CLAUDE.md`](../../CLAUDE.md) point here and do not repeat them.
 
 ## 1. Layout
 
 | Path | What it is | Guide |
 |---|---|---|
-| `services/graphos/` | The service, `graphos-api`: FastAPI on PostgreSQL + Apache AGE (Python 3.11+). | [service](../services/graphos/DEVELOPMENT.md) |
-| `clients/python/` | The Python client, `graphos-client`, published on its own. | [client](../clients/python/DEVELOPMENT.md) |
-| `services/graphos-ui/` | The web UI: React, TypeScript, Vite, Mantine. | [UI](../services/graphos-ui/DEVELOPMENT.md) |
+| `services/graphos/` | The service, `graphos-api`: FastAPI on PostgreSQL + Apache AGE (Python 3.11+). | [service](../../services/graphos/DEVELOPMENT.md) |
+| `clients/python/` | The Python client, `graphos-client`, published on its own. | [client](../../clients/python/DEVELOPMENT.md) |
+| `services/graphos-ui/` | The web UI: React, TypeScript, Vite, Mantine. | [UI](../../services/graphos-ui/DEVELOPMENT.md) |
 | `docker-compose.graphos.yml` | The stack: `graphos-db` (PostgreSQL 18 + AGE 1.8), `graphos-api`, `graphos-ui` (profile `ui`), and the move from PostgreSQL 16. | |
 | `docker-compose.louvain.yml` | Adds python-igraph (GPL) to a published image at start, for Louvain. | |
 | `scripts/` | `init-secrets.sh` / `.ps1`, `run-db-tests.sh`, benchmarks. | |
-| `tools/` | `docs/` (diagrams, UI screenshots, API docs assets), `release/version.mjs`, `export/ndjson_to_age.py`. | |
-| `docs/` | User and design documentation; [`README.md`](README.md) is its index. | |
-| `docs/adrs/` | Architecture decision records: one file per decision. | [ADRs](adrs/README.md) |
-| `docs/images/` | Diagrams and UI screenshots, all made by `tools/docs/`. | [§3](#pictures-and-docs-tools) |
+| `tools/` | `docs/` (diagrams, UI screenshots, API docs assets, the website's page), `release/version.mjs`, `export/ndjson_to_age.py`. | |
+| `docs/` | The website's root, as GitHub Pages serves it: `index.html`, `site.css`, `site.js`, `404.html`; no guides. | [§3](#pictures-and-docs-tools) |
+| `docs/guide/` | User and design documentation, these guides; [`README.md`](README.md) is its index. | |
+| `docs/guide/adrs/` | Architecture decision records: one file per decision. | [ADRs](adrs/README.md) |
+| `docs/images/` | Diagrams and UI screenshots, all made by `tools/docs/`, for the README, the guides and the website. | [§3](#pictures-and-docs-tools) |
 
 Where to read about the system as a whole:
 
@@ -36,7 +37,7 @@ Where to read about the system as a whole:
 - [`features.md`](features.md): capabilities at a glance;
 - [`usage.md`](usage.md): worked requests for every endpoint group;
 - [`adrs/`](adrs/README.md): the decisions behind the design, and why;
-- [`../CHANGELOG.md`](../CHANGELOG.md): what changed and when.
+- [`../CHANGELOG.md`](../../CHANGELOG.md): what changed and when.
 
 ## 2. Run the stack, check the repository
 
@@ -86,7 +87,7 @@ match the root copies.
 
 A change is done when its docs are. With a feature change, update:
 
-- [`CHANGELOG.md`](../CHANGELOG.md), under `## Unreleased` (Added /
+- [`CHANGELOG.md`](../../CHANGELOG.md), under `## Unreleased` (Added /
   Changed / Fixed / Deprecated), in the style of the existing entries
   (add the heading at the top when it is missing; the release script dates
   it). Docs that change what a reader learns, such as a new guide or a
@@ -97,9 +98,9 @@ A change is done when its docs are. With a feature change, update:
   limitations) when a limitation appears, changes or goes away;
 - [`usage.md`](usage.md) for new or changed endpoints;
 - the Python client and its models when the API changes
-  ([clients/python/DEVELOPMENT.md §5](../clients/python/DEVELOPMENT.md#5-when-the-client-changes));
+  ([clients/python/DEVELOPMENT.md §5](../../clients/python/DEVELOPMENT.md#5-when-the-client-changes));
 - the UI screenshots when the UI changes visibly
-  ([services/graphos-ui/DEVELOPMENT.md §5](../services/graphos-ui/DEVELOPMENT.md#5-when-the-ui-changes));
+  ([services/graphos-ui/DEVELOPMENT.md §5](../../services/graphos-ui/DEVELOPMENT.md#5-when-the-ui-changes));
 - an ADR in [`adrs/`](adrs/README.md) before the code, when the change
   alters an invariant, adds a public surface, changes the supported
   databases or reverses an earlier decision.
@@ -117,7 +118,7 @@ commit what it writes. Every picture has alt text that says what it shows.
 two themes cannot drift apart.
 
 ```bash
-node tools/docs/diagrams.mjs           # write the SVGs, embed every picture in the whitepaper
+node tools/docs/diagrams.mjs           # write the SVGs
 node tools/docs/diagrams.mjs --check   # CI: exit 1 when a file is not what the script draws
 ```
 
@@ -134,8 +135,8 @@ node tools/docs/diagrams.mjs --check   # CI: exit 1 when a file is not what the 
   </picture>
   ```
 
-**UI screenshots** (`ui-<shot>-dark.png` for the docs, `.jpg` for the
-whitepaper) are taken by `tools/docs/screenshots.py` with Playwright, in
+**UI screenshots** (`ui-<shot>-dark.png`, shown by the README, the docs and
+the website) are taken by `tools/docs/screenshots.py` with Playwright, in
 dark mode at 1440x900, of the demo tenant only:
 
 ```bash
@@ -144,22 +145,46 @@ python clients/python/examples/08_demo_ecosystem.py     # load the demo tenant
 export GRAPHOS_USER=... GRAPHOS_PASSWORD=...            # a user granted only the demo tenant
 python tools/docs/screenshots.py --ui http://localhost:5173              # every shot
 python tools/docs/screenshots.py --ui http://localhost:5173 query        # or name them
-node tools/docs/diagrams.mjs                            # embed the new JPEGs in the whitepaper
+python tools/docs/site.py                               # the website's page shows the README's shots
 ```
 
 The shots are `explore-graph`, `explore-groups`, `explore-map`,
-`explore-styles`, `schema-editor`, `schema-styles` and `query`. A new shot
-is a function in `SHOTS` of `screenshots.py`, its alt text in `SHOTS` of
-`diagrams.mjs`, and a marker in the whitepaper. Never take a screenshot of
-real data.
+`explore-styles`, `explore-selection`, `schema-editor`, `schema-styles`,
+`query` and `csv-import`. A new shot is a function in `SHOTS` of
+`screenshots.py`; where it is shown, its alt text says what it shows. Never
+take a screenshot of real data.
 
-**The whitepaper** (`docs/whitepaper.html`) is one self-contained page.
-Its pictures sit between markers, `<!--fig:<name>-<theme>-->…<!--/fig:…-->`
-for diagrams and `<!--shot:<name>-->…<!--/shot:…-->` for screenshots, that
-`diagrams.mjs` fills: edit the text around them, never what is inside.
-The `whitepaper` workflow publishes the page on every push to `main` that
-touches it, `docs/images/` or `tools/docs/`, so merging such a change
-publishes it.
+**The website** (`https://pomentum.github.io/graphos/`) is `docs/` as it is
+on `main`: GitHub Pages serves the folder (Settings → Pages → Deploy from a
+branch, `main`, `/docs`) and runs no build of ours. Its page,
+`docs/index.html`, is generated like the diagrams: `tools/docs/site.py` fills
+the frame `tools/docs/site.html` with the README's features, screenshots,
+first quickstart block and documentation table, the version, and each
+diagram's alt text from its SVG. Edit the README, the diagrams or the frame,
+never `docs/index.html`. Beside it sit `site.css` and
+`site.js` (its design and light/dark switch), `favicon.svg`,
+`404.html` and `.nojekyll`; its pictures are `docs/images/`. The guides
+live apart, in `docs/guide/`; GitHub still serves them as plain files, since
+everything committed under `docs/` is published, so keep private notes in
+`docs/design/`, which git ignores.
+
+What the frame says itself must match the docs: At a glance matches
+[`features.md`](features.md) or the README, and each benchmark figure is
+quoted, with its setup, from [`apache-age.md`](apache-age.md),
+[`concept.md`](concept.md), [`features.md`](features.md) or
+[`upgrade-postgresql-18.md`](upgrade-postgresql-18.md); a new measurement
+goes into those docs first.
+
+```bash
+python tools/docs/site.py                          # write docs/index.html; fails on a broken local link
+python tools/docs/site.py --check                  # exit 1 when docs/index.html is out of date
+python -m http.server -d docs 8000                 # preview at http://127.0.0.1:8000/
+```
+
+Run it after changing the README's features, screenshots, quickstart or
+documentation table, or the version (`tools/release/version.mjs`), and
+commit `docs/index.html` with the change. The site is live once that commit
+is on `main`.
 
 **API docs assets.** graphos serves Swagger UI (`/docs`) and ReDoc
 (`/redoc`) from files in `services/graphos/src/graphos/static/api-docs/`,
@@ -213,7 +238,7 @@ project with a running stack. So:
   case, plain English, no trailing period. Types in use: `feat`, `fix`,
   `docs`, `test`, `perf`, `refactor`, `ci`, `chore`. Scopes in use: `ui`,
   `api`, `graph`, `cypher`, `db`, `dataset`, `compose`, `client`, `auth`,
-  `tenants`, `schema`, `whitepaper`, `age`.
+  `tenants`, `schema`, `age`.
   A security fix says so: `fix(cypher): ... (security)`. Releases are
   `chore: release X.Y.Z`.
 - **Never commit secrets.** Passwords, keys and tokens live in
@@ -236,5 +261,5 @@ local paths. Fixtures and examples use neutral data (`acme`, `Doc`,
 
 `docs/design/` holds local working notes and is never committed. Do not
 `git add` it, and do not link to it from committed files. An ADR may be
-drafted there; it is published in [`docs/adrs/`](adrs/README.md) only once
+drafted there; it is published in [`docs/guide/adrs/`](adrs/README.md) only once
 it holds nothing private.

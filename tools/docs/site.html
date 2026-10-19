@@ -1,0 +1,166 @@
+<!doctype html>
+<!--
+  The frame of the graphos website's page, docs/index.html. tools/docs/site.py fills every double-brace slot
+  from the README (features, screenshots, first quickstart block, documentation
+  table), services/graphos/pyproject.toml (the version) and the diagrams'
+  own descriptions (their alt text). The rest is written
+  here and must say only what the docs say: At a glance matches
+  docs/guide/features.md or the README, and every benchmark figure is quoted, with
+  its setup, from docs/guide/apache-age.md, docs/guide/concept.md, docs/guide/features.md or
+  docs/guide/upgrade-postgresql-18.md.
+-->
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>graphos: a property-graph service on PostgreSQL and Apache AGE</title>
+<meta name="description" content="graphos is a multi-tenant property-graph service: PostgreSQL and Apache AGE behind a typed HTTP API. Apache-2.0.">
+<link rel="canonical" href="https://pomentum.github.io/graphos/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="graphos">
+<meta property="og:title" content="graphos">
+<meta property="og:description" content="A multi-tenant property-graph service: PostgreSQL and Apache AGE behind a typed HTTP API.">
+<meta property="og:url" content="https://pomentum.github.io/graphos/">
+<meta property="og:image" content="https://pomentum.github.io/graphos/images/ui-explore-graph-dark.png">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<script>try{var t=localStorage.getItem('graphos-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+
+<div class="bar"><div class="bar-inner">
+  <a class="bar-name" href="#top">graphos</a>
+  <nav class="bar-links" aria-label="Sections">
+    <a href="#why">Why</a>
+    <a href="#features">Features</a>
+    <a href="#benchmarks">Benchmarks</a>
+    <a href="#ui">Web UI</a>
+    <a class="keep" href="#start">Get started</a>
+    <a href="#docs">Docs</a>
+  </nav>
+  <div class="mode" role="group" aria-label="Colour theme">
+    <button type="button" data-set="light" aria-pressed="false">Light</button><button type="button" data-set="dark" aria-pressed="false">Dark</button>
+  </div>
+</div></div>
+
+<div class="wrap">
+<main>
+  <header class="top" id="top">
+    <p class="eyebrow">Open source · Apache-2.0 · version {{ version }}</p>
+    <p class="repo"><a href="https://github.com/pomentum/graphos" rel="noopener" aria-label="Read the source on GitHub: pomentum/graphos"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg><span>pomentum/graphos</span></a></p>
+    <h1>graphos</h1>
+    <p class="lede">A multi-tenant property-graph service: PostgreSQL + Apache AGE behind a typed HTTP API.</p>
+    <p class="meta prose">Your services send JSON over HTTP. graphos owns the database, writes the SQL against AGE's tables, enforces tenant isolation, and gives you bulk loading, traversal, aggregation, graph algorithms and a web UI. Consumers never get a connection string.</p>
+    <div class="cta">
+      <a class="btn primary" href="#start">Get started</a>
+      <a class="btn" href="#benchmarks">Benchmarks</a>
+      <a class="btn" href="https://github.com/pomentum/graphos">GitHub</a>
+    </div>
+  </header>
+
+  <div class="prose">
+    <section class="summary" id="summary">
+      <h2>In 30 seconds</h2>
+      <ul>
+        <li><span class="k">The problem</span><span>Connected data turns up in most systems. Once several services need it, each one ends up holding database credentials, its own Cypher, and its own answers to bulk loading, indexing and isolation.</span></li>
+        <li><span class="k">The approach</span><span>One service owns the graph. Consumers call a typed REST API; graphos alone talks to PostgreSQL + Apache AGE on a private network.</span></li>
+        <li><span class="k">What it is not</span><span>Not a query passthrough for applications (Cypher is offered read-only, under graphos's checks), not a new database engine, and not tied to any domain: graphos ships no labels of its own.</span></li>
+        <li><span class="k">Licence</span><span>Apache 2.0, like the Apache AGE extension it is built on.</span></li>
+      </ul>
+    </section>
+  </div>
+
+  <h2 id="why"><span class="sec"><span class="num">01 · Why</span></span>From many database clients to one graph service</h2>
+  <figure class="fig pic">
+    <img class="pic-light" src="images/problem-light.svg" alt="{{ alt_problem }}">
+    <img class="pic-dark" src="images/problem-dark.svg" alt="" aria-hidden="true">
+    <figcaption><span class="fig-n">Fig 01</span><span>Without graphos, every service holds a driver, a connection string and its own Cypher. With it, services call typed HTTP and only graphos reaches PostgreSQL + Apache AGE.</span></figcaption>
+  </figure>
+
+  <h2 id="glance"><span class="sec"><span class="num">02 · At a glance</span></span>What graphos is made of</h2>
+  <dl class="gloss glance">
+    <div><dt>Storage</dt><dd>PostgreSQL 18 with Apache AGE 1.8; each tenant is its own AGE graph</dd></div>
+    <div><dt>API</dt><dd>Typed HTTP (FastAPI), JSON and NDJSON; the contract at <code>/openapi.json</code></dd></div>
+    <div><dt>Access</dt><dd>Users and service accounts, 15-minute tokens, OpenID Connect sign-on, a level per tenant</dd></div>
+    <div><dt>Algorithms</dt><dd>Louvain (optional extra), PageRank, betweenness, components, degree</dd></div>
+    <div><dt>Clients</dt><dd>An async, typed Python client; an optional web UI; plain HTTP</dd></div>
+    <div><dt>Images</dt><dd><code>ghcr.io/pomentum/graphos-api</code> and <code>graphos-ui</code>, amd64 and arm64</dd></div>
+    <div><dt>Licence</dt><dd>Apache-2.0</dd></div>
+    <div><dt>Latest</dt><dd>{{ version }}</dd></div>
+    <div><dt>Agents</dt><dd>An MCP endpoint, <code>/mcp</code>: 22 read tools on the API's tokens and grants</dd></div>
+  </dl>
+
+  <h2 id="features"><span class="sec"><span class="num">03 · Features</span></span>Build, explore, run</h2>
+{{ features }}
+
+  <h2 id="benchmarks"><span class="sec"><span class="num">04 · Benchmarks</span></span>Bulk writes 37–156× faster than per-row Cypher MERGE</h2>
+  <p class="lead-in">Every write goes through COPY-staged SQL upserts instead of Cypher, every label gets its indexes at registration, and the same graph reads faster on PostgreSQL 18 with AGE 1.8, which graphos now requires. Measured with the scripts in <code>scripts/</code>, by profiling queries and by timing requests against a running service: orders of magnitude, not guarantees.</p>
+  <div class="tbl">
+    <table class="bench">
+      <caption>Factor = before ÷ after; bars on a log scale. Writes: 13k nodes and 44k edges, 4 GB <code>shared_buffers</code>, one host. Lookups: a ~117k-row label. Reads: 251,246 nodes and 940,144 edges, the image's default settings, a laptop, 30 warm runs of 12 reads.</caption>
+      <thead>
+        <tr><th scope="col">Measured</th><th scope="col" class="n">Before</th><th scope="col" class="n">graphos</th><th scope="col" class="bar-cell">Factor (log scale)</th><th scope="col" class="n">×</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Bulk edge writes<small>per-row Cypher <code>MERGE</code> → COPY-staged <code>INSERT … ON CONFLICT</code></small></td><td class="n">31 /s</td><td class="n after">1,153–4,840 /s</td><td class="bar-cell"><div class="meter" role="img" aria-label="37 to 156 times"><b style="width:59.3%"></b><s style="width:42.4%"></s></div></td><td class="n">37–156</td></tr>
+        <tr><td>Substring search on a name<small>no index → the trigram index graphos creates</small></td><td class="n">1.2 s</td><td class="n after">1.3 ms</td><td class="bar-cell"><div class="meter" role="img" aria-label="about 920 times"><s style="width:80.2%"></s></div></td><td class="n">~920</td></tr>
+        <tr><td>Lookup by community id<small>no index → the index graphos creates</small></td><td class="n">2.4 s</td><td class="n after">0.5 ms</td><td class="bar-cell"><div class="meter" role="img" aria-label="about 4,800 times"><s style="width:99.5%"></s></div></td><td class="n">~4,800</td></tr>
+        <tr><td>12-read mix, 5 users, 360 requests<small>PostgreSQL 16 / AGE 1.6 → PostgreSQL 18 / AGE 1.8</small></td><td class="n">57 s</td><td class="n after">35 s</td><td class="bar-cell"><div class="meter" role="img" aria-label="1.6 times"><s style="width:5.7%"></s></div></td><td class="n">1.6</td></tr>
+        <tr><td>Paths of up to 4 hops, median, 5 users<small>PostgreSQL 16 / AGE 1.6 → PostgreSQL 18 / AGE 1.8</small></td><td class="n">1,233 ms</td><td class="n after">529 ms</td><td class="bar-cell"><div class="meter" role="img" aria-label="2.3 times"><s style="width:9.9%"></s></div></td><td class="n">2.3</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">The COPY figures come from <a href="https://github.com/pomentum/graphos/blob/main/scripts/bench_bulk_write.py"><code>scripts/bench_bulk_write.py</code></a>; the per-row <code>MERGE</code> baseline was measured with an earlier graphos that still had a Cypher write path and can no longer be rerun. PostgreSQL 16 / AGE 1.6 was measured before graphos dropped it; a stack on it still moves to 18 by itself on <code>docker compose up</code>. The PostgreSQL 18 database was freshly restored and the 16 one carried about 3× dead space, which favours 18. Details: <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/apache-age.md#5-why-every-write-is-sql">why every write is SQL</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/concept.md#23-indexes-created-at-registration">indexes created at registration</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/apache-age.md#12-measured-on-postgresql-18--age-18">measured on PostgreSQL 18</a>.</p>
+  <div class="stats">
+    <div class="stat"><b>~1 s</b><span>a map of every label and the edges between them, on ten million edges (sampled)</span></div>
+    <div class="stat"><b>12 min</b><span>a 9.5 GB database with five tenants moved from PostgreSQL 16 to 18 by <code>docker compose up</code></span></div>
+    <div class="stat"><b>+1.8 ms</b><span>to record a single write in the change feed, in the same transaction</span></div>
+    <div class="stat"><b>0 of 840</b><span>requests failed in the read mix, on either database</span></div>
+  </div>
+
+  <h2 id="how"><span class="sec"><span class="num">05 · How it works</span></span>One service owns the graph</h2>
+  <figure class="fig pic">
+    <img class="pic-light" src="images/architecture-light.svg" alt="Consumers call graphos-api over the graphos-net network with a bearer token. graphos-api checks tenant scope and read/write access, validates typed contracts, builds SQL internally, times out bad queries and emits metrics and audit logs. Only graphos-api reaches PostgreSQL 18 with Apache AGE on an internal network; each tenant is its own AGE graph.">
+    <img class="pic-dark" src="images/architecture-dark.svg" alt="" aria-hidden="true">
+    <figcaption><span class="fig-n">Fig 02</span><span>The boundary: consumers reach graphos-api only, with a bearer token; graphos-api alone reaches the database, on an internal network.</span></figcaption>
+  </figure>
+  <figure class="fig pic">
+    <img class="pic-light" src="images/communities-light.svg" alt="{{ alt_communities }}">
+    <img class="pic-dark" src="images/communities-dark.svg" alt="" aria-hidden="true">
+    <figcaption><span class="fig-n">Fig 03</span><span>Communities, computed beside the data: Louvain in its own process, ids kept stable from run to run, written back with COPY (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/algorithms.md">what each algorithm finds</a>).</span></figcaption>
+  </figure>
+
+  <h2 id="ui"><span class="sec"><span class="num">06 · Web UI</span></span>Explore, edit, query</h2>
+  <div class="shots">
+{{ shots }}
+  </div>
+
+  <h2 id="start"><span class="sec"><span class="num">07 · Get started</span></span>Run it on your machine</h2>
+  <p class="prose">Docker with Compose v2 and about 4 GB of memory for Docker.</p>
+  <pre class="record">{{ quickstart }}</pre>
+  <ol class="next prose">
+    <li>Sign in to the UI at <code>http://127.0.0.1:8081</code> as <code>graphos</code> / <code>graphos</code> and choose a new password: the <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/installation.md">installation guide</a>.</li>
+    <li>Register a tenant, write nodes and edges, read them back: the <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md">usage guide</a>, or the <a href="https://github.com/pomentum/graphos/tree/main/clients/python">Python client</a>.</li>
+    <li>Load the demo tenant to explore: <a href="https://github.com/pomentum/graphos/blob/main/clients/python/examples/08_demo_ecosystem.py"><code>08_demo_ecosystem.py</code></a>.</li>
+  </ol>
+
+  <h2 id="docs"><span class="sec"><span class="num">08 · Documentation</span></span>Read further</h2>
+  <dl class="gloss docs">
+{{ docs }}
+  </dl>
+</main>
+
+<footer>
+  <div class="cols">
+    <a href="https://github.com/pomentum/graphos">Source</a>
+    <a href="https://github.com/pomentum/graphos/blob/main/CHANGELOG.md">Changelog</a>
+    <a href="https://github.com/pomentum/graphos/blob/main/LICENSE">Licence</a>
+    <a href="https://pomentum.github.io/">Pomentum</a>
+  </div>
+  <p>graphos is licensed under the Apache License 2.0. Apache AGE is a project of the Apache Software Foundation, licensed under Apache 2.0, and is not affiliated with graphos.</p>
+</footer>
+</div>
+
+<script src="site.js"></script>
+</body>
+</html>

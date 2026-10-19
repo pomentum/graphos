@@ -8,7 +8,7 @@ changes live.
 It has no backend of its own. The image is static files served by nginx, which also forwards
 `/api/` to graphos on the same origin, so graphos needs no CORS setup. Every person signs in with
 their graphos user name and password (and changes it first when it must change), or through the
-organisation's single sign-on when graphos is set up for it ([installation](../../docs/installation.md#5-single-sign-on-openid-connect)). The access token
+organisation's single sign-on when graphos is set up for it ([installation](../../docs/guide/installation.md#5-single-sign-on-openid-connect)). The access token
 lives in page memory; the session that renews it is graphos's `graphos_session` cookie (HttpOnly, so
 no script on the page can read it; Secure; SameSite=Strict), rotated at each renewal. A reload or a
 new tab stays signed in until the session ends (an hour unused, twelve hours at most) or the person
@@ -34,7 +34,7 @@ recorded under the user's name in the audit log and the change feed.
 | **Activity** | The change feed, live, with who made each change; a change to one node opens it. |
 | **Browse** | One label's nodes as a table: a property filter, columns to choose, paging, a row opens in Explore; the page or every matching node as CSV. |
 | **Schema** | Labels as a tree under their parents (counts, properties), relationship types (label pairs, counts), search indexes. Or as a **diagram**: a grid of label boxes, each label holding the labels that inherit from it in a block, busiest first (laid out by ELK). The lines are the schema's associations: each relationship type's declared label pairs (solid), pairs in the data outside them (dashed, warning colour) and, on request, pairs of types that declare none (dotted); the selected label shows all of its lines. Boxes can be moved and put back with Tidy up. Maintainers add labels, relationship types, search indexes and properties, declare a label pair by dragging from one label to another (or from a line's panel), remove a declared pair, and can have graphos enforce the declared pairs; labels and types are never removed. Each label and relationship type (and every label, every relationship type) opens to its property definitions, with where each comes from and the properties its rows carry undeclared; maintainers declare, narrow and remove them, set the tenant's mode (`off`, `warn`, `strict`) and check the stored rows against them as a job with its report. Each label and relationship type has a style swatch: maintainers set its colour, caption, size and icon, which everyone on the tenant sees. The schema exports as a file and imports from one. |
-| **Authorize** (`/authorize`) | Where an MCP client sends a person to sign in through the UI (no single sign-on): the usual sign-in, then a card naming the client and where it sends the answer, with Allow and Cancel ([agents guide](../../docs/agents.md)). Outside any tenant. |
+| **Authorize** (`/authorize`) | Where an MCP client sends a person to sign in through the UI (no single sign-on): the usual sign-in, then a card naming the client and where it sends the answer, with Allow and Cancel ([agents guide](../../docs/guide/agents.md)). Outside any tenant. |
 | **Access** | For owners and admins: who may use the tenant and at which level. Owners give and take access to their tenant; admins also create users and service accounts (a secret shown once), reset, disable and delete them, and grant patterns, the right to create tenants, and admin. |
 
 | Explore · Map | Explore · Groups |

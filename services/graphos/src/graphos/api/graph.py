@@ -3993,7 +3993,7 @@ async def scan_edges(
 # ``POST /v1/{tenant}/graph/edges:resolve`` — compile each registered
 # ``resolve_rule`` to a parameterised INSERT and execute it server-side.
 # Replaces the consumer-side N×N property-match loop for any tenant
-# whose schema declares the rule.  See ``docs/features.md`` for the
+# whose schema declares the rule.  See ``docs/guide/features.md`` for the
 # rule format and ``graphos.resolver.compiler`` for the compilation
 # contract.
 

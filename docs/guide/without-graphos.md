@@ -89,7 +89,7 @@ through `GET /v1/{tenant}/cypher/saved` while the console is on.
 
 ## Into a plain AGE graph
 
-[`tools/export/ndjson_to_age.py`](../tools/export/ndjson_to_age.py) loads a dataset export into a
+[`tools/export/ndjson_to_age.py`](../../tools/export/ndjson_to_age.py) loads a dataset export into a
 **new AGE graph with only AGE's own columns**, without graphos. Variable-length patterns work on
 it.
 

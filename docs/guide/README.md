@@ -10,11 +10,11 @@ Start with **[`concept.md`](concept.md)** — the standing reference. It describ
 - **[`usage.md`](usage.md)** — worked requests for every endpoint group, limits and errors.
 - **[`agents.md`](agents.md)** — connecting an AI agent over MCP: where `/mcp` is, the tokens it takes, how MCP clients sign people in (graphos's own sign-in, or single sign-on, with Keycloak's settings), the tools and their security.
 - **[`sso.md`](sso.md)** — single sign-on with any OpenID Connect provider: what to register, settings, troubleshooting.
-- **[`../services/graphos-ui/README.md`](../services/graphos-ui/README.md)** — the web UI: running it, its views, how its code and text are organised.
+- **[`../services/graphos-ui/README.md`](../../services/graphos-ui/README.md)** — the web UI: running it, its views, how its code and text are organised.
 - **[`apache-age.md`](apache-age.md)** and **[`graph_age_practices.md`](graph_age_practices.md)** — Apache AGE lessons and the write-path templates (including why graphos writes every row through COPY-staged SQL rather than Cypher).
-- **[`development.md`](development.md)** — working on graphos: the rules for the whole repository (docs, pictures and docs tools, test stacks, git, privacy), with a `DEVELOPMENT.md` in each package for the [service](../services/graphos/DEVELOPMENT.md), the [client](../clients/python/DEVELOPMENT.md) and the [web UI](../services/graphos-ui/DEVELOPMENT.md).
+- **[`development.md`](development.md)** — working on graphos: the rules for the whole repository (docs, pictures and docs tools, test stacks, git, privacy), with a `DEVELOPMENT.md` in each package for the [service](../../services/graphos/DEVELOPMENT.md), the [client](../../clients/python/DEVELOPMENT.md) and the [web UI](../../services/graphos-ui/DEVELOPMENT.md).
 - **[`adrs/`](adrs/README.md)** — architecture decision records: when a decision needs one, and its template.
 
 **Quickstart for new consumers (any schema):** read concept.md **§2.5.8 — Generic analytics — examples** for `top`, `community-ids`, and `nodes/{id}/properties` (counts per property value come from `nodes/aggregate`; the label `histogram` is deprecated since 0.10.0), and **§2.5.9 — K/V cache — example** for the `cache/{key}` surface when an aggregate has no natural graph-node anchor. Both sections include curl examples that work for any registered schema — substitute your own labels and properties.
 
-The live API contract is **`GET /openapi.json`** off the running service. The reference Python client lives in [`clients/python/`](../clients/python/).
+The live API contract is **`GET /openapi.json`** off the running service. The reference Python client lives in [`clients/python/`](../../clients/python/).

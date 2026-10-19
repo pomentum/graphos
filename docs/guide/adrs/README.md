@@ -9,7 +9,7 @@ graphos works today; the ADRs say how it came to work that way.
 Write an ADR before the code when a change:
 
 - changes a data-model invariant
-  ([services/graphos/DEVELOPMENT.md §3](../../services/graphos/DEVELOPMENT.md#3-data-model-invariants));
+  ([services/graphos/DEVELOPMENT.md §3](../../../services/graphos/DEVELOPMENT.md#3-data-model-invariants));
 - adds a public surface: an endpoint family, a protocol, a client feature
   other programs rely on;
 - changes the supported databases, AGE versions or deployment;

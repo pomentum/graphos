@@ -1,7 +1,7 @@
 """The Cypher console: read-only Cypher on one tenant's graph.
 
 On unless ``GRAPHOS_CYPHER=false`` (ADR-0006).  graphos runs the query, so graphos
-decides what runs and how (see docs/concept.md §3.1, "Cypher / SQL
+decides what runs and how (see docs/guide/concept.md §3.1, "Cypher / SQL
 boundary"):
 
 - **Only Cypher's own functions.**  AGE lets a Cypher expression call a

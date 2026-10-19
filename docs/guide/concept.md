@@ -81,14 +81,14 @@ Why an HTTP service rather than a shared database:
 `/docker-entrypoint-initdb.d/`; its scripts run as the superuser created by
 the Postgres image (`POSTGRES_USER=graphos`, password in `graphos_pw.txt`)
 and only when the data volume is empty.
-[`00-extensions.sql`](../services/graphos/deploy/db-init/00-extensions.sql):
+[`00-extensions.sql`](../../services/graphos/deploy/db-init/00-extensions.sql):
 
 - creates the `age`, `pg_trgm`, and `pg_stat_statements` extensions;
 - sets `search_path = ag_catalog, "$user", public` for the `graphos` role and
   grants it `USAGE` on `ag_catalog`;
 - creates the `graphos_meta` schema and the `graphos_meta.tenants` table.
 
-[`01-app-role.sh`](../services/graphos/deploy/db-init/01-app-role.sh) then
+[`01-app-role.sh`](../../services/graphos/deploy/db-init/01-app-role.sh) then
 creates `graphos_app`, the role `graphos-api` connects as (password in
 `graphos_app_pw.txt`). It is `NOSUPERUSER NOCREATEDB NOCREATEROLE` and gets
 only what the service needs: `CONNECT` and `CREATE` on the database (AGE puts
@@ -303,7 +303,7 @@ lookup on a ~117k-row label from 2.4 s to 0.5 ms, and the trigram index took
 ### 2.4 Deployment (compose)
 
 The reference deployment is
-[`docker-compose.graphos.yml`](../docker-compose.graphos.yml) at the project
+[`docker-compose.graphos.yml`](../../docker-compose.graphos.yml) at the project
 root. Read that file for exact values; its shape:
 
 | | `graphos-db` | `graphos-api` |
@@ -676,7 +676,7 @@ Error shapes:
 
 #### 2.5.4 Python client
 
-[`clients/python`](../clients/python) provides `GraphosClient`, an async
+[`clients/python`](../../clients/python) provides `GraphosClient`, an async
 wrapper over `httpx.AsyncClient` bound to one tenant
 (`GraphosClient(base_url=..., tenant=..., auth=PasswordAuth(user, secret))`;
 `PasswordAuth` signs in, renews at 80% of the token's life and once more on a
@@ -1479,7 +1479,7 @@ before the cursors run, because PostgreSQL plans a cursor for its first rows
 and, without the index, compared every edge with every vertex (a
 251,000-node, 940,000-edge tenant did not finish in 33 minutes; with it, the
 export takes about 70 s). `snapshot-import` reads the file back.
-[`tools/export/ndjson_to_age.py`](../tools/export/ndjson_to_age.py) loads it
+[`tools/export/ndjson_to_age.py`](../../tools/export/ndjson_to_age.py) loads it
 into a new, plain AGE graph without graphos (AGE's own columns only, new
 graph ids, external ids kept in `properties`), where AGE's variable-length
 patterns work ([without-graphos.md](without-graphos.md)).

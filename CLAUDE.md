@@ -1,11 +1,11 @@
 # CLAUDE.md
 
-The rules for this repository are in [`docs/development.md`](docs/development.md)
+The rules for this repository are in [`docs/guide/development.md`](docs/guide/development.md)
 and one guide per component, imported below; [`AGENTS.md`](AGENTS.md)
 summarises the hard rules for any agent. Do not repeat them here: change the
-guides instead. Before a design change, read [`docs/adrs/README.md`](docs/adrs/README.md).
+guides instead. Before a design change, read [`docs/guide/adrs/README.md`](docs/guide/adrs/README.md).
 
-@docs/development.md
+@docs/guide/development.md
 @services/graphos/DEVELOPMENT.md
 @clients/python/DEVELOPMENT.md
 @services/graphos-ui/DEVELOPMENT.md
@@ -19,5 +19,5 @@ guides instead. Before a design change, read [`docs/adrs/README.md`](docs/adrs/R
 - Ask before `git push`, `git tag`, a release or a merge, every time.
 - Run long commands such as `scripts/run-db-tests.sh` in the background.
 - This file and its imports are read when a session starts. When the rules
-  change during a session, re-read `docs/development.md` and the package
+  change during a session, re-read `docs/guide/development.md` and the package
   `DEVELOPMENT.md` before going on.

@@ -2,7 +2,7 @@
 
 How to work on `graphos-ui`, the React UI in `services/graphos-ui/`. The
 rules for the whole repository (docs, test stacks, git, privacy) are in
-[`development.md`](../../docs/development.md); they apply here too. The
+[`development.md`](../../docs/guide/development.md); they apply here too. The
 [UI README](README.md) describes its views, its
 stack, how its code is organised and how its text is keyed; read it first.
 
@@ -79,14 +79,14 @@ workflow builds the UI image and smoke-tests it.
 
 ## 5. When the UI changes
 
-Besides the shared list in [development.md §3](../../docs/development.md#3-docs-discipline):
+Besides the shared list in [development.md §3](../../docs/guide/development.md#3-docs-discipline):
 
 - **Retake the screenshots** a visible change affects, of the demo tenant
-  only, with `tools/docs/screenshots.py`, then embed them in the whitepaper
-  with `node tools/docs/diagrams.mjs`. The steps are in
-  [development.md, Pictures and docs tools](../../docs/development.md#pictures-and-docs-tools).
+  only, with `tools/docs/screenshots.py`, then regenerate the website's page
+  with `python tools/docs/site.py`. The steps are in
+  [development.md, Pictures and docs tools](../../docs/guide/development.md#pictures-and-docs-tools).
 - Update the UI README when a view, a folder's job or the stack changes.
 - A UI that needs a new endpoint changes the service first
   ([services/graphos/DEVELOPMENT.md](../graphos/DEVELOPMENT.md)).
 - A change to the layers, the stack or the no-other-origins rule gets an
-  [ADR](../../docs/adrs/README.md) first.
+  [ADR](../../docs/guide/adrs/README.md) first.

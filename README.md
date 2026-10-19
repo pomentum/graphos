@@ -2,7 +2,7 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Version](https://img.shields.io/github/v/tag/pomentum/graphos?sort=semver&label=version)](CHANGELOG.md)
-[![Whitepaper](https://img.shields.io/badge/whitepaper-read-1D5BD6)](https://graphos-pomentum.vercel.app)
+[![Website](https://img.shields.io/badge/website-pomentum.github.io%2Fgraphos-1D5BD6)](https://pomentum.github.io/graphos/)
 
 A multi-tenant property-graph service: **PostgreSQL + [Apache AGE](https://age.apache.org/) behind a typed HTTP API.**
 
@@ -13,38 +13,38 @@ Your services send JSON over HTTP. graphos owns the database, writes the SQL aga
   <img src="docs/images/architecture-light.svg" width="100%" alt="Consumers call graphos-api over the graphos-net network with a bearer token. graphos-api checks tenant scope and read/write access, validates typed contracts, builds SQL internally, times out bad queries and emits metrics and audit logs. Only graphos-api reaches PostgreSQL 18 with Apache AGE on an internal network; each tenant is its own AGE graph.">
 </picture>
 
-**Why:** read the [whitepaper](https://graphos-pomentum.vercel.app) for the problem graphos solves and what it gives you.
+**Website:** [pomentum.github.io/graphos](https://pomentum.github.io/graphos/): the problem graphos solves, what it gives you, measured benchmarks and a quickstart.
 
 ## Features
 
-The picture above is the map; each line below links to the section that covers it, and the [feature survey](docs/features.md) lists every capability.
+The picture above is the map; each line below links to the section that covers it, and the [feature survey](docs/guide/features.md) lists every capability.
 
 **Build**
 
-- **Tenants and schema:** each tenant is its own AGE graph with its own labels; no built-in labels or property names; optional property rules, `warn` or `strict` ([usage](docs/usage.md#3-tenant-registration)).
-- **Fast, idempotent writes:** batches, NDJSON bulk and snapshot import as COPY-staged upserts, 37–156× faster than per-row Cypher `MERGE` in our measurements ([usage](docs/usage.md#4-writing-data), [AGE notes](docs/apache-age.md)).
-- **Load a CSV file:** send the file itself; graphos maps its columns to properties, merges rows that repeat an id, checks every row (a dry run writes nothing) and writes them as bulk loads do ([usage](docs/usage.md#csv-import)).
-- **Edit in place, safely:** patch or delete one node or edge, or delete up to 1,000 nodes in one transaction; `If-Match` turns a concurrent edit into a `412` instead of a lost update ([usage](docs/usage.md#4-writing-data)).
-- **Composable reads:** search (substring or ranked indexes), neighbors, multi-hop expand, shortest paths, scans and subgraphs ([usage](docs/usage.md#5-reads-that-compose)).
-- **Rule-derived edges:** declare a property-match rule once; `edges:resolve` writes the edges in SQL ([usage](docs/usage.md#9-rule-based-edges-resolve_rule)).
-- **Reconcile by difference:** send the whole set of a node's or a type's edges; graphos adds, changes and removes only the difference, in one transaction ([usage](docs/usage.md#reconcile-make-the-stored-edges-equal-to-a-set)).
-- **Copy, back up and restore:** a tenant's schema and data as files, restored exactly or loaded into plain AGE ([usage](docs/usage.md#dataset-export-and-import), [without graphos](docs/without-graphos.md)).
+- **Tenants and schema:** each tenant is its own AGE graph with its own labels; no built-in labels or property names; optional property rules, `warn` or `strict` ([usage](docs/guide/usage.md#3-tenant-registration)).
+- **Fast, idempotent writes:** batches, NDJSON bulk and snapshot import as COPY-staged upserts, 37–156× faster than per-row Cypher `MERGE` in our measurements ([usage](docs/guide/usage.md#4-writing-data), [AGE notes](docs/guide/apache-age.md)).
+- **Load a CSV file:** send the file itself; graphos maps its columns to properties, merges rows that repeat an id, checks every row (a dry run writes nothing) and writes them as bulk loads do ([usage](docs/guide/usage.md#csv-import)).
+- **Edit in place, safely:** patch or delete one node or edge, or delete up to 1,000 nodes in one transaction; `If-Match` turns a concurrent edit into a `412` instead of a lost update ([usage](docs/guide/usage.md#4-writing-data)).
+- **Composable reads:** search (substring or ranked indexes), neighbors, multi-hop expand, shortest paths, scans and subgraphs ([usage](docs/guide/usage.md#5-reads-that-compose)).
+- **Rule-derived edges:** declare a property-match rule once; `edges:resolve` writes the edges in SQL ([usage](docs/guide/usage.md#9-rule-based-edges-resolve_rule)).
+- **Reconcile by difference:** send the whole set of a node's or a type's edges; graphos adds, changes and removes only the difference, in one transaction ([usage](docs/guide/usage.md#reconcile-make-the-stored-edges-equal-to-a-set)).
+- **Copy, back up and restore:** a tenant's schema and data as files, restored exactly or loaded into plain AGE ([usage](docs/guide/usage.md#dataset-export-and-import), [without graphos](docs/guide/without-graphos.md)).
 - **Python client:** async and typed; signs in and renews its token by itself ([below](#python-client)).
 
 **Explore**
 
-- **Graph analytics:** a map of every label and the edges between them (about a second on ten million edges), aggregates, top-K by degree ([usage](docs/usage.md#6-aggregates)).
-- **Graph algorithms:** Louvain communities (optional extra), PageRank, betweenness, components and degree, run beside the API and written onto the nodes ([what each finds](docs/algorithms.md)).
-- **Cypher console:** read-only Cypher on one tenant, write clauses refused, with a timeout, a row cap and saved queries ([usage](docs/usage.md#cypher-console)).
-- **AI agents (MCP):** `/mcp` serves graphos's reads to agents as tools and resources, with the caller's grants and a schema summary made for models; MCP clients sign people in themselves ([agents guide](docs/agents.md)).
+- **Graph analytics:** a map of every label and the edges between them (about a second on ten million edges), aggregates, top-K by degree ([usage](docs/guide/usage.md#6-aggregates)).
+- **Graph algorithms:** Louvain communities (optional extra), PageRank, betweenness, components and degree, run beside the API and written onto the nodes ([what each finds](docs/guide/algorithms.md)).
+- **Cypher console:** read-only Cypher on one tenant, write clauses refused, with a timeout, a row cap and saved queries ([usage](docs/guide/usage.md#cypher-console)).
+- **AI agents (MCP):** `/mcp` serves graphos's reads to agents as tools and resources, with the caller's grants and a schema summary made for models; MCP clients sign people in themselves ([agents guide](docs/guide/agents.md)).
 - **Web UI (optional):** explore, inspect and edit, work on many nodes at once, import a CSV file, query, extend the schema, follow changes live and export what is on screen ([below](#web-ui)).
 
 **Run**
 
-- **Safe by default:** 15-minute tokens for people and service accounts, single sign-on, a level per tenant, stored secrets sealed with a master key, a Host allowlist, statement timeouts, the database out of reach ([installation](docs/installation.md#8-before-other-people-use-it), [single sign-on](docs/sso.md)).
-- **Change feed:** every write recorded in its transaction; read after a cursor or follow live ([usage](docs/usage.md#10-change-feed)).
-- **Background jobs:** long operations answer `202` at once, then can be polled and cancelled ([usage](docs/usage.md#background-jobs)).
-- **Operable:** Prometheus metrics, JSON logs with `traceparent`, an audit log and per-user rate limiting ([usage](docs/usage.md#11-operations)).
+- **Safe by default:** 15-minute tokens for people and service accounts, single sign-on, a level per tenant, stored secrets sealed with a master key, a Host allowlist, statement timeouts, the database out of reach ([installation](docs/guide/installation.md#8-before-other-people-use-it), [single sign-on](docs/guide/sso.md)).
+- **Change feed:** every write recorded in its transaction; read after a cursor or follow live ([usage](docs/guide/usage.md#10-change-feed)).
+- **Background jobs:** long operations answer `202` at once, then can be polled and cancelled ([usage](docs/guide/usage.md#background-jobs)).
+- **Operable:** Prometheus metrics, JSON logs with `traceparent`, an audit log and per-user rate limiting ([usage](docs/guide/usage.md#11-operations)).
 
 ## Web UI
 
@@ -74,11 +74,11 @@ The picture above is the map; each line below links to the section that covers i
 
 ## Quickstart
 
-The [installation guide](docs/installation.md) covers the same steps in more detail, single sign-on, and what to change before other people use it.
+The [installation guide](docs/guide/installation.md) covers the same steps in more detail, single sign-on, and what to change before other people use it.
 
-Requires Docker with Compose v2 and about 4 GB of memory available to Docker (the defaults are laptop-sized; [tuning](docs/apache-age.md) covers larger graphs).
+Requires Docker with Compose v2 and about 4 GB of memory available to Docker (the defaults are laptop-sized; [tuning](docs/guide/apache-age.md) covers larger graphs).
 
-Already running graphos 0.9 or earlier on PostgreSQL 16? Pull and run the same `up`: the first start moves your data to PostgreSQL 18 ([upgrade guide](docs/upgrade-postgresql-18.md)).
+Already running graphos 0.9 or earlier on PostgreSQL 16? Pull and run the same `up`: the first start moves your data to PostgreSQL 18 ([upgrade guide](docs/guide/upgrade-postgresql-18.md)).
 
 ```bash
 git clone https://github.com/pomentum/graphos.git && cd graphos
@@ -168,7 +168,7 @@ Community detection uses [python-igraph](https://python.igraph.org/), which is G
 | `pip install "./services/graphos[louvain]"` | yes |
 | `docker build --build-arg GRAPHOS_EXTRAS=louvain` | yes (the image then contains GPL code) |
 | `docker compose ... up` (local build) | yes by default; `GRAPHOS_EXTRAS= docker compose ...` to leave it out |
-| an image without it (the published one), plus `-f docker-compose.louvain.yml` | yes, no rebuild: graphos-api downloads python-igraph into its container on first start ([example with the published images](docs/installation.md#louvain-with-the-published-images)) |
+| an image without it (the published one), plus `-f docker-compose.louvain.yml` | yes, no rebuild: graphos-api downloads python-igraph into its container on first start ([example with the published images](docs/guide/installation.md#louvain-with-the-published-images)) |
 
 `GET /v1/info` reports `features.louvain` so clients can check before calling.
 
@@ -176,7 +176,7 @@ Community detection uses [python-igraph](https://python.igraph.org/), which is G
 
 The [`graphos-image`](.github/workflows/image.yml) workflow builds and smoke-tests both variants (`linux/amd64`) on every pull request and push, and publishes the default (permissive-only) variant for `linux/amd64` and `linux/arm64` to `ghcr.io/<owner>/graphos-api`, and the web UI to `ghcr.io/<owner>/graphos-ui`, from `main` and version tags. The `louvain` variant is built and smoke-tested but not published.
 
-**Releasing.** What changed in each version is in [CHANGELOG.md](CHANGELOG.md). Push a version tag such as `0.12.0` to publish the images (`ghcr.io/<owner>/graphos-api:0.12.0` and `:0.12`, and the same for `graphos-ui`); set the version first with `node tools/release/version.mjs X.Y.Z`, which writes it everywhere it lives (server, client, UI), turns the changelog's *Unreleased* heading into the release and dates the whitepaper; CI and the release workflows check with `--check` that every place matches the tag. [`graphos-client`](clients/python/) is not published to PyPI automatically: the [`graphos-client-release`](.github/workflows/client-release.yml) workflow is run by hand from a version tag.
+**Releasing.** What changed in each version is in [CHANGELOG.md](CHANGELOG.md). Push a version tag such as `0.12.0` to publish the images (`ghcr.io/<owner>/graphos-api:0.12.0` and `:0.12`, and the same for `graphos-ui`); set the version first with `node tools/release/version.mjs X.Y.Z`, which writes it everywhere it lives (server, client, UI), turns the changelog's *Unreleased* heading into the release; CI and the release workflows check with `--check` that every place matches the tag. [`graphos-client`](clients/python/) is not published to PyPI automatically: the [`graphos-client-release`](.github/workflows/client-release.yml) workflow is run by hand from a version tag.
 
 ## Python client
 
@@ -209,17 +209,17 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | `GRAPHOS_SESSION_IDLE_S`, `GRAPHOS_SESSION_MAX_S` | `3600`, `43200` | Browser sessions end after this long unused, and after this long in any case |
 | `GRAPHOS_AUTH_SIGNING_KEY_FILE` | — | A PEM EC P-256 key to sign tokens with (e.g. from a secret manager), instead of the one graphos generates and keeps in the database |
 | `GRAPHOS_MASTER_KEY_FILE` | — (compose: `master_key.txt` from `init-secrets`) | Master key that seals the signing keys and ID tokens graphos stores; without it they are stored in clear (a warning at start). Back it up apart from the database |
-| `GRAPHOS_MCP` | `true` | `false` turns off the MCP endpoint `/mcp` for agents (read tools, the same tokens as the API; [agents guide](docs/agents.md)) |
+| `GRAPHOS_MCP` | `true` | `false` turns off the MCP endpoint `/mcp` for agents (read tools, the same tokens as the API; [agents guide](docs/guide/agents.md)) |
 | `GRAPHOS_ALLOWED_HOSTS` | — (any) | Host names graphos answers to, comma-separated (`*.example.com` works), against DNS rebinding; `localhost` and `127.0.0.1` always. Add `graphos-api` when the bundled web UI proxies to it |
 | `GRAPHOS_OIDC_ISSUER` | — | Single sign-on: the OpenID Connect provider's issuer (exactly the `issuer` of its discovery document); unset, no SSO |
 | `GRAPHOS_OIDC_CLIENT_ID` | — | Single sign-on: graphos's public client (PKCE) at the provider |
 | `GRAPHOS_OIDC_REDIRECT_URIS` | `[]` (any) | Single sign-on: the UI's callback URLs, as a JSON list, e.g. `["https://graphs.example.com/auth/callback"]` |
-| `GRAPHOS_OIDC_GROUPS_CLAIM`, `GRAPHOS_OIDC_ROLES_CLAIM` | `groups`, `roles` | Single sign-on: the claims grants match on (a dotted path works: `realm_access.roles`); every OIDC setting is in the [installation guide](docs/installation.md#5-single-sign-on-openid-connect) |
+| `GRAPHOS_OIDC_GROUPS_CLAIM`, `GRAPHOS_OIDC_ROLES_CLAIM` | `groups`, `roles` | Single sign-on: the claims grants match on (a dotted path works: `realm_access.roles`); every OIDC setting is in the [installation guide](docs/guide/installation.md#5-single-sign-on-openid-connect) |
 | `GRAPHOS_AUTH_DISABLED` | `false` | `true` makes every request an anonymous admin: local development only |
 | `GRAPHOS_STATEMENT_TIMEOUT_S` | `60` | Per-statement limit; exceeded → `504` problem+json |
 | `GRAPHOS_IMPORT_MAX_BYTES` | `17179869184` (16 GiB) | Most bytes `snapshot-import` reads from one body, after gzip decompression; beyond → `413` |
 | `GRAPHOS_CSV_MAX_BYTES` | `268435456` (256 MiB) | Most bytes `nodes:csv` / `edges:csv` read from one file (its rows are held to merge repeated ids); beyond → `413` |
-| `GRAPHOS_CYPHER` | `true` | `false` turns off the read-only Cypher console (`POST /v1/{tenant}/cypher`, the UI's Query page); see [usage](docs/usage.md#cypher-console) |
+| `GRAPHOS_CYPHER` | `true` | `false` turns off the read-only Cypher console (`POST /v1/{tenant}/cypher`, the UI's Query page); see [usage](docs/guide/usage.md#cypher-console) |
 | `GRAPHOS_CYPHER_LEVEL` | `read` | Level on a tenant needed to run console queries (`read`, `write`, `maintain`) |
 | `GRAPHOS_CYPHER_TIMEOUT_S`, `GRAPHOS_CYPHER_MAX_ROWS` | `30`, `5000` | Per console query: time before it is stopped (504), rows returned at most |
 | `GRAPHOS_CYPHER_POOL_SIZE`, `GRAPHOS_CYPHER_PER_USER` | `5`, `1` | Console queries running at once per replica, and per user |
@@ -248,34 +248,35 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 
 | Doc | Read it for |
 |---|---|
-| [Whitepaper](https://graphos-pomentum.vercel.app) ([source](docs/whitepaper.html)) | The problem, the approach, the benefits |
-| [Installation guide](docs/installation.md) | Installing, the first sign-in, users, single sign-on, production settings, upgrading |
-| [Reading graphos's data without graphos](docs/without-graphos.md) | The table layout, reading it with SQL or Cypher, taking it out, loading an export into plain AGE |
-| [Upgrading the database](docs/upgrade-postgresql-18.md) | Moving from PostgreSQL 16 / AGE 1.6 (no longer supported) to PostgreSQL 18 / AGE 1.8 with `docker compose up` |
-| [Single sign-on](docs/sso.md) | Registering graphos at an OpenID Connect provider, a Keycloak example, troubleshooting |
-| [Graph algorithms](docs/algorithms.md) | What Louvain, PageRank, betweenness, components and degree find, and what they are for |
-| [Usage guide](docs/usage.md) | Practical integration patterns |
-| [Feature survey](docs/features.md) | Every capability, briefly |
-| [Concept](docs/concept.md) | Architecture, endpoint catalogue, capacity planning |
-| [Apache AGE notes](docs/apache-age.md) | AGE pitfalls, indexing, Postgres tuning, measured numbers |
+| [Installation guide](docs/guide/installation.md) | Installing, the first sign-in, users, single sign-on, production settings, upgrading |
+| [Reading graphos's data without graphos](docs/guide/without-graphos.md) | The table layout, reading it with SQL or Cypher, taking it out, loading an export into plain AGE |
+| [Upgrading the database](docs/guide/upgrade-postgresql-18.md) | Moving from PostgreSQL 16 / AGE 1.6 (no longer supported) to PostgreSQL 18 / AGE 1.8 with `docker compose up` |
+| [Single sign-on](docs/guide/sso.md) | Registering graphos at an OpenID Connect provider, a Keycloak example, troubleshooting |
+| [Graph algorithms](docs/guide/algorithms.md) | What Louvain, PageRank, betweenness, components and degree find, and what they are for |
+| [Usage guide](docs/guide/usage.md) | Practical integration patterns |
+| [Connecting an agent (MCP)](docs/guide/agents.md) | Where `/mcp` is, getting a token, configuring a client, the tools and resources, security |
+| [Feature survey](docs/guide/features.md) | Every capability, briefly |
+| [Concept](docs/guide/concept.md) | Architecture, endpoint catalogue, capacity planning |
+| [Apache AGE notes](docs/guide/apache-age.md) | AGE pitfalls, indexing, Postgres tuning, measured numbers |
 | [Web UI](services/graphos-ui/README.md) | Running the UI, its views, how its code and text are organised |
 
 ## Built on Apache AGE
 
 graphos stores every tenant as an [Apache AGE](https://age.apache.org/) graph inside PostgreSQL 18 (image `apache/age:release_PG18_1.8.0`). PostgreSQL 16 with AGE 1.6, bundled up to graphos 0.9, is no longer
-supported: graphos-api does not start on it, and a stack on it moves to 18 by itself on `docker compose up` ([upgrade guide](docs/upgrade-postgresql-18.md)). AGE provides the property-graph model and its per-label storage tables (and an openCypher engine; graphos queries the tables with SQL instead, so statement timeouts and cancellation always apply); graphos adds the HTTP boundary, tenancy, bulk paths, indexing and analytics on top. Apache AGE is a project of the Apache Software Foundation, licensed under Apache 2.0, and is not affiliated with graphos.
+supported: graphos-api does not start on it, and a stack on it moves to 18 by itself on `docker compose up` ([upgrade guide](docs/guide/upgrade-postgresql-18.md)). AGE provides the property-graph model and its per-label storage tables (and an openCypher engine; graphos queries the tables with SQL instead, so statement timeouts and cancellation always apply); graphos adds the HTTP boundary, tenancy, bulk paths, indexing and analytics on top. Apache AGE is a project of the Apache Software Foundation, licensed under Apache 2.0, and is not affiliated with graphos.
 
 ## Development
 
-The rules for working on graphos, for people and coding agents, are in [docs/development.md](docs/development.md), with a `DEVELOPMENT.md` in each package; [AGENTS.md](AGENTS.md) sums up the hard rules. To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md); to report a vulnerability, [SECURITY.md](SECURITY.md).
+The rules for working on graphos, for people and coding agents, are in [docs/guide/development.md](docs/guide/development.md), with a `DEVELOPMENT.md` in each package; [AGENTS.md](AGENTS.md) sums up the hard rules. To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md); to report a vulnerability, [SECURITY.md](SECURITY.md).
 
 ```bash
 pip install -e "services/graphos[dev,louvain]" -e "clients/python[dev]"
 pytest -m "not db" services/graphos/tests      # unit tests, no database
 pytest clients/python/tests
 bash scripts/run-db-tests.sh                   # integration tests against the compose stack
-node tools/docs/diagrams.mjs                    # regenerate docs/images/*.svg and embed them, and the UI screenshots, in the whitepaper
+node tools/docs/diagrams.mjs                    # regenerate the diagrams, docs/images/*.svg
 python tools/docs/screenshots.py --ui <url>     # retake the UI screenshots (docs/images/ui-*), of the demo tenant
+python tools/docs/site.py                       # regenerate the website's page, docs/index.html
 (cd services/graphos-ui && npm ci && npm test)  # the web UI: tests (npm run dev to run it)
 ```
 

@@ -4,7 +4,7 @@ One module per topic: ``health`` (/healthz, /readyz), ``info`` (/v1/info),
 ``tenants`` (/v1/tenants), ``graph`` / ``bulk`` / ``snapshot`` (data plane),
 ``communities`` / ``louvain`` (community detection), ``cache`` (K/V cache)
 and ``db`` (operational introspection). The full catalogue is in
-``docs/concept.md`` §2.5.1.
+``docs/guide/concept.md`` §2.5.1.
 
 Admin scope is enforced by the token store (token has an ``admin: true``
 attribute) rather than by URL prefix — there is no ``/admin`` segment in

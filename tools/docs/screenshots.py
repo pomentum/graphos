@@ -1,10 +1,9 @@
-"""Screenshots of the web UI for the docs (docs/images/ui-*.png, and .jpg).
+"""Screenshots of the web UI for the docs and the website (docs/images/ui-*.png).
 
 Takes them from a running UI, signed in as a user that sees only the demo
 tenant (so no other tenant's name appears), in dark mode, at 1440x900.  Load
 the demo first: ``clients/python/examples/08_demo_ecosystem.py``.  Each shot is
-written twice: a PNG for the README and docs, and a smaller JPEG that
-``node tools/docs/diagrams.mjs`` embeds in the whitepaper (one self-contained file).
+one PNG, shown by the README, the docs and the website.
 
     pip install playwright            # plus a browser: playwright install chromium,
                                       # or --channel msedge / chrome to use an installed one
@@ -29,7 +28,6 @@ from playwright.sync_api import Page, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
 SETTLE_MS = 3500          # layouts animate: let them come to rest
-JPEG_QUALITY = 80         # the whitepaper's copies: a quarter of the PNG's size
 
 
 def _go(page: Page, path: str) -> None:
@@ -235,7 +233,6 @@ def main() -> int:
             SHOTS[name](page)
             target = args.out / f"ui-{name}-{args.scheme}.png"
             page.screenshot(path=target)
-            page.screenshot(path=target.with_suffix(".jpg"), type="jpeg", quality=JPEG_QUALITY)
             print(target.relative_to(ROOT) if target.is_relative_to(ROOT) else target)
             ctx.close()
         browser.close()

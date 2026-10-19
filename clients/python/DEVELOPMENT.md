@@ -2,7 +2,7 @@
 
 How to work on `graphos-client`, the async Python client in
 `clients/python/`. The rules for the whole repository (docs, test stacks,
-git, privacy) are in [`development.md`](../../docs/development.md); they apply here too.
+git, privacy) are in [`development.md`](../../docs/guide/development.md); they apply here too.
 Its users' guide is the [client README](README.md).
 
 ## 1. Where to look
@@ -23,7 +23,7 @@ Paths are under `clients/python/`.
 ## 2. Setup, test, lint
 
 In a venv at `.venv` in the checkout
-([development.md, Python environment](../../docs/development.md#python-environment)):
+([development.md, Python environment](../../docs/guide/development.md#python-environment)):
 
 ```bash
 pip install -e "clients/python[dev]"
@@ -71,14 +71,14 @@ against a running stack, set `GRAPHOS_URL` (default
 
 ## 5. When the client changes
 
-Besides the shared list in [development.md §3](../../docs/development.md#3-docs-discipline):
+Besides the shared list in [development.md §3](../../docs/guide/development.md#3-docs-discipline):
 
 - the README's "What the client covers" table lists every method; "Not
   wrapped" lists what is left to plain HTTP;
 - the README's examples table lists every script in `examples/`;
 - a change in retries or errors updates the README's "Behaviour" section;
 - a change to what the client promises (async only, its dependencies, what
-  it retries) gets an [ADR](../../docs/adrs/README.md) first.
+  it retries) gets an [ADR](../../docs/guide/adrs/README.md) first.
 
 ## 6. Release
 
@@ -87,4 +87,4 @@ The client shares its version with the service and the UI
 hand: the `graphos-client-release` workflow, run from a version tag
 (`.github/workflows/client-release.yml`). A version tag does not publish it.
 Never tag or publish without the owner's approval
-([development.md §6](../../docs/development.md#6-git)).
+([development.md §6](../../docs/guide/development.md#6-git)).

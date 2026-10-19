@@ -1,7 +1,7 @@
 import { createTheme, type CSSVariablesResolver, type MantineColorsTuple } from "@mantine/core";
 import { cssVariables, DARK, LIGHT } from "./tokens";
 
-/** Ten shades of the whitepaper blue; shade 7 is the accent itself. */
+/** Ten shades of graphos's blue; shade 7 is the accent itself. */
 const accent: MantineColorsTuple = [
   "#EAF1FC",
   "#D4E2F9",
