@@ -26,7 +26,7 @@ and the commands.
   in the current turn.
 - **Never rebase; merge.** Update a branch by merging `main` into it; no
   `git rebase`, no `git pull --rebase`.
-- **Never commit secrets.** `deploy/secrets/` and `.env` stay ignored; never
+- **Never commit secrets.** `services/graphos/deploy/secrets/` and `.env` stay ignored; never
   `git add -f` them or put a password, key or token in a commit.
 - **No customer data** in code, tests, fixtures, commits or published docs:
   no customer names, schemas, hosts, repository ids or paths. Neutral
@@ -43,6 +43,7 @@ and the commands.
 # Service
 pip install -e "services/graphos[dev,louvain]"
 ruff check services/graphos/src services/graphos/tests
+(cd services/graphos && mypy)
 pytest -m "not db" services/graphos/tests
 bash scripts/run-db-tests.sh                          # database tests, own compose project
 
@@ -56,4 +57,5 @@ pytest clients/python/tests
 
 # Repository
 node tools/docs/diagrams.mjs --check && node tools/release/version.mjs --check
+python tools/docs/api_docs_assets.py --check && python tools/docs/site.py --check
 ```

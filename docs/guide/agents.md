@@ -50,7 +50,7 @@ token to paste. graphos is then the client's authorization server
 
 1. The client calls `/mcp`, gets a 401 pointing at the metadata, and registers itself at
    `/oauth/register`. It is registered as a public client (no secret; PKCE binds each code to
-   it). Its callback must be a loopback one (`http://localhost` or `127.0.0.1`, any port), as
+   it). Its callback must be a loopback one (`http://localhost`, `127.0.0.1` or `[::1]`, any port), as
    desktop and command-line clients use. A web client, such as a hosted chat's connector, signs
    people in through single sign-on, where the provider holds its callback.
 2. It opens a browser at `/oauth/authorize`. At the web UI's address, that leads to the UI's

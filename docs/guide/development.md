@@ -37,7 +37,7 @@ Where to read about the system as a whole:
 - [`features.md`](features.md): capabilities at a glance;
 - [`usage.md`](usage.md): worked requests for every endpoint group;
 - [`adrs/`](adrs/README.md): the decisions behind the design, and why;
-- [`../CHANGELOG.md`](../../CHANGELOG.md): what changed and when.
+- [`CHANGELOG.md`](../../CHANGELOG.md): what changed and when.
 
 ## 2. Run the stack, check the repository
 

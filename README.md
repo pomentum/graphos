@@ -271,6 +271,7 @@ The rules for working on graphos, for people and coding agents, are in [docs/gui
 
 ```bash
 pip install -e "services/graphos[dev,louvain]" -e "clients/python[dev]"
+(cd services/graphos && mypy)                  # types, as CI checks them
 pytest -m "not db" services/graphos/tests      # unit tests, no database
 pytest clients/python/tests
 bash scripts/run-db-tests.sh                   # integration tests against the compose stack
@@ -280,7 +281,7 @@ python tools/docs/site.py                       # regenerate the website's page,
 (cd services/graphos-ui && npm ci && npm test)  # the web UI: tests (npm run dev to run it)
 ```
 
-`run-db-tests.sh` starts the compose file as a project of its own, `graphos-test`, sharing nothing with a graphos stack on the same machine: containers `graphos-test-*`, volumes `graphos_test_*`, networks `graphos-test-internal` and `graphos-test-net`, the API on `127.0.0.1:18089` (`GRAPHOS_TEST_API_PORT`) built as `graphos-api:test`. `--down-volumes` deletes only those volumes (the script refuses any other). `--db-image IMAGE` runs the tests on another database image (CI: PostgreSQL 16 / AGE 1.6), on a volume of its own (`graphos_test_db`).
+`run-db-tests.sh` starts the compose file as a project of its own, `graphos-test`, sharing nothing with a graphos stack on the same machine: containers `graphos-test-*`, volumes `graphos_test_*`, networks `graphos-test-internal` and `graphos-test-net`, the API on `127.0.0.1:18089` (`GRAPHOS_TEST_API_PORT`) built as `graphos-api:test`. `--down-volumes` deletes only those volumes (the script refuses any other). `--db-image IMAGE` runs the tests on another database image (a newer AGE, say; graphos needs PostgreSQL 18 / AGE 1.8), on a volume of its own (`graphos_test_db`).
 
 ## License
 
