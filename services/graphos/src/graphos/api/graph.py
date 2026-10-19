@@ -25,13 +25,14 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import functools
 import json as _json
 import logging
 import time
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import asyncpg
 from fastapi import (
@@ -1544,7 +1545,7 @@ async def induced_edges(
         gid_text = [str(g) for g in gid_set]
         if body.rel_types:
             rel_filter_sql = "AND c.relname = ANY($3::text[])"
-            params = (gid_text, body.limit, list(body.rel_types))
+            params: tuple[Any, ...] = (gid_text, body.limit, list(body.rel_types))
         else:
             rel_filter_sql = ""
             params = (gid_text, body.limit)
@@ -1684,11 +1685,11 @@ async def scoped_subgraph(
                 break
             props = {k: _agtype_scalar(r[f"p{i}"]) for i, k in enumerate(wanted)}
             if markers:
-                probe = str(props.get(body.exclude_property) or "").lower()
+                probe = str(props.get(cast(str, body.exclude_property)) or "").lower()
                 if any(m in probe for m in markers):
                     continue
             if groups:
-                g = str(props.get(body.group_property) or "")
+                g = str(props.get(cast(str, body.group_property)) or "")
                 if per_group_count.get(g, 0) >= per_group_cap:
                     continue
                 per_group_count[g] = per_group_count.get(g, 0) + 1
@@ -1708,7 +1709,7 @@ async def scoped_subgraph(
         if gids:
             if body.rel_types:
                 rel_sql = "AND c.relname = ANY($2::text[])"
-                edge_params = (gids, list(body.rel_types), body.edge_limit)
+                edge_params: tuple[Any, ...] = (gids, list(body.rel_types), body.edge_limit)
                 limit_ph = "$3"
             else:
                 rel_sql = ""
@@ -2050,7 +2051,7 @@ async def expand(
             ) if in_dir else None
             # When scope is active, $2 = community_id strings as text[],
             # served by the per-edge-label partial btrees directly.
-            args = (out_limit, list(communities)) if scope_active else (out_limit,)
+            args = (out_limit, list(communities)) if communities else (out_limit,)
             try:
                 if out_sql and in_sql:
                     out_rows, in_rows = await asyncio.gather(
@@ -3447,6 +3448,7 @@ async def scan_nodes(
     #   ``order_by_wire``  — opaque value carried verbatim in the cursor
     #                        (str for single-key, list[dict] for multi-key)
     #   ``sort_keys``      — ordered list of per-key SQL fragments + casts
+    sort_keys: list[dict[str, Any]]
     if skip_order_by:
         order_by_wire, sort_keys = None, []
     else:
@@ -3500,6 +3502,12 @@ async def scan_nodes(
         for i, k in enumerate(page_keys)
     )
     not_null_sql = " AND ".join(k["not_null"] for k in sort_keys)
+
+    remaining = body.limit
+    # The most recently included row's sort-key values (one per key) and
+    # graphid, for the cursor; kept across the cursor branches of a label.
+    last_included_anchors: list[Any] = []
+    last_included_gid: int | None = None
 
     async def _scan_part(
         cursor_frag: str, cursor_params: list[Any], first_idx: int, label: str,
@@ -3638,10 +3646,8 @@ async def scan_nodes(
         return False
 
     remaining = body.limit
-    # The most recently included row's sort-key values (one per key) and
-    # graphid, for the cursor; kept across the cursor branches of a label.
-    last_included_anchors: list[Any] = []
-    last_included_gid: int | None = None
+    last_included_anchors = []
+    last_included_gid = None
     for li, label in enumerate(labels_to_scan):
         if remaining <= 0 or truncated:
             break
@@ -4160,7 +4166,7 @@ async def run_resolve(
                     rules=rules,
                     catalogue=catalogue,
                     allows=(
-                        (lambda s, d, et=edge_type: policy.allows(et, s, d))
+                        functools.partial(policy.allows, edge_type)
                         if policy.strict else None
                     ),
                 )

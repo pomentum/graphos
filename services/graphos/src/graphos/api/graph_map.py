@@ -22,8 +22,9 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Any
 
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -89,11 +90,14 @@ def _sample(table: _Table, exact: bool) -> tuple[str, float]:
     return f" TABLESAMPLE SYSTEM ({percent:.4f})", 100.0 / percent
 
 
-async def _gather(pool: asyncpg.Pool, jobs: list) -> list:
+_Job = Callable[[asyncpg.Connection], Awaitable[Any]]
+
+
+async def _gather(pool: asyncpg.Pool, jobs: Sequence[_Job]) -> list[Any]:
     """Runs `jobs` (coroutine factories taking a connection), a few at a time."""
     gate = asyncio.Semaphore(PARALLEL_READS)
 
-    async def run(job):  # noqa: ANN001, ANN202 — internal
+    async def run(job: _Job) -> Any:
         async with gate, pool.acquire() as conn:
             return await job(conn)
 
@@ -131,14 +135,14 @@ async def graph_map(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"no graph {tenant!r}")
     vertex = {t.label_id: t.name for t in tables if t.kind == "v"}
 
-    def count_nodes(table: _Table):  # noqa: ANN202 — job factory
+    def count_nodes(table: _Table) -> Callable[[asyncpg.Connection], Awaitable[MapLabel]]:
         async def job(conn: asyncpg.Connection) -> MapLabel:
             # ONLY: a parent label's own rows; its children are counted as themselves.
             n = await conn.fetchval(f"SELECT count(*) FROM ONLY {table.relation}")
             return MapLabel(label=table.name, count=n)
         return job
 
-    def count_links(table: _Table):  # noqa: ANN202 — job factory
+    def count_links(table: _Table) -> Callable[[asyncpg.Connection], Awaitable[list[MapLink]]]:
         sample, scale = _sample(table, exact)
 
         async def job(conn: asyncpg.Connection) -> list[MapLink]:
@@ -215,7 +219,9 @@ async def graph_hubs(
             detail=f"no vertex label {label!r} in {tenant!r}",
         )
 
-    def degrees(table: _Table):  # noqa: ANN202 — job factory
+    def degrees(
+        table: _Table,
+    ) -> Callable[[asyncpg.Connection], Awaitable[list[tuple[str, float, bool]]]]:
         sample, scale = _sample(table, exact=False)
 
         async def job(conn: asyncpg.Connection) -> list[tuple[str, float, bool]]:

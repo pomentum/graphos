@@ -42,6 +42,7 @@ Python 3.11 (CI's version), in a venv at `.venv` in the checkout
 ```bash
 pip install -e "services/graphos[dev,louvain]"     # louvain: python-igraph, GPL, optional
 ruff check services/graphos/src services/graphos/tests
+(cd services/graphos && mypy)                       # types, as configured in pyproject.toml
 pytest -m "not db" services/graphos/tests          # unit tests, no database
 ```
 
@@ -129,7 +130,9 @@ Changing one takes an [ADR](../../docs/adrs/README.md) first.
   says why.
 - **Typing:** `from __future__ import annotations` at the top of every
   module; every function annotated; modern syntax (`str | None`,
-  `collections.abc`). The mypy config is `strict`.
+  `collections.abc`). The mypy config is `strict` (with pydantic's plugin,
+  for Linux, as CI runs it) and CI runs it; a `# type: ignore` names the
+  error code and says why.
 - **Docstrings:** every module opens with a docstring that says what it is
   for and why it works the way it does (constraints, AGE behaviour, which
   test enforces it). Functions get a one-line summary, more only when it

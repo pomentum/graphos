@@ -18,7 +18,7 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncIterator
-from typing import Annotated
+from typing import Annotated, Any
 
 import asyncpg
 from fastapi import APIRouter, Header, HTTPException, Query, Request, status
@@ -41,10 +41,12 @@ router = APIRouter(tags=["changes"], prefix="/{tenant}/changes")
 # Records read per query while streaming.
 _STREAM_BATCH = 500
 
-_GONE_RESPONSE = {
+_GONE_RESPONSE: dict[int | str, dict[str, Any]] = {
     410: {"description": "The records after this cursor were pruned; resync from the head."},
 }
-_BAD_CURSOR_RESPONSE = {400: {"description": "The cursor is not one the feed issued."}}
+_BAD_CURSOR_RESPONSE: dict[int | str, dict[str, Any]] = {
+    400: {"description": "The cursor is not one the feed issued."},
+}
 
 
 def _cursor(text: str | None) -> changes.Cursor | None:

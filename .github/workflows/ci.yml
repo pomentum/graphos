@@ -26,6 +26,10 @@ jobs:
       - name: Lint (service)
         run: ruff check services/graphos/src services/graphos/tests
 
+      - name: Types (service)
+        working-directory: services/graphos
+        run: mypy
+
       - name: Unit tests (no DB)
         run: pytest -m "not db" services/graphos/tests
 

@@ -353,7 +353,7 @@ async def prune(pool: asyncpg.Pool, retention_h: float, *, batch: int = 5000) ->
     """
     total = 0
     while True:
-        n = await pool.fetchval(_PRUNE_SQL, retention_h * 3600, batch)
+        n: int = await pool.fetchval(_PRUNE_SQL, retention_h * 3600, batch)
         total += n
         if n < batch:
             return total

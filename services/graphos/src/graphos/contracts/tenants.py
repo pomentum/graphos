@@ -715,7 +715,7 @@ class TenantSpecBody(BaseModel):
 
     @field_validator("edge_labels", mode="before")
     @classmethod
-    def _coerce_edge_labels(cls, v: Any) -> list[Any]:
+    def _coerce_edge_labels(cls, v: Any) -> Any:
         """Accept both plain ``["LABEL_A", "LABEL_B"]`` and the richer
         ``[{"name": "LABEL_A", "resolve_rule": {...}}]`` shape.
 

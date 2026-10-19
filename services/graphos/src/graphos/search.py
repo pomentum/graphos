@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -144,7 +145,7 @@ async def ensure_indexes(
     conn: asyncpg.Connection,
     tenant: str,
     indexes: dict[str, dict[str, Any]],
-    ensure_index,  # noqa: ANN001 — bootstrap._ensure_index_concurrently
+    ensure_index: Callable[..., Awaitable[None]],  # bootstrap._ensure_index_concurrently
 ) -> None:
     """Build the Postgres indexes behind each search index (concurrently).
 

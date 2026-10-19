@@ -15,6 +15,7 @@ and ``undeclared: warn`` only ever warn.  ``id``, ``graphos_*`` and
 
 from __future__ import annotations
 
+import builtins
 import json
 import re
 from collections.abc import Callable, Iterable, Mapping
@@ -112,7 +113,7 @@ class Violation:
     source: str
     severity: str = ERROR
 
-    @property
+    @builtins.property
     def key(self) -> str:
         """``<source>.<property>:<rule>``: how violations are counted."""
         return f"{self.source}.{self.property}:{self.rule}"

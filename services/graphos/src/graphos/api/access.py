@@ -48,14 +48,14 @@ _NO_USER_404: dict[int | str, dict[str, Any]] = {
 
 def _user_info(user: identity.User) -> UserInfo:
     return UserInfo(
-        name=user.name, kind=user.kind, disabled=user.disabled, must_change=user.must_change,  # type: ignore[arg-type]
+        name=user.name, kind=user.kind, disabled=user.disabled, must_change=user.must_change,
         created_at=user.created_at, created_by=user.created_by, last_login_at=user.last_login_at,
     )
 
 
 def _grant_info(grant: identity.Grant) -> GrantInfo:
     return GrantInfo(
-        subject=grant.subject, tenant=grant.tenant_pattern, level=grant.level,  # type: ignore[arg-type]
+        subject=grant.subject, tenant=grant.tenant_pattern, level=grant.level,
         granted_by=grant.granted_by, granted_at=grant.granted_at,
     )
 

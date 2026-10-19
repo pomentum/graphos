@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Awaitable, Callable
+from typing import cast
 
 import structlog
 from fastapi import Request, Response
@@ -108,7 +109,7 @@ def _parse_traceparent(value: str) -> str | None:
 def _route_label(request: Request) -> str:
     route = request.scope.get("route")
     if route is not None and hasattr(route, "path"):
-        return route.path
+        return cast(str, route.path)
     return request.url.path
 
 

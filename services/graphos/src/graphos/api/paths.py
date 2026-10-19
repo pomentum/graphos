@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import time
 from collections import defaultdict
+from typing import Any
 
 import asyncpg
 from fastapi import APIRouter, HTTPException, Request, status
@@ -196,7 +197,7 @@ def _expand_sql(source: str, walk: paths.Walk) -> str:
 
 async def _vertices(
     conn: asyncpg.Connection, tenant: str, found: list[paths.Path],
-) -> dict[int, tuple[str, dict]]:
+) -> dict[int, tuple[str, dict[str, Any]]]:
     """``graphid -> (label, properties)`` for every vertex on the paths."""
     gids = {v for p in found for v in p.vertices}
     if not gids:
@@ -213,7 +214,7 @@ async def _vertices(
     by_label: dict[str, list[int]] = defaultdict(list)
     for gid in gids:
         by_label[labels[gid >> _ENTRY_BITS]].append(gid)
-    out: dict[int, tuple[str, dict]] = {}
+    out: dict[int, tuple[str, dict[str, Any]]] = {}
     for label, members in by_label.items():
         for r in await conn.fetch(
             f"SELECT (id::text)::bigint AS gid, properties::text::jsonb AS props "
@@ -226,12 +227,12 @@ async def _vertices(
 
 async def _edge_properties(
     conn: asyncpg.Connection, tenant: str, found: list[paths.Path],
-) -> dict[int, dict]:
+) -> dict[int, dict[str, Any]]:
     by_type: dict[str, set[int]] = defaultdict(set)
     for p in found:
         for e in p.edges:
             by_type[e.type].add(e.gid)
-    out: dict[int, dict] = {}
+    out: dict[int, dict[str, Any]] = {}
     for edge_type, gids in by_type.items():
         for r in await conn.fetch(
             f"SELECT (id::text)::bigint AS gid, properties::text::jsonb AS props "

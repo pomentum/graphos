@@ -36,7 +36,7 @@ from graphos import analysis, changes, community_map, graph_compute, louvain_com
 # because it is GPL-licensed; the rest of graphos is Apache-2.0 and must
 # import cleanly without it.  The recompute endpoint checks
 # ``LOUVAIN_AVAILABLE`` and answers 501 when the extra is missing.
-LOUVAIN_AVAILABLE = louvain_compute.ig is not None
+LOUVAIN_AVAILABLE = louvain_compute.IGRAPH_AVAILABLE
 LOUVAIN_INSTALL_HINT = (
     'Louvain community detection is not installed in this build. Install the '
     'optional extra (pip install "graphos[louvain]") or build the image with '
@@ -122,7 +122,7 @@ async def _writeback_assignments(
     (regardless of how many actually got written).
     """
     if not assignments:
-        return 0
+        return 0, {}
 
     # New-side aggregates: cluster sizes by RAW (size-sorted) ID,
     # built directly from the in-memory partition.  No DB round-trip.
@@ -134,8 +134,8 @@ async def _writeback_assignments(
     #   'q' = signed int64 (graphid)   — 8 B
     #   'i' = signed int32 (community) — 4 B
     # Per-vertex client memory ~12 B vs ~140 B for a dict[int,str].
-    gids_arr: array.array = array.array("q")
-    olds_arr: array.array = array.array("i")
+    gids_arr: array.array[int] = array.array("q")
+    olds_arr: array.array[int] = array.array("i")
     pair_counts: dict[tuple[int, int], int] = {}
     old_sizes: dict[int, int] = {}
 
@@ -158,9 +158,9 @@ async def _writeback_assignments(
             gids_arr.append(gid)
             olds_arr.append(old)
             old_sizes[old] = old_sizes.get(old, 0) + 1
-            raw = assignments.get(gid)
-            if raw is not None:
-                key = (raw, old)
+            new_raw = assignments.get(gid)
+            if new_raw is not None:
+                key = (new_raw, old)
                 pair_counts[key] = pair_counts.get(key, 0) + 1
 
         # Greene 2010 stable-ID matching — pure function, sub-ms on
