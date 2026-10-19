@@ -1,16 +1,16 @@
 """The MCP endpoint (``/mcp``): graphos's reads as tools for agents (ADR-0002).
 
-Mounted in the API itself when ``GRAPHOS_MCP=true``, over the Python SDK's
+Mounted in the API itself unless ``GRAPHOS_MCP=false``, over the Python SDK's
 Streamable HTTP transport in stateless mode, so any replica serves any call
 and there is no protocol session to keep.
 
-**Who calls.**  ``/mcp`` is an OAuth resource server.  A token must carry
-``GRAPHOS_MCP_RESOURCE`` as its audience: a graphos token from
-``POST /v1/auth/token`` with ``resource`` set to it, or the identity
-provider's access token for it.  A token for the REST API is refused here,
-and an MCP token is refused by the REST API.  A refused call answers 401
-with ``WWW-Authenticate: Bearer resource_metadata=…``; the metadata
-(RFC 9728) is served at ``/.well-known/oauth-protected-resource[/mcp]``.
+**Who calls.**  ``/mcp`` takes the tokens the REST API takes (ADR-0008):
+graphos's own, from ``/v1/auth/login`` or single sign-on, and the identity
+provider's access tokens for graphos's audience.  A tool can do nothing the
+same token cannot do through REST, so one audience serves both.  A refused
+call answers 401 with ``WWW-Authenticate: Bearer resource_metadata=…``; the
+metadata (RFC 9728), served at ``/.well-known/oauth-protected-resource[/mcp]``,
+names the endpoint as the caller reached it and ``GRAPHOS_OIDC_ISSUER``.
 
 **What a tool does.**  Each tool runs the REST route it wraps, in process
 (no network, no HTTP server), with a single-use token lent for the caller
@@ -24,11 +24,12 @@ schema ever contains tenant data (labels, properties, descriptions), so a
 tenant cannot plant instructions in it.  Tenant data reaches the model only
 as results, which are data.  Every tool is a read (``readOnlyHint``), its
 access level stated once in :data:`TOOLS` and checked by the tests.  A
-result over ``GRAPHOS_MCP_MAX_RESULT_BYTES`` is cut and says so.
+result over :data:`MAX_RESULT_BYTES` is cut and says so.
 
 **Host and Origin.**  The app's ``GRAPHOS_ALLOWED_HOSTS`` check runs first;
 a browser request's ``Origin`` must name an allowed host too (or, with no
-list, the request's own), against DNS rebinding.
+list, the request's own), against DNS rebinding; both read the setting
+through :func:`graphos.config.allowed_hosts`.
 """
 
 from __future__ import annotations
@@ -51,13 +52,16 @@ from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
 from graphos import __version__
+from graphos.api.schema_summary import TTL_S as SUMMARY_TTL_S
 from graphos.auth import LentTokens
-from graphos.config import Settings
+from graphos.config import Settings, allowed_hosts
 from graphos.identity import ANONYMOUS_ADMIN, Principal
 
 log = logging.getLogger(__name__)
 
 PRINCIPAL_KEY = "graphos.mcp_principal"
+# Bytes of one tool result at most; a longer one is cut and says so.
+MAX_RESULT_BYTES = 262_144
 INSTRUCTIONS = (
     "graphos holds property graphs, one per tenant. Call list_tenants, then get_schema for a "
     "tenant before anything else: it lists the labels, edge types, properties and their real "
@@ -379,7 +383,7 @@ class McpEndpoint:
             return
         principal = await self._principal(request)
         if principal is None:
-            await self._unauthorized()(scope, receive, send)
+            await _unauthorized(request)(scope, receive, send)
             return
         scope[PRINCIPAL_KEY] = principal
         await self.manager.handle_request(scope, receive, send)
@@ -389,12 +393,10 @@ class McpEndpoint:
         if not origin:
             return True
         host = (urlsplit(origin).hostname or "").lower()
-        allowed = [h.strip().lower() for h in self.settings.allowed_hosts.split(",") if h.strip()]
+        allowed = allowed_hosts(self.settings.allowed_hosts)
         if not allowed:
             return host == (request.url.hostname or "").lower()
-        return any(
-            host == a or (a.startswith("*.") and host.endswith(a[1:])) for a in allowed
-        ) or host in ("localhost", "127.0.0.1")
+        return any(host == a or (a.startswith("*.") and host.endswith(a[1:])) for a in allowed)
 
     async def _principal(self, request: Request) -> Principal | None:
         authenticator = getattr(self.app.state, "authenticator", None)
@@ -404,20 +406,10 @@ class McpEndpoint:
         scheme, _, bearer = header.partition(" ")
         if scheme.lower() != "bearer" or not bearer.strip():
             return None
-        principal = await authenticator.authenticate(
-            bearer.strip(), audience=self.settings.mcp_resource,
-        )
+        principal = await authenticator.authenticate(bearer.strip())
         if principal is None or principal.must_change:
             return None
         return principal
-
-    def _unauthorized(self) -> Response:
-        metadata = metadata_url(self.settings)
-        challenge = f'Bearer resource_metadata="{metadata}"' if metadata else "Bearer"
-        return JSONResponse(
-            {"detail": "a token for this MCP endpoint is needed"}, status_code=401,
-            headers={"WWW-Authenticate": challenge},
-        )
 
     # ── MCP handlers ────────────────────────────────────────────────────
 
@@ -448,7 +440,7 @@ class McpEndpoint:
         tenant = parts.netloc
         if parts.scheme != "graphos" or not tenant:
             raise ValueError(f"unknown resource {uri!r}")
-        ttl = self.settings.schema_summary_ttl_s * 1000
+        ttl = SUMMARY_TTL_S * 1000
         if parts.path == "/schema/summary":
             status, payload = await self._run(
                 ctx, "resource:schema_summary", "GET",
@@ -500,14 +492,13 @@ class McpEndpoint:
 
     def _result(self, payload: Any) -> mt.CallToolResult:
         text = json.dumps(payload, ensure_ascii=False, default=str)
-        cap = self.settings.mcp_max_result_bytes
         data = text.encode("utf-8")
-        if len(data) > cap:
-            cut = data[:cap].decode("utf-8", errors="ignore")
+        if len(data) > MAX_RESULT_BYTES:
+            cut = data[:MAX_RESULT_BYTES].decode("utf-8", errors="ignore")
             note = (
-                f"[truncated: the result is {len(data):,} bytes, more than "
-                f"GRAPHOS_MCP_MAX_RESULT_BYTES ({cap:,}); ask for less (limit, project, "
-                "a cursor) or page]"
+                f"[truncated: the result is {len(data):,} bytes, more than the "
+                f"{MAX_RESULT_BYTES:,} a tool returns; ask for less (limit, project, a cursor) "
+                "or page]"
             )
             return mt.CallToolResult(
                 content=[mt.TextContent(type="text", text=cut + "\n" + note)],
@@ -523,19 +514,26 @@ def _error(message: str) -> mt.CallToolResult:
     return mt.CallToolResult(content=[mt.TextContent(type="text", text=message)], is_error=True)
 
 
-def metadata_url(settings: Settings) -> str | None:
-    """Where the protected-resource metadata of ``/mcp`` is served."""
-    if not settings.mcp_resource:
-        return None
-    parts = urlsplit(settings.mcp_resource)
-    return f"{parts.scheme}://{parts.netloc}/.well-known/oauth-protected-resource{parts.path}"
+def _origin(request: Request) -> str:
+    """The scheme and host the caller reached graphos at: the proxy passes
+    ``Host`` on, and uvicorn takes the scheme from a trusted proxy's
+    ``X-Forwarded-Proto``; ``GRAPHOS_ALLOWED_HOSTS`` bounds the host."""
+    return f"{request.url.scheme}://{request.url.netloc}"
 
 
-def protected_resource_metadata(settings: Settings) -> dict[str, Any]:
+def _unauthorized(request: Request) -> Response:
+    metadata = f"{_origin(request)}/.well-known/oauth-protected-resource/mcp"
+    return JSONResponse(
+        {"detail": "a valid graphos token is needed"}, status_code=401,
+        headers={"WWW-Authenticate": f'Bearer resource_metadata="{metadata}"'},
+    )
+
+
+def protected_resource_metadata(request: Request, settings: Settings) -> dict[str, Any]:
     """RFC 9728 metadata for ``/mcp``."""
     servers = [settings.oidc_issuer] if settings.oidc_issuer else []
     return {
-        "resource": settings.mcp_resource,
+        "resource": f"{_origin(request)}/mcp",
         "authorization_servers": servers,
         "bearer_methods_supported": ["header"],
         "resource_name": "graphos",
@@ -545,15 +543,10 @@ def protected_resource_metadata(settings: Settings) -> dict[str, Any]:
 def install(app: Any, settings: Settings) -> McpEndpoint:
     """Mount ``/mcp`` and its metadata on ``app``; the app's lifespan runs the
     session manager (``graphos.app.mcp_running``)."""
-    if not settings.mcp_resource and not settings.auth_disabled:
-        raise RuntimeError(
-            "GRAPHOS_MCP=true needs GRAPHOS_MCP_RESOURCE (the endpoint's public URL, the "
-            "audience its tokens carry)",
-        )
     endpoint = McpEndpoint(app, settings)
 
-    async def metadata(_: Request) -> Response:
-        return JSONResponse(protected_resource_metadata(settings))
+    async def metadata(request: Request) -> Response:
+        return JSONResponse(protected_resource_metadata(request, settings))
 
     app.router.routes.append(Route("/mcp", endpoint=endpoint, methods=["GET", "POST", "DELETE"]))
     for path in ("/.well-known/oauth-protected-resource",

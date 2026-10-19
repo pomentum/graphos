@@ -42,7 +42,7 @@ PRINCIPALS = {
 # links the documentation, is left out of the schema).
 PUBLIC_PATHS = {
     "/healthz", "/readyz", "/v1/info",
-    "/v1/auth/login", "/v1/auth/token", "/v1/auth/refresh", "/v1/auth/logout",
+    "/v1/auth/login", "/v1/auth/refresh", "/v1/auth/logout",
     "/v1/auth/config", "/v1/auth/oidc/start", "/v1/auth/oidc/callback",
 }
 # The token holding exactly each level on "acme".

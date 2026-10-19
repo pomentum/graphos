@@ -58,8 +58,8 @@ In short:
   refused (DNS rebinding);
 - the read-only Cypher console is on by default and needs `read` on a tenant: turn it off with
   `GRAPHOS_CYPHER=false` where no one needs it, or raise `GRAPHOS_CYPHER_LEVEL`;
-- with the MCP endpoint on (`GRAPHOS_MCP=true`), set `GRAPHOS_MCP_RESOURCE` to its public URL and
-  turn on the rate limiter ([agents guide](docs/agents.md)).
+- the MCP endpoint `/mcp` is on by default, reads only, with the caller's grants: turn on the rate
+  limiter for agents, or turn it off with `GRAPHOS_MCP=false` ([agents guide](docs/agents.md)).
 
 ## Known limits
 

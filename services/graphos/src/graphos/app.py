@@ -69,7 +69,7 @@ from graphos.bootstrap import (
     registered_tenants,
 )
 from graphos.changes import ChangeFeed
-from graphos.config import Settings
+from graphos.config import Settings, allowed_hosts
 from graphos.contracts.db import VacuumRequest
 from graphos.contracts.graph_metrics import ComputeMetricsRequest
 from graphos.contracts.louvain import RecomputeCommunitiesRequest
@@ -294,20 +294,6 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await app.state.console.pool.close()
         await pool.close()
         log.info("graphos shutdown complete")
-
-
-# Always answered as well: the container's own health check and a person on
-# the host use them, and a rebinding page cannot send them (its requests carry
-# the attacker's host name).
-LOOPBACK_HOSTS = ("localhost", "127.0.0.1")
-
-
-def allowed_hosts(setting: str) -> list[str]:
-    """``GRAPHOS_ALLOWED_HOSTS`` as a list, with the loopback names; empty: off."""
-    hosts = [h.strip().lower() for h in setting.split(",") if h.strip()]
-    if not hosts or "*" in hosts:
-        return []
-    return [*hosts, *(h for h in LOOPBACK_HOSTS if h not in hosts)]
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

@@ -134,10 +134,7 @@ password being its secret. Only a scrypt hash of it is stored.
 
 **Signing in.** `POST /v1/auth/login {"user", "password"}` answers an access token, valid
 `expires_in` seconds (`GRAPHOS_ACCESS_TOKEN_TTL_S`, 900). Send it as `Authorization: Bearer <token>`.
-A service account can also use OAuth client credentials: `POST /v1/auth/token`, form-encoded
-`grant_type=client_credentials`, `client_id` (its name), `client_secret`, and optionally
-`resource`, which picks the token's audience (the REST API by default, or the MCP endpoint for an
-agent; see [agents.md](agents.md)).
+The same token opens the MCP endpoint for agents, `/mcp` ([agents.md](agents.md)).
 A person also gets a `refresh_token`: `POST /v1/auth/refresh {"refresh_token"}` answers a new pair
 and the old refresh token stops working; one used twice ends the whole session (someone else has
 it). Sessions end after `GRAPHOS_SESSION_IDLE_S` (3600) without a refresh and
@@ -505,8 +502,7 @@ label pairs per edge type with their counts, the search indexes, the saved queri
 parameters, and the `graphos_*` names graphos computes itself. Lists are capped (40 labels, 25
 properties a label, 60 label pairs) and say how many there were; labels above 50,000 nodes are read
 on a sample (`estimated`). `text` holds the same as compact text, and `?format=text` answers it
-alone. It is kept per tenant for `GRAPHOS_SCHEMA_SUMMARY_TTL_S` (300 s) and dropped when the
-schema changes.
+alone. It is kept per tenant for five minutes and dropped when the schema changes.
 
 ```text
 graphos tenant acme: 2 labels with nodes, 1 label pairs with edges.

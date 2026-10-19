@@ -31,17 +31,6 @@ class LoginRequest(BaseModel):
     )
 
 
-class ClientCredentialsForm(BaseModel):
-    """The form of ``POST /v1/auth/token``: OAuth 2.0 client credentials (RFC 6749 §4.4)."""
-
-    grant_type: str = Field(..., description="Always `client_credentials`.")
-    client_id: str = Field(..., description="The service account's name.")
-    client_secret: str = Field(..., description="The service account's secret.")
-    resource: str | None = Field(
-        None, description="The resource the token is for (RFC 8707); absent: the REST API.",
-    )
-
-
 class TokenResponse(BaseModel):
     """An access token, and for a person the session that renews it."""
 

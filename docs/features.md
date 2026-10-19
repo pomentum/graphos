@@ -703,16 +703,15 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
 
 ## 10a. Agents (MCP)
 
-- **An MCP endpoint** (`/mcp`, `GRAPHOS_MCP=true`) serves graphos's reads to AI
+- **An MCP endpoint** (`/mcp`, on unless `GRAPHOS_MCP=false`) serves graphos's reads to AI
   agents as 22 read tools (schema, graph map, property definitions, stats,
   recent changes, search, nodes, neighbours, expansion, paths, aggregates,
   scans, edge checks, communities, saved queries read and run, and read-only
   Cypher where the console is on) and three resources,
   over Streamable HTTP in stateless mode, inside the API: the same grants per
   tenant, caps and timeouts, and every call audited with its tool's name. The
-  tool list carries no tenant data. Tokens must name the endpoint as their
-  audience: a service account gets one from `POST /v1/auth/token` (OAuth client
-  credentials, `resource`), a person from the identity provider. See
+  tool list carries no tenant data. It takes the tokens the REST API takes
+  (`/v1/auth/login`, single sign-on, the provider's tokens for graphos). See
   [agents.md](agents.md).
 - **Schema summary** (`GET /v1/{tenant}/schema/summary`): what a model needs
   before querying, measured from the data: labels with counts and properties

@@ -18,7 +18,7 @@ Caps keep it short (40 labels, 25 properties a label, 60 label pairs, 20
 values a property, values cut at 80 characters); each list says how many
 there were, so a cut is visible.  Labels above 50,000 nodes are read on a
 sample, flagged ``estimated``.  It is kept per tenant for
-``GRAPHOS_SCHEMA_SUMMARY_TTL_S`` (300) and dropped when the schema changes.
+five minutes (:data:`TTL_S`) and dropped when the schema changes.
 ``format=text`` answers the compact text alone, for a prompt.
 """
 
@@ -56,6 +56,8 @@ MAX_LINKS = 60
 MAX_VALUES = 20
 MAX_VALUE_CHARS = 80
 SAMPLE_ROWS = 50_000
+# How long a tenant's summary is kept; a schema change drops it at once.
+TTL_S = 300
 
 _cache: dict[str, tuple[float, str, SchemaSummaryResponse]] = {}
 
@@ -152,9 +154,8 @@ async def build_summary(
     started = time.perf_counter()
     spec = registered_tenants()[tenant]
     key = _fingerprint(spec)
-    ttl = request.app.state.settings.schema_summary_ttl_s
     hit = _cache.get(tenant)
-    if hit is not None and hit[1] == key and time.monotonic() - hit[0] < ttl:
+    if hit is not None and hit[1] == key and time.monotonic() - hit[0] < TTL_S:
         return hit[2].model_copy(update={
             "cached": True, "elapsed_ms": int((time.perf_counter() - started) * 1000),
         })
@@ -239,7 +240,7 @@ async def build_summary(
         "graphos computes itself. Compact on purpose (about 1,000 tokens on a mid-sized "
         "tenant): capped lists say how many there were. `text` is the same as compact text; "
         "`format=text` answers it alone (`text/plain`). Kept per tenant for "
-        "`GRAPHOS_SCHEMA_SUMMARY_TTL_S` and dropped when the schema changes."
+        "five minutes and dropped when the schema changes."
     ),
     responses={200: {
         "description": "The summary, as JSON or (`format=text`) as text.",

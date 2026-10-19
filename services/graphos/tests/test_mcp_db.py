@@ -3,8 +3,7 @@
 DB-gated.  The identity tables are instance-wide, so each test starts with no
 user, grant, session or signing key, as a first start would.  The agent is
 the MCP SDK's own client over an in-process ASGI transport; its token comes
-from ``POST /v1/auth/token`` (client credentials, ``resource`` = the MCP
-endpoint), so the audience rules are those of a real deployment.
+from ``POST /v1/auth/login``, as for the REST API (ADR-0008).
 """
 
 from __future__ import annotations
@@ -33,7 +32,6 @@ from graphos.config import Settings
 
 from .conftest import requires_db
 
-RESOURCE = "https://graph.example.com/mcp"
 TENANT = "graphos_test_mcp"
 OTHER = "graphos_test_mcp_other"
 FIRST, SECOND = "first-password-1", "second-password-2"
@@ -74,7 +72,7 @@ async def app(db_pool: asyncpg.Pool, tmp_path: Path) -> AsyncIterator[Any]:
     settings = Settings(
         db_host=dsn.hostname, db_port=dsn.port or 5432, db_name=dsn.path.lstrip("/"),
         db_user=unquote(dsn.username or ""), db_password=unquote(dsn.password or ""),
-        admin_password_file=password_file, mcp=True, mcp_resource=RESOURCE,
+        admin_password_file=password_file,
     )
     application = create_app(settings)
     application.state.pool = db_pool
@@ -108,11 +106,11 @@ async def _service_secret(rest: httpx.AsyncClient, saved: dict[str, Any] | None 
     return str(created.json()["password"])
 
 
-async def _token(rest: httpx.AsyncClient, secret: str, resource: str | None) -> httpx.Response:
-    form = {"grant_type": "client_credentials", "client_id": "agent", "client_secret": secret}
-    if resource is not None:
-        form["resource"] = resource
-    return await rest.post("/v1/auth/token", data=form)
+async def _token(rest: httpx.AsyncClient, secret: str) -> str:
+    """The service account's token, from the same sign-in as for REST."""
+    resp = await rest.post("/v1/auth/login", json={"user": "agent", "password": secret})
+    assert resp.status_code == HTTPStatus.OK, resp.text
+    return str(resp.json()["access_token"])
 
 
 def _mcp(app: Any, token: str) -> Client:
@@ -128,10 +126,7 @@ async def test_an_agent_reads_a_granted_tenant_and_every_call_is_audited(
     app: Any, caplog: pytest.LogCaptureFixture,
 ) -> None:
     async with _rest(app) as rest:
-        secret = await _service_secret(rest)
-        resp = await _token(rest, secret, RESOURCE)
-        assert resp.status_code == HTTPStatus.OK, resp.text
-        token = resp.json()["access_token"]
+        token = await _token(rest, await _service_secret(rest))
     caplog.set_level(logging.INFO, logger="graphos.audit")
     async with app.state.mcp.manager.run(), _mcp(app, token) as client:
         tenants = await client.call_tool("list_tenants", {})
@@ -169,25 +164,20 @@ async def test_an_agent_reads_a_granted_tenant_and_every_call_is_audited(
 
 @requires_db
 @pytest.mark.asyncio
-async def test_a_token_opens_only_the_resource_it_was_issued_for(app: Any) -> None:
+async def test_the_token_that_opens_rest_opens_mcp_and_nothing_else_does(app: Any) -> None:
     async with _rest(app) as rest:
-        secret = await _service_secret(rest)
-        rest_token = (await _token(rest, secret, None)).json()["access_token"]
-        mcp_token = (await _token(rest, secret, RESOURCE)).json()["access_token"]
-        on_rest = await rest.get("/v1/me", headers={"Authorization": f"Bearer {mcp_token}"})
-        assert on_rest.status_code == HTTPStatus.UNAUTHORIZED
-        on_mcp = await rest.post(
-            "/mcp", json={}, headers={"Authorization": f"Bearer {rest_token}"},
-        )
-        assert on_mcp.status_code == HTTPStatus.UNAUTHORIZED
-        wrong = await _token(rest, "not-the-secret", RESOURCE)
-        assert (wrong.status_code, wrong.json()["error"]) == (401, "invalid_client")
-        elsewhere = await _token(rest, secret, "https://elsewhere.example/mcp")
-        assert (elsewhere.status_code, elsewhere.json()["error"]) == (400, "invalid_target")
-        person = await rest.post("/v1/auth/token", data={
-            "grant_type": "client_credentials", "client_id": "graphos", "client_secret": SECOND,
-        })
-        assert person.status_code == HTTPStatus.UNAUTHORIZED     # not a service account
+        token = await _token(rest, await _service_secret(rest))
+        assert (await rest.get(
+            "/v1/me", headers={"Authorization": f"Bearer {token}"},
+        )).status_code == HTTPStatus.OK
+        gone = await rest.post("/v1/auth/token", data={"grant_type": "client_credentials"})
+        assert gone.status_code in (HTTPStatus.NOT_FOUND, HTTPStatus.METHOD_NOT_ALLOWED)
+        for bad in ("not-a-token", token[:-4] + "AAAA"):
+            refused = await rest.post("/mcp", json={}, headers={"Authorization": f"Bearer {bad}"})
+            assert refused.status_code == HTTPStatus.UNAUTHORIZED
+    async with app.state.mcp.manager.run(), _mcp(app, token) as client:
+        tenants = await client.call_tool("list_tenants", {})
+        assert tenants.structured_content["tenants"] == [TENANT]
 
 
 @requires_db
@@ -204,7 +194,7 @@ async def test_run_cypher_is_offered_with_the_console_and_keeps_its_guard(
                  "query": "MATCH (d:Doc) WHERE d.status = $s RETURN d.name ORDER BY d.name"}
         async with _rest(app) as rest:
             secret = await _service_secret(rest, saved)
-            token = (await _token(rest, secret, RESOURCE)).json()["access_token"]
+            token = await _token(rest, secret)
         async with app.state.mcp.manager.run(), _mcp(app, token) as client:
             assert "run_cypher" in [t.name for t in (await client.list_tools()).tools]
             listed = await client.call_tool("list_saved_queries", {"tenant": TENANT})

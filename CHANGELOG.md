@@ -9,8 +9,9 @@ under one version.
 ### Added
 
 - **An MCP endpoint for agents** ([ADR-0002](docs/adrs/ADR-0002-mcp-surface.md),
-  [agents guide](docs/agents.md)): `GRAPHOS_MCP=true` mounts `/mcp` in the API, over the MCP
-  Python SDK's Streamable HTTP transport in stateless mode. 22 read tools (`list_tenants`,
+  [ADR-0008](docs/adrs/ADR-0008-mcp-uses-the-api-tokens.md), [agents guide](docs/agents.md)):
+  `/mcp` in the API, on unless `GRAPHOS_MCP=false`, over the MCP Python SDK's Streamable HTTP
+  transport in stateless mode. 22 read tools (`list_tenants`,
   `get_schema`, `get_graph_map`, `get_property_definitions`, `get_graph_stats`, `recent_changes`,
   `search_nodes`, `get_node`, `get_neighbors`, `expand_subgraph`, `shortest_paths`,
   `aggregate_nodes`, `get_property_values`, `aggregate_edges`, `scan_nodes`, `check_edges`,
@@ -19,24 +20,22 @@ under one version.
   three resources (`graphos://{tenant}/schema/summary`, `…/properties`, `…/saved-queries`). Each tool runs
   the REST route it wraps, in process and as the caller, so grants, caps and timeouts are the
   route's; every call is audited with `mcp_tool`, reads included. The tool list carries no tenant
-  data. Results over `GRAPHOS_MCP_MAX_RESULT_BYTES` (256 KiB) are cut and say so. Tokens must
-  carry `GRAPHOS_MCP_RESOURCE` as their audience (protected-resource metadata at
-  `/.well-known/oauth-protected-resource[/mcp]`, 401 with `resource_metadata`); a browser
-  `Origin` must be an allowed host. New dependency: `mcp` 2.3 (MIT).
+  data. Results over 256 KiB are cut and say so. It takes the tokens the REST API takes: a token
+  from `POST /v1/auth/login`, single sign-on, or the identity provider's access token for
+  graphos's audience. A call without one answers 401 with `resource_metadata`, which names the
+  identity provider for clients that sign people in themselves
+  (`/.well-known/oauth-protected-resource[/mcp]`); a browser `Origin` must be an allowed host.
+  New dependency: `mcp` 2.3 (MIT).
 - **One saved query by name**: `GET /v1/{tenant}/cypher/saved/{name}` (text, description,
   parameters), with the access running it needs; 404 while the console is off or when there is
   none.
-- **OAuth client credentials for service accounts**: `POST /v1/auth/token`
-  (`grant_type=client_credentials`, `client_id`, `client_secret`, `resource`), form-encoded.
-  `resource` picks the token's audience: the REST API, or the MCP endpoint; a token for one is
-  refused by the other.
 - **Schema summary**: `GET /v1/{tenant}/schema/summary` gives what a model needs before querying:
   labels with node counts, parent and properties (declared type, `required` and enum; rows,
   distinct values and, when there are at most 20, every value with its count), label pairs per
   edge type with counts, search indexes, saved queries with their parameters, and the names
   graphos computes itself. Capped lists say how many there were; large labels are sampled
   (`estimated`). JSON with the compact text in `text`, or `?format=text`. Kept per tenant for
-  `GRAPHOS_SCHEMA_SUMMARY_TTL_S` (300) and dropped when the schema changes. Client:
+  five minutes and dropped when the schema changes. Client:
   `schema_summary()`, with the `SchemaSummaryResponse` models.
 
 - **Reconcile edges by difference** ([ADR-0001](docs/adrs/ADR-0001-edge-reconciliation.md)):

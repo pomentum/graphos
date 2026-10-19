@@ -3,51 +3,55 @@
 graphos serves its reads to AI agents over the [Model Context Protocol](https://modelcontextprotocol.io)
 at `/mcp`, inside the API itself: the same grants per tenant, the same caps and timeouts, and an
 audit line for every call that names the person or service and the tool. The design and its
-reasons are in [ADR-0002](adrs/ADR-0002-mcp-surface.md).
+reasons are in [ADR-0002](adrs/ADR-0002-mcp-surface.md) and [ADR-0008](adrs/ADR-0008-mcp-uses-the-api-tokens.md).
 
-## 1. Turn it on
+## 1. Where it is
+
+`/mcp` is on by default, on the API's own port, beside `/v1`. It needs no setting; these are
+the ones that touch it:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `GRAPHOS_MCP` | `false` | `true` mounts `/mcp` (read tools only) |
-| `GRAPHOS_MCP_RESOURCE` | — (required) | The endpoint's public URL, e.g. `https://graph.example.com/mcp`: the audience its tokens must carry |
-| `GRAPHOS_MCP_MAX_RESULT_BYTES` | `262144` | A tool result longer than this is cut and says so |
-| `GRAPHOS_SCHEMA_SUMMARY_TTL_S` | `300` | How long the schema summary is kept per tenant |
+| `GRAPHOS_MCP` | `true` | `false` turns `/mcp` off |
+| `GRAPHOS_CYPHER` | `true` | `false` removes the `run_cypher` tool; the saved-query tools then answer 404 |
 | `GRAPHOS_ALLOWED_HOSTS` | — | Set it to the public host name: `/mcp` also refuses a browser `Origin` outside it |
 
 Behind a proxy, route `/mcp` and `/.well-known/oauth-protected-resource*` to graphos-api as
-well as `/v1`. Turn on the rate limiter (`GRAPHOS_RATE_LIMIT_ENABLED=true`): agents call often.
+well as `/v1`, and pass the `Host` header on. Turn on the rate limiter
+(`GRAPHOS_RATE_LIMIT_ENABLED=true`): agents call often. A tool returns at most 256 KiB; a longer
+result is cut and says so.
 
-## 2. Get a token for the endpoint
+## 2. Get a token
 
-A token for `/mcp` must carry `GRAPHOS_MCP_RESOURCE` as its audience. A token for the REST API is
-refused there, and a token for `/mcp` is refused by the REST API.
+`/mcp` takes the tokens the REST API takes ([ADR-0008](adrs/ADR-0008-mcp-uses-the-api-tokens.md)).
+Whatever a token may read through `/v1`, it may read through `/mcp`, and no more.
 
-**A service account** (a program, no browser) gets one with OAuth client credentials:
+**A service account** (a program, no browser) signs in as for REST:
 
 ```bash
-curl -s -X POST "$G/v1/auth/token" \
-  -d grant_type=client_credentials -d client_id=agent -d client_secret="$SECRET" \
-  -d resource=https://graph.example.com/mcp
+curl -s -X POST "$G/v1/auth/login" -H 'content-type: application/json' \
+  -d '{"user": "agent", "password": "'"$SECRET"'"}'
 # → {"access_token":"eyJ…","token_type":"Bearer","expires_in":900,…}
 ```
 
 The account is created by an admin (`POST /v1/users` with `"kind": "service"`, UI: Access) and
 granted `read` on the tenants the agent may see; its secret comes from that call or
-`POST /v1/users/{name}:reset-secret`. Without `resource`, the same endpoint issues a token for the
-REST API.
+`POST /v1/users/{name}:reset-secret`. Tokens last `GRAPHOS_ACCESS_TOKEN_TTL_S` (15 minutes by
+default): a long-running program signs in again before it expires.
 
-**A person, with single sign-on**, uses an access token from the identity provider for the MCP
-resource. The provider must put the MCP URL in the token's audience: with resource indicators
-(RFC 8707) the client asks for it; otherwise a client scope or audience mapper adds it. MCP
-clients find the provider from the endpoint's metadata:
-`GET /.well-known/oauth-protected-resource/mcp` names `GRAPHOS_OIDC_ISSUER` as the authorization
-server, and a call without a valid token answers 401 with
-`WWW-Authenticate: Bearer resource_metadata="…"`.
+**A person, with single sign-on**, lets the MCP client sign them in. A call without a valid token
+answers 401 with `WWW-Authenticate: Bearer resource_metadata="…"`; that metadata
+(`GET /.well-known/oauth-protected-resource/mcp`) names `GRAPHOS_OIDC_ISSUER` as the
+authorization server. The client signs the person in there, in a browser, and sends the
+provider's access token. graphos takes it as it does on REST: the token must carry graphos's
+audience (`GRAPHOS_OIDC_AUDIENCE`, or the client id), and the person's groups and roles give the
+grants. The provider must know the MCP client (dynamic client registration, or a client
+registered by hand) and put graphos's audience in its tokens (an audience mapper, for example).
+This flow is documented, not yet tested against a real provider.
 
 ## 3. Configure the client
 
-Any MCP client that speaks Streamable HTTP and can send a header:
+Any MCP client that speaks Streamable HTTP. With a service account's token, as a header:
 
 ```json
 {
@@ -61,8 +65,7 @@ Any MCP client that speaks Streamable HTTP and can send a header:
 }
 ```
 
-Tokens last `GRAPHOS_ACCESS_TOKEN_TTL_S` (15 minutes by default): a long-running program asks
-`/v1/auth/token` again before it expires.
+With single sign-on, give the URL alone: the client finds the provider from the 401.
 
 ## 4. Tools and resources
 

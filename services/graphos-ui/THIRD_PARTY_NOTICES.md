@@ -54,8 +54,8 @@ carries its own licence file in its distribution.
 | mcp, mcp-types (the Model Context Protocol SDK) | MIT | service (the MCP endpoint, `/mcp`) |
 | httpx2, sse-starlette | BSD-3-Clause | service (dependencies of the MCP SDK) |
 | jsonschema | MIT | service (dependency of the MCP SDK) |
+| python-multipart | Apache-2.0 | service (dependency of the MCP SDK) |
 | opentelemetry-api | Apache-2.0 | service (dependency of the MCP SDK) |
-| python-multipart | Apache-2.0 | service (the OAuth token endpoint's form) |
 
 These are the direct dependencies. Installing them pulls in further packages
 (for example starlette, anyio, h11, idna, uvloop, httptools, websockets,

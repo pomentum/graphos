@@ -139,16 +139,10 @@ class Settings(BaseSettings):
     # The master keys that seal the secrets graphos stores (graphos.vault):
     # signing keys and ID tokens.  Without it they are stored in clear.
     master_key_file: Path | None = None
-    # ── Agents (graphos.mcp_server, ADR-0002) ───────────────────────────
-    # Mount the MCP endpoint at /mcp (read tools only).
-    mcp: bool = False
-    # The MCP endpoint's public URL, e.g. https://graph.example.com/mcp: the
-    # audience its tokens must carry, and what its metadata names.
-    mcp_resource: str = ""
-    # Bytes of one tool result at most; a longer one is cut and says so.
-    mcp_max_result_bytes: int = Field(default=262_144, ge=4_096)
-    # How long GET /v1/{tenant}/schema/summary is kept per tenant.
-    schema_summary_ttl_s: int = Field(default=300, ge=0)
+    # ── Agents (graphos.mcp_server, ADR-0002, ADR-0008) ─────────────────
+    # The MCP endpoint at /mcp (read tools only), on unless turned off; it
+    # takes the tokens the REST API takes.
+    mcp: bool = True
     # Edges an NDJSON ``edges:reconcile`` body may carry (held in memory).
     reconcile_max_edges: int = Field(default=2_000_000, ge=1)
     # Host names the API answers to (Starlette's TrustedHostMiddleware;
@@ -262,3 +256,17 @@ class Settings(BaseSettings):
         user = quote(self.db_user, safe="")
         pw = quote(self.resolved_db_password(), safe="")
         return f"postgresql://{user}:{pw}@{self.db_host}:{self.db_port}/{self.db_name}"
+
+
+# Always answered as well: the container's own health check and a person on
+# the host use them, and a rebinding page cannot send them (its requests carry
+# the attacker's host name).
+LOOPBACK_HOSTS = ("localhost", "127.0.0.1")
+
+
+def allowed_hosts(setting: str) -> list[str]:
+    """``GRAPHOS_ALLOWED_HOSTS`` as a list, with the loopback names; empty: off."""
+    hosts = [h.strip().lower() for h in setting.split(",") if h.strip()]
+    if not hosts or "*" in hosts:
+        return []
+    return [*hosts, *(h for h in LOOPBACK_HOSTS if h not in hosts)]

@@ -692,32 +692,28 @@ class Signer:
         self._signing = keys[0]
         self._public = {kid: key.public_key() for kid, key in keys}
 
-    def issue(self, user: User, audience: str = AUDIENCE) -> tuple[str, int]:
-        """An access token for ``user`` and its lifetime in seconds; ``audience``
-        is the REST API's unless the token is for another resource (the MCP
-        endpoint, ADR-0002)."""
-        return self._sign({"sub": user.name, "ver": user.token_version}, audience)
+    def issue(self, user: User) -> tuple[str, int]:
+        """An access token for ``user`` and its lifetime in seconds."""
+        return self._sign({"sub": user.name, "ver": user.token_version})
 
-    def issue_for(self, identity: Identity, audience: str = AUDIENCE) -> tuple[str, int]:
+    def issue_for(self, identity: Identity) -> tuple[str, int]:
         """An access token for someone who signed in at the identity provider."""
-        return self._sign(
-            {"sub": OIDC_SUB_PREFIX + identity.subject, "idn": identity.claims()}, audience,
-        )
+        return self._sign({"sub": OIDC_SUB_PREFIX + identity.subject, "idn": identity.claims()})
 
-    def _sign(self, extra: dict[str, Any], audience: str = AUDIENCE) -> tuple[str, int]:
+    def _sign(self, extra: dict[str, Any]) -> tuple[str, int]:
         if self._signing is None:
             raise RuntimeError("no signing key loaded")
         kid, key = self._signing
         now = int(time.time())
         claims = {
-            "iss": self.issuer, "aud": audience,
+            "iss": self.issuer, "aud": AUDIENCE,
             "iat": now, "nbf": now, "exp": now + self.ttl_s, "jti": uuid.uuid4().hex,
             **extra,
         }
         return jwt.encode(claims, key, algorithm="ES256", headers={"kid": kid}), self.ttl_s
 
-    def verify(self, token: str, audience: str = AUDIENCE) -> dict[str, Any]:
-        """The claims of a valid token this graphos signed for ``audience``.
+    def verify(self, token: str) -> dict[str, Any]:
+        """The claims of a valid token this graphos signed.
 
         Raises:
             TokenError: not one (bad signature, expired, wrong issuer or audience).
@@ -728,7 +724,7 @@ class Signer:
             if key is None:
                 raise TokenError("unknown signing key")
             return jwt.decode(
-                token, key, algorithms=["ES256"], audience=audience, issuer=self.issuer,
+                token, key, algorithms=["ES256"], audience=AUDIENCE, issuer=self.issuer,
                 leeway=30, options={"require": ["exp", "iat", "sub"]},
             )
         except jwt.PyJWTError as exc:

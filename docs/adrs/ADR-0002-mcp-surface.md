@@ -1,6 +1,7 @@
 # ADR-0002: An MCP surface for agents, and a schema summary
 
-- **Status:** Accepted (2026-10-16)
+- **Status:** Accepted (2026-10-16); §3's token rules, the token endpoint and the settings are
+  superseded by [ADR-0008](ADR-0008-mcp-uses-the-api-tokens.md) (2026-10-19)
 - **Scope:**
   - a new transport, `/mcp`, in the graphos app;
   - a new read endpoint, `GET /v1/{tenant}/schema/summary`;

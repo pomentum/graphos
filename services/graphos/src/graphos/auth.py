@@ -41,7 +41,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, SecurityS
 from graphos.changes import ACTOR, Actor
 from graphos.identity import (
     ANONYMOUS_ADMIN,
-    AUDIENCE,
     OIDC_SUB_PREFIX,
     AccessStore,
     Level,
@@ -77,9 +76,7 @@ MUST_CHANGE_ALLOWED = frozenset({"/v1/me", "/v1/me/password", "/v1/auth/logout"}
 
 
 class Authenticator(Protocol):
-    async def authenticate(
-        self, bearer: str, audience: str | None = None,
-    ) -> Principal | None: ...
+    async def authenticate(self, bearer: str) -> Principal | None: ...
 
 
 class TokenAuthenticator:
@@ -93,14 +90,13 @@ class TokenAuthenticator:
         self.store = store
         self.provider = provider
 
-    async def authenticate(self, bearer: str, audience: str | None = None) -> Principal | None:
-        """The principal of a token for ``audience`` (the REST API's by default):
-        a token for another audience is refused, so a token for one resource
-        never opens another."""
+    async def authenticate(self, bearer: str) -> Principal | None:
+        """The principal of a token for graphos's audience, the REST API's and
+        ``/mcp``'s alike (ADR-0008), or ``None``."""
         try:
-            claims = self.signer.verify(bearer, audience or AUDIENCE)
+            claims = self.signer.verify(bearer)
         except TokenError:
-            return await self._provider_token(bearer, audience)
+            return await self._provider_token(bearer)
         subject = str(claims["sub"])
         if subject.startswith(OIDC_SUB_PREFIX):
             identity = claims.get("idn")
@@ -113,15 +109,12 @@ class TokenAuthenticator:
             return None
         return self.store.principal(user.name)
 
-    async def _provider_token(self, bearer: str, audience: str | None = None) -> Principal | None:
-        """A program's token from the identity provider, for graphos's audience
-        (or ``audience``)."""
+    async def _provider_token(self, bearer: str) -> Principal | None:
+        """A program's token from the identity provider, for graphos's audience."""
         if self.provider is None:
             return None
         try:
-            claims = await self.provider.validate(
-                bearer, audience=audience or self.provider.audience,
-            )
+            claims = await self.provider.validate(bearer, audience=self.provider.audience)
         except OidcError:
             return None
         person = any(claims.get(c) for c in ("preferred_username", "email", "name"))
@@ -134,8 +127,8 @@ class LentTokens:
     """Single-use bearer strings for calls graphos makes to itself on someone's
     behalf (an MCP tool runs the REST route it wraps, ADR-0002).
 
-    A lent token is 256 random bits, lives in this process only, for the one
-    call, and names the principal it was lent for and the tool: the route
+    A lent token is 256 random bits, lives in this process only, for as long
+    as the one tool call runs, and names the principal it was lent for and the tool: the route
     then holds that principal to its grants, and the audit records the call
     with the tool's name whatever ``GRAPHOS_AUDIT_READS`` says.  It never
     leaves the process, so it is not a token passed through to anyone.
@@ -167,7 +160,7 @@ class StaticAuthenticator:
     def __init__(self, principals: Mapping[str, Principal]) -> None:
         self._principals = dict(principals)
 
-    async def authenticate(self, bearer: str, audience: str | None = None) -> Principal | None:
+    async def authenticate(self, bearer: str) -> Principal | None:
         return self._principals.get(bearer)
 
 

@@ -21,8 +21,6 @@ dependencies = [
     "PyJWT[crypto]>=2.10,<3.0",
     # Talking to the identity provider (discovery, keys, code exchange).
     "httpx>=0.27,<1.0",
-    # The OAuth token endpoint's form (POST /v1/auth/token).
-    "python-multipart>=0.0.9,<1.0",
     # The MCP endpoint (/mcp, ADR-0002): MIT. Pinned to a minor: protocol
     # revisions are tested like AGE upgrades.
     "mcp>=2.3,<2.4",
