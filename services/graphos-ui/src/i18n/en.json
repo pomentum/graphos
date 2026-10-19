@@ -191,7 +191,9 @@
       "allow": "Allow",
       "notYou": "Not you? Sign out",
       "invalid": "This sign-in link is not valid: start again from your MCP client.",
-      "notPerson": "A service account cannot sign an MCP client in: it uses /v1/auth/login."
+      "notPerson": "A service account cannot sign an MCP client in: it uses /v1/auth/login.",
+      "sso": "With single sign-on, your MCP client signs you in at {{provider}}, not here: start again from your MCP client.",
+      "notHere": "graphos does not sign MCP clients in on this server: start again from your MCP client."
     },
     "toolbar": {
       "toggleSidebar": "Show or hide the sidebar"

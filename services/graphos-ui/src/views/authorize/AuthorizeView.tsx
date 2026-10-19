@@ -42,8 +42,9 @@ interface Props {
  */
 export function AuthorizeView({ navigate = (url) => window.location.assign(url) }: Props) {
   const { t } = useTranslation();
-  const { session } = useSessionContext();
+  const { session, config } = useSessionContext();
   const request = useMemo(() => requestFromSearch(window.location.search), []);
+  const sso = config?.oidc ?? null;
   return (
     <div className={classes.root}>
       <Paper radius="xl" p="xl" className={classes.card}>
@@ -52,6 +53,10 @@ export function AuthorizeView({ navigate = (url) => window.location.assign(url) 
           {!request ? (
             <Alert color="gray" variant="light">
               {t("shell.authorize.invalid")}
+            </Alert>
+          ) : sso ? (
+            <Alert color="gray" variant="light">
+              {t("shell.authorize.sso", { provider: sso.display_name })}
             </Alert>
           ) : !session ? (
             <>
@@ -81,7 +86,9 @@ function AllowCard({ request, navigate }: { request: Omit<McpApproval, "allow">;
       ? t("shell.authorize.invalid")
       : e instanceof ApiError && e.status === 403
         ? t("shell.authorize.notPerson")
-        : t("errors.unreachableTryAgain");
+        : e instanceof ApiError && e.status === 404
+          ? t("shell.authorize.notHere")
+          : t("errors.unreachableTryAgain");
 
   useEffect(() => {
     if (!account) return;
