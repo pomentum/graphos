@@ -414,7 +414,7 @@ class McpEndpoint:
         scheme, _, bearer = header.partition(" ")
         if scheme.lower() != "bearer" or not bearer.strip():
             return None
-        principal = await authenticator.authenticate(bearer.strip())
+        principal: Principal | None = await authenticator.authenticate(bearer.strip())
         if principal is None or principal.must_change:
             return None
         return principal

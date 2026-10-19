@@ -60,6 +60,7 @@ from mcp.server.auth.provider import (
     AccessToken,
     AuthorizationCode,
     AuthorizationParams,
+    IdentityAssertionParams,
     RefreshToken,
     RegistrationError,
     TokenError,
@@ -286,6 +287,12 @@ class GraphosOAuth:
         fresh = f"{client.client_id}.{renewed.refresh_token}" if renewed.refresh_token else None
         return self._tokens(user, fresh or refresh_token.token, renewed.until)
 
+    async def exchange_identity_assertion(
+        self, client: OAuthClientInformationFull, params: IdentityAssertionParams,
+    ) -> OAuthToken:
+        """Not offered: graphos signs people in itself, or leaves it to single sign-on."""
+        raise TokenError("unsupported_grant_type", "the identity assertion grant is not offered")
+
     async def load_access_token(self, token: str) -> AccessToken | None:
         try:
             claims = self._state.signer.verify(token)
@@ -305,7 +312,7 @@ class GraphosOAuth:
     # ── Helpers ─────────────────────────────────────────────────────────
 
     def _person(self, name: str) -> identity.User:
-        user = self._state.access_store.user(name)
+        user: identity.User | None = self._state.access_store.user(name)
         refused = (
             user is None or user.disabled or user.kind != "person" or user.must_change
             or (user.name == identity.ADMIN_USER and not self._state.settings.local_admin)

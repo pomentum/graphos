@@ -103,7 +103,9 @@ class TokenAuthenticator:
             identity = claims.get("idn")
             if not isinstance(identity, dict):
                 return None
-            principal = self.store.principal_for(Identity.from_claims(identity))
+            principal: Principal | None = self.store.principal_for(
+                Identity.from_claims(identity),
+            )
         else:
             user = self.store.user(subject)
             # A password change, reset or disable bumps the version: older tokens stop.
@@ -226,10 +228,10 @@ async def authenticate_request(request: Request, bearer: str | None) -> Principa
         # imports this module, so the key is spelled out here).
         request.scope["graphos.audit_read"] = True
         return principal
-    principal = await authenticator.authenticate(bearer.strip())
-    if principal is None:
+    found = await authenticator.authenticate(bearer.strip())
+    if found is None:
         raise _unauthorized("invalid or expired token")
-    return principal
+    return found
 
 
 async def require_principal(
