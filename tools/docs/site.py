@@ -1,6 +1,6 @@
 """Write the graphos website's page, docs/index.html, from tools/docs/site.html.
 
-GitHub Pages serves ``docs/`` of ``main`` as it is, at https://pomentum.github.io/graphos/
+GitHub Pages serves ``docs/`` of ``main`` as it is, at https://www.pomentum.dev/graphos/
 (Settings -> Pages -> Deploy from a branch, ``main``, ``/docs``): no build runs there.
 The page is generated here, like the diagrams, and committed. Beside it in ``docs/`` sit
 its stylesheet and theme switch (``site.css``, ``site.js``),

@@ -2,7 +2,7 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Version](https://img.shields.io/github/v/tag/pomentum/graphos?sort=semver&label=version)](CHANGELOG.md)
-[![Website](https://img.shields.io/badge/website-pomentum.github.io%2Fgraphos-1D5BD6)](https://www.pomentum.dev/graphos/)
+[![Website](https://img.shields.io/badge/website-www.pomentum.dev%2Fgraphos-1D5BD6)](https://www.pomentum.dev/graphos/)
 
 A multi-tenant property-graph service: **PostgreSQL + [Apache AGE](https://age.apache.org/) behind a typed HTTP API.**
 
@@ -13,7 +13,7 @@ Your services send JSON over HTTP. graphos owns the database, writes the SQL aga
   <img src="docs/images/architecture-light.svg" width="100%" alt="Consumers call graphos-api over the graphos-net network with a bearer token. graphos-api checks tenant scope and read/write access, validates typed contracts, builds SQL internally, times out bad queries and emits metrics and audit logs. Only graphos-api reaches PostgreSQL 18 with Apache AGE on an internal network; each tenant is its own AGE graph.">
 </picture>
 
-**Website:** [pomentum.github.io/graphos](https://pomentum.github.io/graphos/): the problem graphos solves, what it gives you, measured benchmarks and a quickstart.
+**Website:** [www.pomentum.dev/graphos](https://www.pomentum.dev/graphos/): the problem graphos solves, what it gives you, measured benchmarks and a quickstart.
 
 ## Features
 

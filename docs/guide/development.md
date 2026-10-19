@@ -154,7 +154,7 @@ The shots are `explore-graph`, `explore-groups`, `explore-map`,
 `screenshots.py`; where it is shown, its alt text says what it shows. Never
 take a screenshot of real data.
 
-**The website** (`https://pomentum.github.io/graphos/`) is `docs/` as it is
+**The website** (`https://www.pomentum.dev/graphos/`) is `docs/` as it is
 on `main`: GitHub Pages serves the folder (Settings → Pages → Deploy from a
 branch, `main`, `/docs`) and runs no build of ours. Its page,
 `docs/index.html`, is generated like the diagrams: `tools/docs/site.py` fills
