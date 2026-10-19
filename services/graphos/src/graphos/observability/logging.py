@@ -87,6 +87,10 @@ def configure_logging(*, level: str = "INFO", json_output: bool = True) -> None:
     ]
     root.addHandler(handler)
     root.setLevel(level.upper())
+    # httpx logs every request at INFO; graphos's own requests (MCP tools run their routes
+    # in process, the identity provider) are logged where they matter.
+    for name in ("httpx", "httpx2", "httpcore"):
+        logging.getLogger(name).setLevel(max(logging.WARNING, root.level))
 
 
 def _parse_traceparent(value: str) -> str | None:

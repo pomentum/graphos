@@ -351,3 +351,44 @@ class GrantList(BaseModel):
             "tenants they own), sorted by subject, tenant and level."
         ),
     )
+
+
+class McpRequestInfo(BaseModel):
+    """Who asks to sign a person in, for the UI's Allow card (`GET /v1/auth/mcp/request`)."""
+
+    client_id: str = Field(..., description="The MCP client's id, from its registration.")
+    client_name: str | None = Field(
+        None, description="The name the client registered with, when it gave one.",
+    )
+    redirect_host: str = Field(
+        ..., description="Where graphos sends the answer: the host (and port) of its callback.",
+    )
+
+
+class McpApproval(BaseModel):
+    """A person's answer to an MCP client's request (`POST /v1/auth/mcp/approve`): the request
+    as ``/oauth/authorize`` passed it on, and whether they allow it."""
+
+    client_id: str = Field(..., max_length=200, description="The MCP client's id.")
+    redirect_uri: str = Field(..., max_length=2000, description="The client's callback.")
+    explicit: str = Field(
+        "1", pattern="^[01]$",
+        description="`1` when the client named its callback in the request, `0` otherwise.",
+    )
+    code_challenge: str = Field(
+        ..., min_length=43, max_length=128, description="The request's PKCE challenge (S256).",
+    )
+    state: str | None = Field(None, max_length=2000, description="The client's `state`, sent back.")
+    scope: str | None = Field(None, max_length=2000, description="The scopes the client asked for.")
+    resource: str | None = Field(
+        None, max_length=2000, description="The resource the client asked for (RFC 8707).",
+    )
+    allow: bool = Field(..., description="`true` to sign the client in, `false` to refuse.")
+
+
+class McpApprovalResponse(BaseModel):
+    """Where to send the browser after the person answered."""
+
+    redirect: str = Field(
+        ..., description="The client's callback with a code (allowed) or `access_denied`.",
+    )

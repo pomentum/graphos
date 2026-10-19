@@ -28,8 +28,11 @@ under one version.
 - **MCP clients sign people in without a pasted token.** Without single sign-on, graphos is
   their OAuth authorization server (`/.well-known/oauth-authorization-server`, endpoints under
   `/oauth/`): clients register themselves as public ones (PKCE, a loopback callback, as
-  desktop and command-line clients use), a sign-in page names the client and takes the person's
-  graphos password, a single-use code is exchanged for a graphos access token and a refresh
+  desktop and command-line clients use); at the web UI's address the person signs in on the UI's
+  new **Authorize** screen and clicks Allow (`GET /v1/auth/mcp/request`,
+  `POST /v1/auth/mcp/approve`; the UI's nginx now forwards `/mcp`, `/oauth/` and
+  `/.well-known/oauth-*`), and at graphos-api's own address on its sign-in page, styled like the
+  UI; a single-use code is exchanged for a graphos access token and a refresh
   token that is a graphos session bound to the client, and `/oauth/revoke` ends it. With single
   sign-on the provider signs MCP clients in and none of this is served. Two new tables,
   `graphos_meta.oauth_clients` and `graphos_meta.oauth_codes`.

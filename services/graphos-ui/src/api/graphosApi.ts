@@ -44,6 +44,9 @@ import type {
   TenantSchema,
   TenantStats,
   UnregisteredTenant,
+  McpApproval,
+  McpApprovalResponse,
+  McpRequestInfo,
 } from "./types";
 
 export interface SearchParams {
@@ -92,6 +95,16 @@ export function fetchMe(http: HttpClient): Promise<Me> {
  */
 export class AccountApi {
   constructor(private readonly http: HttpClient) {}
+
+  /** An MCP client's sign-in request that graphos passed on to `/authorize` (ADR-0008). */
+  mcpRequest(query: { client_id: string; redirect_uri: string; code_challenge: string }): Promise<McpRequestInfo> {
+    return this.http.get<McpRequestInfo>("/v1/auth/mcp/request", query);
+  }
+
+  /** Allows or refuses an MCP client's sign-in; answers where to send the browser. */
+  mcpApprove(approval: McpApproval): Promise<McpApprovalResponse> {
+    return this.http.post<McpApprovalResponse>("/v1/auth/mcp/approve", approval);
+  }
 
   /** Changes some preferences (`null` removes one); answers all of them. */
   updatePreferences(patch: { [K in keyof Preferences]?: Preferences[K] | null }): Promise<Preferences> {

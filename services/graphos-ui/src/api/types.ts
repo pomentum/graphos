@@ -764,3 +764,28 @@ export interface ChangesHistory {
   older: string | null;
   more: boolean;
 }
+
+/** `GET /v1/auth/mcp/request`: the MCP client that asks to sign the person in (ADR-0008). */
+export interface McpRequestInfo {
+  client_id: string;
+  client_name: string | null;
+  /** Where graphos sends the answer: the callback's host and port. */
+  redirect_host: string;
+}
+
+/** `POST /v1/auth/mcp/approve`: the request as `/oauth/authorize` passed it on, and the answer. */
+export interface McpApproval {
+  client_id: string;
+  redirect_uri: string;
+  explicit?: string;
+  code_challenge: string;
+  state?: string;
+  scope?: string;
+  resource?: string;
+  allow: boolean;
+}
+
+/** The answer of `POST /v1/auth/mcp/approve`: where to send the browser. */
+export interface McpApprovalResponse {
+  redirect: string;
+}

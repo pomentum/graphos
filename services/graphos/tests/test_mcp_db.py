@@ -160,6 +160,9 @@ async def test_an_agent_reads_a_granted_tenant_and_every_call_is_audited(
     assert {"list_tenants", "get_schema", "search_nodes", "check_edges"} <= set(tools)
     assert all(getattr(r, "consumer", None) == "agent"
                for r in caplog.records if hasattr(r, "mcp_tool"))
+    mcp_lines = [r for r in caplog.records if getattr(r, "path", None) == "/mcp"]
+    assert mcp_lines
+    assert all(getattr(r, "consumer", None) == "agent" for r in mcp_lines)  # not "anonymous"
 
 
 @requires_db

@@ -429,6 +429,7 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | **Sign-in, users and grants** (§2.5.3) | | |
 | `POST /v1/auth/login`, `/refresh`, `/logout` | Access token (and a person's refresh token); renew; end a session (and the provider's URL to end it there) | none |
 | `GET /v1/auth/config`, `POST /v1/auth/oidc/start`, `/oidc/callback` | How to sign in; single sign-on with PKCE held by graphos | none |
+| `GET /v1/auth/mcp/request`, `POST /v1/auth/mcp/approve` | The web UI's Allow card for an MCP client's sign-in: who asks, and the person's answer, which issues the code (ADR-0008) | a person |
 | `POST /v1/me/password` | Change one's password | signed in |
 | `GET/POST /v1/users`, `PATCH/DELETE /v1/users/{name}`, `POST /v1/users/{name}:reset-secret` | Users and service accounts | admin |
 | `GET/POST/DELETE /v1/grants` | Grants | admin; an owner for its tenant |

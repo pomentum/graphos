@@ -15,6 +15,7 @@ import { AccessView } from "./views/access/AccessView";
 import { ActivityView } from "./views/activity/ActivityView";
 import { BrowseView } from "./views/browse/BrowseView";
 import { SchemaView } from "./views/schema/SchemaView";
+import { AUTHORIZE_PATH, AuthorizeView } from "./views/authorize/AuthorizeView";
 import { ConnectView } from "./views/connect/ConnectView";
 import { ExploreView } from "./views/explore/ExploreView";
 import { OverviewView } from "./views/overview/OverviewView";
@@ -96,6 +97,8 @@ function Screens() {
       </Center>
     );
   }
+  // An MCP client asks to sign the person in (ADR-0008): outside any tenant.
+  if (window.location.pathname === AUTHORIZE_PATH) return <AuthorizeView />;
   // Signed out, a password to change first, or no tenant chosen yet.
   if (!session?.tenant || session.me.must_change) return <ConnectView />;
   return (

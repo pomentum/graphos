@@ -227,3 +227,59 @@ async def test_a_service_account_is_sent_to_the_login_api(app: Any) -> None:
         })
         assert page.status_code == HTTPStatus.FORBIDDEN
         assert "/v1/auth/login" in page.text
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_through_the_ui_the_person_allows_on_the_ui_and_the_client_gets_its_code(
+    app: Any,
+) -> None:
+    async with _http(app) as http:
+        client = (await _register(http)).json()
+        verifier, challenge = _pkce()
+        authorize = await http.get("/oauth/authorize", params={
+            "response_type": "code", "client_id": client["client_id"], "redirect_uri": CALLBACK,
+            "code_challenge": challenge, "code_challenge_method": "S256", "state": "s2",
+        })
+        login = authorize.headers["location"]
+        handed = await http.get(login, headers={"X-Graphos-UI": "1"})
+        assert handed.status_code == HTTPStatus.FOUND
+        ui = urlparse(handed.headers["location"])
+        assert ui.path == "/authorize"
+        fields = {k: v[0] for k, v in parse_qs(ui.query).items()}
+
+        token = (await http.post(
+            "/v1/auth/login", json={"user": "graphos", "password": SECOND},
+        )).json()["access_token"]
+        auth = {"Authorization": f"Bearer {token}"}
+        asked = {k: fields[k] for k in ("client_id", "redirect_uri", "code_challenge")}
+        assert (await http.get("/v1/auth/mcp/request", params=asked)).status_code == (
+            HTTPStatus.UNAUTHORIZED
+        )
+        info = await http.get("/v1/auth/mcp/request", params=asked, headers=auth)
+        assert info.status_code == HTTPStatus.OK, info.text
+        assert info.json() == {
+            "client_id": client["client_id"], "client_name": "Test client",
+            "redirect_host": "127.0.0.1:33418",
+        }
+        swapped = await http.post("/v1/auth/mcp/approve", headers=auth, json={
+            **fields, "redirect_uri": "http://127.0.0.1:9/elsewhere", "allow": True,
+        })
+        assert swapped.status_code == HTTPStatus.BAD_REQUEST
+        allowed = await http.post(
+            "/v1/auth/mcp/approve", headers=auth, json={**fields, "allow": True},
+        )
+        assert allowed.status_code == HTTPStatus.OK, allowed.text
+        back = urlparse(allowed.json()["redirect"])
+        query = parse_qs(back.query)
+        assert query["state"] == ["s2"]
+        tokens = await http.post("/oauth/token", data={
+            "grant_type": "authorization_code", "code": query["code"][0], "redirect_uri": CALLBACK,
+            "client_id": client["client_id"], "code_verifier": verifier,
+        })
+        assert tokens.status_code == HTTPStatus.OK, tokens.text
+
+        refused = await http.post(
+            "/v1/auth/mcp/approve", headers=auth, json={**fields, "allow": False},
+        )
+        assert "error=access_denied" in refused.json()["redirect"]

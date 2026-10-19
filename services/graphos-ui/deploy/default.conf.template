@@ -10,7 +10,14 @@
 map $uri $graphos_ui_cache {
   ~^/assets/ "public, max-age=31536000, immutable";
   ~^/api/    "";
+  ~^/(mcp|oauth/|\.well-known/oauth-) "";
   default    "no-cache";
+}
+
+# The scheme the client used: a TLS proxy in front says so; otherwise this server's own.
+map $http_x_forwarded_proto $graphos_scheme {
+  default $http_x_forwarded_proto;
+  ""      $scheme;
 }
 
 server {
@@ -40,6 +47,21 @@ server {
     # The change feed streams (Server-Sent Events): pass bytes on at once, keep it open.
     proxy_buffering off;
     proxy_cache off;
+    proxy_read_timeout 1h;
+  }
+
+  # The MCP endpoint and graphos's sign-in for MCP clients, at the UI's address, so a
+  # person signs in on the UI's own screen (ADR-0008). graphos names these URLs by the
+  # address the client used, so the Host goes on unchanged (with its port); the mark
+  # tells graphos to send the browser to the UI's /authorize.
+  location ~ ^/(mcp|oauth/|\.well-known/oauth-) {
+    proxy_pass $graphos_api;
+    proxy_http_version 1.1;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $graphos_scheme;
+    proxy_set_header X-Graphos-UI "1";
+    proxy_buffering off;
     proxy_read_timeout 1h;
   }
 

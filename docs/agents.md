@@ -17,7 +17,11 @@ the ones that touch it:
 | `GRAPHOS_ALLOWED_HOSTS` | — | Set it to the public host name: `/mcp` also refuses a browser `Origin` outside it |
 
 Behind a proxy, route `/mcp`, `/oauth/` and `/.well-known/oauth-*` to graphos-api as well as
-`/v1`, and pass the `Host` header on. Turn on the rate limiter
+`/v1`, and pass the `Host` header on. The bundled web UI's nginx already does: give MCP clients
+the UI's address (`https://graph.example.com/mcp`), and people sign in on the UI's own screen.
+Then let graphos trust the UI's scheme header (`GRAPHOS_FORWARDED_ALLOW_IPS` covering the UI
+container, so it knows the client used `https`), and list the UI's host name in
+`GRAPHOS_ALLOWED_HOSTS` when you set it. Turn on the rate limiter
 (`GRAPHOS_RATE_LIMIT_ENABLED=true`): agents call often. A tool returns at most 256 KiB; a longer
 result is cut and says so.
 
@@ -48,10 +52,12 @@ token to paste. graphos is then the client's authorization server
    it). Its callback must be a loopback one (`http://localhost` or `127.0.0.1`, any port), as
    desktop and command-line clients use. A web client, such as a hosted chat's connector, signs
    people in through single sign-on, where the provider holds its callback.
-2. It opens a browser at `/oauth/authorize`, which leads to graphos's sign-in page: the person
-   sees which client asks and where the answer goes, and signs in with their graphos name and
-   password (the same throttle and lock-out as `/v1/auth/login`; a password that must change is
-   changed in the web UI first).
+2. It opens a browser at `/oauth/authorize`. At the web UI's address, that leads to the UI's
+   `/authorize` screen: the usual sign-in (or nothing, when the person is already signed in to
+   the UI), a new password when it must change, then a card that names the client (as it named
+   itself) and where it sends the answer, with **Allow** and **Cancel**. At graphos-api's own
+   address, graphos's sign-in page says the same and asks for the name and password. Both count
+   towards the throttle and lock-out of `/v1/auth/login`.
 3. The client exchanges the code (once, within 5 minutes) at `/oauth/token` for a graphos access
    token and a refresh token, a graphos session bound to that client, and renews by itself until
    the session ends (`GRAPHOS_SESSION_IDLE_S`, `GRAPHOS_SESSION_MAX_S`) or is revoked
@@ -65,8 +71,23 @@ authorization server. The client signs the person in there, in a browser, and se
 provider's access token. graphos takes it as it does on REST: the token must carry graphos's
 audience (`GRAPHOS_OIDC_AUDIENCE`, or the client id), and the person's groups and roles give the
 grants. The provider must know the MCP client (dynamic client registration, or a client
-registered by hand) and put graphos's audience in its tokens (an audience mapper, for example).
-This flow is documented, not yet tested against a real provider.
+registered by hand) and put graphos's audience, and the claims the grants use, in the tokens
+it issues to it.
+
+With **Keycloak** (tried with 26.0, the MCP Python SDK's client and a browser), in the realm:
+
+1. A client scope, `graphos`, with an **Audience** mapper (included client audience: graphos's
+   client id), made a realm **default** client scope, so every client gets it, those that
+   register themselves included.
+2. **Client registration → anonymous access policies:** MCP clients register without a token.
+   *Trusted Hosts* refuses them unless their address is listed, and *Allowed Client Scopes*
+   refuses the scopes they ask for (the SDK asks for every scope the realm advertises): list
+   the hosts and scopes there, or remove the two policies. *Consent Required* stays: the person
+   sees Keycloak's consent page for the client.
+3. A client that registers itself gets *Full Scope Allowed* off, so the person's realm roles
+   reach its tokens only through its scopes: map the roles graphos's grants use into the
+   `graphos` scope (its *Scope* tab), and grant them in graphos as `oidc-role:<role>` with
+   `GRAPHOS_OIDC_ROLES_CLAIM=realm_access.roles`.
 
 ## 3. Configure the client
 

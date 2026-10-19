@@ -60,10 +60,20 @@ the identity provider. Without it, nothing signs people in for MCP clients.
       Every client
       is registered as a public one (no client secret; PKCE binds the code to it), so graphos
       keeps no client secret.
-    - **The sign-in page** (`/oauth/login`) asks for a person's name and password and says which
-      client asks, and where it sends the answer. It is never framed. Sign-in failures count
-      towards the same throttle and lock-out as `/v1/auth/login`; a person whose password must
-      change, a service account or a disabled user is refused.
+    - **Where the person signs in.** Through the web UI, when the client reached graphos at the
+      UI's address: the UI's nginx forwards `/mcp`, `/oauth/` and `/.well-known/oauth-*` to the
+      API with the client's own `Host`, and marks them. `/oauth/login` then sends the browser to
+      the UI's `/authorize` screen: the UI's usual sign-in (and password change, for a new
+      person), then a card that names the client and where it sends the answer, with Allow and
+      Cancel. The card's details come from `GET /v1/auth/mcp/request`, and Allow or Cancel calls
+      `POST /v1/auth/mcp/approve` with the person's own UI token, which issues the code and
+      answers where to send the browser. Someone already signed in to the UI only clicks Allow.
+    - **The API's own page** (`/oauth/login`) is the fallback, for a client that reached
+      graphos-api directly (no UI, or the API's own address). It has the UI's colours and mark,
+      asks for a name and password and says the same about the client. It is never framed.
+    - **Either way**, sign-in failures count towards the same throttle and lock-out as
+      `/v1/auth/login`, and only a person whose account is usable is let through: a service
+      account, a disabled user or a password that must change is refused.
     - **Codes** are 256 random bits, stored hashed, single-use and valid 5 minutes, so any replica
       can exchange them. The request between `authorize` and the sign-in page travels in the page
       and is checked again when the person signs in (the client, its redirect URI, a PKCE
@@ -106,6 +116,10 @@ the identity provider. Without it, nothing signs people in for MCP clients.
   after it, for a service account and for a person.
 - The MCP Python SDK (MIT, already a dependency) ships the authorization server's handlers and
   checks; graphos supplies the storage, the sign-in page and its own tokens.
+- Tried end to end, each with the MCP Python SDK's client: graphos's own sign-in, with Claude Code
+  as the client and through the web UI's Allow card; and Keycloak 26.0 as the provider (the
+  client registered there, a person signed in and consented, graphos took Keycloak's token on
+  `/mcp` with the grant of the person's realm role).
 
 ## Consequences
 
@@ -115,9 +129,10 @@ the identity provider. Without it, nothing signs people in for MCP clients.
 - **Worse:** graphos is an OAuth authorization server where there is no single sign-on: a sign-in
   page, client registration open to anyone (bounded by the loopback rule, the cap and the
   consent line), and two tables. A web MCP client (one that signs in from a hosted service, such
-  as a hosted chat's connector) cannot sign people in through graphos: it needs single sign-on. A provider that sets the audience only from `resource` issues
-  tokens graphos refuses, until it is configured to add graphos's audience. The flow through a
-  provider is documented but not tested against a real one.
+  as a hosted chat's connector) cannot sign people in through graphos: it needs single sign-on.
+  A provider that sets the audience only from `resource` issues tokens graphos refuses, until it
+  is configured to add graphos's audience; Keycloak needs some realm settings for MCP clients
+  (the agents guide lists them).
 - `/mcp` is a public surface on every install unless turned off. It reads only, through the
   routes, with the caller's grants, audited and rate-limited as REST.
 - An install upgrading from a build with `GRAPHOS_MCP_RESOURCE` can drop it; graphos ignores it.
@@ -133,6 +148,9 @@ None.
 - Without single sign-on, an MCP client registers, signs a person in on `/oauth/login`,
   exchanges the code once (a second exchange fails), calls `/mcp`, renews with the refresh token
   and revokes it; a redirect URI that is not a loopback one is refused at registration.
+- Through the UI's address, `/oauth/login` sends the browser to the UI's `/authorize`, and Allow
+  there (`POST /v1/auth/mcp/approve`) gives the client a code it exchanges as above; without the
+  UI's mark, the API's own page signs the person in.
 - With single sign-on, the metadata names the provider and `/oauth/*` is not served.
 - `Settings().mcp` is `true`; the removed settings are gone from `config.py`, the compose file,
   the README and the agents guide.

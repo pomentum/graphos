@@ -44,7 +44,8 @@ export function ConnectView() {
   );
 }
 
-function SignInForm() {
+/** A graphos user name and password, or single sign-on when configured. */
+export function SignInForm() {
   const { t } = useTranslation();
   const { signIn, notice, config, signInWithSso } = useSessionContext();
   const [leaving, setLeaving] = useState(false);
@@ -132,7 +133,8 @@ function SignInForm() {
   );
 }
 
-function ChangePasswordForm() {
+/** A new password, when the current one must change. */
+export function ChangePasswordForm() {
   const { t } = useTranslation();
   const { session, changePassword, signOut } = useSessionContext();
   const [current, setCurrent] = useState("");

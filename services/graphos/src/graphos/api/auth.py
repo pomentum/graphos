@@ -19,13 +19,13 @@ import logging
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, TypeVar
+from typing import Annotated, Any, TypeVar
 from urllib.parse import urlsplit
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 
-from graphos import identity, oidc
+from graphos import identity, oauth, oidc
 from graphos.auth import ReadPrincipal
 from graphos.config import Settings
 from graphos.contracts.auth import (
@@ -33,6 +33,9 @@ from graphos.contracts.auth import (
     LoginRequest,
     LogoutRequest,
     LogoutResponse,
+    McpApproval,
+    McpApprovalResponse,
+    McpRequestInfo,
     OidcCallback,
     OidcConfig,
     OidcSignedIn,
@@ -271,6 +274,100 @@ async def auth_config(request: Request) -> AuthConfig:
         issuer=provider.issuer, client_id=provider.client_id, scopes=provider.scopes,
         display_name=settings.oidc_display_name,
     ))
+
+
+_MCP_RESPONSES: dict[int | str, dict[str, Any]] = {
+    400: {"description": "Not a request `/oauth/authorize` would pass on: unknown client, a "
+                         "callback it did not register, or no PKCE challenge."},
+    403: {"description": "Not a person: a service account signs in with `/v1/auth/login`."},
+    404: {"description": "graphos does not sign MCP clients in here: single sign-on is on (the "
+                         "provider does it), `/mcp` is off, or sign-in is disabled."},
+}
+
+
+def _signs_clients_in(request: Request) -> oauth.GraphosOAuth:
+    provider: oauth.GraphosOAuth | None = getattr(request.app.state, "oauth", None)
+    if provider is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="graphos does not sign MCP clients in on this server",
+        )
+    return provider
+
+
+def _person(principal: identity.Principal) -> str:
+    if principal.kind != "person" or not (principal.subject or "").startswith("user:"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="only a person signs an MCP client in; a service account uses /v1/auth/login",
+        )
+    return principal.consumer
+
+
+async def _request_of(provider: oauth.GraphosOAuth, fields: dict[str, str]) -> Any:
+    client = await oauth.checked(provider, fields)
+    if client is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="not a valid MCP sign-in request: start again from the client",
+        )
+    return client
+
+
+@router.get(
+    "/auth/mcp/request",
+    response_model=McpRequestInfo,
+    summary="An MCP client's sign-in request, for the web UI's Allow card",
+    description=(
+        "The client that asks to sign the caller in and where graphos would send the answer, "
+        "for a request that `/oauth/authorize` passed on to the web UI's `/authorize` screen "
+        "(ADR-0008). Needs a person's token; only where graphos signs MCP clients in (no single "
+        "sign-on)."
+    ),
+    responses=_MCP_RESPONSES,
+)
+async def mcp_request(
+    request: Request,
+    principal: ReadPrincipal,
+    client_id: Annotated[str, Query(max_length=200, description="The MCP client's id.")],
+    redirect_uri: Annotated[str, Query(max_length=2000, description="The client's callback.")],
+    code_challenge: Annotated[str, Query(
+        min_length=43, max_length=128, description="The request's PKCE challenge.",
+    )],
+) -> McpRequestInfo:
+    provider = _signs_clients_in(request)
+    _person(principal)
+    client = await _request_of(provider, {
+        "client_id": client_id, "redirect_uri": redirect_uri, "code_challenge": code_challenge,
+    })
+    return McpRequestInfo(
+        client_id=client_id, client_name=client.client_name,
+        redirect_host=urlsplit(redirect_uri).netloc or redirect_uri,
+    )
+
+
+@router.post(
+    "/auth/mcp/approve",
+    response_model=McpApprovalResponse,
+    summary="Allow or refuse an MCP client's sign-in, from the web UI",
+    description=(
+        "The caller's answer to a request `/oauth/authorize` passed on: with `allow`, a "
+        "single-use code for the caller (5 minutes) on the client's callback, which the client "
+        "exchanges at `/oauth/token`; without, `access_denied`. The answer says where to send "
+        "the browser. Needs a person's token; only where graphos signs MCP clients in."
+    ),
+    responses=_MCP_RESPONSES,
+)
+async def mcp_approve(
+    request: Request, principal: ReadPrincipal, body: McpApproval,
+) -> McpApprovalResponse:
+    provider = _signs_clients_in(request)
+    user = _person(principal)
+    fields = {k: str(v) for k, v in body.model_dump(exclude={"allow"}).items() if v is not None}
+    await _request_of(provider, fields)
+    return McpApprovalResponse(
+        redirect=await oauth.answer(provider, fields, user if body.allow else None),
+    )
 
 
 def _provider(d: AuthDeps) -> oidc.Provider:

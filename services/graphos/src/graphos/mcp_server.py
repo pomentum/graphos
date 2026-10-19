@@ -386,6 +386,8 @@ class McpEndpoint:
             await _unauthorized(request)(scope, receive, send)
             return
         scope[PRINCIPAL_KEY] = principal
+        # The audit line of the /mcp request names the caller, as a route's does.
+        scope["principal"] = principal
         await self.manager.handle_request(scope, receive, send)
 
     def _origin_ok(self, request: Request) -> bool:

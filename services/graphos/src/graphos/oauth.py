@@ -21,10 +21,14 @@ clients listen there, and a page elsewhere cannot receive the code); at most
 with single sign-on the identity provider, which signs such clients in,
 holds it.
 
-**The sign-in page** takes a person's name and password, says which client
-asks and where the answer goes, and is never framed.  It counts towards the
-same throttle and lock-out as ``/v1/auth/login``.  The authorization request
-travels in the page and is checked again on submit, so it needs no storage.
+**Where the person signs in.**  A request that came through the web UI's
+proxy carries :data:`UI_MARK`; ``/oauth/login`` then sends the browser to the
+UI's ``/authorize`` screen, which signs the person in as the UI always does
+and answers through ``/v1/auth/mcp/approve`` (:func:`answer`).  Otherwise
+graphos's own page here takes a name and password.  Both say which client
+asks and where the answer goes, count towards the throttle and lock-out of
+``/v1/auth/login``, and check the request again (:func:`checked`), which
+travels with the browser and needs no storage.  The page is never framed.
 
 **Codes** are 256 random bits, kept hashed, single use, :data:`CODE_TTL_S`.
 **Tokens** are graphos's own: the access token of ``/v1/auth/login``, and a
@@ -72,6 +76,8 @@ from graphos import identity
 log = logging.getLogger(__name__)
 
 CODE_TTL_S = 300
+# Set by the web UI's nginx on what it forwards here (deploy/default.conf.template).
+UI_MARK = "x-graphos-ui"
 MAX_CLIENTS = 1_000
 LOOPBACK = ("localhost", "127.0.0.1", "::1")
 _PAGE_HEADERS = {
@@ -281,6 +287,49 @@ def _drop_none(d: dict[str, str | None]) -> dict[str, str]:
 _FIELDS = ("client_id", "redirect_uri", "explicit", "code_challenge", "state", "scope", "resource")
 
 
+# The web UI's look (services/graphos-ui/src/theme/tokens.ts, its sign-in card and
+# its mark), for the clients that reach graphos-api without the UI.
+_STYLE = """
+:root{--window:#FBFBFD;--panel:#F0F0F3;--group:#FFFFFF;--text:#1D1D1F;--muted:#6E6E73;
+--accent:#1D5BD6;--separator:rgba(0,0,0,.09);--danger:#B3261E;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--window:#0B0B0C;--panel:#141416;--group:#1E2024;
+--text:#F2F3F5;--muted:#8E939C;--separator:rgba(255,255,255,.08);--danger:#F2877F}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;
+background:var(--window);color:var(--text);font:14px/1.45 -apple-system,BlinkMacSystemFont,
+"SF Pro Text",Inter,"Segoe UI",sans-serif}
+.card{width:min(380px,100%);background:var(--panel);border:.5px solid var(--separator);
+border-radius:16px;padding:24px;display:grid;gap:18px}
+.mark{width:28px;height:28px;display:block}
+h1{margin:0;font:600 20px/1.3 -apple-system,BlinkMacSystemFont,"SF Pro Display",Inter,sans-serif}
+p{margin:0}.muted{color:var(--muted)}.who{font-weight:600}.err{color:var(--danger)}
+form{display:grid;gap:12px}label{display:grid;gap:4px;font-weight:500}
+input{font:inherit;color:inherit;background:var(--group);border:1px solid var(--separator);
+border-radius:8px;padding:8px 10px}
+input:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.buttons{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
+button{font:inherit;font-weight:600;border-radius:8px;padding:8px 12px;cursor:pointer;
+border:1px solid var(--separator);background:var(--group);color:var(--text)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+"""
+_MARK = (
+    '<svg class="mark" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" '
+    'viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#1D5BD6"/>'
+    '<circle cx="11" cy="20" r="3.5" fill="#fff"/><circle cx="21" cy="11" r="3.5" fill="#fff"/>'
+    '<path d="M13.5 17.5 18.5 13.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>'
+)
+
+
+def _shell(inner: str, status: int) -> HTMLResponse:
+    body = (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>Sign in to graphos</title><style>{_STYLE}</style></head>"
+        f'<body><main class="card">{_MARK}{inner}</main></body></html>'
+    )
+    return HTMLResponse(body, status_code=status, headers=_PAGE_HEADERS)
+
+
 def _page(client: OAuthClientInformationFull, request: dict[str, str], error: str = "",
           status: int = 200) -> HTMLResponse:
     e = html.escape
@@ -289,38 +338,27 @@ def _page(client: OAuthClientInformationFull, request: dict[str, str], error: st
     hidden = "".join(
         f'<input type="hidden" name="{k}" value="{e(request[k])}">' for k in _FIELDS if k in request
     )
-    notice = f'<p class="err">{e(error)}</p>' if error else ""
-    body = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign in to graphos</title>
-<style>body{{font:15px system-ui,sans-serif;max-width:24rem;margin:4rem auto;padding:0 1rem;
-color:#1b1f24;background:#f6f7f9}}h1{{font-size:1.3rem}}
-label{{display:block;margin:.8rem 0 .2rem}}
-input[type=text],input[type=password]{{width:100%;padding:.5rem;box-sizing:border-box}}
-button{{margin:1rem .5rem 0 0;padding:.5rem 1rem}}.err{{color:#b42318}}.who{{font-weight:600}}
-@media (prefers-color-scheme:dark){{body{{color:#e6e8eb;background:#14171a}}}}</style></head><body>
-<h1>Sign in to graphos</h1>
-<p><span class="who">{who}</span> asks to read graphos as you, with your grants. graphos then
-sends you back to <span class="who">{to}</span>.</p>{notice}
-<form method="post" action="/oauth/login">{hidden}
-<label for="user">User</label><input id="user" name="user" type="text" autocomplete="username"
- required autofocus>
-<label for="password">Password</label><input id="password" name="password" type="password"
- autocomplete="current-password" required>
-<button name="action" value="allow" type="submit">Sign in and allow</button>
-<button name="action" value="deny" type="submit" formnovalidate>Cancel</button>
-</form></body></html>"""
-    return HTMLResponse(body, status_code=status, headers=_PAGE_HEADERS)
-
-
-def _problem(text: str, status: int = 400) -> HTMLResponse:
-    return HTMLResponse(
-        f"<!doctype html><title>graphos</title><p>{html.escape(text)}</p>",
-        status_code=status, headers=_PAGE_HEADERS,
+    notice = f'<p class="err" role="alert">{e(error)}</p>' if error else ""
+    return _shell(
+        f'<div><h1>Allow {who}?</h1><p><span class="who">{who}</span> asks to read graphos as '
+        f'you, with your grants.</p><p class="muted">graphos then sends you back to '
+        f'<span class="who">{to}</span>.</p></div>{notice}'
+        f'<form method="post" action="/oauth/login">{hidden}'
+        '<label>User<input name="user" type="text" autocomplete="username" required autofocus>'
+        '</label><label>Password<input name="password" type="password" '
+        'autocomplete="current-password" required></label><div class="buttons">'
+        '<button name="action" value="deny" type="submit" formnovalidate>Cancel</button>'
+        '<button class="primary" name="action" value="allow" type="submit">Sign in and allow'
+        "</button></div></form>",
+        status,
     )
 
 
-async def _checked(provider: GraphosOAuth, request: dict[str, str]) -> (
+def _problem(text: str, status: int = 400) -> HTMLResponse:
+    return _shell(f'<p class="err">{html.escape(text)}</p>', status)
+
+
+async def checked(provider: GraphosOAuth, request: dict[str, str]) -> (
         OAuthClientInformationFull | None):
     """The client, when the request is one ``/oauth/authorize`` would accept."""
     client = await provider.get_client(request.get("client_id", ""))
@@ -360,31 +398,36 @@ async def _sign_in(request: Request, form: Any) -> identity.User | tuple[str, in
 def login_endpoint(provider: GraphosOAuth) -> Any:
     async def login(request: Request) -> Response:
         if request.method == "GET":
+            if request.headers.get(UI_MARK) == "1":
+                # Through the web UI: its own sign-in, then its Allow card.
+                return RedirectResponse(f"/authorize?{request.url.query}", status_code=302)
             fields = {k: v for k, v in request.query_params.items() if k in _FIELDS}
-            client = await _checked(provider, fields)
+            client = await checked(provider, fields)
             return _page(client, fields) if client else _problem(_INVALID_LINK)
         form = await request.form()
         fields = {k: str(v) for k, v in form.items() if k in _FIELDS}
-        client = await _checked(provider, fields)
+        client = await checked(provider, fields)
         if client is None:
             return _problem(_INVALID_LINK)
-        back, state = fields["redirect_uri"], fields.get("state")
         if form.get("action") != "allow":
-            return RedirectResponse(
-                construct_redirect_uri(back, error="access_denied", state=state), status_code=302,
-            )
+            return RedirectResponse(await answer(provider, fields, None), status_code=302)
         user = await _sign_in(request, form)
         if isinstance(user, tuple):
             return _page(client, fields, *user)
-        code = await provider.issue_code(fields, user.name)
-        log.info("signed in", extra={
-            "user": user.name, "kind": user.kind, "oauth_client": client.client_id,
-        })
-        return RedirectResponse(
-            construct_redirect_uri(back, code=code, state=state), status_code=302,
-        )
+        return RedirectResponse(await answer(provider, fields, user.name), status_code=302)
 
     return login
+
+
+async def answer(provider: GraphosOAuth, fields: dict[str, str], user: str | None) -> str:
+    """The client's callback: with a new code for ``user``, or ``access_denied``
+    (``user`` None).  ``fields`` is a request :func:`checked` accepted."""
+    back, state = fields["redirect_uri"], fields.get("state")
+    if user is None:
+        return construct_redirect_uri(back, error="access_denied", state=state)
+    code = await provider.issue_code(fields, user)
+    log.info("signed in", extra={"user": user, "oauth_client": fields["client_id"]})
+    return construct_redirect_uri(back, code=code, state=state)
 
 
 def metadata(request: Request) -> dict[str, Any]:
@@ -442,6 +485,7 @@ def _api(handler: Any, methods: list[str], *, cors: bool) -> ASGIApp:
 def routes(app: Any) -> list[Route]:
     """The authorization server's routes, under ``/oauth/`` and its metadata."""
     provider = GraphosOAuth(app)
+    app.state.oauth = provider
     clients = ClientAuthenticator(provider)
 
     async def meta(request: Request) -> Response:

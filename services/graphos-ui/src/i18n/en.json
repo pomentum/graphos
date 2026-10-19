@@ -183,6 +183,16 @@
       "noTenants": "You have no access to a tenant yet. Ask an administrator, or the owner of a tenant.",
       "signOut": "Sign out"
     },
+    "authorize": {
+      "intro": "An MCP client asks to use graphos as you. Sign in to answer it.",
+      "title": "Allow {{client}}?",
+      "asks": "{{client}} asks to read graphos as {{user}}, with your grants: the tenants you may read, nothing more.",
+      "sendsTo": "graphos then sends you back to {{host}}.",
+      "allow": "Allow",
+      "notYou": "Not you? Sign out",
+      "invalid": "This sign-in link is not valid: start again from your MCP client.",
+      "notPerson": "A service account cannot sign an MCP client in: it uses /v1/auth/login."
+    },
     "toolbar": {
       "toggleSidebar": "Show or hide the sidebar"
     },
