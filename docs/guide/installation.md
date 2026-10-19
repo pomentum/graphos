@@ -203,10 +203,10 @@ later); set the version you want:
 # docker-compose.published.yml
 services:
   graphos-api:
-    image: ghcr.io/pomentum/graphos-api:0.13.0
+    image: ghcr.io/pomentum/graphos-api:0.13.1
     build: !reset null
   graphos-ui:
-    image: ghcr.io/pomentum/graphos-ui:0.13.0
+    image: ghcr.io/pomentum/graphos-ui:0.13.1
     build: !reset null
 ```
 

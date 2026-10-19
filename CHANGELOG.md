@@ -4,7 +4,7 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.13.1 — 2026-10-19
 
 A fix to the release script: the website shows the released version as soon as the version is
 set. graphos-api, graphos-ui and graphos-client are unchanged apart from their version.
