@@ -1,0 +1,38 @@
+name: Feature request
+description: Something graphos should do that it does not do yet.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please use neutral data in examples (`acme`, `Doc`, `LINKS_TO`): no real names, schemas or hosts.
+        A change to the design (an invariant, a new public surface, the supported databases) needs an
+        architecture decision record before the code: see docs/adrs/README.md.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and why graphos makes it hard today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: The endpoint, setting, client method or UI change you have in mind, if any.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead today
+      description: Workarounds, other tools, or plain AGE / SQL.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      multiple: true
+      options:
+        - graphos-api (the service)
+        - graphos-ui (the web UI)
+        - graphos-client (Python)
+        - docker compose / images
+        - Docs

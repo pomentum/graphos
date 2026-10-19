@@ -1,8 +1,8 @@
 import type { HttpClient, Tagged } from "./http";
 import type {
   AuthConfig,
-  BulkEdgesResult,
-  BulkNodesResult,
+  CsvImportQuery,
+  CsvImportResult,
   DeleteNodeResponse,
   DeleteNodesResponse,
   EdgeRecord,
@@ -44,6 +44,9 @@ import type {
   TenantSchema,
   TenantStats,
   UnregisteredTenant,
+  McpApproval,
+  McpApprovalResponse,
+  McpRequestInfo,
 } from "./types";
 
 export interface SearchParams {
@@ -60,6 +63,11 @@ export interface SearchParams {
 export interface UploadProgress {
   onSent?: (bytes: number, total: number) => void;
   signal?: AbortSignal;
+}
+
+export interface CsvImportOptions extends UploadProgress {
+  /** Check every row and write nothing: the answer says what the import would do. */
+  dryRun?: boolean;
 }
 
 export interface EdgeKey {
@@ -87,6 +95,16 @@ export function fetchMe(http: HttpClient): Promise<Me> {
  */
 export class AccountApi {
   constructor(private readonly http: HttpClient) {}
+
+  /** An MCP client's sign-in request that graphos passed on to `/authorize` (ADR-0008). */
+  mcpRequest(query: { client_id: string; redirect_uri: string; code_challenge: string }): Promise<McpRequestInfo> {
+    return this.http.get<McpRequestInfo>("/v1/auth/mcp/request", query);
+  }
+
+  /** Allows or refuses an MCP client's sign-in; answers where to send the browser. */
+  mcpApprove(approval: McpApproval): Promise<McpApprovalResponse> {
+    return this.http.post<McpApprovalResponse>("/v1/auth/mcp/approve", approval);
+  }
 
   /** Changes some preferences (`null` removes one); answers all of them. */
   updatePreferences(patch: { [K in keyof Preferences]?: Preferences[K] | null }): Promise<Preferences> {
@@ -445,18 +463,20 @@ export class GraphosApi {
     });
   }
 
-  /** Upserts nodes sent as NDJSON, one `{id, label, properties}` per line (`write`). */
-  bulkNodes(file: Blob, progress: UploadProgress = {}): Promise<BulkNodesResult> {
-    return this.http.upload<BulkNodesResult>(`${this.graph}/nodes:bulk`, file, {
-      contentType: "application/x-ndjson",
-      ...progress,
-    });
-  }
-
-  /** Upserts edges sent as NDJSON, one `{src_id, src_label, dst_id, dst_label, type, properties}` per line. */
-  bulkEdges(file: Blob, progress: UploadProgress = {}): Promise<BulkEdgesResult> {
-    return this.http.upload<BulkEdgesResult>(`${this.graph}/edges:bulk`, file, {
-      contentType: "application/x-ndjson",
+  /**
+   * Imports a CSV file, sent as it is, as nodes of a label or relationships
+   * of a type (`write`); graphos reads, maps, merges and checks the rows.
+   * `dryRun` checks them and writes nothing.
+   */
+  csvImport(
+    kind: "nodes" | "edges",
+    file: Blob,
+    query: CsvImportQuery,
+    { dryRun = false, ...progress }: CsvImportOptions = {},
+  ): Promise<CsvImportResult> {
+    return this.http.upload<CsvImportResult>(`${this.graph}/${kind}:csv`, file, {
+      contentType: "text/csv",
+      query: { ...query, dry_run: dryRun },
       ...progress,
     });
   }

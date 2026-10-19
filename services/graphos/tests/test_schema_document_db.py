@@ -177,6 +177,32 @@ async def test_a_dry_run_warns_about_rewrites_and_repeated_values(
 
 @requires_db
 @pytest.mark.asyncio
+async def test_a_dry_run_lists_what_stops_working_with_the_rows_it_concerns(
+    api: httpx.AsyncClient,
+) -> None:
+    strict = {"mode": "strict", "vertex": {"Doc": {"properties": {"owner": {"type": "string"}}}}}
+    registered = await api.post("/v1/tenants", json={**FULL, "property_schema": strict})
+    assert registered.status_code == HTTPStatus.OK, registered.text
+    nodes = [{"id": f"d{i}", "label": "Doc", "properties": {"owner": "u1"}} for i in (1, 2)]
+    assert (await api.post(f"/v1/{SOURCE}/graph/nodes", json={"nodes": nodes})).status_code == 200  # noqa: PLR2004
+    tighter = {"mode": "strict", "vertex": {"Doc": {"properties": {
+        "owner": {"type": "string", "required": True}}}}}
+    dry = await api.post("/v1/tenants?dry_run=true&force_shrink=true", json={
+        **FULL, "property_schema": tighter, "search_indexes": {},
+    })
+    assert dry.status_code == HTTPStatus.OK, dry.text
+    breaking = {(b["name"], b["change"]): b for b in dry.json()["breaking"]}
+    assert set(breaking) == {("Doc", "property_required"), (None, "search_index_removed")}
+    assert breaking[("Doc", "property_required")]["rows"] >= 1
+    assert breaking[(None, "search_index_removed")]["rows"] is None
+    relaxed = await api.post("/v1/tenants?dry_run=true", json={
+        "name": SOURCE, "vertex_labels": ["Invoice"],
+    })
+    assert relaxed.json()["breaking"] == []
+
+
+@requires_db
+@pytest.mark.asyncio
 async def test_a_dry_run_refuses_what_the_import_would(api: httpx.AsyncClient) -> None:
     assert (await api.post("/v1/tenants", json=FULL)).status_code == HTTPStatus.OK
     for body, needle in (

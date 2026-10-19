@@ -4,8 +4,9 @@ A working catalogue of what AGE 1.6.x does and does not accept, what
 costs are surprising, and the concrete templates graphos uses on the
 write path (`graphos.writes`, `graphos.bootstrap`, `graphos.api.bulk`).
 Verified against AGE 1.6.0 on PostgreSQL 16; the bundled database is now
-AGE 1.8.0 on PostgreSQL 18, where the write path is the same (PostgreSQL 16
-with AGE 1.6 is deprecated: [upgrade guide](./upgrade-postgresql-18.md)). For tuning, concurrency
+AGE 1.8.0 on PostgreSQL 18, where the write path is the same, and the only
+one graphos starts on ([upgrade guide](./upgrade-postgresql-18.md)); the 1.6
+notes are kept as history. For tuning, concurrency
 and community-detection notes see [`apache-age.md`](./apache-age.md).
 
 ## 1. AGE Cypher acceptances and rejections
@@ -30,7 +31,7 @@ into the extra columns (`graphos_rev` is NOT NULL) and a `CREATE` fails with
 Because of the last row (and the throughput gap in §3), graphos writes
 no rows through Cypher: every write is SQL in `graphos.writes`, and every
 node and edge upsert is the COPY-staged SQL path of §3. Every API read is
-SQL too; Cypher runs only in the opt-in, read-only console. What follows is
+SQL too; Cypher runs only in the read-only console. What follows is
 what graphos does,
 plus the workaround a per-row Cypher write would need:
 

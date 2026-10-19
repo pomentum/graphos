@@ -13,15 +13,17 @@ endpoints. All pure reads — no writes, no advisory locks.
 from __future__ import annotations
 
 import time
-from typing import Annotated
+from typing import Annotated, Any
 
 import asyncpg
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 
+from graphos import analysis
 from graphos.api.graph import _check_tenant
 from graphos.auth import ReadPrincipal, Tenant
 from graphos.bootstrap import registered_tenants
 from graphos.contracts.communities import (
+    AnalysisFreshness,
     CommunitiesResponse,
     CommunityIdsRequest,
     CommunityIdsResponse,
@@ -49,6 +51,11 @@ MAX_INCLUDED_MEMBERS_PER_COMMUNITY = 500
 # for callers that genuinely need the full enumeration.
 DEFAULT_COMMUNITY_LIMIT = 50
 MAX_COMMUNITY_LIMIT = 500
+
+# A registered tenant whose graph's tables are missing.
+_NO_GRAPH_400: dict[int | str, dict[str, Any]] = {
+    400: {"description": "The tenant's graph does not exist in the database."},
+}
 # Number of distinct label names to include in each community's
 # ``sample_labels``.  Matches the prior _sample_labels(limit=5) call.
 SAMPLE_LABELS_PER_COMMUNITY = 5
@@ -166,6 +173,7 @@ async def _communities_with_labels(
         "`include_members=true` to return up to "
         f"{MAX_INCLUDED_MEMBERS_PER_COMMUNITY} member ids per community."
     ),
+    responses=_NO_GRAPH_400,
 )
 async def list_communities(
     tenant: Tenant,
@@ -244,6 +252,7 @@ async def list_communities(
         "community sizes, and the `top` largest communities with a few sample labels each. "
         "400 when the tenant's graph does not exist."
     ),
+    responses=_NO_GRAPH_400,
 )
 async def community_summary(
     tenant: Tenant,
@@ -303,7 +312,9 @@ async def community_summary(
         "Exact `count(*)` per label over AGE's per-label storage tables "
         "(cheaper than Cypher `count()`). `total_bytes` is the rolled-up "
         "`pg_total_relation_size` across all of the tenant's "
-        "`_ag_label_*` tables."
+        "`_ag_label_*` tables. `analyses` says, for graph metrics and "
+        "communities, when their stored values were computed and how many "
+        "nodes and edges were written since (`stale`)."
     ),
 )
 async def tenant_stats(
@@ -369,6 +380,14 @@ async def tenant_stats(
         n_edges = int(await conn.fetchval(
             f'SELECT count(*) FROM "{tenant}"."_ag_label_edge"',
         ) or 0)
+        analyses = {
+            kind: AnalysisFreshness(
+                computed_at=f.computed_at, scope=f.scope,
+                rows_written_since=f.rows_written_since, at_least=f.at_least,
+                stale=None if f.rows_written_since is None else f.rows_written_since > 0,
+            )
+            for kind, f in (await analysis.freshness(conn, tenant)).items()
+        }
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     return TenantStatsResponse(
@@ -377,6 +396,7 @@ async def tenant_stats(
         n_edges=n_edges,
         total_bytes=total_bytes,
         labels=labels,
+        analyses=analyses,
         elapsed_ms=elapsed_ms,
     )
 
@@ -537,6 +557,10 @@ def _check_label(tenant: str, label: str, *, kind: str) -> None:
         "Uses the ``(start_id, end_id)`` btree on the edge label table "
         "for an index-scan ``GROUP BY``."
     ),
+    responses={400: {"description": (
+        "`label` is not a vertex label, or `by_edge` not an edge type, registered for the "
+        "tenant."
+    )}},
 )
 async def label_top_by_edge(
     tenant: Tenant,

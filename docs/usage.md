@@ -134,6 +134,7 @@ password being its secret. Only a scrypt hash of it is stored.
 
 **Signing in.** `POST /v1/auth/login {"user", "password"}` answers an access token, valid
 `expires_in` seconds (`GRAPHOS_ACCESS_TOKEN_TTL_S`, 900). Send it as `Authorization: Bearer <token>`.
+The same token opens the MCP endpoint for agents, `/mcp` ([agents.md](agents.md)).
 A person also gets a `refresh_token`: `POST /v1/auth/refresh {"refresh_token"}` answers a new pair
 and the old refresh token stops working; one used twice ends the whole session (someone else has
 it). Sessions end after `GRAPHOS_SESSION_IDLE_S` (3600) without a refresh and
@@ -407,7 +408,8 @@ and snapshot endpoints count the line in `rows_invalid` with the reason in `erro
 `<label or *>.<property>:<rule>`: `property_warnings` (written) and, on the bulk and snapshot
 endpoints, `property_violations` (refused). `snapshot-import?properties=report` checks and counts
 but refuses nothing, to restore data older than its definitions. Prometheus counts every problem
-in `graphos_property_violations_total{tenant,kind,outcome,rule}`.
+in `graphos_property_violations_total{kind,outcome,rule}` (no tenant label: `/metrics` needs no
+sign-in).
 
 `POST /v1/{tenant}/graph/properties:check` (`maintain`; `Prefer: respond-async` runs it as a
 job) reads the stored rows as if every rule applied, whatever the mode, so a schema can be tried in
@@ -492,6 +494,27 @@ Any token on a tenant, read-only included, can read its shape with `GET /v1/{ten
 `property_schema` list only what was declared: a key left out of an entry is left out here too.
 It leaves out what only maintainers see (property indexes, generated columns, rule bodies, `meta`).
 
+**Schema summary, for a model.** `GET /v1/{tenant}/schema/summary` (`read`) answers what an agent
+needs before it writes a query, measured from the data rather than declared: each label with its
+node count, parent and properties (the declared type, `required` and enum; the rows that hold the
+property, its distinct values and, when there are at most 20, every value with its count and
+JSON type: a string as it is, any other value as JSON, a long one cut and ending with `…`), the
+label pairs per edge type with their counts, the search indexes, the saved queries with their
+parameters, and the `graphos_*` names graphos computes itself. Lists are capped (40 labels, 25
+properties a label, 60 label pairs) and say how many there were; labels above 50,000 nodes are read
+on a sample (`estimated`). `text` holds the same as compact text, and `?format=text` answers it
+alone. It is kept per tenant for five minutes and dropped when the schema changes.
+
+```text
+graphos tenant acme: 2 labels with nodes, 1 label pairs with edges.
+Labels (node count; property: type, rows, distinct values or the values):
+- Person (5,300): name: string required, 5,300 rows, 5,280 distinct; status: string, 5,300 rows, 'ACT' 4,100, 'OLD' 1,200
+- Doc (12,000): title: string, 12,000 rows, 11,950 distinct
+Relationships ((source)-[:TYPE]->(target) edge count):
+- (Person)-[:AUTHORED]->(Doc) 12,000
+Use label, type, property names and values exactly as written here; look a property's values up (get_property_values) before filtering on one.
+```
+
 **Export and import a schema.** `GET /v1/tenants/{name}/spec` answers the tenant's whole schema as
 a file (`<name>.schema.json`, format `graphos.schema`, version 1, or 2 when it carries a
 `property_schema`). The file **is a registration
@@ -525,7 +548,9 @@ and answers what it would change, writing nothing:
 ```json
 {"tenant": "acme", "exists": true, "mode": "merge", "status": "dry_run",
  "changes": {"added": {"vertex_labels": ["Invoice"], "property_indexes": ["Invoice(number) unique"]}},
- "warnings": ["generated column Document.kind is added to a label with about 120,000 nodes: its table is rewritten, writes to it wait meanwhile"]}
+ "warnings": ["generated column Document.kind is added to a label with about 120,000 nodes: its table is rewritten, writes to it wait meanwhile"],
+ "breaking": [{"part": "vertex", "name": "Person", "change": "property_required",
+               "detail": "Person.email: now required", "rows": 5300}]}
 ```
 
 `changes` is what the change feed records when the registration is applied (`null` if nothing
@@ -533,6 +558,27 @@ would change; `registered: true` for a new tenant). `warnings` name what applyin
 could still fail on: a generated column on a label that has nodes, a unique property index over
 values nodes already share (the dry run checks), a search index over more than 100,000 nodes, and,
 when replacing, labels left out (their tables and data stay).
+
+`breaking` lists the changes that make something that worked stop working, each with a stable
+`change` code, a `detail` sentence and, for a label or type, `rows` (its row estimate):
+
+| `change` | What stops working |
+|---|---|
+| `label_removed` | writes to a label or type left out of a replaced schema (its data stays) |
+| `search_index_removed` | searches naming the index |
+| `hierarchy_removed` | reads of the parent label no longer include the child's nodes |
+| `resolve_rule_removed` | `edges:resolve` for the type |
+| `strict_endpoints_on`, `endpoint_removed` | writes of a declared type outside its (remaining) declared pairs |
+| `mode_strict` | rows breaking a rule, now refused where the label or type has rules |
+| `undeclared_rejected` | rows with undeclared properties |
+| `property_added_required`, `property_required` | rows without the property |
+| `type_changed`, `enum_narrowed`, `pattern_changed`, `format_changed`, `items_changed`, `minimum_raised`, `maximum_lowered` | rows whose value the tighter rule refuses |
+
+Property rules count only where the mode is `strict` (a warning refuses nothing), and a rule
+declared on `*` or a parent label is listed once, under the name it is declared on. A registration
+never rewrites rows: a tighter rule refuses a row's next write, and
+`POST …/graph/properties:check` counts the rows that already break it. Additions and relaxations
+(a new optional property, a wider enum, `warn` instead of `strict`) are never listed.
 
 A registration carries at most 5,000 declared label pairs. A schema with more is imported in
 several calls: the first with everything else (and `force_shrink` when replacing), the rest adding
@@ -787,6 +833,44 @@ curl -s -X POST "$G/v1/acme_copy/graph/snapshot-import?mode=empty" \
 # → {"nodes_upserted":3,"edges_upserted":2,"complete":true,"header":{…},"mode":"empty",…}
 ```
 
+### Reconcile: make the stored edges equal to a set
+
+`POST /v1/{t}/graph/edges:reconcile` (`write`) takes the complete set of edges wanted in a scope
+and makes the stored set equal to it in one transaction: missing edges are added, kept edges whose
+properties change are rewritten, and the edges of the scope not in the set are deleted. A kept edge
+that does not change is not written, so its revision stays. It replaces "delete the run, then
+reload" (a full rebuild, with readers seeing missing data meanwhile) by the difference. It manages
+your own edges: an edge a resolve rule derived (`graphos_derived`) that the set does not name is
+left to the rules, and one it names becomes yours (its mark is cleared), as it does when you
+upsert or patch it. An edge sent without `props` that turns out to be new is checked against the
+property schema as `{}`.
+
+| Scope | What the set replaces | Body |
+|---|---|---|
+| `node` | the edges of `type` at one `node`, in `direction` (`out`, the default, or `in`), whose other end has `other_label` | JSON; each edge names the other end by `id` |
+| `type` | every edge of `type` from `src_label` to `dst_label` | JSON up to 10,000 edges, or NDJSON: a header line `{"scope": "type", "type", "src_label", "dst_label", "props"}`, then one `{"src_id", "dst_id", "props"}` per line (up to `GRAPHOS_RECONCILE_MAX_EDGES`, 2,000,000) |
+
+Labels take in their child labels. Edges of the same type to other labels, and other types, are not
+touched. `props`: `merge` (the default) merges an edge's given properties into the stored ones,
+`replace` makes them all of them (`graphos_*` keys stay); an edge sent without `props` keeps its
+properties. A wanted edge whose end does not exist is skipped (counted, the first 100 listed),
+never created. The checks are an upsert's: registered type and labels, declared pairs under
+`strict_endpoints`, reserved names, the property schema. `?dry_run=true` answers the counts and
+writes nothing. Reconciliations of one type queue; other types run in parallel. The change feed
+gets one `upsert` (added and changed) and one `delete` (removed) record, each with
+`detail.reconcile` (`node` or `type`), ids listed up to 10,000.
+
+```bash
+curl -s -X POST "$G/v1/acme/graph/edges:reconcile" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"scope": "node", "type": "DEPENDS_ON", "node": {"label": "Service", "id": "billing"},
+       "other_label": "Service", "edges": [{"id": "ledger", "props": {"weight": 3}}, {"id": "auth"}]}'
+# → {"scope":"node","type":"DEPENDS_ON","added":1,"changed":1,"kept":0,"removed":2,"skipped":0,…}
+```
+
+Python: `g.reconcile_node_edges(label=, node_id=, edge_type=, other_label=, targets=[...])` and
+`g.reconcile_type_edges(edge_type=, src_label=, dst_label=, edges=[ReconcileEdge(...)])`.
+
 ### Deletes
 
 | Call | Effect |
@@ -817,6 +901,7 @@ other reads return every match.
 | `/graph/search` | GET | `q` (1–200 chars), `label`, `limit` (20 / 200); `index`, `fuzzy` (false), `min_score` (0); without `index`: `property` (`name`) | `nodes[{id, label, properties, score, matched}]`, `truncated`; `id` is the AGE graphid (integer), the external id is `properties.id` |
 | `/graph/nodes/{external_id}` | GET | `label` | `label`, `properties` (404 if absent) |
 | `/graph/edges/{type}` | GET | `src`, `dst`, `src_label`, `dst_label` | one edge: `src_label`, `dst_label`, `properties` (404 if absent) |
+| `/graph/edges:check` | POST | `edges[{type, src_id, dst_id, src_label, dst_label}]` (1–1000), `include_properties` (false) | one result per edge, in order: `status` `present` (with `src_label`, `dst_label`, `rev`, `etag`, `properties`), `absent` or `ambiguous` (`candidates`: the label pairs that match); `present`, `absent`, `ambiguous` counts; one snapshot; 400 for an unregistered type or label |
 | `/graph/paths` | POST | `src`, `dst` (+ labels), `rel_types`, `direction` (`both`), `max_hops` (4 / 8), `limit` (1 / 100), `include_properties` | the shortest paths: `hops`, `paths[{hops, nodes[], edges[]}]`, `truncated` |
 | `/graph/neighbors` | GET | `node_id`, `rel_types` (repeatable), `limit` (50 / 500) | 1-hop `neighbors[{neighbor_id, neighbor_label, direction, edge_type, …}]`, `truncated` |
 | `/graph/expand` | GET | `node_id` (always required), `seeds` (repeatable), `rel_types`, `max_hops` (2 / 5), `direction` `in\|out\|both` (`both`), `limit` (100 / 1000), `communities` | `paths[{end_id, end_label, hops, rel_path}]` by hops, then `end_id`; `truncated` |
@@ -1006,11 +1091,11 @@ scope property.
 
 ---
 
-### Cypher console (opt-in)
+### Cypher console
 
-For people who know Cypher, graphos can run **read-only** Cypher on one tenant's graph. It is off
-unless an operator sets `GRAPHOS_CYPHER=true`; `GET /v1/info` then says `"cypher": true` and the
-web UI shows a Query page: an editor that colours Cypher and suggests the tenant's labels, edge
+For people who know Cypher, graphos can run **read-only** Cypher on one tenant's graph. It is on
+unless an operator sets `GRAPHOS_CYPHER=false`; while it is on, `GET /v1/info` says `"cypher": true`
+and the web UI shows a Query page: an editor that colours Cypher and suggests the tenant's labels, edge
 types and property names as you type (Ctrl+Space asks), the result as a table and on the canvas,
 and the tenant's saved queries.
 
@@ -1065,7 +1150,7 @@ curl -s -X POST "$G/v1/acme/cypher" -H "Authorization: Bearer $TOKEN" -H 'Conten
 **Saved queries** are named, parameterised queries a tenant's maintainers keep for its readers:
 `PUT /v1/{tenant}/cypher/saved/{name}` with `{"description", "query", "params": {"kind":
 {"type": "string", "label": "Kind"}}, "show": "table" | "graph"}` (`maintain`);
-`GET /v1/{tenant}/cypher/saved`; `POST /v1/{tenant}/cypher/saved/{name}:run` with `{"params": …}`
+`GET /v1/{tenant}/cypher/saved` (or one: `GET /v1/{tenant}/cypher/saved/{name}`); `POST /v1/{tenant}/cypher/saved/{name}:run` with `{"params": …}`
 (every declared parameter, each of its type: `string`, `number`, `boolean` or `list`, and no
 other; 422 otherwise); `DELETE …/saved/{name}` (`maintain`). A name is a letter or digit, then up
 to 62 of those, `_` or `-`. While the console is off, all of them answer 404. They go with the
@@ -1079,7 +1164,7 @@ tenant's data. Python: `cypher(query, params)`, `saved_queries()`, `save_query(.
 | `POST /graph/nodes/aggregate` | `label`, `group_by`, `values`, `limit` (200 / 5000), `missing` | `groups[{value, count}]`, highest count first; `total` (nodes counted in every group) and `distinct` (distinct values), both before `limit` cuts the groups (`truncated`); a parent label includes its children; `missing: true` counts nodes without the property under `""`; a value that is not a string comes as JSON |
 | `POST /graph/edges/aggregate` | `group_by_src`, `group_by_dst`, `rel_types`, `src_values`, `dst_values`, `require_different`, `limit` (200 / 5000) | `groups[{src_value, dst_value, rel_type, count}]` |
 | `GET /graph/labels/{label}/top` | `by_edge` (required), `direction` `out\|in\|both` (`out`), `k` (20 / 200) | `rows[{node_id, edge_count}]` |
-| `GET /graph/stats` | – | exact per-label counts (a parent label includes its children), `n_vertices` and `n_edges` (each node and edge once), `total_bytes` |
+| `GET /graph/stats` | – | exact per-label counts (a parent label includes its children), `n_vertices` and `n_edges` (each node and edge once), `total_bytes`; `analyses` (§8): for `metrics` and `communities`, `computed_at`, `scope`, `rows_written_since`, `at_least`, `stale` |
 | `GET /graph/map` | `exact` (false) | `labels[{label, count}]` (each label's own nodes), `links[{src_label, type, dst_label, count, estimated}]`, `estimated` |
 | `GET /graph/map/hubs` | `label` (required), `limit` (40 / 200) | `nodes[{id, label, properties, degree, estimated}]`, most connected first |
 
@@ -1223,6 +1308,20 @@ records no change; otherwise one change record summarises the run. `dry_run` com
 without writing. The response reports nodes, edges, `n_changed`, `n_cleared`, components and timings;
 `Prefer: respond-async` runs it as a job (`compute_metrics`).
 
+**Are the stored values current?** `GET /graph/stats` answers `analyses.metrics` and
+`analyses.communities` once a run has written (a metrics run that changed nothing counts):
+`computed_at`, `scope` (the run's `rel_types` / `node_filter`, null for the whole graph),
+`rows_written_since` (nodes and edges written, patched or deleted since the run read the graph,
+summed from the change feed over at most 10,000 records, `at_least` when it stopped there; null when
+those records are past the feed's retention) and `stale` (`rows_written_since > 0`, null when
+unknown). The count is for the whole tenant, whatever the run's scope; a write racing the run counts
+as since, so a run is never called current by mistake.
+
+```json
+"analyses": {"metrics": {"computed_at": "2026-10-16T09:12:03Z", "scope": null,
+                         "rows_written_since": 1240, "at_least": false, "stale": true}}
+```
+
 Runs happen only when called: writes never trigger one, so values lag the graph until the next run
 (call it after a bulk load, or on a schedule). The first run writes every node taking part, in
 statements of 25 000 nodes within one transaction (all or nothing); on a graph of about 500 000
@@ -1288,8 +1387,16 @@ curl -s -X POST "$G/v1/acme/graph/edges:resolve" \
 # → {"results":[{"edge_type":"TAGGED_WITH","edges_written":…,"duration_ms":…,"warning":null}],"total_edges_written":…,...}
 ```
 
-`edges:resolve` needs `write` on the tenant; an edge type without a rule returns 400. Inserts use
-`ON CONFLICT (start_id, end_id) DO NOTHING`, so re-runs only add missing edges. Candidate labels and
+`edges:resolve` needs `write` on the tenant; an edge type without a rule returns 400, except in
+reconcile mode. Inserts use
+`ON CONFLICT (start_id, end_id) DO NOTHING`, so re-runs only add missing edges. The edges a rule
+writes carry `graphos_derived: true`. With `"mode": "reconcile"` the run also deletes the marked
+edges no rule derives any more (a document dropped a tag): an edge a consumer wrote itself, or
+wrote to since, is never removed. Reconcile mode visits every edge type of the tenant, so a type
+whose last rule was removed, or whose rules no label matches any more, loses its marked edges. Edges derived before the mark existed are unmarked: `"adopt_unmarked": true` takes the
+unmarked edges of the type between the rules' label pairs as the rules' own, marking those the
+rules derive and deleting the others; try it with `"dry_run": true` first, which answers
+`edges_removed` and `edges_marked` and writes nothing. `insert` stays the default for this release. Candidate labels and
 supporting indexes come from the property catalogue (`GET /graph/catalogue`). graphos records which
 labels carry which properties as nodes are written, so the catalogue is current after every commit;
 indexes are derived at registration, so re-register after loading data to get them. A property no
@@ -1329,7 +1436,8 @@ Read access is enough for all four. A record:
 | node delete (by id or by property) | `delete`, one per label, with the ids; `detail.edges_removed` counts the edges deleted with them (for the whole statement), `detail.where` the property for a delete by property |
 | batch node delete (`nodes:delete`) | `delete`, one per label, with the ids deleted; `detail.edges_removed` counts the edges deleted by that label's statement |
 | edge delete | `delete` with the pair |
-| `edges:resolve` | one `resolve` summary per edge type, `count` edges, no ids: re-read the type |
+| `edges:resolve` | one `resolve` summary per edge type, `count` edges, no ids: re-read the type; with `mode: reconcile`, a `delete` record of the removed edges and an `upsert` one of the adopted, each with `detail.reconcile: "resolve"` |
+| `edges:reconcile` | one `upsert` (added and changed) and one `delete` (removed) record, `detail.reconcile` `node` or `type`; ids up to 10,000 |
 | Louvain write-back | one `communities` summary, `count` nodes, no ids |
 | graph metrics write-back | one `metrics` summary, `count` nodes whose values changed, no ids |
 | schema change (registration that changes something, declared pair removed, unregister, restore) | `op: schema`, `kind: tenant`: `detail.added` / `detail.removed` per part (`vertex_labels`, `edge_labels`, `edge_endpoints`, `label_hierarchy`, `search_indexes`, `resolve_rules` by edge type, `property_indexes` as `Document(lang)` / `User(email) unique`, `generated_columns` as `Document.lang (text, from lang)`, `meta` by key, `display` and `property_schema` by entry as `vertex:Person` / `edge:AUTHORED`; records from before 0.6.0 hold `indexes` and `generated_columns` by count), `detail.changed` (`meta` keys whose text changed, `display` and `property_schema` entries declared again differently), `detail.strict_endpoints` and `detail.property_mode` as `[before, after]`, `detail.registered` / `detail.unregistered` / `detail.restored`. A re-registration that changes nothing records nothing |
@@ -1394,7 +1502,7 @@ async with GraphosClient(base_url=G, token=TOKEN, tenant="acme") as g:
 |---|---|---|
 | `GET /healthz` | none | process alive: `{"status": "ok"}`, no database access |
 | `GET /readyz` | none | database round-trip: `{"status": "ready", "registered_tenants": <count>}`, or 503 with `{"status": "not_ready", "reason"}` only (`lifespan_not_complete` while starting, `db_unreachable` on a database failure; the error goes to the server log) |
-| `GET /v1/info` | none | `version`, `postgres_version`, `age_version`, `database_deprecated` (why the database is deprecated, or `null`), `tenants` (a count), `features` (`louvain`, `metrics`, `cypher`) |
+| `GET /v1/info` | none | `version`, `postgres_version`, `age_version`, `tenants` (a count), `features` (`louvain`, `metrics`, `cypher`) |
 | `GET /metrics` | none | Prometheus exposition; restrict it at the proxy if you expose it |
 | `GET /v1/db/stats` | admin | PostgreSQL and AGE versions, database size, plus per-table live/dead tuples, sizes and vacuum times (top 200 tables) |
 | `GET /v1/db/slow-queries?limit=25` | admin | `pg_stat_statements` top list (`limit` up to 200); `available: false` when the extension is missing |
@@ -1403,12 +1511,11 @@ async with GraphosClient(base_url=G, token=TOKEN, tenant="acme") as g:
 The endpoints without auth report tenant counts, never names; admins list tenants with
 `GET /v1/tenants`.
 
-**Database versions.** graphos runs on PostgreSQL 18 with AGE 1.8 (the bundled database) and on
-PostgreSQL 16 with AGE 1.6, which is deprecated: support will be removed in a later release, as AGE
-has no release after 1.6 for PostgreSQL 16, and 1.6 carries out some Cypher writes in a read-only
-transaction and can wedge a database process on a variable-length pattern. On a database older
-than PostgreSQL 18 or AGE 1.8, graphos logs `database deprecated` at every start and
-`GET /v1/info` reports the reason in `database_deprecated`. To move, see
+**Database versions.** graphos runs on PostgreSQL 18 with AGE 1.8, the bundled database. On an
+older one (PostgreSQL 16 with AGE 1.6, bundled up to 0.9) graphos-api refuses to start and says
+why ([ADR-0007](adrs/ADR-0007-drop-postgresql-16.md)): AGE has no release after 1.6 for
+PostgreSQL 16, and 1.6 carries out some Cypher writes in a read-only transaction and can wedge a
+database process on a variable-length pattern. To move, see
 [Upgrading the database](upgrade-postgresql-18.md).
 
 ### Web UI
@@ -1503,7 +1610,7 @@ recorded as failed; jobs are never re-run automatically. Finished jobs are kept 
 **Metrics.** graphos exports `graphos_requests_total{method,route,status}`,
 `graphos_request_duration_seconds{method,route}`, `graphos_db_pool_size{state=total|idle|active}`,
 `graphos_registered_tenants`, `graphos_rate_limited_total{token_id}` and
-`graphos_property_violations_total{tenant,kind,outcome,rule}` (§3). `route` is the path
+`graphos_property_violations_total{kind,outcome,rule}` (§3). `route` is the path
 template, not the concrete URL; `token_id` is the first 12 hex characters of the SHA-256 of the
 user name (of the bearer token when auth is disabled), never the token itself. The default
 `prometheus_client` process and runtime collectors are also exported.

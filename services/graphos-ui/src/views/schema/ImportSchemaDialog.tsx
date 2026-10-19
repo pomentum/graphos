@@ -192,6 +192,15 @@ export function ImportSchemaDialog({
             {t("views.schema.file.previewFirst")}
           </Text>
         ) : null}
+        {preview?.breaking?.length ? (
+          <Alert variant="light" color="red" radius="md" title={t("views.schema.file.breaking")}>
+            <List size="xs" spacing={2}>
+              {preview.breaking.map((item) => (
+                <List.Item key={`${item.name ?? ""}:${item.change}:${item.detail}`}>{item.detail}</List.Item>
+              ))}
+            </List>
+          </Alert>
+        ) : null}
         {preview?.warnings.length ? (
           <Alert variant="light" color="yellow" radius="md" title={t("views.schema.file.warnings")}>
             <List size="xs" spacing={2}>

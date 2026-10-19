@@ -36,7 +36,10 @@ class PathsRequest(BaseModel):
             "`both` either way."
         ),
     )
-    max_hops: int = Field(DEFAULT_PATH_HOPS, ge=1, le=MAX_PATH_HOPS)
+    max_hops: int = Field(
+        DEFAULT_PATH_HOPS, ge=1, le=MAX_PATH_HOPS,
+        description="The longest path to look for, in edges (1 to 8).",
+    )
     limit: int = Field(1, ge=1, le=MAX_PATHS, description="Shortest paths to return, at most.")
     include_properties: bool = Field(False, description="Return node and edge properties.")
 
@@ -55,38 +58,49 @@ class PathsRequest(BaseModel):
 
 
 class PathNode(BaseModel):
-    id: str
-    label: str
-    properties: dict[str, object] | None = None
+    """A node on a path."""
+
+    id: str = Field(..., description="The node's `id`.")
+    label: str = Field(..., description="The node's vertex label.")
+    properties: dict[str, object] | None = Field(
+        None, description="The node's properties; null unless `include_properties`.",
+    )
 
 
 class PathEdge(BaseModel):
     """An edge on a path, with its stored direction (``src_id`` → ``dst_id``),
     which can run against the path when ``direction`` is ``in`` or ``both``."""
 
-    type: str
-    src_id: str
-    dst_id: str
-    properties: dict[str, object] | None = None
+    type: str = Field(..., description="The edge type.")
+    src_id: str = Field(..., description="`id` of the node the edge starts from.")
+    dst_id: str = Field(..., description="`id` of the node the edge points to.")
+    properties: dict[str, object] | None = Field(
+        None, description="The edge's properties; null unless `include_properties`.",
+    )
 
 
 class GraphPath(BaseModel):
     """``edges[i]`` joins ``nodes[i]`` and ``nodes[i + 1]``."""
 
-    hops: int
-    nodes: list[PathNode]
-    edges: list[PathEdge]
+    hops: int = Field(..., description="Edges on the path.")
+    nodes: list[PathNode] = Field(..., description="The nodes in order, `src` first, `dst` last.")
+    edges: list[PathEdge] = Field(..., description="The edges in order: one fewer than `nodes`.")
 
 
 class PathsResponse(BaseModel):
-    tenant: str
-    src: str
-    dst: str
-    direction: str
+    """The shortest paths found between two nodes."""
+
+    tenant: str = Field(..., description="The tenant.")
+    src: str = Field(..., description="`id` of the start node, as sent.")
+    dst: str = Field(..., description="`id` of the end node, as sent.")
+    direction: str = Field(..., description="The `direction` walked: `out`, `in` or `both`.")
     hops: int | None = Field(
         ..., description="Length of the shortest paths; null when none was found.",
     )
-    paths: list[GraphPath]
+    paths: list[GraphPath] = Field(
+        ...,
+        description="Up to `limit` paths, all `hops` long; empty when none was found.",
+    )
     truncated: bool = Field(
         ...,
         description=(
@@ -95,4 +109,4 @@ class PathsResponse(BaseModel):
         ),
     )
     visited: int = Field(..., description="Vertices the search reached.")
-    elapsed_ms: int
+    elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")

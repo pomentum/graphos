@@ -8,6 +8,128 @@ under one version.
 
 ### Added
 
+- **An MCP endpoint for agents** ([ADR-0002](docs/adrs/ADR-0002-mcp-surface.md),
+  [ADR-0008](docs/adrs/ADR-0008-mcp-uses-the-api-tokens.md), [agents guide](docs/agents.md)):
+  `/mcp` in the API, on unless `GRAPHOS_MCP=false`, over the MCP Python SDK's Streamable HTTP
+  transport in stateless mode. 22 read tools (`list_tenants`,
+  `get_schema`, `get_graph_map`, `get_property_definitions`, `get_graph_stats`, `recent_changes`,
+  `search_nodes`, `get_node`, `get_neighbors`, `expand_subgraph`, `shortest_paths`,
+  `aggregate_nodes`, `get_property_values`, `aggregate_edges`, `scan_nodes`, `check_edges`,
+  `list_communities`, `community_summary`, `list_saved_queries`, `get_saved_query`,
+  `run_saved_query`, and `run_cypher` where the read-only console is on, through its guard) and
+  three resources (`graphos://{tenant}/schema/summary`, `…/properties`, `…/saved-queries`). Each tool runs
+  the REST route it wraps, in process and as the caller, so grants, caps and timeouts are the
+  route's; every call is audited with `mcp_tool`, reads included. The tool list carries no tenant
+  data. Results over 256 KiB are cut and say so. It takes the tokens the REST API takes: a token
+  from `POST /v1/auth/login`, single sign-on, or the identity provider's access token for
+  graphos's audience. A call without one answers 401 with `resource_metadata`, which names who
+  signs people in for the client (`/.well-known/oauth-protected-resource[/mcp]`); a browser
+  `Origin` must be an allowed host. New dependency: `mcp` 2.3 (MIT).
+- **MCP clients sign people in without a pasted token.** Without single sign-on, graphos is
+  their OAuth authorization server (`/.well-known/oauth-authorization-server`, endpoints under
+  `/oauth/`): clients register themselves as public ones (PKCE, a loopback callback, as
+  desktop and command-line clients use); at the web UI's address the person signs in on the UI's
+  new **Authorize** screen and clicks Allow (`GET /v1/auth/mcp/request`,
+  `POST /v1/auth/mcp/approve`; the UI's nginx now forwards `/mcp`, `/oauth/` and
+  `/.well-known/oauth-*`), and at graphos-api's own address on its sign-in page, styled like the
+  UI; a single-use code is exchanged for a graphos access token that only reads (refused on every
+  write and account change) and a refresh token that is a graphos session belonging to the
+  client (renewed only by it, at `/oauth/token`; one allowed in the UI ends no later than the
+  allowing session; allowing is audited), and `/oauth/revoke` ends it. Registration is bounded
+  (small fields, 10 a minute from one address, at most 1,000 clients, unused ones forgotten).
+  With single sign-on the provider signs MCP clients in and none of this is served. New tables
+  `graphos_meta.oauth_clients` and `graphos_meta.oauth_codes`, and `graphos_meta.sessions.client`.
+- **One saved query by name**: `GET /v1/{tenant}/cypher/saved/{name}` (text, description,
+  parameters), with the access running it needs; 404 while the console is off or when there is
+  none.
+- **Schema summary**: `GET /v1/{tenant}/schema/summary` gives what a model needs before querying:
+  labels with node counts, parent and properties (declared type, `required` and enum; rows,
+  distinct values and, when there are at most 20, every value with its count), label pairs per
+  edge type with counts, search indexes, saved queries with their parameters, and the names
+  graphos computes itself. Capped lists say how many there were; large labels are sampled
+  (`estimated`). JSON with the compact text in `text`, or `?format=text`. Kept per tenant for
+  five minutes and dropped when the schema changes. Client:
+  `schema_summary()`, with the `SchemaSummaryResponse` models.
+
+- **Reconcile edges by difference** ([ADR-0001](docs/adrs/ADR-0001-edge-reconciliation.md)):
+  `POST …/graph/edges:reconcile` takes the complete set of edges wanted in a scope and makes the
+  stored set equal to it in one transaction: missing edges added, kept edges whose properties
+  change rewritten (`props`: `merge` or `replace`), the rest deleted; an unchanged edge keeps its
+  revision. Scopes: `node` (one node's edges of a type, in a direction, towards a label; JSON) and
+  `type` (every edge of a type between two labels; JSON up to 10,000 edges, or NDJSON up to
+  `GRAPHOS_RECONCILE_MAX_EDGES`, 200,000). The upsert checks apply; a wanted edge whose end does
+  not exist is skipped, and one sent without `props` that turns out to be new is checked as
+  `{}`; `dry_run=true` answers the counts. It manages the consumer's own edges: a rule's derived
+  edge it does not name is left alone, one it names is taken over. The change feed gets one
+  `upsert` and one `delete` record with `detail.reconcile`. Client: `reconcile_node_edges()`,
+  `reconcile_type_edges()`, with the `ReconcileEdge` and `EdgesReconcileResponse` models.
+- **`edges:resolve` by difference**: edges a rule writes now carry `graphos_derived: true`, and
+  `"mode": "reconcile"` also deletes the marked edges no rule derives any more, on every edge type
+  of the tenant (a type whose last rule was removed included), never an edge a consumer wrote; a
+  consumer's upsert, patch or reconcile of a derived edge takes it over (the mark is cleared). `"adopt_unmarked": true` takes the unmarked edges of the type between the rules'
+  label pairs as derived (edges resolved before this release); `"dry_run": true` answers
+  `edges_removed` and `edges_marked` and writes nothing. `insert` stays the default for this
+  release. Client: `resolve_edges(mode=, adopt_unmarked=, dry_run=)`.
+
+- **Secrets at rest**: the signing keys graphos signs tokens with and each session's ID token from
+  the identity provider are stored sealed with a master key the database never sees
+  (`GRAPHOS_MASTER_KEY_FILE`): AES-256-GCM, a key per row derived with HKDF, the row as associated
+  data. A database dump or backup no longer holds a usable signing key. Several key versions may
+  be listed (the newest seals); `python -m graphos.vault reseal` re-seals everything and
+  `python -m graphos.vault new-key` prints a key. Keys stored in clear are sealed at the next
+  start. Without a master key graphos stores them in clear, as before, and warns at start.
+  `scripts/init-secrets.sh` / `.ps1` write `master_key.txt`, and the compose sets the variable.
+- **Host allowlist**: `GRAPHOS_ALLOWED_HOSTS` (comma-separated, `*.example.com` wildcards) refuses
+  requests for any other `Host` with 400, against DNS rebinding; `localhost` and `127.0.0.1` are
+  always allowed. Empty (the default): off.
+
+- **Docs:** `SECURITY.md` (private vulnerability reporting, supported versions, what a deployment
+  must do itself, known security limits), `CONTRIBUTING.md` (where the rules are, how to open a
+  pull request), issue templates for bugs and feature requests, and a pull request template.
+
+- **Docs:** a website for graphos on GitHub Pages, served from `docs/` on `main`: one page in
+  the whitepaper's design, with features, measured benchmarks, the web UI, a quickstart and the
+  documentation. `tools/docs/site.py` writes `docs/index.html` from the README and the version
+  (`--check` tells when it is out of date); no workflow builds or deploys it.
+
+### Changed
+
+- **PostgreSQL 16 / AGE 1.6 is no longer supported**
+  ([ADR-0007](docs/adrs/ADR-0007-drop-postgresql-16.md)): graphos-api refuses to start on
+  PostgreSQL before 18 or AGE before 1.8, naming the versions it found and the
+  [upgrade guide](docs/upgrade-postgresql-18.md), where it used to start with a warning. **A
+  stack still on PostgreSQL 16 must move before or as it upgrades**: with the compose file,
+  `docker compose up -d` moves it by itself, as since 0.10.0 (`graphos-db-export` and
+  `graphos-db-import` stay). `GET /v1/info` no longer has `database_deprecated`. CI runs the
+  integration tests on PostgreSQL 18 / AGE 1.8 only.
+- **The Cypher console is on by default** ([ADR-0006](docs/adrs/ADR-0006-console-on-by-default.md)):
+  `GRAPHOS_CYPHER` now defaults to `true`, so the UI's Query page, saved queries and the MCP
+  `run_cypher` tool work on a fresh install. Its guard, limits, audit and level
+  (`GRAPHOS_CYPHER_LEVEL`, `read`) are unchanged, and its pool opens no connection until a query
+  needs one. **An install that never set `GRAPHOS_CYPHER` gets the console on when it upgrades**;
+  set `GRAPHOS_CYPHER=false` to keep it off.
+- The compose file sets `GRAPHOS_MASTER_KEY_FILE`: **run `scripts/init-secrets.sh` once** when
+  upgrading an existing installation, or graphos-api does not start (it names the missing file).
+  Back up `master_key.txt` apart from the database.
+
+### Fixed
+
+- Web UI, CSV import: a file moved, renamed or deleted after it was chosen made the check or the
+  import say graphos could not be reached; it now says the file can no longer be read, and to
+  choose it again.
+
+## 0.12.0 — 2026-10-16
+
+Team tools in the web UI and the server work behind them: select several nodes on the canvas,
+draw nodes and relationships, read a large canvas with a minimap, delete a batch of nodes, and
+import a CSV file that graphos reads, checks and writes itself. For agents and schema owners: one
+call checks many edges, a schema dry run lists what a change would break, and the stats say
+whether metrics and communities are still current. The OpenAPI document now describes every
+route, field and error, `/metrics` no longer names tenants, and the first architecture decision
+records are published.
+
+### Added
+
 - **Batch node delete**: `POST …/graph/nodes:delete` deletes up to 1,000 nodes, each by `label`
   and `id`, with their edges, in one transaction. One statement per label, served by the label's
   unique id index (a label takes in its child labels' nodes); one change record per label. A
@@ -27,6 +149,32 @@ under one version.
   CSV row numbers. Mapping errors are 422, an unreadable file 400 (a quoted cell never closed
   included), a file over `GRAPHOS_CSV_MAX_BYTES` (256 MiB) 413. Client: `import_csv_nodes()`,
   `import_csv_edges()`, with the `CsvImportResponse`, `CsvIssue` and `CsvColumnPlan` models.
+- **Check many edges at once**: `POST …/graph/edges:check` looks up to 1,000 edges, each by type
+  and the ids of its ends as `GET …/graph/edges/{type}` names one, from one snapshot, and answers
+  each in order: `present` (with its labels, revision, ETag and, with `include_properties`, its
+  properties), `absent`, or `ambiguous` (an end id in several labels; the matching label pairs
+  are listed). Meant for checking a set of facts against the graph in one call, such as what an
+  agent is about to state. Read access. Client: `check_edges()`, with the `EdgeCheckItem`,
+  `EdgeCheckResult` and `EdgesCheckResponse` models.
+- **What a schema change breaks, in the dry run**: `POST /v1/tenants?dry_run=true` answers
+  `breaking` beside `changes` and `warnings`: each change that refuses writes or calls that
+  worked, or changes what a read returns (a label or type left out of a replaced schema, a search
+  index, label-hierarchy pair or resolve rule removed, `strict_endpoints` turned on or a declared
+  pair removed under it, and property rules that refuse more where the mode is `strict`: the
+  mode becoming strict, a property made required, a new required property, a type changed, an
+  enum narrowed, a pattern, format or item rule changed, a minimum raised, a maximum lowered,
+  undeclared keys rejected). Each has a stable `change` code, a sentence and the label's or
+  type's row estimate. Additions and relaxations are never listed. The web UI's schema import
+  shows them before the warnings.
+- **Are the metrics and communities current?** `GET …/graph/stats` answers `analyses`: for graph
+  metrics and Louvain communities that have written results, when (`computed_at`), over what
+  part of the graph (`scope`), how many nodes and edges were written since
+  (`rows_written_since`, from the change feed, null past its retention) and `stale`. A metrics run
+  that changes no value counts as a run. Stored in `graphos_meta.analysis_runs`. Client:
+  `TenantStatsResponse.analyses`, with the `AnalysisFreshness` model.
+- **Search quality held to floors**: a labelled query set (literal identifiers, misspellings with
+  `fuzzy`, English sentences with the `text` analyzer) runs through `graph/search` in the
+  database tests, which fail when recall@10 or MRR drops below its floor.
 - **Web UI: several nodes at once on the canvas.** Ctrl, ⌘ or Shift click adds a node to the
   selection or takes it out; Shift-drag on the empty canvas draws a loop that selects what it
   encloses (with Ctrl or ⌘, added to the selection); Ctrl/⌘+A selects every node. A bar then
@@ -41,19 +189,19 @@ under one version.
   node at that spot, and Alt-drag from one node onto another to connect them (only the type is
   asked; declared pairs first, refused ones blocked as in Connect).
 - **Web UI: CSV import.** On the Overview, beside the dataset upload, writers import a CSV file
-  without writing a loader: the separator (comma, semicolon or tab) is detected, quoted cells,
-  CRLF and a UTF-8 byte-order mark are read as RFC 4180 says. The rows are nodes of a label or
-  relationships of a type (rule-derived types left out, declared label pairs offered first); the
-  id columns are picked, and every other column is a property, named from its header, of a type
-  (auto, text, number, true / false) taken from the label's definitions where they declare one,
-  or left out. The first 20 rows are previewed as they will be written, and every row is checked:
-  empty, too long and repeated ids, cells that do not read as their type, names graphos keeps for
-  itself, and the declared definitions (required, type, allowed values, range) and label pairs.
-  Rows with the same id (or, for relationships, the same two ends) are sent as one, in file
-  order, a later non-empty cell winning; ids are trimmed. The rows go to `nodes:bulk` /
-  `edges:bulk` as NDJSON, with the upload's progress and graphos's answer (rows received,
-  written, refused, skipped for a missing endpoint, property violations and warnings, its first
-  errors, named by the file's row). The web UI's API layer has `bulkNodes()` and `bulkEdges()`.
+  without writing a loader. The page reads only the file's start, for its header, its separator
+  (comma, semicolon or tab, detected) and a preview of the first 20 rows; graphos reads the file
+  itself (`nodes:csv` / `edges:csv`). The rows are nodes of a label or relationships of a type
+  (rule-derived types left out, declared label pairs offered first); the id columns are picked,
+  and every other column is a property, named from its header, of a type (auto, text, number,
+  true / false) taken from the label's definitions where they declare one, or left out. With each
+  change of the mapping graphos checks the whole file in a dry run: rows and the records they
+  merge into, what would be written, refused or skipped, the issues it found (empty, too long and
+  repeated ids, ragged rows, cells that do not read as their type, undeclared label pairs), the
+  property definitions' verdicts and its first refusals; a mapping it refuses is shown by the
+  column grid. The import sends the file as it is, with the upload's progress, Cancel (nothing is
+  written before graphos has the whole file) and graphos's answer. The web UI's API layer has
+  `csvImport()`.
 - **Docs:** development guides, for people and coding agents: the rules for the whole repository
   ([docs/development.md](docs/development.md): docs, pictures and docs tools, test stacks, git,
   privacy) and a `DEVELOPMENT.md` in each package for the
@@ -61,10 +209,43 @@ under one version.
   [web UI](services/graphos-ui/DEVELOPMENT.md); architecture decision records in
   [docs/adrs/](docs/adrs/README.md), with when one is needed and its template; `AGENTS.md` and
   `CLAUDE.md` at the root point to them.
-- **Docs:** a website for graphos on GitHub Pages, served from `docs/` on `main`: one page in
-  the whitepaper's design, with features, measured benchmarks, the web UI, a quickstart and the
-  documentation. `tools/docs/site.py` writes `docs/index.html` from the README and the version
-  (`--check` tells when it is out of date); no workflow builds or deploys it.
+- **Docs:** the first five architecture decision records, all proposed: edge reconciliation by
+  difference ([ADR-0001](docs/adrs/ADR-0001-edge-reconciliation.md)), an MCP surface for agents and
+  a schema summary ([ADR-0002](docs/adrs/ADR-0002-mcp-surface.md)), variable-length Cypher patterns
+  in the console ([ADR-0003](docs/adrs/ADR-0003-variable-length-cypher.md)), team annotations
+  ([ADR-0004](docs/adrs/ADR-0004-team-annotations.md)) and a geographic view with no third-party
+  calls from the UI by default ([ADR-0005](docs/adrs/ADR-0005-geo-view-and-external-calls.md)).
+
+### Changed
+
+- `graphos_property_violations_total` loses its `tenant` label: `/metrics` needs no sign-in, so it
+  no longer names tenants to anyone who reaches the port. It counts by `kind`, `outcome` and
+  `rule`; per-tenant problems are in the write responses (`property_warnings`,
+  `property_violations`). A dashboard that grouped by tenant must drop that grouping.
+- **The OpenAPI document is complete** (`/openapi.json`, `/docs`, `/redoc`):
+  - every error a route can answer is declared, with when it happens: 401 / 403 on every route
+    that needs a token, 404 for an unregistered tenant on every tenant route, 429 (the rate
+    limit), 504 (a statement timeout), and each route's own (400, 409, 413, …);
+  - every error has a body schema (`ErrorResponse`, `RateLimited`, RFC 7807 `Problem`), and a 422
+    is described as either FastAPI's validation error or the route's own refusal;
+  - the routes that take a file or a stream declare it: `application/x-ndjson` for `:bulk` and
+    `snapshot-import` (gzip accepted), `text/csv` for `:csv`;
+  - every schema and every field has a description.
+  Two tests keep it so: a route raising a code it does not declare, or a model or field without a
+  description, fails the build.
+
+### Fixed
+
+- `POST …/graph/induced_edges` answered 500 when none of the ids matched a node (the answer left
+  out `node_count`). It also missed ids holding a `"` or a `\`, reported them with their JSON
+  escapes, and, for an id in two labels, counted the edges of only one of its nodes.
+- `POST …/graph/edges:scan`: when the 10 MiB page cap was reached on the first row of the next edge
+  type, the page came back without a `next_cursor`, as if the scan were over; the rest of that type
+  and the types after it were never returned. The cursor now points to that row.
+- `GET …/graph/export` declares `multi: true`: two nodes can be joined by edges of several types,
+  which graphology refuses to load into a graph declared `multi: false`.
+- `POST …/graph/nodes/{id}/properties` answers 400 for a database error, as the other node writes
+  do, instead of an unhandled 500.
 
 ## 0.11.1 — 2026-10-16
 

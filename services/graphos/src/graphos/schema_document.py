@@ -253,7 +253,7 @@ def _hard_to_see(previous: TenantSpec | None, after: TenantSpec) -> list[str]:
     return out
 
 
-async def _rows(conn: asyncpg.Connection, tenant: str, label: str) -> int | None:
+async def row_estimate(conn: asyncpg.Connection, tenant: str, label: str) -> int | None:
     """Rows in a label table: ``None`` when it does not exist, else an estimate
     (``reltuples``), corrected to at least 1 when the table is not empty."""
     row = await conn.fetchrow(
@@ -296,7 +296,7 @@ async def warnings(
         for col in after.generated_columns:
             if col in previous.generated_columns:
                 continue
-            rows = await _rows(conn, after.name, str(col["label"]))
+            rows = await row_estimate(conn, after.name, str(col["label"]))
             if rows:
                 out.append(
                     f"generated column {col['label']}.{col['column']} is added to a label with "
@@ -306,7 +306,7 @@ async def warnings(
             if idx in previous.property_indexes or not idx.get("unique"):
                 continue
             label = str(idx["label"])
-            if not await _rows(conn, after.name, label):
+            if not await row_estimate(conn, after.name, label):
                 continue
             values = ", ".join(value_sql(str(p)) for p in idx["properties"])
             if await conn.fetchval(
@@ -323,7 +323,7 @@ async def warnings(
             labels = body.get("labels") or ["*"]
             if "*" in labels:
                 labels = list(after.vertex_labels)
-            rows = sum([await _rows(conn, after.name, str(lab)) or 0 for lab in labels])
+            rows = sum([await row_estimate(conn, after.name, str(lab)) or 0 for lab in labels])
             if rows > _LARGE_LABEL_ROWS:
                 out.append(
                     f"search index {name!r} covers about {rows:,} nodes: it is built without "

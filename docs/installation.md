@@ -22,7 +22,7 @@ once it runs is in the [usage guide](usage.md).
 
 | Part | Image | Role |
 |---|---|---|
-| `graphos-db` | `apache/age:release_PG18_1.8.0` (pinned by digest) | PostgreSQL 18 with Apache AGE 1.8 (PostgreSQL 16 / AGE 1.6 is deprecated). On an internal network: nothing but graphos-api (and, for an upgrade, graphos-db-import) reaches it. |
+| `graphos-db` | `apache/age:release_PG18_1.8.0` (pinned by digest) | PostgreSQL 18 with Apache AGE 1.8 (graphos-api refuses older ones). On an internal network: nothing but graphos-api (and, for an upgrade, graphos-db-import) reaches it. |
 | `graphos-db-export`, `graphos-db-import` | `apache/age` for PostgreSQL 16 and 18 | One-shot: move a PostgreSQL 16 database to PostgreSQL 18 on the first start after an upgrade ([§11](#11-upgrading-from-postgresql-16)); otherwise they exit at once. |
 | `graphos-api` | built from `services/graphos` (published: `ghcr.io/<owner>/graphos-api`) | The REST API, sign-in and the background jobs. Listens on `127.0.0.1:8080`. |
 | `graphos-ui` (optional) | built from `services/graphos-ui` (published: `ghcr.io/<owner>/graphos-ui`) | The web UI: static files and a same-origin proxy to the API, no state of its own. Listens on `127.0.0.1:8081`. |
@@ -38,7 +38,8 @@ OpenID Connect provider that graphos-api can reach over HTTPS.
 ```bash
 git clone https://github.com/pomentum/graphos.git && cd graphos
 
-# 1. Random database passwords, written once to services/graphos/deploy/secrets/ (gitignored)
+# 1. Random database passwords and graphos's master key, written once to
+#    services/graphos/deploy/secrets/ (gitignored)
 bash scripts/init-secrets.sh            # Windows: pwsh scripts/init-secrets.ps1
 
 # 2. Database, API and web UI (leave out --profile ui for the API alone)
@@ -202,10 +203,10 @@ later); set the version you want:
 # docker-compose.published.yml
 services:
   graphos-api:
-    image: ghcr.io/pomentum/graphos-api:0.11.1
+    image: ghcr.io/pomentum/graphos-api:0.12.0
     build: !reset null
   graphos-ui:
-    image: ghcr.io/pomentum/graphos-ui:0.11.1
+    image: ghcr.io/pomentum/graphos-ui:0.12.0
     build: !reset null
 ```
 
@@ -260,6 +261,27 @@ the communities. Then open the UI, pick `demo`, and use *Explore → Graph → C
   identity provider's for SSO sign-ins.
 - **Several deployments, one provider.** Give each its own `GRAPHOS_AUTH_ISSUER`, so a token from
   one is never accepted by another.
+- **The master key.** graphos seals the secrets it stores in its database, its signing keys and
+  the identity provider's ID token of each signed-in session, with the master key in
+  `GRAPHOS_MASTER_KEY_FILE` (AES-256-GCM, a key per row derived with HKDF). A database dump or
+  backup then holds no usable key. `scripts/init-secrets.sh` writes one (`master_key.txt`) and the
+  compose sets the variable. **Back it up apart from the database:** without it graphos cannot
+  open what it sealed and refuses to start. To recover from a lost key, delete the rows of
+  `graphos_meta.signing_keys` (graphos makes a new key; clients sign in again) and set
+  `id_token` to null in `graphos_meta.sessions`.
+  - **Format:** one key per line, `<version>:<base64 of 32 bytes>`
+    (`python -m graphos.vault new-key --version 2` prints one).
+  - **Rotation:** add a line with a higher version, restart, run
+    `python -m graphos.vault reseal` in the API container (it seals everything with the newest
+    key), then remove the old line.
+  - **Upgrading from 0.12 or older:** run `scripts/init-secrets.sh` once; the keys stored in clear
+    are sealed at the next start.
+- **Host names.** Set `GRAPHOS_ALLOWED_HOSTS` to the names clients use (`graph.example.com`, and
+  `graphos-api` when the bundled web UI proxies to it). graphos then refuses (400) a request for
+  any other `Host`, which stops a web page from reaching it through DNS rebinding (its address
+  made to point at graphos, so the browser lets the page read the answers). `localhost` and
+  `127.0.0.1` are always allowed. It matters most for the endpoints that need no sign-in, and
+  for a local instance with `GRAPHOS_AUTH_DISABLED=true`.
 - **Sizing and backups.** Raise the database's memory settings for large graphs
   ([tuning](apache-age.md)); back up the `graphos_data_pg18` volume or the database with the tools
   you use for any PostgreSQL (`pg_dump -Fc` and a restore are what the
@@ -272,10 +294,9 @@ the communities. Then open the UI, pick `demo`, and use *Explore → Graph → C
 
 Reports, notebooks or a DBA may read graphos's tables directly (they are plain AGE tables, see
 [apache-age.md](apache-age.md) §2). Give them a role of their own that can only read, per tenant
-schema, with a statement timeout. **This needs AGE 1.8:** on AGE 1.6 a role with only `SELECT`
-can still change and delete rows through Cypher `SET`, `REMOVE` and `DELETE` (only `CREATE` and
-`MERGE` are refused), so do not give direct Cypher access on AGE 1.6. On AGE 1.8 every Cypher write
-from such a role is refused ("permission denied"; both verified).
+schema, with a statement timeout. On AGE 1.8 every Cypher write from such a role is refused
+("permission denied"; verified). AGE 1.6, which graphos no longer starts on, let a role with only
+`SELECT` change and delete rows through Cypher `SET`, `REMOVE` and `DELETE`.
 
 ```sql
 CREATE ROLE report_reader LOGIN PASSWORD '...';
@@ -314,6 +335,8 @@ lists every one; the README the most common). Those for sign-in, besides the OID
 | `GRAPHOS_LOGIN_ATTEMPTS_PER_MIN` | `20` | Sign-in attempts per minute from one client address. |
 | `GRAPHOS_PASSWORD_MIN_LENGTH` | `12` | Shortest password a person may choose. |
 | `GRAPHOS_AUTH_SIGNING_KEY_FILE` | unset | A PEM EC P-256 private key to sign tokens with, instead of the generated one (§8). |
+| `GRAPHOS_MASTER_KEY_FILE` | unset (compose: `master_key.txt`) | Master keys sealing the stored signing keys and ID tokens (§8). Unset: stored in clear, with a warning. |
+| `GRAPHOS_ALLOWED_HOSTS` | empty (any) | Host names graphos answers to, comma-separated; `localhost` and `127.0.0.1` always (§8). |
 | `GRAPHOS_AUTH_ISSUER` | `graphos` | `iss` of the tokens graphos signs. |
 | `GRAPHOS_RATE_LIMIT_ENABLED` | `false` | Per-user request rate limit. |
 | `GRAPHOS_FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxies whose `X-Forwarded-*` headers are trusted. |
@@ -322,8 +345,7 @@ lists every one; the README the most common). Those for sign-in, besides the OID
 
 - **The published images.** `ghcr.io/<owner>/graphos-api` and `ghcr.io/<owner>/graphos-ui`, tagged
   by version, take the same settings. The API needs PostgreSQL 18 with Apache AGE 1.8
-  (PostgreSQL 16 with AGE 1.6 still runs but is deprecated: [upgrade](upgrade-postgresql-18.md);
-  CI runs the server's tests against both), loaded with
+  and refuses to start on an older database ([upgrade](upgrade-postgresql-18.md)), loaded with
   `shared_preload_libraries=age,pg_stat_statements`, and a database role for itself: the compose
   file and `services/graphos/deploy/db-init/` show the set-up to copy. The published API image has
   no Louvain; with the compose file, run the published images and add Louvain as in
@@ -333,9 +355,8 @@ lists every one; the README the most common). Those for sign-in, besides the OID
 
 ## 11. Upgrading from PostgreSQL 16
 
-graphos 0.9 and earlier ran PostgreSQL 16 with AGE 1.6 on the volume `graphos_data`; that
-database is now **deprecated** (graphos logs `database deprecated` and `GET /v1/info` reports
-`database_deprecated`). The compose file runs PostgreSQL 18 with AGE 1.8 on a new volume,
+graphos 0.9 and earlier ran PostgreSQL 16 with AGE 1.6 on the volume `graphos_data`; graphos-api
+no longer starts on that database ([ADR-0007](adrs/ADR-0007-drop-postgresql-16.md)). The compose file runs PostgreSQL 18 with AGE 1.8 on a new volume,
 `graphos_data_pg18`, and moves the data by itself on the first start:
 
 ```bash

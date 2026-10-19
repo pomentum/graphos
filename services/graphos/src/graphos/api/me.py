@@ -81,7 +81,10 @@ async def _preferences(request: Request, subject: str | None) -> dict[str, Any]:
         "`theme` (`auto`, `light`, `dark`) and `last_tenant` (a tenant name). `null` "
         "removes one. Answers all of them."
     ),
-    responses={422: {"description": "An unknown preference, or a value it does not take."}},
+    responses={
+        400: {"description": "The caller is not a signed-in user: preferences belong to users."},
+        422: {"description": "An unknown preference, or a value it does not take."},
+    },
 )
 async def update_preferences(
     principal: ReadPrincipal,

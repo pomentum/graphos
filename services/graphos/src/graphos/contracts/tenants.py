@@ -267,8 +267,18 @@ class EdgeLabelSpec(BaseModel):
     ``TenantSpecBody._coerce_edge_labels``.
     """
 
-    name: str
-    resolve_rule: dict[str, Any] | None = None
+    name: str = Field(
+        ..., description="The edge type: a letter in upper case, then letters, digits or `_`.",
+    )
+    resolve_rule: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "A rule `POST …/graph/edges:resolve` creates these edges by: `src_has_array` or "
+            "`src_array_of_objects` (with `src_match_field`), `dst_value_from`, and optionally "
+            "`match_op`, `require_different`, `require_same`, `require_dst_label`, "
+            "`require_dst_property`; any other key is 422. Null for a plain edge type."
+        ),
+    )
 
     @field_validator("name")
     @classmethod
@@ -432,8 +442,8 @@ class EdgeEndpointSpec(BaseModel):
     A child label (``label_hierarchy``) satisfies a pair declared for its parent.
     """
 
-    src: str
-    dst: str
+    src: str = Field(..., description="The source vertex label.")
+    dst: str = Field(..., description="The target vertex label.")
 
     @model_validator(mode="before")
     @classmethod
@@ -512,8 +522,14 @@ class DisplaySpec(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    vertex: dict[str, VertexDisplay | None] = Field(default_factory=dict)
-    edge: dict[str, EdgeDisplay | None] = Field(default_factory=dict)
+    vertex: dict[str, VertexDisplay | None] = Field(
+        default_factory=dict,
+        description="Styles by vertex label; `null` removes a label's entry on a registration.",
+    )
+    edge: dict[str, EdgeDisplay | None] = Field(
+        default_factory=dict,
+        description="Styles by edge type; `null` removes a type's entry on a registration.",
+    )
 
     @field_validator("vertex", "edge")
     @classmethod
@@ -558,9 +574,27 @@ class TenantSpecBody(BaseModel):
       (grandparent → parent → child) are permitted but flatly listed.
     """
 
-    name: str = Field(..., min_length=1, max_length=63)
-    vertex_labels: list[str] = Field(default_factory=list)
-    edge_labels: list[EdgeLabelSpec] = Field(default_factory=list)
+    name: str = Field(
+        ..., min_length=1, max_length=63,
+        description=(
+            "The tenant: a letter, then letters, digits or `_` (at most 63). It names the AGE "
+            "graph and the Postgres schema."
+        ),
+    )
+    vertex_labels: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Vertex labels: a letter in upper case, then letters, digits or `_`. Added to the "
+            "registered ones (`force_shrink` replaces them; tables and data stay)."
+        ),
+    )
+    edge_labels: list[EdgeLabelSpec] = Field(
+        default_factory=list,
+        description=(
+            "Edge types, as names or `{name, resolve_rule}`; several entries may share a name. "
+            "Added to the registered ones."
+        ),
+    )
     property_indexes: list[PropertyIndexSpec] = Field(
         default_factory=list,
         description="Indexes on vertex-label properties; added to the registered ones.",
@@ -766,29 +800,54 @@ class TenantSpecBody(BaseModel):
 class TenantInfo(BaseModel):
     """Returned by GET /v1/tenants."""
 
-    name: str
-    vertex_labels: list[str] = Field(default_factory=list)
-    edge_labels: list[str] = Field(default_factory=list)
-    property_indexes: list[PropertyIndexSpec] = Field(default_factory=list)
-    generated_columns: list[GeneratedColumnSpec] = Field(default_factory=list)
-    n_resolve_rules: int = 0
-    label_hierarchy: dict[str, str] = Field(default_factory=dict)
-    meta: dict[str, str] = Field(default_factory=dict)
-    search_indexes: dict[str, SearchIndexSpec] = Field(default_factory=dict)
-    display: DisplaySpec = Field(default_factory=DisplaySpec)
-    property_schema: PropertySchemaSpec = Field(default_factory=PropertySchemaSpec)
+    name: str = Field(..., description="The tenant.")
+    vertex_labels: list[str] = Field(default_factory=list, description="Its vertex labels.")
+    edge_labels: list[str] = Field(
+        default_factory=list, description="Its edge types, rule-derived ones included.",
+    )
+    property_indexes: list[PropertyIndexSpec] = Field(
+        default_factory=list, description="The declared indexes on vertex-label properties.",
+    )
+    generated_columns: list[GeneratedColumnSpec] = Field(
+        default_factory=list, description="The declared generated columns.",
+    )
+    n_resolve_rules: int = Field(0, description="Registered resolve rules, over every edge type.")
+    label_hierarchy: dict[str, str] = Field(
+        default_factory=dict, description="child label -> parent label",
+    )
+    meta: dict[str, str] = Field(default_factory=dict, description="Its free-form notes.")
+    search_indexes: dict[str, SearchIndexSpec] = Field(
+        default_factory=dict, description="Its named search indexes.",
+    )
+    display: DisplaySpec = Field(
+        default_factory=DisplaySpec,
+        description="How the web UI draws each vertex label and edge type.",
+    )
+    property_schema: PropertySchemaSpec = Field(
+        default_factory=PropertySchemaSpec,
+        description="Its property schema, as declared.",
+    )
 
 
 class MeResponse(BaseModel):
     """Returned by GET /v1/me: who is signed in and what they may use."""
 
     consumer: str = Field(description="The user name; audit, changes and jobs record it.")
-    kind: Literal["person", "service", "anonymous"] = "person"
+    kind: Literal["person", "service", "anonymous"] = Field(
+        "person",
+        description=(
+            "`person`, `service` (a service account), or `anonymous` when authentication is "
+            "disabled."
+        ),
+    )
     via: Literal["password", "oidc", "none"] = Field(
         "password",
         description="How the caller signed in: a graphos user, or the identity provider.",
     )
-    admin: bool
+    admin: bool = Field(
+        ...,
+        description="The caller holds `admin`: everything is allowed (true with auth disabled).",
+    )
     must_change: bool = Field(
         False, description="The password must be changed before anything else.",
     )
@@ -815,13 +874,17 @@ class MeResponse(BaseModel):
 class TenantSchema(BaseModel):
     """Returned by GET /v1/{tenant}/schema: the tenant's shape, for any token on it."""
 
-    name: str
-    vertex_labels: list[str] = Field(default_factory=list)
-    edge_labels: list[str] = Field(default_factory=list)
+    name: str = Field(..., description="The tenant.")
+    vertex_labels: list[str] = Field(default_factory=list, description="Its vertex labels.")
+    edge_labels: list[str] = Field(
+        default_factory=list, description="Its edge types, rule-derived ones included.",
+    )
     label_hierarchy: dict[str, str] = Field(
         default_factory=dict, description="child label -> parent label",
     )
-    search_indexes: dict[str, SearchIndexSpec] = Field(default_factory=dict)
+    search_indexes: dict[str, SearchIndexSpec] = Field(
+        default_factory=dict, description="Its named search indexes.",
+    )
     rule_edge_labels: list[str] = Field(
         default_factory=list, description="Edge labels derived by a resolve rule.",
     )
@@ -864,6 +927,31 @@ class ResolveEdgesRequest(BaseModel):
             "Omit (or pass null) to resolve all registered types."
         ),
     )
+    mode: Literal["insert", "reconcile"] = Field(
+        "insert",
+        description=(
+            "`insert` adds the edges the rules derive and removes none. `reconcile` also "
+            "deletes the edges a rule derived (marked `graphos_derived`) that no rule derives "
+            "any more; an edge a consumer wrote is never removed."
+        ),
+    )
+    adopt_unmarked: bool = Field(
+        False,
+        description=(
+            "`reconcile` only: take the unmarked edges of the type between the rules' label "
+            "pairs as the rules' own (edges derived before the mark existed): those the rules "
+            "derive are marked, the others deleted. Try it with `dry_run` first."
+        ),
+    )
+    dry_run: bool = Field(
+        False, description="Compute and answer the counts; write nothing (`reconcile` only).",
+    )
+
+    @model_validator(mode="after")
+    def _reconcile_options(self) -> ResolveEdgesRequest:
+        if self.mode != "reconcile" and (self.adopt_unmarked or self.dry_run):
+            raise ValueError("`adopt_unmarked` and `dry_run` need `mode: reconcile`")
+        return self
 
     @field_validator("edge_types")
     @classmethod
@@ -881,25 +969,70 @@ class ResolveEdgesRequest(BaseModel):
 class ResolveEdgesResult(BaseModel):
     """One per-edge-type entry in ``ResolveEdgesResponse.results``."""
 
-    edge_type: str
-    edges_written: int
-    duration_ms: int
-    warning: str | None = None
+    edge_type: str = Field(..., description="The edge type resolved.")
+    edges_written: int = Field(
+        ..., description="New edges created; edges that already existed are not counted.",
+    )
+    edges_removed: int = Field(
+        0, description="`reconcile`: derived edges no rule derives any more, deleted.",
+    )
+    edges_marked: int = Field(
+        0, description="`reconcile` with `adopt_unmarked`: unmarked edges taken as derived.",
+    )
+    duration_ms: int = Field(..., description="Time this type's rules took, in milliseconds.")
+    warning: str | None = Field(
+        None,
+        description=(
+            "Set when no vertex label carries the properties the rules name, or when "
+            "`strict_endpoints` left undeclared label pairs out; null otherwise."
+        ),
+    )
 
 
 class ResolveEdgesResponse(BaseModel):
     """Aggregated result of ``POST /v1/{tenant}/graph/edges:resolve``."""
 
-    tenant: str
-    results: list[ResolveEdgesResult]
-    total_edges_written: int
-    total_duration_ms: int
+    tenant: str = Field(..., description="The tenant.")
+    results: list[ResolveEdgesResult] = Field(..., description="One entry per edge type resolved.")
+    total_edges_written: int = Field(..., description="The sum of `edges_written`.")
+    total_edges_removed: int = Field(0, description="The sum of `edges_removed`.")
+    total_duration_ms: int = Field(
+        ..., description="Time for the whole request, in milliseconds (types run in parallel).",
+    )
+
+
+class BreakingChange(BaseModel):
+    """One change in a dry run that makes something that worked stop working."""
+
+    part: Literal["vertex", "edge", "tenant"] = Field(
+        ..., description="What the change is about: a vertex label, an edge type or the tenant.",
+    )
+    name: str | None = Field(description="The label or edge type; null for the tenant.")
+    change: str = Field(
+        description=(
+            "A stable code: `label_removed`, `search_index_removed`, `hierarchy_removed`, "
+            "`resolve_rule_removed`, `strict_endpoints_on`, `endpoint_removed`, `mode_strict`, "
+            "`undeclared_rejected`, `property_added_required`, `property_required`, "
+            "`type_changed`, `enum_narrowed`, `pattern_changed`, `format_changed`, "
+            "`items_changed`, `minimum_raised`, `maximum_lowered`."
+        ),
+    )
+    detail: str = Field(description="What stops working, in a sentence.")
+    rows: int | None = Field(
+        None,
+        description=(
+            "About how many nodes or edges of the label or type exist (an estimate); null "
+            "when the change is not about one. Rows are never rewritten by a registration: "
+            "a tighter rule refuses their next write, and `properties:check` counts the rows "
+            "that already break it."
+        ),
+    )
 
 
 class RegisterDryRunResponse(BaseModel):
     """``POST /v1/tenants?dry_run=true``: what the registration would change."""
 
-    tenant: str
+    tenant: str = Field(..., description="The tenant.")
     exists: bool = Field(description="The tenant is registered already.")
     restores: bool = Field(
         False,
@@ -908,7 +1041,12 @@ class RegisterDryRunResponse(BaseModel):
             "first, with the schema it had."
         ),
     )
-    mode: Literal["merge", "replace"]
+    mode: Literal["merge", "replace"] = Field(
+        ...,
+        description=(
+            "`merge` (the default: added to the stored spec) or `replace` (`force_shrink=true`)."
+        ),
+    )
     changes: dict[str, Any] | None = Field(
         description=(
             "What the change feed would record: `added` / `removed` per part, "
@@ -922,34 +1060,57 @@ class RegisterDryRunResponse(BaseModel):
             "What applying it would cost (a table rewrite, a long build) or could still fail on."
         ),
     )
-    status: str = "dry_run"
+    breaking: list[BreakingChange] = Field(
+        default_factory=list,
+        description=(
+            "The changes that refuse writes or calls that worked before, or change what a read "
+            "returns: removed labels, indexes, rules or pairs, and property rules that refuse "
+            "more where the mode is strict. Additions and relaxations are never listed."
+        ),
+    )
+    status: str = Field("dry_run", description="Always `dry_run`: nothing was applied.")
 
 
 class RegisterResponse(BaseModel):
-    tenant: str
-    vertex_labels: list[str]
-    edge_labels: list[str]
-    n_property_indexes: int
-    n_generated_columns: int
-    n_inheritance_edges: int = 0
-    n_resolve_rules: int = 0
+    """The tenant as stored after a registration (the merged spec)."""
+
+    tenant: str = Field(..., description="The tenant.")
+    vertex_labels: list[str] = Field(
+        ..., description="Every registered vertex label, earlier ones included.",
+    )
+    edge_labels: list[str] = Field(
+        ..., description="Every registered edge type, earlier ones included.",
+    )
+    n_property_indexes: int = Field(..., description="Declared property indexes.")
+    n_generated_columns: int = Field(..., description="Declared generated columns.")
+    n_inheritance_edges: int = Field(0, description="Entries in `label_hierarchy`.")
+    n_resolve_rules: int = Field(0, description="Resolve rules, over every edge type.")
     # Count of functional indexes graphos auto-derived from this tenant's
     # ``resolve_rule`` blocks and ensured on the candidate vertex tables.
     # Idempotent across registrations; ``0`` either means no rules were
     # registered or every supporting index already existed and re-creation
     # was a no-op.
-    n_resolver_indexes: int = 0
-    n_edge_endpoints: int = 0
-    strict_endpoints: bool = False
+    n_resolver_indexes: int = Field(
+        0,
+        description=(
+            "Indexes derived from the resolve rules and ensured (created, or already there) "
+            "on the candidate vertex labels; 0 when there is no rule, no label carries their "
+            "properties yet, or ensuring them failed (logged)."
+        ),
+    )
+    n_edge_endpoints: int = Field(0, description="Declared (edge type, source, target) pairs.")
+    strict_endpoints: bool = Field(
+        False, description="Edge writes of a declared type outside its pairs are refused.",
+    )
     n_property_definitions: int = Field(0, description="Declared properties, `*` included.")
     property_mode: str = Field("off", description="How writes are held to them.")
-    status: str = "bootstrapped"
+    status: str = Field("bootstrapped", description="Always `bootstrapped`: the spec is applied.")
 
 
 class UnregisteredTenant(BaseModel):
     """A tenant whose data is kept without a registration."""
 
-    name: str
+    name: str = Field(..., description="The tenant.")
     kind: Literal["unregistered", "orphan"] = Field(
         description=(
             "`unregistered`: its registration is kept and `POST /v1/tenants/{name}/restore` "
@@ -959,15 +1120,23 @@ class UnregisteredTenant(BaseModel):
     )
     vertex_labels: int = Field(0, description="Vertex labels in its kept registration.")
     edge_labels: int = Field(0, description="Edge labels in its kept registration.")
-    created_at: datetime | None = None
-    unregistered_at: datetime | None = None
-    unregistered_by: str | None = None
+    created_at: datetime | None = Field(
+        None, description="When it was first registered; null for an orphan.",
+    )
+    unregistered_at: datetime | None = Field(
+        None, description="When it was unregistered; null for an orphan.",
+    )
+    unregistered_by: str | None = Field(
+        None, description="Who unregistered it; null for an orphan or when not recorded.",
+    )
 
 
 class TenantList(BaseModel):
     """Returned by GET /v1/tenants."""
 
-    tenants: list[TenantInfo]
+    tenants: list[TenantInfo] = Field(
+        ..., description="The registered tenants the caller may maintain.",
+    )
     unregistered: list[UnregisteredTenant] | None = Field(
         None,
         description=(

@@ -19,6 +19,8 @@ from graphos_client import (
     BulkNodesResponse,
     CsvImportResponse,
     DeleteNodesResponse,
+    EdgeCheckItem,
+    EdgesCheckResponse,
     EdgeUpsert,
     GraphosClient,
     GraphosError,
@@ -26,6 +28,7 @@ from graphos_client import (
     NodesUpsertResponse,
     NodeUpsert,
     PasswordAuth,
+    ReconcileEdge,
     SearchHit,
 )
 
@@ -1220,6 +1223,125 @@ async def test_delete_nodes_is_retried_on_5xx() -> None:
         await cli.delete_nodes([NodeRef(label="Doc", id="a")])
     assert len(calls) == 3          # idempotent: a node already gone is skipped
     await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_check_edges_posts_the_edges_and_parses_each_status() -> None:
+    seen: list[tuple[str, str, dict]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path, json.loads(request.content)))
+        return httpx.Response(200, json={
+            "tenant": "demo", "present": 1, "absent": 0, "ambiguous": 1, "elapsed_ms": 1,
+            "results": [
+                {"type": "CITES", "src_id": "a", "dst_id": "b", "status": "present",
+                 "src_label": "Doc", "dst_label": "Doc", "rev": 2, "etag": '"1.2"',
+                 "properties": {"w": 1}},
+                {"type": "CITES", "src_id": "a", "dst_id": "s", "status": "ambiguous",
+                 "candidates": ["Doc->Doc", "Doc->Tag"]},
+            ],
+        })
+
+    resp = await _client_for(handler).check_edges([
+        EdgeCheckItem(type="CITES", src_id="a", dst_id="b"),
+        EdgeCheckItem(type="CITES", src_id="a", dst_id="s", dst_label="Tag"),
+    ], include_properties=True)
+    assert seen == [("POST", "/v1/demo/graph/edges:check", {"include_properties": True, "edges": [
+        {"type": "CITES", "src_id": "a", "dst_id": "b"},
+        {"type": "CITES", "src_id": "a", "dst_id": "s", "dst_label": "Tag"},
+    ]})]
+    assert isinstance(resp, EdgesCheckResponse)
+    present, ambiguous = resp.results
+    assert (present.status, present.rev, present.properties) == ("present", 2, {"w": 1})
+    assert ambiguous.status == "ambiguous" and ambiguous.candidates == ["Doc->Doc", "Doc->Tag"]
+
+
+_RECONCILED = {"tenant": "demo", "scope": "type", "type": "LINKS_TO", "added": 1, "changed": 0,
+               "kept": 1, "removed": 2, "skipped": 0, "dry_run": True, "elapsed_ms": 1}
+
+
+@pytest.mark.asyncio
+async def test_reconcile_type_edges_sends_a_header_then_one_edge_per_line() -> None:
+    seen: list[tuple[str, dict[str, str], str, bytes]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, dict(request.url.params),
+                     request.headers["content-type"], request.content))
+        return httpx.Response(200, json=_RECONCILED)
+
+    resp = await _client_for(handler).reconcile_type_edges(
+        edge_type="LINKS_TO", src_label="Doc", dst_label="Doc", dry_run=True,
+        edges=[ReconcileEdge(src_id="a", dst_id="b"),
+               ReconcileEdge(src_id="b", dst_id="c", props={"w": 1})],
+    )
+    path, params, kind, content = seen[0]
+    assert (path, params, kind) == (
+        "/v1/demo/graph/edges:reconcile", {"dry_run": "true"}, "application/x-ndjson",
+    )
+    assert [json.loads(line) for line in content.decode().splitlines()] == [
+        {"scope": "type", "type": "LINKS_TO", "src_label": "Doc", "dst_label": "Doc",
+         "props": "merge"},
+        {"src_id": "a", "dst_id": "b"},
+        {"src_id": "b", "dst_id": "c", "props": {"w": 1}},
+    ]
+    assert (resp.added, resp.kept, resp.removed, resp.dry_run) == (1, 1, 2, True)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_node_edges_and_resolve_by_difference_send_their_options() -> None:
+    bodies: list[tuple[str, dict]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append((request.url.path, json.loads(request.content)))
+        if request.url.path.endswith(":resolve"):
+            return httpx.Response(200, json={"tenant": "demo", "results": []})
+        return httpx.Response(200, json={**_RECONCILED, "scope": "node", "dry_run": False})
+
+    cli = _client_for(handler)
+    await cli.reconcile_node_edges(
+        label="Doc", node_id="a", edge_type="LINKS_TO", other_label="Doc",
+        targets=["b", ("c", {"w": 2})], direction="in",
+    )
+    await cli.resolve_edges(edge_types=["TAGGED"], mode="reconcile", adopt_unmarked=True)
+    assert bodies == [
+        ("/v1/demo/graph/edges:reconcile", {
+            "scope": "node", "type": "LINKS_TO", "node": {"label": "Doc", "id": "a"},
+            "direction": "in", "other_label": "Doc", "props": "merge",
+            "edges": [{"id": "b"}, {"id": "c", "props": {"w": 2}}],
+        }),
+        ("/v1/demo/graph/edges:resolve", {
+            "edge_types": ["TAGGED"], "mode": "reconcile", "adopt_unmarked": True,
+        }),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_schema_summary_parses_labels_values_and_text() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/demo/schema/summary"
+        return httpx.Response(200, json={
+            "tenant": "demo", "labels_total": 1, "links_total": 0, "links": [],
+            "estimated": False, "text": "graphos tenant demo", "cached": False, "elapsed_ms": 3,
+            "labels": [{"label": "Doc", "count": 2, "properties_total": 1, "properties": [
+                {"name": "status", "records": 2, "distinct": 1,
+                 "values": [{"value": "ACT", "count": 2}]}]}],
+        })
+
+    summary = await _client_for(handler).schema_summary()
+    (doc,) = summary.labels
+    assert doc.properties[0].values[0].value == "ACT" and summary.text.startswith("graphos")
+
+
+@pytest.mark.asyncio
+async def test_saved_query_reads_one_by_name_and_none_when_missing() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.raw_path.endswith(b"/cypher/saved/docs%20of"):
+            return httpx.Response(200, json={"name": "docs of", "query": "MATCH (n) RETURN n"})
+        return httpx.Response(404, json={"detail": "no saved query"})
+
+    cli = _client_for(handler)
+    assert (await cli.saved_query("docs of"))["query"] == "MATCH (n) RETURN n"
+    assert await cli.saved_query("nope") is None
 
 
 @pytest.mark.asyncio

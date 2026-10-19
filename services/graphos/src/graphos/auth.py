@@ -28,8 +28,11 @@ change records of the request's writes.
 
 from __future__ import annotations
 
+import contextlib
 import logging
-from collections.abc import Mapping
+import secrets
+from collections.abc import Iterator, Mapping
+from dataclasses import replace
 from enum import StrEnum
 from typing import Annotated, Protocol
 
@@ -89,6 +92,8 @@ class TokenAuthenticator:
         self.provider = provider
 
     async def authenticate(self, bearer: str) -> Principal | None:
+        """The principal of a token for graphos's audience, the REST API's and
+        ``/mcp``'s alike (ADR-0008), or ``None``."""
         try:
             claims = self.signer.verify(bearer)
         except TokenError:
@@ -98,12 +103,18 @@ class TokenAuthenticator:
             identity = claims.get("idn")
             if not isinstance(identity, dict):
                 return None
-            return self.store.principal_for(Identity.from_claims(identity))
-        user = self.store.user(subject)
-        # A password change, reset or disable bumps the version: older tokens stop.
-        if user is None or user.disabled or claims.get("ver") != user.token_version:
+            principal = self.store.principal_for(Identity.from_claims(identity))
+        else:
+            user = self.store.user(subject)
+            # A password change, reset or disable bumps the version: older tokens stop.
+            if user is None or user.disabled or claims.get("ver") != user.token_version:
+                return None
+            principal = self.store.principal(user.name)
+        if principal is None:
             return None
-        return self.store.principal(user.name)
+        until = claims.get("sxp")
+        principal = replace(principal, session_until=until if isinstance(until, int) else None)
+        return reading_only(principal) if claims.get("ro") is True else principal
 
     async def _provider_token(self, bearer: str) -> Principal | None:
         """A program's token from the identity provider, for graphos's audience."""
@@ -117,6 +128,52 @@ class TokenAuthenticator:
         return self.store.principal_for(
             self.provider.identity(claims), kind="person" if person else "service",
         )
+
+
+def reading_only(principal: Principal) -> Principal:
+    """``principal`` held to reading (a token an MCP client got, ADR-0008): every
+    level becomes ``read``, an admin reads every tenant, and nothing is created."""
+    levels = (("*", Level.READ),) if principal.admin else tuple(
+        (pattern, Level.READ) for pattern, _ in principal.levels
+    )
+    return replace(
+        principal, read_only=True, admin=False, levels=levels, create_tenants=(),
+    )
+
+
+# Account changes a route declares as `read`: refused to a read-only token.
+READ_ONLY_REFUSED = frozenset({"/v1/me/password", "/v1/me/preferences", "/v1/auth/mcp/approve"})
+
+
+class LentTokens:
+    """Single-use bearer strings for calls graphos makes to itself on someone's
+    behalf (an MCP tool runs the REST route it wraps, ADR-0002).
+
+    A lent token is 256 random bits, lives in this process only, for as long
+    as the one tool call runs, and names the principal it was lent for and the tool: the route
+    then holds that principal to its grants, and the audit records the call
+    with the tool's name whatever ``GRAPHOS_AUDIT_READS`` says.  It never
+    leaves the process, so it is not a token passed through to anyone.
+    """
+
+    def __init__(self) -> None:
+        self._lent: dict[str, tuple[Principal, str]] = {}
+
+    @contextlib.contextmanager
+    def lend(self, principal: Principal, tool: str) -> Iterator[str]:
+        token = "lent." + secrets.token_urlsafe(32)
+        self._lent[token] = (principal, tool)
+        try:
+            yield token
+        finally:
+            self._lent.pop(token, None)
+
+    def take(self, bearer: str) -> tuple[Principal, str] | None:
+        return self._lent.get(bearer) if bearer.startswith("lent.") else None
+
+
+# Set in a request's scope when a lent token authenticated it: the tool name.
+MCP_TOOL_KEY = "graphos.mcp_tool"
 
 
 class StaticAuthenticator:
@@ -160,6 +217,15 @@ async def authenticate_request(request: Request, bearer: str | None) -> Principa
         return ANONYMOUS_ADMIN
     if not bearer:
         raise _unauthorized("missing or malformed Authorization header")
+    lent: LentTokens | None = getattr(request.app.state, "lent_tokens", None)
+    taken = lent.take(bearer.strip()) if lent is not None else None
+    if taken is not None:
+        principal, tool = taken
+        request.scope[MCP_TOOL_KEY] = tool
+        # Every MCP call is audited (the audit module's AUDIT_READ_KEY; it
+        # imports this module, so the key is spelled out here).
+        request.scope["graphos.audit_read"] = True
+        return principal
     principal = await authenticator.authenticate(bearer.strip())
     if principal is None:
         raise _unauthorized("invalid or expired token")
@@ -197,6 +263,11 @@ async def require_principal(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="change your password first (POST /v1/me/password)",
+        )
+    if principal.read_only and (needed is not Access.READ or request.url.path in READ_ONLY_REFUSED):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="this token only reads: an MCP client got it (ADR-0008)",
         )
     if needed is Access.ADMIN:
         require_admin(principal)

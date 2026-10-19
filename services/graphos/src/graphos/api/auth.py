@@ -19,13 +19,13 @@ import logging
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TypeVar
+from typing import Annotated, Any, TypeVar
 from urllib.parse import urlsplit
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 
-from graphos import identity, oidc
+from graphos import identity, oauth, oidc
 from graphos.auth import ReadPrincipal
 from graphos.config import Settings
 from graphos.contracts.auth import (
@@ -33,6 +33,9 @@ from graphos.contracts.auth import (
     LoginRequest,
     LogoutRequest,
     LogoutResponse,
+    McpApproval,
+    McpApprovalResponse,
+    McpRequestInfo,
     OidcCallback,
     OidcConfig,
     OidcSignedIn,
@@ -42,6 +45,7 @@ from graphos.contracts.auth import (
     RefreshRequest,
     TokenResponse,
 )
+from graphos.observability.audit import audit_this
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +53,21 @@ router = APIRouter(tags=["auth"])
 
 # The browser session: the refresh token, where page scripts cannot read it.
 SESSION_COOKIE = "graphos_session"
+
+# Error responses the sign-in routes share (``responses=``).
+_AUTH_OFF_404: dict[int | str, dict[str, Any]] = {
+    404: {"description": "Authentication is disabled on this server (`GRAPHOS_AUTH_DISABLED`)."},
+}
+_SSO_404: dict[int | str, dict[str, Any]] = {
+    404: {"description": (
+        "Single sign-on is not configured, or authentication is disabled on this server."
+    )},
+}
+_THROTTLED_429: dict[int | str, dict[str, Any]] = {
+    429: {"description": (
+        "Too many sign-in attempts from this address; `Retry-After` says when to try again."
+    )},
+}
 
 
 @dataclass(frozen=True)
@@ -86,12 +105,13 @@ def _refused(exc: Exception) -> HTTPException:
 
 
 async def _tokens(d: AuthDeps, user: identity.User, *, session: bool) -> TokenResponse:
-    access, ttl = d.signer.issue(user)
-    refresh = None
+    refresh = until = None
     if session and user.kind == "person":
-        refresh = await identity.open_session(
+        opened = await identity.open_session(
             d.pool, user.name, idle_s=d.settings.session_idle_s, max_s=d.settings.session_max_s,
         )
+        refresh, until = opened.token, int(opened.until.timestamp())
+    access, ttl = d.signer.issue(user, session_until=until)
     return TokenResponse(
         access_token=access, expires_in=ttl, refresh_token=refresh, session=refresh is not None,
         must_change=user.must_change,
@@ -130,6 +150,14 @@ def _clear_cookie(response: Response, d: AuthDeps) -> None:
         "failures lock the account for a while, and too many attempts from one address "
         "answer 429."
     ),
+    responses={
+        401: {"description": (
+            "The name or password is wrong, or the account is locked or disabled: one message "
+            "whatever the cause."
+        )},
+        **_AUTH_OFF_404,
+        **_THROTTLED_429,
+    },
 )
 async def login(body: LoginRequest, request: Request, response: Response) -> TokenResponse:
     d = deps(request)
@@ -166,6 +194,13 @@ async def login(body: LoginRequest, request: Request, response: Response) -> Tok
         "again more than a few seconds after it was rotated revokes the whole session; within "
         "them (another browser tab renewing at the same moment) it gives an access token only."
     ),
+    responses={
+        401: {"description": (
+            "No refresh token, or one that is invalid, expired or revoked; or its user is "
+            "disabled or gone."
+        )},
+        **_AUTH_OFF_404,
+    },
 )
 async def refresh(body: RefreshRequest, request: Request, response: Response) -> TokenResponse:
     d = deps(request)
@@ -176,9 +211,10 @@ async def refresh(body: RefreshRequest, request: Request, response: Response) ->
         renewed = await identity.rotate_session(d.pool, token, idle_s=d.settings.session_idle_s)
     except identity.SessionError as exc:
         raise _refused(exc) from None
+    until = int(renewed.until.timestamp()) if renewed.until else None
     if renewed.identity is not None:
         # Signed in at the identity provider: issued again from its claims.
-        access, ttl = d.signer.issue_for(renewed.identity)
+        access, ttl = d.signer.issue_for(renewed.identity, session_until=until)
         tokens = TokenResponse(
             access_token=access, expires_in=ttl, refresh_token=renewed.refresh_token, session=True,
         )
@@ -186,7 +222,7 @@ async def refresh(body: RefreshRequest, request: Request, response: Response) ->
         user = d.store.user(renewed.user)
         if user is None or user.disabled:
             raise _refused(identity.SessionError("session ended"))
-        access, ttl = d.signer.issue(user)
+        access, ttl = d.signer.issue(user, session_until=until)
         tokens = TokenResponse(
             access_token=access, expires_in=ttl, refresh_token=renewed.refresh_token, session=True,
             must_change=user.must_change,
@@ -205,6 +241,7 @@ async def refresh(body: RefreshRequest, request: Request, response: Response) ->
         "identity provider the answer carries `end_session_url`: opening it ends the session "
         "there too."
     ),
+    responses=_AUTH_OFF_404,
 )
 async def logout(body: LogoutRequest, request: Request, response: Response) -> LogoutResponse:
     d = deps(request)
@@ -242,6 +279,115 @@ async def auth_config(request: Request) -> AuthConfig:
     ))
 
 
+_MCP_RESPONSES: dict[int | str, dict[str, Any]] = {
+    400: {"description": "Not a request `/oauth/authorize` would pass on: unknown client, a "
+                         "callback it did not register, or no PKCE challenge."},
+    403: {"description": (
+        "Not a person who may sign an MCP client in: a service account (it signs in with "
+        "`/v1/auth/login`), the local admin where `GRAPHOS_LOCAL_ADMIN=false`, a token an MCP "
+        "client got (it only reads), or one not from a sign-in session."
+    )},
+    404: {"description": "graphos does not sign MCP clients in here: single sign-on is on (the "
+                         "provider does it), `/mcp` is off, or sign-in is disabled."},
+}
+
+
+def _signs_clients_in(request: Request) -> oauth.GraphosOAuth:
+    provider: oauth.GraphosOAuth | None = getattr(request.app.state, "oauth", None)
+    if provider is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="graphos does not sign MCP clients in on this server",
+        )
+    return provider
+
+
+def _person(request: Request, principal: identity.Principal) -> str:
+    """The person answering an MCP client's request, from a token of their own sign-in."""
+    def refuse(detail: str) -> HTTPException:
+        return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+    if principal.kind != "person" or not (principal.subject or "").startswith("user:"):
+        raise refuse("only a person signs an MCP client in; a service account uses /v1/auth/login")
+    if principal.read_only or principal.session_until is None:
+        # An MCP client's token, or none from a sign-in session: it could otherwise
+        # start sessions that outlast the one the person signed in with.
+        raise refuse("sign in to graphos to answer an MCP client")
+    settings: Settings = request.app.state.settings
+    if principal.consumer == identity.ADMIN_USER and not settings.local_admin:
+        raise refuse(identity.REFUSED_MESSAGE)
+    return principal.consumer
+
+
+async def _request_of(provider: oauth.GraphosOAuth, fields: dict[str, str]) -> Any:
+    client = await oauth.checked(provider, fields)
+    if client is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="not a valid MCP sign-in request: start again from the client",
+        )
+    return client
+
+
+@router.get(
+    "/auth/mcp/request",
+    response_model=McpRequestInfo,
+    summary="An MCP client's sign-in request, for the web UI's Allow card",
+    description=(
+        "The client that asks to sign the caller in and where graphos would send the answer, "
+        "for a request that `/oauth/authorize` passed on to the web UI's `/authorize` screen "
+        "(ADR-0008). Needs a person's token; only where graphos signs MCP clients in (no single "
+        "sign-on)."
+    ),
+    responses=_MCP_RESPONSES,
+)
+async def mcp_request(
+    request: Request,
+    principal: ReadPrincipal,
+    client_id: Annotated[str, Query(max_length=200, description="The MCP client's id.")],
+    redirect_uri: Annotated[str, Query(max_length=2000, description="The client's callback.")],
+    code_challenge: Annotated[str, Query(
+        min_length=43, max_length=128, description="The request's PKCE challenge.",
+    )],
+) -> McpRequestInfo:
+    provider = _signs_clients_in(request)
+    _person(request, principal)
+    client = await _request_of(provider, {
+        "client_id": client_id, "redirect_uri": redirect_uri, "code_challenge": code_challenge,
+    })
+    return McpRequestInfo(
+        client_id=client_id, client_name=client.client_name,
+        redirect_host=urlsplit(redirect_uri).netloc or redirect_uri,
+    )
+
+
+@router.post(
+    "/auth/mcp/approve",
+    response_model=McpApprovalResponse,
+    summary="Allow or refuse an MCP client's sign-in, from the web UI",
+    description=(
+        "The caller's answer to a request `/oauth/authorize` passed on: with `allow`, a "
+        "single-use code for the caller (5 minutes) on the client's callback, which the client "
+        "exchanges at `/oauth/token`; without, `access_denied`. The answer says where to send "
+        "the browser. Needs a person's token; only where graphos signs MCP clients in."
+    ),
+    responses=_MCP_RESPONSES,
+)
+async def mcp_approve(
+    request: Request, principal: ReadPrincipal, body: McpApproval,
+) -> McpApprovalResponse:
+    provider = _signs_clients_in(request)
+    user = _person(request, principal)
+    # A credential is issued: audited, although the route only needs `read`.
+    audit_this(request)
+    fields = {k: str(v) for k, v in body.model_dump(exclude={"allow"}).items() if v is not None}
+    await _request_of(provider, fields)
+    until = datetime.fromtimestamp(principal.session_until or 0, UTC)
+    return McpApprovalResponse(
+        redirect=await oauth.answer(provider, fields, user if body.allow else None, until=until),
+    )
+
+
 def _provider(d: AuthDeps) -> oidc.Provider:
     if d.provider is None:
         raise HTTPException(
@@ -275,6 +421,15 @@ def _unavailable(exc: oidc.OidcError) -> HTTPException:
         "PKCE verifier and the nonce for 5 minutes; the browser stores nothing. `silent` asks "
         "the provider not to prompt (single sign-on on page load)."
     ),
+    responses={
+        **_SSO_404,
+        422: {"description": (
+            "The request is not valid, or `redirect_uri` is not one graphos accepts "
+            "(`GRAPHOS_OIDC_REDIRECT_URIS`)."
+        )},
+        **_THROTTLED_429,
+        502: {"description": "The identity provider could not be reached."},
+    },
 )
 async def oidc_start(body: OidcStart, request: Request) -> OidcStartResponse:
     d = deps(request)
@@ -322,6 +477,14 @@ async def oidc_start(body: OidcStart, request: Request) -> OidcStartResponse:
         "refresh tokens, and the page to return to. An `error` (`login_required` after a "
         "silent attempt) answers 401."
     ),
+    responses={
+        401: {"description": (
+            "The sign-in expired or was already used, the provider did not sign the user in "
+            "(`error`), or its answer was not valid."
+        )},
+        **_SSO_404,
+        **_THROTTLED_429,
+    },
 )
 async def oidc_callback(body: OidcCallback, request: Request, response: Response) -> OidcSignedIn:
     d = deps(request)
@@ -346,12 +509,13 @@ async def oidc_callback(body: OidcCallback, request: Request, response: Response
     except oidc.OidcError as exc:
         log.warning("single sign-on refused: %s", exc)
         raise _refused(identity.AuthError("the identity provider's answer was not valid")) from None
-    access, ttl = d.signer.issue_for(who)
-    refresh = await identity.open_session(
+    opened = await identity.open_session(
         d.pool, identity.OIDC_SUB_PREFIX + who.subject,
         idle_s=d.settings.session_idle_s, max_s=d.settings.session_max_s, identity=who,
         id_token=id_token,
     )
+    refresh = opened.token
+    access, ttl = d.signer.issue_for(who, session_until=int(opened.until.timestamp()))
     log.info("signed in through the identity provider", extra={"user": who.consumer})
     signed = OidcSignedIn(
         access_token=access, expires_in=ttl, refresh_token=refresh, session=True,
@@ -369,6 +533,16 @@ async def oidc_callback(body: OidcCallback, request: Request, response: Response
         "the answer carries new ones. A user whose password must change can call only this, "
         "`GET /v1/me` and `/v1/auth/logout`."
     ),
+    responses={
+        400: {"description": "The caller signed in at the identity provider: no graphos password."},
+        403: {"description": (
+            "The current password is wrong; or the token's grants do not allow this operation."
+        )},
+        **_AUTH_OFF_404,
+        422: {"description": (
+            "The request is not valid, or the new password does not meet the password policy."
+        )},
+    },
 )
 async def change_password(
     body: PasswordChange, request: Request, response: Response, principal: ReadPrincipal,

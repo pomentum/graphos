@@ -322,8 +322,12 @@ async def test_the_watchdog_stops_when_the_query_ends_even_if_its_cancel_is_lost
         await asyncio.wait_for(watchdog, 2)
     assert asyncio.get_running_loop().time() - started < 1.0
 
+def test_the_console_is_on_unless_it_is_turned_off() -> None:
+    assert Settings(db_password="placeholder").cypher is True        # ADR-0006
+
+
 def test_every_console_route_answers_404_while_it_is_off() -> None:
-    app = create_app(Settings(db_password="placeholder"))
+    app = create_app(Settings(db_password="placeholder", cypher=False))
     app.state.authenticator = StaticAuthenticator({"tok": Principal.static("ops", admin=True)})
     app.state.console = None
     client = TestClient(app, raise_server_exceptions=False)

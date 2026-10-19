@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import re
 from typing import Any
 
 import asyncpg
@@ -100,29 +101,38 @@ async def create_pool(settings: Settings) -> asyncpg.Pool:
     return pool
 
 
-# The database graphos ships with (docker-compose.graphos.yml). Older ones still
-# run but are deprecated: PostgreSQL 16 has no AGE after 1.6, which carries out
-# some Cypher writes in a read-only transaction and can wedge a database process
-# on a variable-length pattern (docs/apache-age.md).
-CURRENT_POSTGRES_MAJOR = 18
-CURRENT_AGE = (1, 8)
+# The oldest database graphos starts on (ADR-0007), the one it ships with
+# (docker-compose.graphos.yml). PostgreSQL 16 has no AGE after 1.6, which carries
+# out some Cypher writes in a read-only transaction and can wedge a database
+# process on a variable-length pattern (docs/apache-age.md).
+MIN_POSTGRES_MAJOR = 18
+MIN_AGE = (1, 8)
 
 
-def deprecated_database(postgres_version: str, age_version: str | None) -> str | None:
-    """Why this PostgreSQL / AGE pair is deprecated for graphos, or ``None``."""
-    major = int(postgres_version.split(maxsplit=1)[0].split(".", maxsplit=1)[0])
-    age = tuple(int(p) for p in (age_version or "0").split(".")[:2] if p.isdigit())
-    if major < CURRENT_POSTGRES_MAJOR or age < CURRENT_AGE:
+def _leading(version: str | None, parts: int) -> tuple[int, ...]:
+    """The first ``parts`` numbers of a version (``18beta1`` → ``(18,)``,
+    ``1.8.0-rc1`` → ``(1, 8)``); ``()`` when it starts with none."""
+    found = re.match(r"\s*(\d+)(?:\.(\d+))?", version or "")
+    if not found:
+        return ()
+    return tuple(int(n) for n in found.groups()[:parts] if n is not None)
+
+
+def unsupported_database(postgres_version: str, age_version: str | None) -> str | None:
+    """Why graphos does not start on this PostgreSQL / AGE pair, or ``None``."""
+    major = (_leading(postgres_version, 1) or (0,))[0]
+    age = _leading(age_version, 2)
+    if major < MIN_POSTGRES_MAJOR or age < MIN_AGE:
         return (
-            f"PostgreSQL {major} with AGE {age_version} is deprecated: move to PostgreSQL "
-            f"{CURRENT_POSTGRES_MAJOR} with AGE {'.'.join(map(str, CURRENT_AGE))} "
-            "(docs/upgrade-postgresql-18.md)"
+            f"PostgreSQL {major} with AGE {age_version or '(none)'} is not supported: graphos "
+            f"needs PostgreSQL {MIN_POSTGRES_MAJOR} with AGE {'.'.join(map(str, MIN_AGE))} or "
+            "later. To move, see docs/upgrade-postgresql-18.md"
         )
     return None
 
 
 async def fetch_db_version(pool: asyncpg.Pool) -> dict[str, Any]:
-    """Return postgres + AGE version metadata for /v1/info."""
+    """The PostgreSQL and AGE versions, for /v1/info and the start-up check."""
     async with pool.acquire() as conn:
         pg_version: str = await conn.fetchval("SHOW server_version;")
         age_version: str | None = await conn.fetchval(
@@ -131,7 +141,6 @@ async def fetch_db_version(pool: asyncpg.Pool) -> dict[str, Any]:
     return {
         "postgres_version": pg_version,
         "age_version": age_version,
-        "deprecated": deprecated_database(pg_version, age_version),
     }
 
 
@@ -240,6 +249,19 @@ CREATE TABLE IF NOT EXISTS graphos_meta.community_map_runs (
     computed_at  timestamptz NOT NULL,
     communities  integer NOT NULL,
     modularity   double precision
+);
+
+-- The last written run of each analysis (``metrics``, ``communities``) and
+-- the change-feed position it started from: the writes after that position
+-- are what its results do not know about (``graphos.changes.written_since``).
+CREATE TABLE IF NOT EXISTS graphos_meta.analysis_runs (
+    tenant       text NOT NULL,
+    kind         text NOT NULL,
+    computed_at  timestamptz NOT NULL,
+    txid         xid8 NOT NULL,
+    seq          bigint NOT NULL,
+    scope        jsonb,
+    PRIMARY KEY (tenant, kind)
 );
 
 -- Background jobs (``graphos.jobs``): long operations a caller asked to
@@ -367,6 +389,9 @@ ALTER TABLE graphos_meta.sessions ADD COLUMN IF NOT EXISTS claims jsonb;
 -- The provider's ID token, kept server-side only, sent back as id_token_hint
 -- when signing out there (providers otherwise ask the person to confirm).
 ALTER TABLE graphos_meta.sessions ADD COLUMN IF NOT EXISTS id_token text;
+-- The MCP client a session belongs to (graphos.oauth, ADR-0008): renewed only by
+-- that client, at /oauth/token, and its tokens only read.
+ALTER TABLE graphos_meta.sessions ADD COLUMN IF NOT EXISTS client text;
 CREATE INDEX IF NOT EXISTS sessions_family ON graphos_meta.sessions (family);
 
 -- A sign-in at the identity provider in progress: graphos keeps the PKCE
@@ -378,6 +403,24 @@ CREATE TABLE IF NOT EXISTS graphos_meta.oidc_pending (
     redirect_uri   text NOT NULL,
     return_to      text NOT NULL,
     expires_at     timestamptz NOT NULL
+);
+
+-- MCP clients that registered themselves (RFC 7591, ADR-0008, graphos.oauth).
+-- All public clients, bound by PKCE, so no client secret is kept.
+CREATE TABLE IF NOT EXISTS graphos_meta.oauth_clients (
+    client_id   text PRIMARY KEY,
+    info        jsonb NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+-- The last sign-in or renewal: unused clients are forgotten (graphos.oauth).
+ALTER TABLE graphos_meta.oauth_clients ADD COLUMN IF NOT EXISTS last_used_at timestamptz;
+-- Their authorization codes: only the hash is kept, single use, 5 minutes.
+CREATE TABLE IF NOT EXISTS graphos_meta.oauth_codes (
+    code_hash   text PRIMARY KEY,
+    client_id   text NOT NULL,
+    user_name   text NOT NULL,
+    data        jsonb NOT NULL,
+    expires_at  timestamptz NOT NULL
 );
 CREATE INDEX IF NOT EXISTS sessions_user ON graphos_meta.sessions (user_name);
 

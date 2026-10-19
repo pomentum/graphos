@@ -6,7 +6,7 @@
 - ``DELETE /v1/{tenant}/cypher/saved/{name}``      delete one (``maintain``)
 - ``POST /v1/{tenant}/cypher/saved/{name}:run``    run one with its parameters
 
-Every route answers 404 while the console is off (``GRAPHOS_CYPHER``).
+Every route answers 404 while the console is off (``GRAPHOS_CYPHER=false``).
 Running and listing need ``GRAPHOS_CYPHER_LEVEL`` on the tenant (``read`` by
 default).  Each run is written to the audit log, and logged with its text.
 """
@@ -89,7 +89,7 @@ async def _run(  # noqa: PLR0913
     "/{tenant}/cypher",
     summary="Run a read-only Cypher query on the tenant's graph",
     description=(
-        "Off unless the server runs with `GRAPHOS_CYPHER=true` (404); needs "
+        "Off (404) where the server runs with `GRAPHOS_CYPHER=false`; needs "
         "`GRAPHOS_CYPHER_LEVEL` on the tenant (`read` by default). The query runs in a "
         "read-only transaction on the tenant's graph, with `params` as `$name`. Only "
         "Cypher's own functions; no variable-length patterns (`-[*1..3]->`) or "
@@ -138,6 +138,32 @@ async def list_saved(
         tenant,
     )
     return [_saved(r) for r in rows]
+
+
+@router.get(
+    "/{tenant}/cypher/saved/{name}",
+    summary="One saved Cypher query",
+    description=(
+        "Its text, description, parameters and how to show its result, and who saved it "
+        "last. Needs what running a query needs; 404 while the console is off, or when there "
+        "is no such query."
+    ),
+    responses={404: {"description": "The console is off, or no saved query has this name."}},
+)
+async def get_saved(
+    tenant: Tenant, name: SavedName, request: Request, principal: ReadPrincipal,
+) -> SavedQuery:
+    _console(request, principal, tenant)
+    row = await request.app.state.pool.fetchrow(
+        "SELECT name, definition::text AS definition, created_by, updated_at "
+        "FROM graphos_meta.saved_queries WHERE tenant = $1 AND name = $2;",
+        tenant, name,
+    )
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"no saved query {name!r}",
+        )
+    return _saved(row)
 
 
 @router.put(

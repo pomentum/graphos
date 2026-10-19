@@ -40,7 +40,15 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 from fastapi.responses import Response
 
-from graphos import by_entry, declared, lifecycle, schema_changes, schema_document, sync
+from graphos import (
+    by_entry,
+    declared,
+    lifecycle,
+    schema_breaking,
+    schema_changes,
+    schema_document,
+    sync,
+)
 from graphos.api.cache import LRU
 from graphos.auth import (
     MaintainPrincipal,
@@ -66,6 +74,7 @@ from graphos.bootstrap import (
 )
 from graphos.contracts.property_schema import PropertySchemaSpec
 from graphos.contracts.tenants import (
+    BreakingChange,
     DisplaySpec,
     GeneratedColumnSpec,
     PropertyIndexSpec,
@@ -224,7 +233,28 @@ async def _dry_run(
         mode="replace" if replace else "merge",
         changes=schema_changes.diff(previous, after),
         warnings=await schema_document.warnings(pool, previous, after, replace=replace),
+        breaking=await _breaking(pool, previous, after, replace=replace),
     )
+
+
+async def _breaking(
+    pool: asyncpg.Pool, previous: TenantSpec | None, after: TenantSpec, *, replace: bool,
+) -> list[BreakingChange]:
+    """The dry run's breaking changes, each with its label's or type's row estimate."""
+    found = schema_breaking.changes(previous, after, replace=replace)
+    if not found:
+        return []
+    rows: dict[str, int | None] = {}
+    async with pool.acquire() as conn:
+        for name in sorted({b.name for b in found if b.name is not None}):
+            rows[name] = await schema_document.row_estimate(conn, after.name, name)
+    return [
+        BreakingChange(
+            part=b.part, name=b.name, change=b.change, detail=b.detail,
+            rows=rows.get(b.name) if b.name is not None else None,
+        )
+        for b in found
+    ]
 
 
 def _may_maintain(principal: Principal, name: str) -> bool:
@@ -329,6 +359,10 @@ async def export_spec(name: TenantName, request: Request, principal: MaintainPri
 @router.post(
     "", summary="Register a tenant (idempotent)",
     response_model=RegisterResponse | RegisterDryRunResponse,
+    responses={409: {"description": (
+        "The name is an unregistered tenant that keeps its data, which only its owner or an "
+        "admin may restore; or an orphan graph, which only an admin may register again."
+    )}},
 )
 async def register(
     body: TenantSpecBody,

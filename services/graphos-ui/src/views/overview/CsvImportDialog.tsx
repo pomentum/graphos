@@ -14,25 +14,27 @@ import {
 import { IconFileUpload, IconTableImport } from "@tabler/icons-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { BulkEdgesResult, BulkNodesResult, TenantSchema } from "../../api/types";
+import { ApiError } from "../../api/http";
+import type { CsvImportResult, TenantSchema } from "../../api/types";
 import { usePropertyDefinitions, useRefreshAfterImport, useSchema } from "../../data/queries";
-import { parseCsvAsync, readFileText, type CsvDelimiter, type CsvTable } from "../../lib/csv";
+import { readFileText, stillReadable, type CsvDelimiter, type CsvTable } from "../../lib/csv";
 import {
+  DELIMITER_NAMES,
+  HEAD_BYTES,
   ID_NAMES,
   SOURCE_NAMES,
   TARGET_NAMES,
-  checkRowsAsync,
   guessColumn,
+  headTable,
+  importQuery,
   planColumns,
   policyOf,
-  prepareImport,
   type ColumnChoice,
-  type ImportCheck,
   type ImportPlan,
   type RowKind,
 } from "../../lib/csvImport";
 import { Endpoints, lineage } from "../../lib/endpoints";
-import { formatCount } from "../../lib/time";
+import { formatBytes, formatCount } from "../../lib/time";
 import { useTenantSession } from "../../session/SessionProvider";
 import { CsvColumnGrid } from "./CsvColumnGrid";
 import { CsvChecks, CsvImportAnswer, CsvPreview } from "./CsvImportReport";
@@ -62,16 +64,14 @@ export function CsvImportEntry() {
   );
 }
 
-const DELIMITER_NAMES: Record<CsvDelimiter, "comma" | "semicolon" | "tab"> = {
-  ",": "comma",
-  ";": "semicolon",
-  "\t": "tab",
-};
-
-/** The file as read: its text (to read it again with another separator) and its table. */
+/**
+ * The file and its start as read: the text (to read it again with another
+ * separator), whether it is the whole file, and its table (header, preview).
+ */
 interface Loaded {
-  name: string;
+  file: File;
   text: string;
+  whole: boolean;
   table: CsvTable;
 }
 
@@ -100,21 +100,29 @@ const NO_CHOICES: Choices = {
   columns: {},
 };
 
-type Phase = "preparing" | "sending" | "writing" | "done" | "cancelled" | "stopped" | "failed";
+type Phase = "sending" | "writing" | "done" | "cancelled" | "stopped" | "failed";
 
 interface Run {
   phase: Phase;
   share: number;
-  result?: BulkNodesResult | BulkEdgesResult;
+  result?: CsvImportResult;
   error?: string;
-  /** The file's rows and the lines they were sent as, with the row each line comes from. */
-  sent?: { rows: number; lines: number; rowOfLine: number[] };
 }
 
-/** How long the mapping stays unchanged before the rows are checked again. */
-const CHECK_DELAY_MS = 200;
+/** How long the mapping stays unchanged before graphos checks the file again with it. */
+const CHECK_DELAY_MS = 400;
 
-const RUNNING: Phase[] = ["preparing", "sending", "writing"];
+const RUNNING: Phase[] = ["sending", "writing"];
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Why a request failed; a failure without an answer may be the file, gone since it was chosen. */
+async function failureOf(error: unknown, file: Blob, fileGone: string): Promise<string> {
+  if (!(error instanceof ApiError) && !(await stillReadable(file))) return fileGone;
+  return messageOf(error);
+}
 
 /** The choice if still offered, else the first offered. */
 function pick<T>(chosen: T | null, offered: T[]): T | null {
@@ -158,11 +166,12 @@ function endLabels(
 }
 
 /**
- * Loads a CSV file into the tenant: pick the file (its separator detected),
- * say whether its rows are nodes or relationships and which columns hold
- * the ids, map the other columns to properties, look at the first rows and
- * at the checks over all of them, then send every row to graphos's NDJSON
- * bulk endpoint, with its progress and its answer.
+ * Loads a CSV file into the tenant: pick the file (its start read for the
+ * header, the separator and a preview), say whether its rows are nodes or
+ * relationships and which columns hold the ids, map the other columns to
+ * properties; graphos checks the whole file with that mapping (a dry run,
+ * again whenever it changes), then reads and writes it, with the upload's
+ * progress and its answer.
  */
 export function CsvImportDialog({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
@@ -172,13 +181,13 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
   const refresh = useRefreshAfterImport();
   const [file, setFile] = useState<File | null>(null);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [reading, setReading] = useState<number | null>(null);
+  const [reading, setReading] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
   const [choices, setChoices] = useState<Choices>(NO_CHOICES);
   const [run, setRun] = useState<Run | null>(null);
-  const [check, setCheck] = useState<ImportCheck | null>(null);
-  const [checking, setChecking] = useState(0);
-  const reader = useRef<AbortController | null>(null);
+  const [check, setCheck] = useState<CsvImportResult | null>(null);
+  const [checkSent, setCheckSent] = useState<number | null>(null);
+  const [checkError, setCheckError] = useState<{ mapping: boolean; message: string } | null>(null);
   const sender = useRef<AbortController | null>(null);
   /** Counts the files (and separators) chosen: a read finishing after another began is dropped. */
   const readSeq = useRef(0);
@@ -187,32 +196,15 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
   useEffect(
     () => () => {
       readSeq.current += 1;
-      reader.current?.abort();
       sender.current?.abort();
     },
     [],
   );
 
-  const read = async (name: string, text: string, delimiter?: CsvDelimiter, seq = ++readSeq.current) => {
-    reader.current?.abort();
-    const controller = new AbortController();
-    reader.current = controller;
-    setReading(0);
-    try {
-      const table = await parseCsvAsync(text, {
-        delimiter,
-        signal: controller.signal,
-        onProgress: (share) => setReading(share),
-      });
-      if (controller.signal.aborted || seq !== readSeq.current) return;
-      setLoaded({ name, text, table });
-      setChoices((current) => ({ ...NO_CHOICES, kind: current.kind }));
-      setRun(null);
-    } catch (error) {
-      if (!controller.signal.aborted) setReadError(error instanceof Error ? error.message : String(error));
-    } finally {
-      if (reader.current === controller) setReading(null);
-    }
+  const read = (file: File, text: string, whole: boolean, delimiter?: CsvDelimiter) => {
+    setLoaded({ file, text, whole, table: headTable(text, whole, delimiter) });
+    setChoices((current) => ({ ...NO_CHOICES, kind: current.kind }));
+    setRun(null);
   };
 
   const choose = async (next: File | null) => {
@@ -221,17 +213,17 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
     setLoaded(null);
     setReadError(null);
     setRun(null);
-    reader.current?.abort();
-    setReading(next ? 0 : null);
+    setReading(Boolean(next));
     if (!next) return;
     try {
-      const text = await readFileText(next);
-      if (seq === readSeq.current) await read(next.name, text, undefined, seq);
+      const whole = next.size <= HEAD_BYTES;
+      const text = await readFileText(whole ? next : next.slice(0, HEAD_BYTES));
+      if (seq !== readSeq.current) return;
+      read(next, text, whole);
     } catch (error) {
-      if (seq === readSeq.current) {
-        setReading(null);
-        setReadError(error instanceof Error ? error.message : String(error));
-      }
+      if (seq === readSeq.current) setReadError(messageOf(error));
+    } finally {
+      if (seq === readSeq.current) setReading(false);
     }
   };
 
@@ -244,6 +236,7 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
 
   const header = loaded?.table.header ?? [];
   const rows = loaded?.table.rows ?? [];
+  const hasRows = Boolean(loaded && (rows.length || !loaded.whole));
   const labels = schema?.vertex_labels ?? [];
   const edgeTypes = (schema?.edge_labels ?? []).filter((type) => !(schema?.rule_edge_labels ?? []).includes(type));
   const columnData = header.map((title, index) => ({ value: String(index), label: title || `#${index + 1}` }));
@@ -280,53 +273,62 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
     };
   }, [loaded, kind, label, id, type, srcLabel, src, dstLabel, dst, policy, choices.columns]);
 
-  // `header` and `rows` change only with `loaded`, which `plan` follows.
+  const query = useMemo(
+    () => (plan && loaded ? importQuery(plan, loaded.table.header, loaded.table.delimiter) : null),
+    [plan, loaded],
+  );
+
   useEffect(() => {
     setCheck(null);
-    setChecking(0);
-    if (!plan) return;
+    setCheckError(null);
+    setCheckSent(null);
+    if (!plan || !query || !loaded || !hasRows) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      checkRowsAsync(plan, header, rows, policy, schema, {
-        signal: controller.signal,
-        onProgress: setChecking,
-      }).then(setCheck, () => undefined);
+      setCheckSent(0);
+      api
+        .csvImport(plan.kind, loaded.file, query, {
+          dryRun: true,
+          signal: controller.signal,
+          onSent: (bytes, total) => setCheckSent(total ? bytes / total : 1),
+        })
+        .then(setCheck, async (error: unknown) => {
+          if (controller.signal.aborted) return;
+          const message = await failureOf(error, loaded.file, t("csvImport.fileGone"));
+          if (controller.signal.aborted) return;
+          setCheckError({ mapping: error instanceof ApiError && error.status === 422, message });
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setCheckSent(null);
+        });
     }, CHECK_DELAY_MS);
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [plan, policy, schema]);
+  }, [api, plan, query, loaded, hasRows, t]);
 
   const start = async () => {
-    if (!plan) return;
+    if (!plan || !query || !loaded) return;
     const controller = new AbortController();
     sender.current = controller;
-    setRun({ phase: "preparing", share: 0 });
-    let sending = false;
+    setRun({ phase: "sending", share: 0 });
+    let received = false;
     try {
-      const prepared = await prepareImport(plan, rows, controller.signal);
-      const sent = { rows: rows.length, lines: prepared.lines, rowOfLine: prepared.rowOfLine };
-      sending = true;
-      setRun({ phase: "sending", share: 0, sent });
-      const progress = {
+      const result = await api.csvImport(plan.kind, loaded.file, query, {
         signal: controller.signal,
-        onSent: (bytes: number, total: number) =>
-          setRun(
-            bytes >= total
-              ? { phase: "writing", share: 1, sent }
-              : { phase: "sending", share: total ? bytes / total : 0, sent },
-          ),
-      };
-      const body = prepared.body;
-      const result = plan.kind === "nodes" ? await api.bulkNodes(body, progress) : await api.bulkEdges(body, progress);
-      setRun({ phase: "done", share: 1, result, sent });
+        onSent: (bytes, total) => {
+          received = bytes >= total;
+          setRun(received ? { phase: "writing", share: 1 } : { phase: "sending", share: total ? bytes / total : 0 });
+        },
+      });
+      setRun({ phase: "done", share: 1, result });
     } catch (error) {
-      if (controller.signal.aborted) setRun({ phase: sending ? "stopped" : "cancelled", share: 0 });
-      else setRun({ phase: "failed", share: 0, error: error instanceof Error ? error.message : String(error) });
+      // graphos writes nothing before it has the whole file; once it has, it may go on.
+      if (controller.signal.aborted) setRun({ phase: received ? "stopped" : "cancelled", share: 0 });
+      else setRun({ phase: "failed", share: 0, error: await failureOf(error, loaded.file, t("csvImport.fileGone")) });
     } finally {
-      // graphos writes as it reads: after an answer, a stop or a failure, what it wrote is shown.
-      if (sending) void refresh();
+      if (received) void refresh();
       if (sender.current === controller) sender.current = null;
     }
   };
@@ -366,9 +368,9 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
           disabled={running}
           clearable
         />
-        {reading !== null ? (
+        {reading ? (
           <Text size="xs" c="dimmed">
-            {t("csvImport.reading", { percent: Math.floor(reading * 100) })}
+            {t("csvImport.reading")}
           </Text>
         ) : null}
 
@@ -376,9 +378,8 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
           <Group justify="space-between" align="flex-end" gap="sm">
             <Text size="xs" c="dimmed">
               {t("csvImport.detected", {
-                count: rows.length,
-                rows: formatCount(rows.length),
                 columns: formatCount(header.length),
+                size: formatBytes(loaded.file.size),
               })}
             </Text>
             <Stack gap={2}>
@@ -389,8 +390,8 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
                 size="xs"
                 data={delimiterData}
                 value={loaded.table.delimiter}
-                disabled={running || reading !== null}
-                onChange={(next) => void read(loaded.name, loaded.text, next as CsvDelimiter)}
+                disabled={running}
+                onChange={(next) => read(loaded.file, loaded.text, loaded.whole, next as CsvDelimiter)}
               />
             </Stack>
           </Group>
@@ -400,13 +401,13 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
             <Text size="xs">{t("csvImport.openQuote")}</Text>
           </Alert>
         ) : null}
-        {loaded && !rows.length ? (
+        {loaded && !hasRows ? (
           <Text size="xs" c="red">
             {t("csvImport.empty")}
           </Text>
         ) : null}
 
-        {loaded && rows.length ? (
+        {hasRows ? (
           <>
             <Stack gap={2}>
               <Text size="xs" fw={500}>
@@ -502,15 +503,15 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
                   </Text>
                   <CsvColumnGrid columns={plan.columns} example={rows[0]} policy={policy} onChange={setColumn} />
                 </Stack>
+                <CsvChecks check={check} sending={checkSent} error={checkError} />
                 <CsvPreview plan={plan} header={header} rows={rows} />
-                <CsvChecks check={check} progress={checking} />
               </>
             ) : null}
           </>
         ) : null}
 
         {run ? <RunProgress run={run} /> : null}
-        {run?.result && run.sent ? <CsvImportAnswer result={run.result} sent={run.sent} /> : null}
+        {run?.result ? <CsvImportAnswer result={run.result} /> : null}
         {run?.phase === "failed" ? (
           <Alert color="red" variant="light" radius="md">
             <Text size="xs">{t("csvImport.failed", { message: run.error })}</Text>
@@ -530,11 +531,13 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
           <Button
             size="xs"
             leftSection={<IconTableImport size={14} />}
-            disabled={!plan || !rows.length || missing || running}
+            disabled={!plan || !hasRows || missing || running || Boolean(checkError?.mapping)}
             loading={running}
             onClick={() => void start()}
           >
-            {t("csvImport.import", { count: rows.length, rows: formatCount(rows.length) })}
+            {check
+              ? t("csvImport.import", { count: check.rows, rows: formatCount(check.rows) })
+              : t("csvImport.importFile")}
           </Button>
         </Group>
       </Stack>
@@ -561,7 +564,7 @@ function RunProgress({ run }: { run: Run }) {
         size="sm"
         value={run.phase === "done" || run.phase === "writing" ? 100 : run.share * 100}
         color={color}
-        animated={run.phase === "writing" || run.phase === "preparing"}
+        animated={run.phase === "writing"}
       />
     </Stack>
   );

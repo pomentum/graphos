@@ -144,6 +144,15 @@ services:
       # superuser (POSTGRES_USER) is only used by the init scripts.
       GRAPHOS_DB_USER: graphos_app
       GRAPHOS_DB_PASSWORD_FILE: /run/graphos/secrets/graphos_app_pw.txt
+      # Seals the signing keys and ID tokens graphos stores (scripts/init-secrets.sh
+      # creates it). Back it up apart from the database: without it, what it
+      # sealed cannot be read.
+      GRAPHOS_MASTER_KEY_FILE: /run/graphos/secrets/master_key.txt
+      # The host names clients reach graphos by, against DNS rebinding; add
+      # graphos-api when the bundled web UI proxies to it. Empty: any Host.
+      GRAPHOS_ALLOWED_HOSTS: ${GRAPHOS_ALLOWED_HOSTS:-}
+      # The MCP endpoint for agents at /mcp (docs/agents.md); false turns it off.
+      GRAPHOS_MCP: ${GRAPHOS_MCP:-true}
       GRAPHOS_BIND_HOST: "0.0.0.0"
       GRAPHOS_BIND_PORT: "8080"
       GRAPHOS_LOG_LEVEL: info

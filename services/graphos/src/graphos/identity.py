@@ -56,6 +56,7 @@ import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from graphos import vault
 from graphos.oidc import Identity
 
 log = logging.getLogger(__name__)
@@ -133,6 +134,11 @@ class Principal:
     kind: str = "person"
     # How it signed in: "password" (a graphos user) or "oidc" (the provider).
     via: str = "password"
+    # A token from an MCP client's sign-in (graphos.oauth, ADR-0008): its levels
+    # are held to read and every write is refused (graphos.auth).
+    read_only: bool = False
+    # When the session the token came from ends (epoch seconds), if it came from one.
+    session_until: int | None = None
 
     def level(self, tenant: str) -> Level | None:
         """The highest level on ``tenant``; ``OWNER`` for an admin."""
@@ -629,7 +635,14 @@ class Signer:
 
     async def load(self, pool: asyncpg.Pool, key_file: Path | None = None) -> None:
         """The newest key signs, every unretired key verifies.  Generates the
-        first key (once, whichever replica gets there first)."""
+        first key (once, whichever replica gets there first).  Keys are stored
+        sealed (:mod:`graphos.vault`); a key stored in clear is sealed here
+        when a master key is set.
+
+        Raises:
+            vault.VaultError: a stored key is sealed with a master key this
+                process does not hold.
+        """
         if key_file is not None:
             pem = key_file.read_bytes()
             key = serialization.load_pem_private_key(pem, password=None)
@@ -638,6 +651,7 @@ class Signer:
             kid = "file-" + hashlib.sha256(pem).hexdigest()[:12]
             self._use([(kid, key)])
             return
+        sealer = vault.current()
         async with pool.acquire() as conn, conn.transaction():
             await conn.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended('graphos.signing_keys', 0));",
@@ -656,14 +670,23 @@ class Signer:
                 kid = uuid.uuid4().hex[:16]
                 await conn.execute(
                     "INSERT INTO graphos_meta.signing_keys (kid, private_pem) VALUES ($1, $2);",
-                    kid, new_pem,
+                    kid, sealer.seal(new_pem, vault.signing_key_context(kid)),
                 )
                 rows = [{"kid": kid, "private_pem": new_pem}]
+            pems: list[tuple[str, str]] = []
+            for row in rows:
+                stored, context = row["private_pem"], vault.signing_key_context(row["kid"])
+                pems.append((row["kid"], sealer.open(stored, context)))
+                if sealer.enabled and not sealer.is_sealed(stored):
+                    await conn.execute(
+                        "UPDATE graphos_meta.signing_keys SET private_pem = $2 WHERE kid = $1;",
+                        row["kid"], sealer.seal(stored, context),
+                    )
         keys = []
-        for row in rows:
-            key = serialization.load_pem_private_key(row["private_pem"].encode(), password=None)
+        for kid, pem in pems:
+            key = serialization.load_pem_private_key(pem.encode(), password=None)
             assert isinstance(key, ec.EllipticCurvePrivateKey)
-            keys.append((row["kid"], key))
+            keys.append((kid, key))
         self._use(keys)
 
     def use_key(self, kid: str, key: ec.EllipticCurvePrivateKey) -> None:
@@ -674,13 +697,27 @@ class Signer:
         self._signing = keys[0]
         self._public = {kid: key.public_key() for kid, key in keys}
 
-    def issue(self, user: User) -> tuple[str, int]:
-        """An access token for ``user`` and its lifetime in seconds."""
-        return self._sign({"sub": user.name, "ver": user.token_version})
+    def issue(
+        self, user: User, *, read_only: bool = False, session_until: int | None = None,
+    ) -> tuple[str, int]:
+        """An access token for ``user`` and its lifetime in seconds.  ``read_only``
+        for an MCP client's sign-in; ``session_until``: when the session it came
+        from ends, so nothing approved with it can outlast that session."""
+        extra: dict[str, Any] = {"sub": user.name, "ver": user.token_version}
+        if read_only:
+            extra["ro"] = True
+        if session_until is not None:
+            extra["sxp"] = session_until
+        return self._sign(extra)
 
-    def issue_for(self, identity: Identity) -> tuple[str, int]:
+    def issue_for(self, identity: Identity, *, session_until: int | None = None) -> tuple[str, int]:
         """An access token for someone who signed in at the identity provider."""
-        return self._sign({"sub": OIDC_SUB_PREFIX + identity.subject, "idn": identity.claims()})
+        extra: dict[str, Any] = {
+            "sub": OIDC_SUB_PREFIX + identity.subject, "idn": identity.claims(),
+        }
+        if session_until is not None:
+            extra["sxp"] = session_until
+        return self._sign(extra)
 
     def _sign(self, extra: dict[str, Any]) -> tuple[str, int]:
         if self._signing is None:
@@ -726,26 +763,40 @@ def _hash_refresh(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+@dataclass(frozen=True)
+class Opened:
+    token: str
+    until: datetime                    # when the session ends, at the latest
+
+
 async def open_session(  # noqa: PLR0913 — a session's fields
     pool: asyncpg.Pool, user: str, *, idle_s: int, max_s: int,
     identity: Identity | None = None, id_token: str | None = None,
-) -> str:
+    client: str | None = None, until: datetime | None = None,
+) -> Opened:
     """A new session; ``identity`` for one signed in at the identity provider
-    (its tokens are issued again from it at each renewal)."""
+    (its tokens are issued again from it at each renewal).  ``client``: the MCP
+    client it belongs to (graphos.oauth), renewed only by it and only reading;
+    ``until`` caps its end (the session that approved it)."""
     token = secrets.token_urlsafe(32)
     now = datetime.now(UTC)
+    ends = now + timedelta(seconds=max_s)
+    if until is not None:
+        ends = min(ends, until)
+    family = uuid.uuid4()
     await pool.execute(
         "INSERT INTO graphos_meta.sessions "
         "(family, user_name, refresh_hash, idle_expires_at, absolute_expires_at, kind, claims, "
-        " id_token) "
-        "VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8);",
-        uuid.uuid4(), user, _hash_refresh(token),
-        now + timedelta(seconds=idle_s), now + timedelta(seconds=max_s),
+        " id_token, client) "
+        "VALUES ($1, $2, $3, LEAST($4::timestamptz, $5::timestamptz), $5, $6, $7::jsonb, "
+        " $8, $9);",
+        family, user, _hash_refresh(token), now + timedelta(seconds=idle_s), ends,
         "oidc" if identity else "native",
         json.dumps(identity.claims()) if identity else None,
-        id_token,
+        vault.current().seal(id_token, vault.session_context(family)) if id_token else None,
+        client,
     )
-    return token
+    return Opened(token=token, until=ends)
 
 
 @dataclass(frozen=True)
@@ -755,6 +806,8 @@ class Renewed:
     # REUSE_GRACE_S): a new access token, no new refresh token.
     refresh_token: str | None
     identity: Identity | None          # set for a session signed in at the provider
+    client: str | None = None          # the MCP client the session belongs to
+    until: datetime | None = None      # when the session ends, at the latest
 
 
 # Seconds during which a just-rotated refresh token still renews the access
@@ -763,11 +816,15 @@ class Renewed:
 REUSE_GRACE_S = 10
 
 
-async def rotate_session(pool: asyncpg.Pool, token: str, *, idle_s: int) -> Renewed:
+async def rotate_session(
+    pool: asyncpg.Pool, token: str, *, idle_s: int, client: str | None = None,
+) -> Renewed:
     """The session's user and a new refresh token, for a valid refresh token.
 
     A token already rotated (used twice: someone else has it) revokes its
-    whole family.
+    whole family.  ``client``: who renews it (None: the web UI or a program);
+    a session of another is refused before anything changes, so presenting it
+    in the wrong place neither rotates nor revokes it.
 
     Raises:
         SessionError: unknown, expired, revoked or reused.
@@ -775,7 +832,7 @@ async def rotate_session(pool: asyncpg.Pool, token: str, *, idle_s: int) -> Rene
     async with pool.acquire() as conn, conn.transaction():
         row = await conn.fetchrow(
             "SELECT id, family, user_name, rotated_at, revoked_at, kind, claims::text AS claims, "
-            "  id_token, "
+            "  id_token, client, "
             "  idle_expires_at < now() OR absolute_expires_at < now() AS expired, "
             "  absolute_expires_at, "
             "  rotated_at > now() - make_interval(secs => $2) AS just_rotated "
@@ -784,6 +841,10 @@ async def rotate_session(pool: asyncpg.Pool, token: str, *, idle_s: int) -> Rene
         )
         if row is None:
             raise SessionError("unknown session")
+        if row["client"] != client:
+            raise SessionError(
+                "this session renews at /oauth/token" if row["client"] else "not this client's",
+            )
         family_live = row["just_rotated"] and await conn.fetchval(
             "SELECT EXISTS (SELECT 1 FROM graphos_meta.sessions WHERE family = $1 "
             "  AND rotated_at IS NULL AND revoked_at IS NULL "
@@ -795,7 +856,10 @@ async def rotate_session(pool: asyncpg.Pool, token: str, *, idle_s: int) -> Rene
             identity = (
                 Identity.from_claims(json.loads(row["claims"])) if row["kind"] == "oidc" else None
             )
-            return Renewed(user=row["user_name"], refresh_token=None, identity=identity)
+            return Renewed(
+                user=row["user_name"], refresh_token=None, identity=identity,
+                client=row["client"], until=row["absolute_expires_at"],
+            )
         if row["rotated_at"] is not None:
             # Committed before refusing: the revocation must outlive this call.
             await conn.execute(
@@ -821,11 +885,12 @@ async def rotate_session(pool: asyncpg.Pool, token: str, *, idle_s: int) -> Rene
             await conn.execute(
                 "INSERT INTO graphos_meta.sessions "
                 "(family, user_name, refresh_hash, idle_expires_at, absolute_expires_at, "
-                " kind, claims, id_token) "
+                " kind, claims, id_token, client) "
                 "VALUES ($1, $2, $3, LEAST(now() + make_interval(secs => $4), $5), $5, "
-                " $6, $7::jsonb, $8);",
+                " $6, $7::jsonb, $8, $9);",
                 row["family"], row["user_name"], _hash_refresh(new), float(idle_s),
-                row["absolute_expires_at"], row["kind"], row["claims"], row["id_token"],
+                row["absolute_expires_at"], row["kind"], row["claims"],
+                _sealed_copy(row["id_token"], row["family"]), row["client"],
             )
         # Rotated rows are only kept to detect reuse while the family lives.
         await conn.execute(
@@ -835,7 +900,10 @@ async def rotate_session(pool: asyncpg.Pool, token: str, *, idle_s: int) -> Rene
     if refused is not None:
         raise refused
     identity = Identity.from_claims(json.loads(row["claims"])) if row["kind"] == "oidc" else None
-    return Renewed(user=row["user_name"], refresh_token=new, identity=identity)
+    return Renewed(
+        user=row["user_name"], refresh_token=new, identity=identity, client=row["client"],
+        until=row["absolute_expires_at"],
+    )
 
 
 @dataclass(frozen=True)
@@ -849,11 +917,29 @@ async def close_session(pool: asyncpg.Pool, token: str) -> Ended | None:
     row = await pool.fetchrow(
         "WITH ended AS (UPDATE graphos_meta.sessions s SET revoked_at = now() "
         "FROM graphos_meta.sessions t WHERE t.refresh_hash = $1 AND s.family = t.family "
-        "AND s.revoked_at IS NULL RETURNING s.kind, s.id_token) "
-        "SELECT kind, id_token FROM ended LIMIT 1;",
+        "AND s.revoked_at IS NULL RETURNING s.kind, s.family, s.id_token) "
+        "SELECT kind, family, id_token FROM ended LIMIT 1;",
         _hash_refresh(token),
     )
-    return Ended(kind=row["kind"], id_token=row["id_token"]) if row else None
+    if row is None:
+        return None
+    id_token = None
+    if row["id_token"] is not None:
+        try:
+            id_token = vault.current().open(row["id_token"], vault.session_context(row["family"]))
+        except vault.VaultError as exc:
+            # Signing out here still works; the provider then asks to confirm.
+            log.warning("the session's ID token does not open: %s", exc)
+    return Ended(kind=row["kind"], id_token=id_token)
+
+
+def _sealed_copy(id_token: str | None, family: object) -> str | None:
+    """The stored ID token for the next session of ``family``: as it is when
+    sealed (the family is its context), sealed when a master key is set."""
+    sealer = vault.current()
+    if id_token is None or sealer.is_sealed(id_token) or not sealer.enabled:
+        return id_token
+    return sealer.seal(id_token, vault.session_context(family))
 
 
 async def revoke_sessions(conn: asyncpg.Connection, user: str) -> None:

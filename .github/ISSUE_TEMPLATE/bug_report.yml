@@ -1,0 +1,65 @@
+name: Bug report
+description: Something in graphos-api, the web UI or the Python client does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A security problem? Do not open an issue: report it privately (see SECURITY.md).
+        Please use neutral data in examples (`acme`, `Doc`, `LINKS_TO`): no real names, schemas, hosts or tokens.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The smallest steps, request or script that shows it (a curl call, a client call, a schema).
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Response or logs
+      description: The status code and body, or the graphos-api log lines. Remove any token.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: graphos version
+      description: "`GET /v1/info`, or the image tag."
+      placeholder: "0.12.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: database
+    attributes:
+      label: Database
+      options:
+        - PostgreSQL 18 / Apache AGE 1.8
+        - Other (say which below)
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      multiple: true
+      options:
+        - graphos-api (the service)
+        - graphos-ui (the web UI)
+        - graphos-client (Python)
+        - docker compose / images
+        - Docs
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup
+      description: How graphos runs (the compose file, Kubernetes, ...), replicas, single sign-on or passwords, and any GRAPHOS_* settings that matter.

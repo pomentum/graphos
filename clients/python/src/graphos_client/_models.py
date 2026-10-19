@@ -740,6 +740,127 @@ class DeleteEdgeResponse(BaseModel):
     elapsed_ms: int
 
 
+class SummaryValueCount(BaseModel):
+    value: str
+    kind: str | None = None
+    count: int
+
+
+class SummaryProperty(BaseModel):
+    name: str
+    type: str | None = None
+    required: bool = False
+    enum: list[Any] | None = None
+    records: int
+    distinct: int
+    values: list[SummaryValueCount] | None = None
+    estimated: bool = False
+
+
+class SummaryLabel(BaseModel):
+    label: str
+    count: int
+    parent: str | None = None
+    properties: list[SummaryProperty] = Field(default_factory=list)
+    properties_total: int
+
+
+class SummaryLink(BaseModel):
+    src_label: str
+    type: str
+    dst_label: str
+    count: int
+
+
+class SummarySearchIndex(BaseModel):
+    name: str
+    labels: list[str]
+    properties: list[str]
+    analyzer: str
+
+
+class SummarySavedQuery(BaseModel):
+    name: str
+    description: str = ""
+    params: dict[str, str] = Field(default_factory=dict)
+
+
+class SchemaSummaryResponse(BaseModel):
+    """``GET /v1/{tenant}/schema/summary``: the schema as a model needs it."""
+
+    tenant: str
+    labels: list[SummaryLabel]
+    labels_total: int
+    links: list[SummaryLink]
+    links_total: int
+    search_indexes: list[SummarySearchIndex] = Field(default_factory=list)
+    saved_queries: list[SummarySavedQuery] = Field(default_factory=list)
+    computed: list[str] = Field(default_factory=list)
+    estimated: bool
+    text: str
+    cached: bool
+    elapsed_ms: int
+
+
+class ReconcileEdge(BaseModel):
+    """One wanted edge for :meth:`GraphosClient.reconcile_type_edges`; ``props``
+    None keeps a stored edge's properties."""
+
+    src_id: str
+    dst_id: str
+    props: dict[str, Any] | None = None
+
+
+class EdgesReconcileResponse(BaseModel):
+    """What ``POST …/graph/edges:reconcile`` did, or with ``dry_run`` would do."""
+
+    tenant: str
+    scope: Literal["node", "type"]
+    type: str
+    added: int
+    changed: int
+    kept: int
+    removed: int
+    skipped: int
+    skipped_edges: list[list[str]] = Field(default_factory=list)
+    dry_run: bool
+    elapsed_ms: int
+
+
+class EdgeCheckItem(BaseModel):
+    """One edge to look for, as :meth:`GraphosClient.check_edges` takes it."""
+
+    type: str
+    src_id: str
+    dst_id: str
+    src_label: str | None = None
+    dst_label: str | None = None
+
+
+class EdgeCheckResult(BaseModel):
+    """One requested edge: ``present``, ``absent`` or ``ambiguous``."""
+
+    type: str
+    src_id: str
+    dst_id: str
+    status: Literal["present", "absent", "ambiguous"]
+    src_label: str | None = None
+    dst_label: str | None = None
+    rev: int | None = None
+    etag: str | None = None
+    properties: dict[str, Any] | None = None
+    candidates: list[str] | None = None
+
+
+class EdgesCheckResponse(BaseModel):
+    tenant: str
+    results: list[EdgeCheckResult]
+    present: int
+    absent: int
+    ambiguous: int
+    elapsed_ms: int
+
+
 # ── Schema-agnostic K/V cache ────────────────────────────────────────
 
 
@@ -768,12 +889,24 @@ class LabelCount(BaseModel):
     total_bytes: int = 0
 
 
+class AnalysisFreshness(BaseModel):
+    """When an analysis (``metrics``, ``communities``) last wrote, and the
+    rows written since; ``stale`` is None when that is unknown."""
+
+    computed_at: datetime
+    scope: dict[str, Any] | None = None
+    rows_written_since: int | None = None
+    at_least: bool = False
+    stale: bool | None = None
+
+
 class TenantStatsResponse(BaseModel):
     tenant: str
     n_vertices: int
     n_edges: int
     total_bytes: int
     labels: list[LabelCount] = Field(default_factory=list)
+    analyses: dict[str, AnalysisFreshness] = Field(default_factory=dict)
     elapsed_ms: int
 
 

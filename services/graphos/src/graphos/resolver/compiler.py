@@ -50,6 +50,10 @@ _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 #   concat(<arg>, <arg>, ...)    -- chain
 # where each <arg> is either an identifier (property name on dst) or
 # a single-quoted string literal (becomes a bound parameter).
+# The properties of an edge a rule writes: the reserved mark that tells
+# ``edges:resolve`` by difference (ADR-0001) the rule owns the edge.
+DERIVED_PROPERTIES = '{"graphos_derived": true}'
+
 _TOK = re.compile(
     r"\s*("
     r"concat\(|"
@@ -557,7 +561,7 @@ def _emit_arm(
     # rows.
     return (
         f'SELECT src.id AS start_id, dst.id AS end_id, '
-        f"'{{}}'::agtype AS properties "
+        f"'{DERIVED_PROPERTIES}'::agtype AS properties "
         f'FROM "{tenant}"."{src_label}" src '
         f'CROSS JOIN "{tenant}"."{dst_label}" dst '
         f', {unnest_sql} '
@@ -668,6 +672,10 @@ class CompiledEdgeType:
     no_label_rule_count: int
     rule_count: int
     undeclared_arm_count: int = 0
+    # The same candidates as ``SELECT DISTINCT start_id, end_id`` (for
+    # reconciling by difference), and the (src, dst) label pairs of the arms.
+    candidates_sql: str | None = None
+    label_pairs: tuple[tuple[str, str], ...] = ()
 
 
 def compile_resolve_rules_for_edge_type(
@@ -701,6 +709,7 @@ def compile_resolve_rules_for_edge_type(
 
     params: list[object] = []
     arms: list[str] = []
+    pairs: list[tuple[str, str]] = []
     no_label_rule_count = 0
     undeclared_arm_count = 0
 
@@ -722,6 +731,8 @@ def compile_resolve_rules_for_edge_type(
                     dst_label=dl,
                     params=params,
                 ))
+                if (sl, dl) not in pairs:
+                    pairs.append((sl, dl))
 
     if not arms:
         return CompiledEdgeType(
@@ -751,4 +762,8 @@ def compile_resolve_rules_for_edge_type(
         no_label_rule_count=no_label_rule_count,
         rule_count=len(rules),
         undeclared_arm_count=undeclared_arm_count,
+        candidates_sql=(
+            f"SELECT DISTINCT start_id, end_id FROM ( {union} ) candidates"
+        ),
+        label_pairs=tuple(pairs),
     )

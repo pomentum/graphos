@@ -3,7 +3,9 @@
 Hands-on notes from running Apache AGE under graphos's write and read paths:
 1.6.0 on PostgreSQL 16 (`apache/age:release_PG16_1.6.0`, the bundled database up to graphos 0.9) and
 1.8.0 on PostgreSQL 18 (`apache/age:release_PG18_1.8.0`, bundled since). A pitfall marked *1.6* is
-fixed in 1.8 (§11); the rest hold on both.
+fixed in 1.8 (§11); the rest hold on both. graphos now starts on 1.8 only
+([ADR-0007](adrs/ADR-0007-drop-postgresql-16.md)); the 1.6 notes are kept as history, and for
+the data a move from 1.6 brings along.
 For the write-path templates in more detail see
 [`graph_age_practices.md`](./graph_age_practices.md).
 
@@ -36,8 +38,8 @@ SQL in one module, `graphos.writes`: node and edge upserts go through the
 COPY-staged path of §6 (`writes.upsert_nodes` / `writes.upsert_edges`), and
 node deletes are one SQL statement that removes the nodes and their edges
 together. §5 gives the two reasons (throughput and a backend segfault).
-Every API read is SQL too; Cypher runs only in the opt-in, read-only
-console (`GRAPHOS_CYPHER=true`). The rows above about inlined map literals and
+Every API read is SQL too; Cypher runs only in the read-only console
+(on unless `GRAPHOS_CYPHER=false`). The rows above about inlined map literals and
 per-row `cypher()` calls describe what a Cypher write needs on AGE 1.6;
 graphos does not write that way. §11 lists which of these AGE has fixed
 since, and in which release.
@@ -122,7 +124,7 @@ Two different access paths, two different indexes:
   operator. It does *not* lower to `properties->'"id"' = …`, so the btree
   unique index is **not** used by Cypher MATCH. GIN on `properties` is
   what keeps a Cypher read by id off a sequential scan. (graphos's own reads
-  run no Cypher and read by id in SQL, through the unique btree; the opt-in
+  run no Cypher and read by id in SQL, through the unique btree; the
   console's `MATCH {id: …}` uses this GIN index.)
 - **Direct SQL** that compares `properties->'"id"'` (node-by-id reads,
   property stamping, the `ON CONFLICT` of every node write, and the edge
@@ -291,8 +293,8 @@ and `DETACH DELETE` removed nodes and an edge. AGE 1.8.0 stops all of them.
 
 So a read-only transaction, or a read-only role, is not a guard against
 Cypher writes on AGE 1.6. graphos's console refuses the write clauses
-before the query reaches the database, whichever AGE runs; a direct-SQL user
-on AGE 1.6 is not protected.
+before the query reaches the database; a direct-SQL user on AGE 1.6 was not
+protected, one reason graphos no longer runs on it.
 
 ---
 
@@ -589,9 +591,9 @@ aggregates back.
 
 Checked 2026-10-15 against `apache/age`. The bundled database is AGE 1.8.0
 on PostgreSQL 18. AGE 1.6.0 on PostgreSQL 16, which has no AGE release after
-1.6.0 (the fixes below ship in 1.8.0, released for PostgreSQL 15 and 18), still runs
-but is **deprecated** for graphos: it logs `database deprecated` at start
-and reports it in `GET /v1/info`. CI runs the server's tests against both.
+1.6.0 (the fixes below ship in 1.8.0, released for PostgreSQL 15 and 18), is no
+longer supported: graphos-api refuses to start on it. CI runs the server's tests on
+1.8 only.
 
 | Pitfall | Upstream |
 |---|---|

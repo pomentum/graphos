@@ -164,6 +164,7 @@ _TENANT_ROWS = (
     "DELETE FROM graphos_meta.community_map WHERE tenant = $1;",
     "DELETE FROM graphos_meta.community_links WHERE tenant = $1;",
     "DELETE FROM graphos_meta.community_map_runs WHERE tenant = $1;",
+    "DELETE FROM graphos_meta.analysis_runs WHERE tenant = $1;",
     "DELETE FROM graphos_meta.jobs WHERE tenant = $1;",
     "DELETE FROM graphos_meta.saved_queries WHERE tenant = $1;",
 )

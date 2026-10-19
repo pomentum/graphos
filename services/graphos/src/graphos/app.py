@@ -24,8 +24,19 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from graphos import __version__, api_docs, console, identity, node_properties, oidc, properties
+from graphos import (
+    __version__,
+    api_docs,
+    console,
+    identity,
+    node_properties,
+    oidc,
+    openapi,
+    properties,
+    vault,
+)
 from graphos.api import (
     access,
     bulk,
@@ -44,25 +55,27 @@ from graphos.api import (
     me,
     paths,
     property_check,
+    reconcile,
+    schema_summary,
     snapshot,
     tenants,
 )
 from graphos.api import auth as auth_api
 from graphos.api import cypher as cypher_api
-from graphos.auth import TokenAuthenticator
+from graphos.auth import LentTokens, TokenAuthenticator
 from graphos.bootstrap import (
     bootstrap_tenant,
     load_registered_tenants,
     registered_tenants,
 )
 from graphos.changes import ChangeFeed
-from graphos.config import Settings
+from graphos.config import Settings, allowed_hosts
 from graphos.contracts.db import VacuumRequest
 from graphos.contracts.graph_metrics import ComputeMetricsRequest
 from graphos.contracts.louvain import RecomputeCommunitiesRequest
 from graphos.contracts.property_schema import PropertiesCheckRequest
 from graphos.contracts.tenants import ResolveEdgesRequest
-from graphos.db import create_pool, ensure_internal_schema, fetch_db_version
+from graphos.db import create_pool, ensure_internal_schema, fetch_db_version, unsupported_database
 from graphos.graph_compute import terminate_running
 from graphos.graph_metrics import configure as configure_metrics
 from graphos.jobs import JobKind, JobRunner
@@ -150,6 +163,7 @@ async def setup_identity(
             "the admin user '%s' still has its first password: sign in and change it",
             identity.ADMIN_USER,
         )
+    vault.configure(settings.master_key_file)
     signer = identity.Signer(issuer=settings.auth_issuer, ttl_s=settings.access_token_ttl_s)
     await signer.load(pool, settings.auth_signing_key_file)
     app.state.access_store = store
@@ -157,6 +171,16 @@ async def setup_identity(
     app.state.authenticator = TokenAuthenticator(signer, store, provider)
     app.state.login_throttle = identity.Throttle(settings.login_attempts_per_min)
     return store
+
+
+@asynccontextmanager
+async def mcp_running(endpoint: Any) -> AsyncIterator[None]:
+    """Runs the MCP SDK's session manager while the app runs, when ``/mcp`` is on."""
+    if endpoint is None:
+        yield
+        return
+    async with endpoint.manager.run():
+        yield
 
 
 @asynccontextmanager
@@ -174,8 +198,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     pool = await create_pool(settings)
     app.state.pool = pool
     versions = await fetch_db_version(pool)
-    if versions["deprecated"]:
-        log.warning("database deprecated", extra={"reason": versions["deprecated"]})
+    refused = unsupported_database(versions["postgres_version"], versions["age_version"])
+    if refused:
+        log.error("database not supported", extra={"reason": refused})
+        await pool.close()
+        raise RuntimeError(refused)
 
     # 3. graphos-internal schema (idempotent) + restore registered tenants
     #    from the previous boot.
@@ -250,7 +277,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
 
     try:
-        yield
+        async with mcp_running(getattr(app.state, "mcp", None)):
+            yield
     finally:
         property_backfill.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -286,7 +314,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url=None,
     )
     api_docs.install(app)
+    openapi.install(app)
     app.state.settings = settings
+    app.state.lent_tokens = LentTokens()
     configure_metrics(betweenness_max_nodes=settings.betweenness_max_nodes)
 
     async def _statement_timeout(request: Request, exc: Exception) -> JSONResponse:
@@ -378,6 +408,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         window_s=settings.rate_limit_window_s,
     )
     app.add_middleware(RequestContextMiddleware)
+    hosts = allowed_hosts(settings.allowed_hosts)
+    if hosts:
+        # Outermost: a request for a Host graphos is not is refused (400)
+        # before anything else runs, against DNS rebinding.
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
     app.add_route("/metrics", metrics_handler, methods=["GET"])
 
     # Routers (no prefix on health; /v1 prefix on every other surface)
@@ -392,6 +427,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(graph_map.router, prefix="/v1")
     app.include_router(bulk.router, prefix="/v1")
     app.include_router(csv_import.router, prefix="/v1")
+    app.include_router(reconcile.router, prefix="/v1")
+    app.include_router(schema_summary.router, prefix="/v1")
+    if settings.mcp:
+        # Imported only when on: the MCP SDK is not needed otherwise.
+        from graphos import mcp_server  # noqa: PLC0415
+
+        mcp_server.install(app, settings)
     app.include_router(db.router, prefix="/v1")
     app.include_router(louvain.router, prefix="/v1")
     app.include_router(graph_metrics.router, prefix="/v1")

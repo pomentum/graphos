@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from typing import Any
 
 import asyncpg
 from fastapi import APIRouter, HTTPException, Request, status
@@ -20,6 +21,15 @@ from graphos.louvain import LOUVAIN_AVAILABLE, LOUVAIN_INSTALL_HINT, recompute_c
 
 router = APIRouter(tags=["communities"], prefix="/{tenant}")
 
+# The community recompute and graph metrics hold the tenant one at a time.
+BUSY_RESPONSE: dict[int | str, dict[str, Any]] = {
+    409: {"description": (
+        "Another whole-graph job (community recompute or graph metrics) is queued or "
+        "running for the tenant; or the call was cancelled (`POST /v1/jobs/{id}:cancel`) "
+        "while it ran."
+    )},
+}
+
 
 @router.post(
     "/recompute-communities",
@@ -35,7 +45,11 @@ router = APIRouter(tags=["communities"], prefix="/{tenant}")
         "installed. With `Prefer: respond-async` it runs as a background job "
         "(202, see `/v1/jobs`)."
     ),
-    responses=ACCEPTED_RESPONSE,
+    responses={
+        **ACCEPTED_RESPONSE,
+        **BUSY_RESPONSE,
+        501: {"description": "The optional `louvain` extra (python-igraph) is not installed."},
+    },
 )
 async def recompute(
     tenant: Tenant,

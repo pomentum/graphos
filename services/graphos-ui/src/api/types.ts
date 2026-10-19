@@ -587,32 +587,74 @@ export interface DatasetImportResult {
   elapsed_ms: number;
 }
 
-/** `POST …/graph/nodes:bulk` and `…/edges:bulk`: what an NDJSON load wrote. */
-interface BulkResult {
+export type CsvColumnType = "auto" | "text" | "number" | "boolean";
+export type CsvDelimiterName = "comma" | "semicolon" | "tab";
+
+/** One property column of a CSV import, as graphos resolved the mapping. */
+export interface CsvColumnPlan {
+  header: string;
+  property: string;
+  type: CsvColumnType;
+}
+
+/** An example of a CSV issue: the row (from 1, under the header), and what is wrong there. */
+export interface CsvIssueExample {
+  row?: number;
+  column?: string;
+  value?: string;
+  /** For a ragged row: the cells it has. */
+  cells?: number;
+}
+
+/** One kind of problem graphos found in a CSV file, counted. */
+export interface CsvIssue {
+  /** `empty_id`, `long_id`, `ragged`, `bad_value`, `duplicate_id`, `duplicate_pair`, `undeclared_pair`. */
+  code: string;
+  /** The rows it names are not written. */
+  refused: boolean;
+  count: number;
+  examples: CsvIssueExample[];
+}
+
+/** `POST …/graph/nodes:csv` and `…/edges:csv`: what a CSV import did (or, in a dry run, would do). */
+export interface CsvImportResult {
   tenant: string;
-  rows_received: number;
-  /** Lines refused (invalid, reserved names, unknown labels, property schema under strict). */
+  dry_run: boolean;
+  delimiter: CsvDelimiterName;
+  /** Rows under the header. */
+  rows: number;
+  /** Nodes or relationships the rows make once rows repeating an id are merged. */
+  records: number;
+  /** Records refused; their errors are in `errors`. */
   rows_invalid: number;
-  /** The first 50 refusals, as `line N: <message>`. */
+  /** Upserted (in a dry run: that would be). */
+  written: number;
+  /** Relationships not written because an end does not exist. */
+  edges_skipped: number;
+  columns: CsvColumnPlan[];
+  /** Refusals first. */
+  issues: CsvIssue[];
+  /** The first 50 refused records, as `row N: <message>`. */
   errors: string[];
   elapsed_ms: number;
-  /** Refused rows' property errors, by `<label or *>.<property>:<rule>`. */
-  property_violations?: Record<string, number>;
-  /** Written rows' property problems, by `<label or *>.<property>:<rule>`. */
-  property_warnings?: Record<string, number>;
+  /** Refused records' property errors, by `<label or *>.<property>:<rule>`. */
+  property_violations: Record<string, number>;
+  /** Written records' property problems, by `<label or *>.<property>:<rule>`. */
+  property_warnings: Record<string, number>;
 }
 
-export interface BulkNodesResult extends BulkResult {
-  nodes_upserted: number;
-  by_label: Record<string, number>;
-}
-
-export interface BulkEdgesResult extends BulkResult {
-  edges_upserted: number;
-  /** Rows whose source or target node does not exist. */
-  edges_skipped: number;
-  by_type: Record<string, number>;
-}
+/** What a CSV file's rows are, as the `nodes:csv` / `edges:csv` query says. */
+export type CsvImportQuery =
+  | { label: string; id: string; columns: string; delimiter: CsvDelimiterName }
+  | {
+      type: string;
+      src_label: string;
+      dst_label: string;
+      src: string;
+      dst: string;
+      columns: string;
+      delimiter: CsvDelimiterName;
+    };
 
 /** `POST /v1/tenants?dry_run=true`: what importing a schema would change. */
 export interface SchemaDryRun {
@@ -625,6 +667,21 @@ export interface SchemaDryRun {
   changes: SchemaChangeDetail | null;
   /** What applying it would cost (a table rewrite, a long build) or could still fail on. */
   warnings: string[];
+  /** Changes that refuse writes or calls that worked, or change what a read returns. */
+  breaking?: SchemaBreakingChange[];
+}
+
+/** One breaking change in a schema dry run. */
+export interface SchemaBreakingChange {
+  part: "vertex" | "edge" | "tenant";
+  /** The label or edge type; null for the tenant. */
+  name: string | null;
+  /** A stable code, e.g. `property_required`. */
+  change: string;
+  /** What stops working, in a sentence. */
+  detail: string;
+  /** About how many nodes or edges of the label or type exist. */
+  rows?: number | null;
 }
 
 export interface SchemaAddition {
@@ -706,4 +763,29 @@ export interface ChangesHistory {
   /** Pass as `before` for the page before; null at the end. */
   older: string | null;
   more: boolean;
+}
+
+/** `GET /v1/auth/mcp/request`: the MCP client that asks to sign the person in (ADR-0008). */
+export interface McpRequestInfo {
+  client_id: string;
+  client_name: string | null;
+  /** Where graphos sends the answer: the callback's host and port. */
+  redirect_host: string;
+}
+
+/** `POST /v1/auth/mcp/approve`: the request as `/oauth/authorize` passed it on, and the answer. */
+export interface McpApproval {
+  client_id: string;
+  redirect_uri: string;
+  explicit?: string;
+  code_challenge: string;
+  state?: string;
+  scope?: string;
+  resource?: string;
+  allow: boolean;
+}
+
+/** The answer of `POST /v1/auth/mcp/approve`: where to send the browser. */
+export interface McpApprovalResponse {
+  redirect: string;
 }

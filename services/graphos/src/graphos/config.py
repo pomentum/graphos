@@ -136,6 +136,20 @@ class Settings(BaseSettings):
     # A PEM EC P-256 private key to sign with, instead of the key graphos
     # generates and keeps in graphos_meta.signing_keys.
     auth_signing_key_file: Path | None = None
+    # The master keys that seal the secrets graphos stores (graphos.vault):
+    # signing keys and ID tokens.  Without it they are stored in clear.
+    master_key_file: Path | None = None
+    # ── Agents (graphos.mcp_server, ADR-0002, ADR-0008) ─────────────────
+    # The MCP endpoint at /mcp (read tools only), on unless turned off; it
+    # takes the tokens the REST API takes.
+    mcp: bool = True
+    # Edges an NDJSON ``edges:reconcile`` body may carry: held in memory, about
+    # 1 KB each in the worker, so the default stays near 200 MB.
+    reconcile_max_edges: int = Field(default=200_000, ge=1)
+    # Host names the API answers to (Starlette's TrustedHostMiddleware;
+    # ``*.example.com`` wildcards), comma-separated.  Empty: any Host.  Behind
+    # a proxy, the names clients use, as the proxy forwards them.
+    allowed_hosts: str = ""
     access_token_ttl_s: int = Field(default=900, ge=60, le=86_400)
     # The web UI's session cookie (the refresh token, HttpOnly, SameSite=Strict)
     # is Secure: sent over HTTPS only (browsers also accept it on http://localhost).
@@ -174,10 +188,10 @@ class Settings(BaseSettings):
     oidc_http_timeout_s: float = Field(default=10.0, gt=0)
 
     # ── Cypher console (graphos.console) ───────────────────────────────
-    # Read-only Cypher on one tenant's graph, off unless an operator turns it
-    # on.  It runs on a small pool of its own (as graphos's own user); graphos
+    # Read-only Cypher on one tenant's graph, on unless an operator turns it
+    # off (ADR-0006).  It runs on a small pool of its own (as graphos's own user); graphos
     # checks every query before it runs (graphos.console).
-    cypher: bool = False
+    cypher: bool = True
     # The level on a tenant needed to run queries on it.
     cypher_level: Literal["read", "write", "maintain"] = "read"
     cypher_timeout_s: float = Field(default=30.0, gt=0)
@@ -204,7 +218,7 @@ class Settings(BaseSettings):
         return v.upper()
 
     @field_validator(
-        "admin_password_file", "auth_signing_key_file",
+        "admin_password_file", "auth_signing_key_file", "master_key_file",
         "oidc_issuer", "oidc_client_id", "oidc_audience", mode="before",
     )
     @classmethod
@@ -243,3 +257,17 @@ class Settings(BaseSettings):
         user = quote(self.db_user, safe="")
         pw = quote(self.resolved_db_password(), safe="")
         return f"postgresql://{user}:{pw}@{self.db_host}:{self.db_port}/{self.db_name}"
+
+
+# Always answered as well: the container's own health check and a person on
+# the host use them, and a rebinding page cannot send them (its requests carry
+# the attacker's host name).
+LOOPBACK_HOSTS = ("localhost", "127.0.0.1")
+
+
+def allowed_hosts(setting: str) -> list[str]:
+    """``GRAPHOS_ALLOWED_HOSTS`` as a list, with the loopback names; empty: off."""
+    hosts = [h.strip().lower() for h in setting.split(",") if h.strip()]
+    if not hosts or "*" in hosts:
+        return []
+    return [*hosts, *(h for h in LOOPBACK_HOSTS if h not in hosts)]
