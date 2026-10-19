@@ -182,8 +182,9 @@ python -m http.server -d docs 8000                 # preview at http://127.0.0.1
 ```
 
 Run it after changing the README's features, screenshots, quickstart or
-documentation table, or the version (`tools/release/version.mjs`), and
-commit `docs/index.html` with the change. The site is live once that commit
+documentation table, and commit `docs/index.html` with the change. The
+version on the page is `tools/release/version.mjs`'s to set, with the
+others, and its `--check` fails when the page shows another one. The site is live once that commit
 is on `main`.
 
 **API docs assets.** graphos serves Swagger UI (`/docs`) and ReDoc
