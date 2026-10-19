@@ -185,6 +185,9 @@ def spec_parts_named(spec: TenantSpec, kind: str, old: str) -> list[str]:
     for key in ("display", "property_schema", "deprecated"):
         if old in (getattr(spec, key).get(part) or {}):
             found.append(key)
+    replacing = (spec.deprecated.get(part) or {}).values()
+    if "deprecated" not in found and any(e.get("replaced_by") == old for e in replacing):
+        found.append("deprecated")
     return found
 
 

@@ -133,6 +133,7 @@ async def test_a_dry_run_reports_and_writes_nothing(
     assert body["dry_run"] is True and body["from"] == "Docu"
     assert set(body["spec_parts"]) >= {
         "label_hierarchy", "property_indexes", "search_indexes", "display", "property_schema",
+        "deprecated",
     }
     assert body["saved_queries"] == ["docs"]
     assert body["endpoints"] == 1 and body["rows"] == 1  # noqa: PT018
