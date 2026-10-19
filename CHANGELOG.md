@@ -4,6 +4,61 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+Schema evolution (ADR-0009): labels, relationship types and properties can be renamed and
+deprecated, and a deprecated label or type dropped once it is empty.
+
+### Added
+
+- **Deprecation.** A registration's `deprecated` marks a vertex label, an edge type or some of
+  their properties as on their way out, with what replaces them and a note
+  (`{"vertex": {"Docu": {"deprecated": true, "replaced_by": "Document"}, "Person":
+  {"properties": {"mail": {"replaced_by": "email"}}}}}`), merged by entry as `display` is (`null`
+  removes one), `maintain` level. Writes naming a deprecated name succeed, whatever the mode, with
+  a warning in `property_warnings` (rule `deprecated`). `GET /v1/{tenant}/schema` and
+  `GET /v1/tenants/{name}` serve it.
+- **Renaming a label or an edge type in place.** `POST /v1/tenants/{name}/schema:rename` with
+  `{"kind": "label" | "edge_type", "from", "to"}`, `owner` level, `?dry_run=true` for what it
+  would change. One transaction: AGE's catalogue, the table, its sequence and `id` default, and
+  graphos's indexes are renamed, so rows keep their graph ids and edges, and the label hierarchy,
+  definitions, styles, declared pairs, property, search and resolver indexes, resolve rules,
+  deprecations and the community map follow. One `schema` change record; every replica reloads.
+  The answer lists the saved queries whose Cypher names the old name (not rewritten: Cypher naming
+  an unknown label returns nothing).
+- **Renaming a property** on a vertex label (and the labels below it) or an edge type, by a
+  background job (`rename_property`, 202 with `Location: /v1/jobs/{id}`): rows rewritten in
+  batches, each a new revision, one `patch` record per batch, `progress` on the job. Its
+  definitions, deprecation, property and search indexes and styles follow at the end. Refused when
+  rows carry both names, or a generated column, a resolve rule or a search index over other labels
+  uses it; renaming `name` warns about unindexed search. A failed or cancelled rename resumes when
+  asked again.
+- **Names renamed away answer where they went.** Every rename is kept in the tenant's `renames`.
+  A write naming an old label or type answers 409 (`'Docu' was renamed to 'Document' on
+  2026-10-19: use the new name`), and so does registering it again; a write naming a renamed
+  property carries a warning while the rename runs and is refused afterwards (rule `renamed`, in
+  any mode).
+- **Dropping a deprecated label or edge type.** `DELETE /v1/tenants/{name}/labels/{label}`,
+  `owner` level, only when it has no rows: its table and indexes and everything graphos keeps that
+  names it, in one transaction. Refused while a label inherits from it, a resolve rule requires it,
+  or a deprecation names it as the replacement.
+- **The schema summary and MCP's `get_schema`** list the deprecated names with what replaces them
+  and the latest 20 renames, in the JSON (`deprecated`, `renames`) and as two lines of the text.
+- **Jobs report progress** (`progress: {done, total}`), a property rename does.
+- **Client:** `rename_label`, `rename_edge_type`, `rename_property`, `drop_label`, and
+  `register_tenant(deprecated=…)`; `TenantInfo`, `TenantSchemaInfo` and the schema summary carry
+  `deprecated` and `renames`, `Job` carries `progress`.
+- **Web UI:** on the Schema page, an open label or relationship type has Rename (itself or one of
+  its properties, after the dry run's report), Deprecate (with what replaces it and a note, or
+  taken back) and, once deprecated and empty, Drop. Rows show a "deprecated" mark; a Renames
+  section lists the history, a running property rename with its progress and a failed one with
+  Resume.
+
+### Changed
+
+- **Schema files are version 3 when they carry `deprecated`.** This version reads 1 to 3; 0.13.x
+  refuses version 3. The rename history is not in the file: it belongs to the tenant.
+
 ## 0.13.1 — 2026-10-19
 
 A fix to the release script: the website shows the released version as soon as the version is

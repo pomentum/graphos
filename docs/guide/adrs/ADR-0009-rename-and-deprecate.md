@@ -1,6 +1,6 @@
 # ADR-0009: Renaming and deprecating labels, edge types and properties
 
-- **Status:** Proposed (2026-10-19)
+- **Status:** Accepted (2026-10-19)
 - **Scope:**
   - the tenant's schema: a `deprecated` section in the registration spec, and a rename endpoint;
   - AGE's catalogue and graphos's tables, indexes and `graphos_meta` rows for a label or edge
@@ -42,27 +42,31 @@ one short transaction; a property rename is a background job.
 
 ### 1. Deprecation
 
-The registration spec gains `deprecated`:
+The registration spec gains `deprecated`, per vertex label and edge type, merged by entry as
+`display` is (an entry given again replaces the stored one, `null` removes it); a registration,
+so `maintain` level:
 
 ```json
 "deprecated": {
-  "labels":     {"Servce": {"replaced_by": "Service", "note": "typo"}},
-  "edge_types": {"DEPENDS": {"replaced_by": "DEPENDS_ON"}},
-  "properties": {"Service": {"owner_team": {"replaced_by": "team"}}}
+  "vertex": {"Servce":  {"deprecated": true, "replaced_by": "Service", "note": "typo"},
+             "Service": {"properties": {"owner_team": {"replaced_by": "team"}}}},
+  "edge":   {"DEPENDS": {"deprecated": true, "replaced_by": "DEPENDS_ON"}}
 }
 ```
 
-- **Writes** naming a deprecated label, edge type or property succeed and carry a
-  `deprecations` warning in the response, as `property_warnings` do. In the property definitions'
-  `strict` mode, a write that *adds* a deprecated property to a row is refused (400), so new data
-  stops using it while old rows stay readable.
+- **Writes** naming a deprecated label, edge type or property succeed and carry a warning in
+  `property_warnings` (rule `deprecated`), **whatever the mode**. A refusal in `strict` mode was
+  left: a patch is checked on the row it leaves, so it would refuse every patch of an old row that
+  still carries the property, not only new data. The warning, the schema and its summary steer new
+  writes instead.
 - **The schema summary** (and MCP's `get_schema`) lists deprecated names with what replaces them;
-  the dry run of a registration reports them; the web UI's Schema page shows them marked.
-- **Removal** is explicit: `DELETE /v1/tenants/{name}/labels/{label}` drops a deprecated label or
-  edge type **only when it has no rows**, with its indexes and `graphos_meta` rows, in one
-  transaction. A deprecated property is removed from the definitions by registering without it;
-  its values stay on the rows until a consumer writes them away (no "unset everywhere" job in this
-  ADR).
+  `GET /v1/{tenant}/schema` serves them; the web UI's Schema page shows them marked.
+- **Removal** is explicit: `DELETE /v1/tenants/{name}/labels/{label}` (`owner`) drops a deprecated
+  label or edge type **only when it has no rows**, with its indexes and `graphos_meta` rows, in one
+  transaction; refused while a label inherits from it, a resolve rule requires it as a destination,
+  or a deprecation names it as the replacement. A deprecated property is removed from the
+  definitions by declaring the entry without it; its values stay on the rows until a consumer
+  writes them away (no "unset everywhere" job in this ADR).
 
 ### 2. Renaming a label or an edge type, in place
 
@@ -104,42 +108,49 @@ would change and writes nothing.
   text names the old name** (the console's tokeniser finds `:Label` and `[:TYPE]`), in the dry run
   and the answer. It does not rewrite them: a query's text is its owner's, and a textual rewrite
   could change other identifiers.
-- **Exports** carry the new names. A schema or snapshot file made before the rename registers the
-  old name again if imported as it is; the import refuses a name that `renames` lists as renamed,
-  and says so (a rename map on import is left open).
+- **Registering the old name again** is refused the same way (409), so an import of a schema or
+  snapshot file made before the rename says where the name went instead of creating it again.
+  Exports carry the new names.
 
 ### 3. Renaming a property
 
-`POST /v1/tenants/{name}/schema:rename` with `{"kind": "property", "label" | "edge_type": …, "from":
-…, "to": …}`, `owner` level, runs as a **background job** (202, `Prefer: respond-async`; whole-graph
-job slot, so one per tenant). Three phases:
+`POST /v1/tenants/{name}/schema:rename` with `{"kind": "property", "on": <vertex label or edge type>,
+"from": …, "to": …}`, `owner` level, runs as a **background job** (`rename_property`, 202 with
+`Location: /v1/jobs/{id}`). On a vertex label it covers the labels below it in the hierarchy. One
+property rename per tenant at a time (a partial unique index on `graphos_meta.jobs`). Three
+phases:
 
-1. **Alias** (one short transaction): the spec records the rename as in progress. From now on a
-   write that names `from` on that label is stored under `to`, with a `deprecations` warning; the
-   property definition, the property catalogue and resolve rules that name it move to `to`.
-2. **Backfill**: rows are rewritten in batches of 25,000, each its own transaction (as
-   `set_edge_end_communities`): `to` takes `from`'s value and `from` is removed. Each rewritten row
-   gets a new `graphos_rev` (its ETag changes, as for any write); each batch writes one summary
-   change record (`op: patch`, `detail.renamed_property`), not one per row. Statement timeout as
-   for long writes (`allow_long_statements`). The job reports **progress** (rows done of rows to do),
-   a new column on `graphos_meta.jobs`, and can be cancelled between batches; a cancelled or failed
-   backfill stays in the alias phase and can be resumed.
-3. **Indexes** (after the backfill): declared, search and resolver indexes on `from` are built
-   again on `to` (`CREATE INDEX CONCURRENTLY`), then the old ones dropped. The spec marks the
-   rename done.
+1. **Start** (one transaction under the tenant's lock): the job is queued and the spec's
+   `renames` records the rename as `running`. Writes naming `from` are stored as written, with a
+   warning (rule `renamed`); mapping them to `to` was left, as a second write path for a few
+   minutes' gain.
+2. **Backfill**: rows are rewritten in batches of 25,000, each its own transaction: `to` takes
+   `from`'s value and `from` is removed. Each rewritten row gets a new `graphos_rev` (its ETag
+   changes, as for any write); each batch writes one summary change record (`op: patch`,
+   `detail.renamed_property`), not one per row. Passes repeat until a whole pass finds no row with
+   `from`, so writes made meanwhile are rewritten too. The job reports **progress** (rows done of
+   rows to do), a new column on `graphos_meta.jobs`, and can be cancelled between batches; a
+   cancelled or failed rename is marked `failed` and resumes when asked again.
+3. **Finish** (one transaction): the definitions, the deprecation, display captions, property and
+   search indexes and the property catalogue move to `to`, the rename is marked `done`, and from
+   then on a write naming `from` is refused (rule `renamed`, in any mode). The indexes are then
+   built under the new name and the old ones dropped.
 
 **Refused** (400, before anything changes):
 - `from` is `id`, a reserved name (`graphos_*`, `community_id`, …), or `to` is;
 - a row already has both `from` and `to` (the dry run counts them; the owner resolves them first);
 - a declared **generated column** computes from `from`: Postgres would rewrite the whole table to
-  change its expression, so the owner drops the generated column first and declares it again.
+  change its expression, so the owner drops the generated column first and declares it again;
+- a **resolve rule** names the property, or a **search index** over other labels uses it: either
+  would change for labels the rename does not cover.
 
-Renaming `name` is allowed, with a warning: the built-in trigram search index is on `name`.
+Renaming `name` on a vertex label is allowed, with a warning in the answer (`warnings`): search
+without an index matches `name` by default, through the trigram index graphos builds on it.
 
 ### 4. Who sees what
 
-- **Client:** `rename_label`, `rename_edge_type`, `rename_property` (returns the job), `drop_label`,
-  and `deprecated` in the spec models.
+- **Client:** `rename_label`, `rename_edge_type`, `rename_property` (its answer carries the job's
+  id: `wait_for_job(result.job_id)`), `drop_label`, and `deprecated` and `renames` in the models.
 - **Web UI, Schema page:** rename and deprecate actions on a label, type or property, with the dry
   run's report (what changes, rows to rewrite, saved queries to check) before confirming.
 - **MCP:** no new tool; `get_schema` marks deprecated names and lists recent renames, so an agent
@@ -179,8 +190,8 @@ one that renamed, one that had queried `Old` just before, and a new one):
 - every row kept its graph id, whose high bits still name the label's id.
 
 So AGE's per-connection label lookups saw the catalogue change at once, and no row needed writing.
-Not yet run: an edge-type rename, the console's own pool, and a label with a hierarchy child; the
-acceptance tests cover them.
+The acceptance tests since run the same on an edge type, on a label with a hierarchy child and on
+another pooled connection.
 
 ## Consequences
 
@@ -191,22 +202,25 @@ acceptance tests cover them.
     upgrade must pass the rename tests before graphos supports it.
   - Cypher that names an old label silently returns nothing; the saved-query report and `get_schema`
     reduce the risk, they do not remove it for queries kept outside graphos.
-  - During a property backfill, readers see some rows with each name; the alias phase makes writes
-    consistent, not reads. Consumers that filter on the property should wait for the job.
+  - During a property backfill, readers see some rows with each name, and writers may still write
+    the old one (with a warning) until it ends. Consumers that filter on the property should wait
+    for the job.
 - **Must change with it:** concept §2.2 and the endpoint table, usage (a "Changing a schema"
-  section), features.md, the client and its models, the web UI's Schema page, `schema_breaking.py`
-  (a rename is not "removed + added"), the schema document and snapshot formats (`renames`), the
-  CHANGELOG.
+  section), features.md, the client and its models, the web UI's Schema page, the schema document
+  (version 3 when it carries `deprecated`; the rename history stays with the tenant, not in the
+  file), the CHANGELOG. `schema_breaking.py` is unchanged: renames do not go through
+  registration.
 
 ## Open questions
 
-- Should the import of an older schema or snapshot file take a rename map (`{"Servce": "Service"}`)
-  instead of being refused?
-- Keep `renames` forever, or prune entries older than a set age once every replica and export has
-  moved on?
-- Should a property rename's alias phase also map *reads* (filters naming `from` matched against
-  `to`), at the cost of a second code path in scans and aggregates?
-- `owner` or `maintain` for deprecation? (Renames and drops: `owner`.)
+Answered on acceptance:
+- An import of an older file naming a renamed name is **refused** with where the name went; no
+  rename map. The owner edits the file, which is plain JSON.
+- `renames` is **kept**: a short list per tenant, and the only record of where a name went.
+- **No read mapping**: filters naming the old property name match nothing once rows are
+  rewritten; the job's progress and the schema summary say when.
+- Deprecation is **`maintain`** (it is a registration and changes no data); renames and drops are
+  `owner`.
 
 ## Acceptance
 
@@ -221,8 +235,7 @@ Tests on PostgreSQL 18 / AGE 1.8:
 - **Property rename:** every row has `to` and not `from`; ETags change; one summary record per
   batch; progress reported; cancel then resume finishes; a row with both names, `id`, a reserved
   name and a generated column are refused before any change; indexes rebuilt on `to`.
-- **Deprecation:** warnings on writes, refusal of a new deprecated property in `strict` mode,
-  shown in the summary and `get_schema`; an empty deprecated label is dropped, a non-empty one is
-  refused.
+- **Deprecation:** warnings on writes in every mode, shown in the summary and `get_schema`; an
+  empty deprecated label is dropped, a non-empty one is refused.
 - **Saved queries** naming the old label or type are reported by the dry run and the rename.
 - **Docs** updated as listed under Consequences.
