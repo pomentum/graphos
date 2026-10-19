@@ -37,7 +37,7 @@ The rules for working on graphos are written once, for people and coding agents 
 3. Run the checks of what you changed (the commands are in each `DEVELOPMENT.md`):
 
    ```bash
-   ruff check services/graphos/src services/graphos/tests && pytest -m "not db" services/graphos/tests
+   ruff check services/graphos/src services/graphos/tests && (cd services/graphos && mypy) && pytest -m "not db" services/graphos/tests
    bash scripts/run-db-tests.sh                                  # service database tests, own compose project
    ruff check clients/python/src clients/python/tests clients/python/examples && pytest clients/python/tests
    (cd services/graphos-ui && npm ci && npm run lint && npm test && npm run build)

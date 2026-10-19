@@ -11,6 +11,7 @@ python -m venv .venv
 source .venv/Scripts/activate    # Windows; on macOS/Linux: source .venv/bin/activate
 pip install -e ".[dev]"          # or ".[dev,louvain]" to include Louvain community detection
 ruff check src tests
+mypy                             # types (strict), as CI runs it
 pytest -v
 ```
 
