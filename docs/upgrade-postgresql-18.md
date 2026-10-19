@@ -1,9 +1,9 @@
 # Upgrading the database: PostgreSQL 16 / AGE 1.6 to PostgreSQL 18 / AGE 1.8
 
 graphos's bundled database is now **PostgreSQL 18 with Apache AGE 1.8**. PostgreSQL 16 with AGE
-1.6, which graphos 0.9 and earlier shipped, is **deprecated**: graphos still runs on it, logs
-`database deprecated` at start and reports it in `GET /v1/info` (`database_deprecated`). Support
-for it will be removed in a later release.
+1.6, which graphos 0.9 and earlier shipped, is **no longer supported**: graphos-api refuses to
+start on it and names this page ([ADR-0007](adrs/ADR-0007-drop-postgresql-16.md)). Move before,
+or as, you upgrade graphos.
 
 With Docker Compose the move is one command: update the files and run `docker compose up -d`.
 The compose file moves the data by itself on the first start. This page says what that does, how
@@ -119,7 +119,7 @@ curl -s http://127.0.0.1:8080/v1/info
 ```
 
 - `/readyz` answers `{"status": "ready", ...}` with your tenant count.
-- `/v1/info` shows `postgres_version` 18.x, `age_version` 1.8.x and `database_deprecated: null`.
+- `/v1/info` shows `postgres_version` 18.x and `age_version` 1.8.x.
 - Sign in as usual: users, grants and sessions came across, and tokens issued before the move
   still verify (the signing key is in the database).
 - Optionally check that no label table lacks AGE 1.8's cache trigger (the query in

@@ -1499,7 +1499,7 @@ async with GraphosClient(base_url=G, token=TOKEN, tenant="acme") as g:
 |---|---|---|
 | `GET /healthz` | none | process alive: `{"status": "ok"}`, no database access |
 | `GET /readyz` | none | database round-trip: `{"status": "ready", "registered_tenants": <count>}`, or 503 with `{"status": "not_ready", "reason"}` only (`lifespan_not_complete` while starting, `db_unreachable` on a database failure; the error goes to the server log) |
-| `GET /v1/info` | none | `version`, `postgres_version`, `age_version`, `database_deprecated` (why the database is deprecated, or `null`), `tenants` (a count), `features` (`louvain`, `metrics`, `cypher`) |
+| `GET /v1/info` | none | `version`, `postgres_version`, `age_version`, `tenants` (a count), `features` (`louvain`, `metrics`, `cypher`) |
 | `GET /metrics` | none | Prometheus exposition; restrict it at the proxy if you expose it |
 | `GET /v1/db/stats` | admin | PostgreSQL and AGE versions, database size, plus per-table live/dead tuples, sizes and vacuum times (top 200 tables) |
 | `GET /v1/db/slow-queries?limit=25` | admin | `pg_stat_statements` top list (`limit` up to 200); `available: false` when the extension is missing |
@@ -1508,12 +1508,11 @@ async with GraphosClient(base_url=G, token=TOKEN, tenant="acme") as g:
 The endpoints without auth report tenant counts, never names; admins list tenants with
 `GET /v1/tenants`.
 
-**Database versions.** graphos runs on PostgreSQL 18 with AGE 1.8 (the bundled database) and on
-PostgreSQL 16 with AGE 1.6, which is deprecated: support will be removed in a later release, as AGE
-has no release after 1.6 for PostgreSQL 16, and 1.6 carries out some Cypher writes in a read-only
-transaction and can wedge a database process on a variable-length pattern. On a database older
-than PostgreSQL 18 or AGE 1.8, graphos logs `database deprecated` at every start and
-`GET /v1/info` reports the reason in `database_deprecated`. To move, see
+**Database versions.** graphos runs on PostgreSQL 18 with AGE 1.8, the bundled database. On an
+older one (PostgreSQL 16 with AGE 1.6, bundled up to 0.9) graphos-api refuses to start and says
+why ([ADR-0007](adrs/ADR-0007-drop-postgresql-16.md)): AGE has no release after 1.6 for
+PostgreSQL 16, and 1.6 carries out some Cypher writes in a read-only transaction and can wedge a
+database process on a variable-length pattern. To move, see
 [Upgrading the database](upgrade-postgresql-18.md).
 
 ### Web UI

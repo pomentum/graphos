@@ -44,8 +44,7 @@ The rules for working on graphos are written once, for people and coding agents 
    node tools/docs/diagrams.mjs --check && node tools/release/version.mjs --check
    ```
 
-   CI runs the database tests twice, on PostgreSQL 18 / AGE 1.8 and on PostgreSQL 16 / AGE 1.6;
-   a change must pass on both.
+   CI runs the database tests on PostgreSQL 18 / AGE 1.8; a change must pass there.
 4. Write commit messages as [conventional commits](https://www.conventionalcommits.org/), in the
    style of `git log`: `type(scope): summary`, lower case, no trailing period
    ([docs/development.md §6](docs/development.md#6-git) lists the types and scopes).

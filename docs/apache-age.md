@@ -3,7 +3,9 @@
 Hands-on notes from running Apache AGE under graphos's write and read paths:
 1.6.0 on PostgreSQL 16 (`apache/age:release_PG16_1.6.0`, the bundled database up to graphos 0.9) and
 1.8.0 on PostgreSQL 18 (`apache/age:release_PG18_1.8.0`, bundled since). A pitfall marked *1.6* is
-fixed in 1.8 (§11); the rest hold on both.
+fixed in 1.8 (§11); the rest hold on both. graphos now starts on 1.8 only
+([ADR-0007](adrs/ADR-0007-drop-postgresql-16.md)); the 1.6 notes are kept as history, and for
+the data a move from 1.6 brings along.
 For the write-path templates in more detail see
 [`graph_age_practices.md`](./graph_age_practices.md).
 
@@ -291,8 +293,8 @@ and `DETACH DELETE` removed nodes and an edge. AGE 1.8.0 stops all of them.
 
 So a read-only transaction, or a read-only role, is not a guard against
 Cypher writes on AGE 1.6. graphos's console refuses the write clauses
-before the query reaches the database, whichever AGE runs; a direct-SQL user
-on AGE 1.6 is not protected.
+before the query reaches the database; a direct-SQL user on AGE 1.6 was not
+protected, one reason graphos no longer runs on it.
 
 ---
 
@@ -589,9 +591,9 @@ aggregates back.
 
 Checked 2026-10-15 against `apache/age`. The bundled database is AGE 1.8.0
 on PostgreSQL 18. AGE 1.6.0 on PostgreSQL 16, which has no AGE release after
-1.6.0 (the fixes below ship in 1.8.0, released for PostgreSQL 15 and 18), still runs
-but is **deprecated** for graphos: it logs `database deprecated` at start
-and reports it in `GET /v1/info`. CI runs the server's tests against both.
+1.6.0 (the fixes below ship in 1.8.0, released for PostgreSQL 15 and 18), is no
+longer supported: graphos-api refuses to start on it. CI runs the server's tests on
+1.8 only.
 
 | Pitfall | Upstream |
 |---|---|

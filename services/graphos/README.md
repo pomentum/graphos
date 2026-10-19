@@ -1,6 +1,6 @@
 # graphos
 
-FastAPI service for graphos — a multi-tenant property-graph service backed by PostgreSQL 18 + Apache AGE 1.8 (16 + 1.6 still runs, but is deprecated: graphos logs `database deprecated` at start and `GET /v1/info` reports `database_deprecated`; see [docs/upgrade-postgresql-18.md](../../docs/upgrade-postgresql-18.md)).
+FastAPI service for graphos — a multi-tenant property-graph service backed by PostgreSQL 18 + Apache AGE 1.8 (it does not start on PostgreSQL 16 + AGE 1.6; to move, see [docs/upgrade-postgresql-18.md](../../docs/upgrade-postgresql-18.md)).
 
 This directory is the Python package. For the overview, the docker-compose stack and the quickstart, see the repository [`README.md`](../../README.md).
 
@@ -20,7 +20,7 @@ Before changing the service, read [DEVELOPMENT.md](DEVELOPMENT.md): where to loo
 
 ## Run
 
-Point the service at a PostgreSQL 18 + AGE 1.8 database (16 + 1.6 is deprecated) and give it its credentials:
+Point the service at a PostgreSQL 18 + AGE 1.8 database (it refuses older ones) and give it its credentials:
 
 ```bash
 GRAPHOS_DB_HOST=localhost \

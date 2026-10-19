@@ -11,8 +11,8 @@ overview see [features.md](features.md); for worked request examples see
 ## 1. Summary
 
 **graphos** is a generic, multi-tenant property-graph service: PostgreSQL 18
-with Apache AGE 1.8 as the data plane (PostgreSQL 16 with AGE 1.6 still runs,
-deprecated: §2.4), and a FastAPI process (`graphos-api`)
+with Apache AGE 1.8 as the data plane (graphos refuses older databases: §2.4),
+and a FastAPI process (`graphos-api`)
 in front of it as the only way in. Consumers speak typed HTTP/JSON (NDJSON for
 bulk writes). They never receive a Postgres DSN and cannot submit SQL, nor
 Cypher outside the read-only console (§3.1).
@@ -325,16 +325,14 @@ before PostgreSQL 18's images moved it). The optional `graphos-ui` service
 (`--profile ui`) serves the web UI on `127.0.0.1:8081`, on `graphos-net`
 only.
 
-**PostgreSQL 16 / AGE 1.6** (bundled up to 0.9) still runs, and CI runs the
-server's tests against both databases, but it is deprecated: AGE has no
-release after 1.6 for PostgreSQL 16, and 1.6 carries out some Cypher writes in
-a read-only transaction and can wedge a database process on a
-variable-length pattern. `db.py::deprecated_database` flags any PostgreSQL
-before 18 or AGE before 1.8; graphos then logs `database deprecated` at start
-and `GET /v1/info` reports the reason in `database_deprecated` (`null`
-otherwise). The compose moves a PostgreSQL 16 stack by itself with two
-one-shot services that run on every `up` and exit at once when there is
-nothing to move:
+**PostgreSQL 16 / AGE 1.6** (bundled up to 0.9) is no longer supported
+([ADR-0007](adrs/ADR-0007-drop-postgresql-16.md)): AGE has no release after
+1.6 for PostgreSQL 16, and 1.6 carries out some Cypher writes in a read-only
+transaction and can wedge a database process on a variable-length pattern.
+`db.py::unsupported_database` refuses any PostgreSQL before 18 or AGE before
+1.8, and graphos-api stops at start with the reason. The compose moves a
+PostgreSQL 16 stack by itself with two one-shot services that run on every
+`up` and exit at once when there is nothing to move:
 
 - `graphos-db-export` (the PostgreSQL 16 image, `network_mode: none`) starts
   PostgreSQL 16 on the old `graphos_data` volume, dumps it (`pg_dump -Fc`) to
@@ -411,7 +409,7 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | **Health & introspection** | | |
 | `GET /healthz` | Liveness; does not touch the DB | none |
 | `GET /readyz` | Pool exists and `SELECT 1` succeeds, else 503; reports `registered_tenants` as a count | none |
-| `GET /v1/info` | Service, Postgres and AGE versions, `database_deprecated` (the reason, or `null`), `tenants` (a count), `features.louvain`, `features.metrics`, `features.cypher` | none |
+| `GET /v1/info` | Service, Postgres and AGE versions, `tenants` (a count), `features.louvain`, `features.metrics`, `features.cypher` | none |
 | `GET /metrics` | Prometheus exposition (§2.5.6) | none |
 | **Tenant control** | | |
 | `POST /v1/tenants[?force_shrink=true][&dry_run=true]` | Register / re-apply a spec (§2.2); a dry run answers what it would change, cost and break | new: `create_tenants` (the caller becomes owner); existing: `maintain` |
@@ -1141,9 +1139,8 @@ $$) AS (category agtype, n agtype);
 
 Such direct reads bypass graphos's checks and audit log. For people who read
 this way regularly, give them a read-only role of their own per tenant schema
-([installation §8](installation.md#direct-sql-readers)); that needs AGE 1.8,
-since on AGE 1.6 a role with only `SELECT` can still change and delete rows
-through Cypher `SET`, `REMOVE` and `DELETE`. Variable-length patterns fail on
+([installation §8](installation.md#direct-sql-readers)); on AGE 1.8 such a
+role cannot write through Cypher either. Variable-length patterns fail on
 graphos's tables there too; `tools/export/ndjson_to_age.py` loads a dataset
 export into a plain AGE graph, with AGE's own columns only, where they work
 ([without-graphos.md](without-graphos.md)).
@@ -1540,8 +1537,7 @@ Postgres instance.
 7. **Generated columns on tables that already hold rows** rewrite the table;
    add them early.
 8. **AGE version.** The compose pins `apache/age:release_PG18_1.8.0` by
-   digest; graphos also runs on `release_PG16_1.6.0`, deprecated (§2.4), and
-   CI tests both.
+   digest; graphos refuses to start on an older database (§2.4).
    Several code paths work around AGE behaviour (e.g. a Cypher `SET` on a
    label table carrying extra columns such as `end_community_id` or a
    generated column crashes the backend on 1.6 and is refused on 1.8, which

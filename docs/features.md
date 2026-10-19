@@ -10,8 +10,8 @@ in [concept.md](concept.md); request/response models are in
 ## 1. What graphos is
 
 graphos is a generic, multi-tenant property-graph service: PostgreSQL 18 with
-Apache AGE 1.8 behind a typed FastAPI REST surface. PostgreSQL 16 with AGE 1.6,
-bundled up to 0.9, still runs but is deprecated (§10). Storage is ordinary
+Apache AGE 1.8 behind a typed FastAPI REST surface (PostgreSQL 16 with AGE 1.6,
+bundled up to 0.9, is no longer supported: §10). Storage is ordinary
 Postgres (MVCC, WAL, standard backup tooling). Requests are JSON, with NDJSON
 for bulk writes. Every API read and write is plain SQL against AGE's per-label
 tables; Cypher runs only in the read-only console (§4,
@@ -579,13 +579,11 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
 - **Health:** `GET /healthz` (process alive, no DB), `GET /readyz` (DB
   round-trip; 503 with only a reason code if not ready), `GET /v1/info`
   (versions, tenant count, `features.louvain`, `features.metrics`,
-  `features.cypher`, and `database_deprecated`: why the database is
-  deprecated, or `null`). These and `/metrics` need no
+  `features.cypher`). These and `/metrics` need no
   token and never list tenant names (admins use `GET /v1/tenants`).
 - **Database:** the bundled `graphos-db` is PostgreSQL 18 with AGE 1.8,
-  pinned by digest. PostgreSQL 16 with AGE 1.6 still runs, and CI tests the
-  server on both, but it is deprecated: graphos logs `database deprecated` at
-  start. On the first `docker compose up` after the upgrade, two one-shot
+  pinned by digest; graphos-api refuses to start on PostgreSQL before 18 or
+  AGE before 1.8. On the first `docker compose up` after the upgrade, two one-shot
   services move a PostgreSQL 16 stack's data by themselves:
   `graphos-db-export` (PostgreSQL 16, no network) dumps the old volume, and
   `graphos-db-import` restores it into PostgreSQL 18, repoints AGE's catalogue
@@ -730,9 +728,8 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   and refuses write clauses before the database (§4). The bundled compose gives
   `graphos-db` no published port and keeps it on an internal-only network.
   People who must read the tables directly get a read-only database role of
-  their own, outside graphos's audit log; that needs AGE 1.8, since AGE 1.6
-  lets a role with only `SELECT` change data through Cypher `SET`, `REMOVE`
-  and `DELETE`
+  their own, outside graphos's audit log; on AGE 1.8 such a role cannot
+  change data through Cypher either
   ([installation §8](installation.md#direct-sql-readers)).
 - **No consumer concepts at the wire.** Labels, property keys, and edge types
   are strings the caller supplies.

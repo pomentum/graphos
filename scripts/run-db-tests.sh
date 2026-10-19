@@ -23,7 +23,7 @@
 #   scripts/run-db-tests.sh tests/test_search.py::test_x   → one test
 #   scripts/run-db-tests.sh --down-volumes   → also wipe the test volumes on exit
 #   scripts/run-db-tests.sh --db-image IMAGE → graphos-db on another database image
-#                                              (CI: the PostgreSQL 16 / AGE 1.6 one),
+#                                              (a newer AGE, say; graphos needs 18 / 1.8),
 #                                              on a volume of its own
 
 set -euo pipefail

@@ -100,29 +100,29 @@ async def create_pool(settings: Settings) -> asyncpg.Pool:
     return pool
 
 
-# The database graphos ships with (docker-compose.graphos.yml). Older ones still
-# run but are deprecated: PostgreSQL 16 has no AGE after 1.6, which carries out
-# some Cypher writes in a read-only transaction and can wedge a database process
-# on a variable-length pattern (docs/apache-age.md).
-CURRENT_POSTGRES_MAJOR = 18
-CURRENT_AGE = (1, 8)
+# The oldest database graphos starts on (ADR-0007), the one it ships with
+# (docker-compose.graphos.yml). PostgreSQL 16 has no AGE after 1.6, which carries
+# out some Cypher writes in a read-only transaction and can wedge a database
+# process on a variable-length pattern (docs/apache-age.md).
+MIN_POSTGRES_MAJOR = 18
+MIN_AGE = (1, 8)
 
 
-def deprecated_database(postgres_version: str, age_version: str | None) -> str | None:
-    """Why this PostgreSQL / AGE pair is deprecated for graphos, or ``None``."""
+def unsupported_database(postgres_version: str, age_version: str | None) -> str | None:
+    """Why graphos does not start on this PostgreSQL / AGE pair, or ``None``."""
     major = int(postgres_version.split(maxsplit=1)[0].split(".", maxsplit=1)[0])
     age = tuple(int(p) for p in (age_version or "0").split(".")[:2] if p.isdigit())
-    if major < CURRENT_POSTGRES_MAJOR or age < CURRENT_AGE:
+    if major < MIN_POSTGRES_MAJOR or age < MIN_AGE:
         return (
-            f"PostgreSQL {major} with AGE {age_version} is deprecated: move to PostgreSQL "
-            f"{CURRENT_POSTGRES_MAJOR} with AGE {'.'.join(map(str, CURRENT_AGE))} "
-            "(docs/upgrade-postgresql-18.md)"
+            f"PostgreSQL {major} with AGE {age_version or '(none)'} is not supported: graphos "
+            f"needs PostgreSQL {MIN_POSTGRES_MAJOR} with AGE {'.'.join(map(str, MIN_AGE))} or "
+            "later. To move, see docs/upgrade-postgresql-18.md"
         )
     return None
 
 
 async def fetch_db_version(pool: asyncpg.Pool) -> dict[str, Any]:
-    """Return postgres + AGE version metadata for /v1/info."""
+    """The PostgreSQL and AGE versions, for /v1/info and the start-up check."""
     async with pool.acquire() as conn:
         pg_version: str = await conn.fetchval("SHOW server_version;")
         age_version: str | None = await conn.fetchval(
@@ -131,7 +131,6 @@ async def fetch_db_version(pool: asyncpg.Pool) -> dict[str, Any]:
     return {
         "postgres_version": pg_version,
         "age_version": age_version,
-        "deprecated": deprecated_database(pg_version, age_version),
     }
 
 

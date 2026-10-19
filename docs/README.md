@@ -4,7 +4,7 @@ Start with **[`concept.md`](concept.md)** — the standing reference. It describ
 
 - **[`installation.md`](installation.md)** — installing, the first sign-in, users, single sign-on, production settings, upgrading.
 - **[`without-graphos.md`](without-graphos.md)** — reading graphos's tables with plain SQL or Cypher, what an export carries, loading it into a plain AGE graph.
-- **[`upgrade-postgresql-18.md`](upgrade-postgresql-18.md)** — moving a PostgreSQL 16 / AGE 1.6 stack (deprecated) to PostgreSQL 18 / AGE 1.8 with `docker compose up`, checking it, going back.
+- **[`upgrade-postgresql-18.md`](upgrade-postgresql-18.md)** — moving a PostgreSQL 16 / AGE 1.6 stack (no longer supported) to PostgreSQL 18 / AGE 1.8 with `docker compose up`, checking it, going back.
 - **[`features.md`](features.md)** — capabilities at a glance.
 - **[`algorithms.md`](algorithms.md)** — the graph algorithms (Louvain, PageRank, betweenness, components, degree): what each finds and what it is for.
 - **[`usage.md`](usage.md)** — worked requests for every endpoint group, limits and errors.

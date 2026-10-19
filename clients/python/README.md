@@ -124,7 +124,7 @@ Runnable scripts in [`examples/`](examples/). Each reads `GRAPHOS_URL` (default 
 | Rule-based edges | `resolve_edges`, `catalogue` |
 | Cache | `cache_put`, `cache_get`, `cache_delete` |
 | Change feed | `changes`, `changes_head`, `iter_changes`, `stream_changes` (reconnects with `Last-Event-ID`), `changes_history` (newest first, for showing the past) |
-| Operations | `healthz`, `readyz`, `info` (no token; reports `database_deprecated`), and for admins `db_stats`, `slow_queries`, `vacuum` |
+| Operations | `healthz`, `readyz`, `info` (no token; versions and features), and for admins `db_stats`, `slow_queries`, `vacuum` |
 | Background jobs | `submit_recompute_communities`, `submit_compute_metrics`, `submit_resolve_edges`, `submit_check_properties`, `submit_vacuum` (each returns a `Job`), `get_job`, `list_jobs`, `cancel_job`, `wait_for_job` |
 
 Not wrapped (use HTTP, see the [usage guide](https://github.com/pomentum/graphos/blob/main/docs/usage.md)): users, grants and sign-in (`/v1/users`, `/v1/grants`, `/v1/auth/*`, `/v1/me/password`), `PATCH /v1/me/preferences`, and the MCP endpoint `/mcp`, which is for agents (see the [agents guide](https://github.com/pomentum/graphos/blob/main/docs/agents.md)).

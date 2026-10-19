@@ -52,10 +52,10 @@ bash scripts/run-db-tests.sh tests/test_search.py::test_x    # one test
 bash scripts/run-db-tests.sh --db-image <image>              # another database image
 ```
 
-CI runs the integration job on pull requests and on `main`, twice: against
-the compose's PostgreSQL 18 / AGE 1.8, and against PostgreSQL 16 / AGE 1.6
-(`apache/age:release_PG16_1.6.0`, pinned by digest). A change must pass on
-both. PostgreSQL 16 / AGE 1.6 is deprecated but still supported.
+CI runs the integration job on pull requests and on `main`, against the
+compose's PostgreSQL 18 / AGE 1.8. graphos-api refuses to start on an older
+database (ADR-0007); the move from PostgreSQL 16 stays in
+`services/graphos/deploy/db-upgrade/`.
 
 ## 3. Data-model invariants
 
@@ -134,8 +134,8 @@ Changing one takes an [ADR](../../docs/adrs/README.md) first.
   `conftest.py`): it marks `db` and skips without `GRAPHOS_TEST_DSN`. Files
   whose tests all need it are named `test_<area>_db.py`.
 - Test names are sentences: `test_write_clauses_are_found_and_nothing_else`.
-- Seed test data with SQL writes (through `writes.py`), not Cypher, so the
-  suite runs on AGE 1.6 and 1.8.
+- Seed test data with SQL writes (through `writes.py`), not Cypher: AGE 1.8
+  refuses Cypher writes on graphos's label tables.
 - Fixtures use neutral names (`acme`, `Doc`, `LINKS_TO`); see
   [development.md §7](../../docs/development.md#7-privacy).
 

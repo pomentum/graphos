@@ -74,6 +74,14 @@ under one version.
 
 ### Changed
 
+- **PostgreSQL 16 / AGE 1.6 is no longer supported**
+  ([ADR-0007](docs/adrs/ADR-0007-drop-postgresql-16.md)): graphos-api refuses to start on
+  PostgreSQL before 18 or AGE before 1.8, naming the versions it found and the
+  [upgrade guide](docs/upgrade-postgresql-18.md), where it used to start with a warning. **A
+  stack still on PostgreSQL 16 must move before or as it upgrades**: with the compose file,
+  `docker compose up -d` moves it by itself, as since 0.10.0 (`graphos-db-export` and
+  `graphos-db-import` stay). `GET /v1/info` no longer has `database_deprecated`. CI runs the
+  integration tests on PostgreSQL 18 / AGE 1.8 only.
 - **The Cypher console is on by default** ([ADR-0006](docs/adrs/ADR-0006-console-on-by-default.md)):
   `GRAPHOS_CYPHER` now defaults to `true`, so the UI's Query page, saved queries and the MCP
   `run_cypher` tool work on a fresh install. Its guard, limits, audit and level
