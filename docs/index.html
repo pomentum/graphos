@@ -97,6 +97,7 @@
 <div class="card"><h4>Graph analytics</h4><p>A map of every label and the edges between them (about a second on ten million edges), aggregates, top-K by degree (<a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md#6-aggregates">usage</a>).</p></div>
 <div class="card"><h4>Graph algorithms</h4><p>Louvain communities (optional extra), PageRank, betweenness, components and degree, run beside the API and written onto the nodes (<a href="https://github.com/pomentum/graphos/blob/main/docs/algorithms.md">what each finds</a>).</p></div>
 <div class="card"><h4>Cypher console</h4><p>Read-only Cypher on one tenant, write clauses refused, with a timeout, a row cap and saved queries (<a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md#cypher-console">usage</a>).</p></div>
+<div class="card"><h4>Agents (MCP)</h4><p>An MCP endpoint at <code>/mcp</code> serves graphos's reads to AI agents as 22 read tools, with the API's own tokens, grants, caps and timeouts and every call audited (<a href="https://github.com/pomentum/graphos/blob/main/docs/agents.md">agents guide</a>).</p></div>
 <div class="card"><h4>Web UI (optional)</h4><p>Explore, inspect and edit, work on many nodes at once, import a CSV file, query, extend the schema, follow changes live and export what is on screen (<a href="#web-ui">below</a>).</p></div>
 </div></div>
 <div class="group"><h3>Run</h3><div class="cards">
@@ -180,6 +181,7 @@ ADMIN_TOKEN=$(curl -s -X POST http://127.0.0.1:8080/v1/me/password -H &quot;Auth
 <div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/sso.md">Single sign-on</a></dt><dd>Registering graphos at an OpenID Connect provider, a Keycloak example, troubleshooting</dd></div>
 <div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/algorithms.md">Graph algorithms</a></dt><dd>What Louvain, PageRank, betweenness, components and degree find, and what they are for</dd></div>
 <div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md">Usage guide</a></dt><dd>Practical integration patterns</dd></div>
+<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/agents.md">Connecting an agent (MCP)</a></dt><dd>Where <code>/mcp</code> is, getting a token, configuring a client, the tools and resources, security</dd></div>
 <div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/features.md">Feature survey</a></dt><dd>Every capability, briefly</dd></div>
 <div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/concept.md">Concept</a></dt><dd>Architecture, endpoint catalogue, capacity planning</dd></div>
 <div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/apache-age.md">Apache AGE notes</a></dt><dd>AGE pitfalls, indexing, Postgres tuning, measured numbers</dd></div>

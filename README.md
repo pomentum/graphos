@@ -35,6 +35,7 @@ The picture above is the map; each line below links to the section that covers i
 - **Graph analytics:** a map of every label and the edges between them (about a second on ten million edges), aggregates, top-K by degree ([usage](docs/usage.md#6-aggregates)).
 - **Graph algorithms:** Louvain communities (optional extra), PageRank, betweenness, components and degree, run beside the API and written onto the nodes ([what each finds](docs/algorithms.md)).
 - **Cypher console:** read-only Cypher on one tenant, write clauses refused, with a timeout, a row cap and saved queries ([usage](docs/usage.md#cypher-console)).
+- **Agents (MCP):** an MCP endpoint at `/mcp` serves graphos's reads to AI agents as 22 read tools, with the API's own tokens, grants, caps and timeouts and every call audited ([agents guide](docs/agents.md)).
 - **Web UI (optional):** explore, inspect and edit, work on many nodes at once, import a CSV file, query, extend the schema, follow changes live and export what is on screen ([below](#web-ui)).
 
 **Run**
@@ -252,6 +253,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | [Single sign-on](docs/sso.md) | Registering graphos at an OpenID Connect provider, a Keycloak example, troubleshooting |
 | [Graph algorithms](docs/algorithms.md) | What Louvain, PageRank, betweenness, components and degree find, and what they are for |
 | [Usage guide](docs/usage.md) | Practical integration patterns |
+| [Connecting an agent (MCP)](docs/agents.md) | Where `/mcp` is, getting a token, configuring a client, the tools and resources, security |
 | [Feature survey](docs/features.md) | Every capability, briefly |
 | [Concept](docs/concept.md) | Architecture, endpoint catalogue, capacity planning |
 | [Apache AGE notes](docs/apache-age.md) | AGE pitfalls, indexing, Postgres tuning, measured numbers |
