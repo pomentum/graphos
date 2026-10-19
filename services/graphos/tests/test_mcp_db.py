@@ -133,12 +133,26 @@ async def test_an_agent_reads_a_granted_tenant_and_every_call_is_audited(
         assert tenants.structured_content["tenants"] == [TENANT]
         schema = await client.call_tool("get_schema", {"tenant": TENANT})
         assert not schema.is_error, schema.content
-        (doc,) = schema.structured_content["labels"]
+        assert schema.structured_content is None             # the compact text alone
+        assert "Doc" in schema.content[0].text and "ACT" in schema.content[0].text
+        full = await client.call_tool("get_schema", {"tenant": TENANT, "format": "json"})
+        (doc,) = full.structured_content["labels"]
         status = next(p for p in doc["properties"] if p["name"] == "status")
         assert {v["value"]: v["count"] for v in status["values"]} == {"ACT": 2, "OLD": 1}
-        assert "status" in schema.structured_content["text"]
+        assert full.structured_content["text"] == schema.content[0].text
         found = await client.call_tool("search_nodes", {"tenant": TENANT, "q": "alp"})
         assert [n["properties"]["id"] for n in found.structured_content["nodes"]] == ["a"]
+        assert found.structured_content["nodes"][0]["properties"]["status"] == "ACT"
+        named = await client.call_tool(
+            "search_nodes", {"tenant": TENANT, "q": "alp", "properties": ["name"]},
+        )
+        assert named.structured_content["nodes"][0]["properties"] == {"id": "a", "name": "alpha"}
+        near = await client.call_tool(
+            "get_neighbors", {"tenant": TENANT, "node_id": "a", "properties": []},
+        )
+        assert [n["neighbor_properties"] for n in near.structured_content["neighbors"]] == [
+            {"id": "b"},
+        ]
         checked = await client.call_tool("check_edges", {"tenant": TENANT, "edges": [
             {"type": "LINKS_TO", "src_id": "a", "dst_id": "b"},
             {"type": "LINKS_TO", "src_id": "b", "dst_id": "a"},
@@ -210,6 +224,7 @@ async def test_run_cypher_is_offered_with_the_console_and_keeps_its_guard(
                 "tenant": TENANT, "name": "active_docs", "params": {"s": "ACT"},
             })
             assert ran.structured_content["rows"] == [["alpha"], ["beta"]]
+            assert "graph" not in ran.structured_content          # the UI's drawing of the rows
             missing = await client.call_tool("get_saved_query", {"tenant": TENANT, "name": "nope"})
             assert missing.is_error
             resource = await client.read_resource(f"graphos://{TENANT}/saved-queries")
