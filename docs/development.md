@@ -158,8 +158,9 @@ on `main`: GitHub Pages serves the folder (Settings → Pages → Deploy from a
 branch, `main`, `/docs`) and runs no build of ours. Its page,
 `docs/index.html`, is generated like the diagrams: `tools/docs/site.py` fills
 the frame `tools/docs/site.html` with the README's features, screenshots,
-first quickstart block and documentation table, and the version. Edit the
-README or the frame, never `docs/index.html`. Beside it sit `site.css` and
+first quickstart block and documentation table, the version, and each
+diagram's alt text from its SVG. Edit the README, the diagrams or the frame,
+never `docs/index.html`. Beside it sit `site.css` and
 `site.js` (its design and light/dark switch), `favicon.svg`,
 `404.html` and `.nojekyll`; its pictures are `docs/images/`. Everything
 committed under `docs/` is published, so keep private notes in

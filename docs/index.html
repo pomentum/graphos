@@ -3,7 +3,8 @@
 <!--
   The frame of the graphos website's page, docs/index.html. tools/docs/site.py fills every double-brace slot
   from the README (features, screenshots, first quickstart block, documentation
-  table) and services/graphos/pyproject.toml (the version). The rest is written
+  table), services/graphos/pyproject.toml (the version) and the diagrams'
+  own descriptions (their alt text). The rest is written
   here and must say only what the docs say: At a glance matches
   docs/features.md or the README, and every benchmark figure is quoted, with
   its setup, from docs/apache-age.md, docs/concept.md, docs/features.md or
@@ -31,6 +32,7 @@
 <div class="bar"><div class="bar-inner">
   <a class="bar-name" href="#top">graphos</a>
   <nav class="bar-links" aria-label="Sections">
+    <a href="#why">Why</a>
     <a href="#features">Features</a>
     <a href="#benchmarks">Benchmarks</a>
     <a href="#ui">Web UI</a>
@@ -69,7 +71,14 @@
     </section>
   </div>
 
-  <h2 id="glance"><span class="sec"><span class="num">01 · At a glance</span></span>What graphos is made of</h2>
+  <h2 id="why"><span class="sec"><span class="num">01 · Why</span></span>From many database clients to one graph service</h2>
+  <figure class="fig pic">
+    <img class="pic-light" src="images/problem-light.svg" alt="Left: three services each embed a database driver, a connection string and their own Cypher, and all reach one shared graph database, so credentials and query text spread, there is no tenant boundary, a slow query affects everyone and each team re-solves bulk load and indexing. Right: the same services call graphos over typed HTTP; graphos alone reaches PostgreSQL with Apache AGE on a private network, giving each consumer its own account and short-lived tokens, a graph per tenant with bounded, timed queries, and built-in bulk load, indexing and community detection.">
+    <img class="pic-dark" src="images/problem-dark.svg" alt="" aria-hidden="true">
+    <figcaption><span class="fig-n">Fig 01</span><span>Without graphos, every service holds a driver, a connection string and its own Cypher. With it, services call typed HTTP and only graphos reaches PostgreSQL + Apache AGE.</span></figcaption>
+  </figure>
+
+  <h2 id="glance"><span class="sec"><span class="num">02 · At a glance</span></span>What graphos is made of</h2>
   <dl class="gloss glance">
     <div><dt>Storage</dt><dd>PostgreSQL 18 with Apache AGE 1.8; each tenant is its own AGE graph</dd></div>
     <div><dt>API</dt><dd>Typed HTTP (FastAPI), JSON and NDJSON; the contract at <code>/openapi.json</code></dd></div>
@@ -82,7 +91,7 @@
     <div><dt>Agents</dt><dd>An MCP endpoint, <code>/mcp</code>: 22 read tools on the API's tokens and grants</dd></div>
   </dl>
 
-  <h2 id="features"><span class="sec"><span class="num">02 · Features</span></span>Build, explore, run</h2>
+  <h2 id="features"><span class="sec"><span class="num">03 · Features</span></span>Build, explore, run</h2>
 <div class="group"><h3>Build</h3><div class="cards">
 <div class="card"><h4>Tenants and schema</h4><p>Each tenant is its own AGE graph with its own labels; no built-in labels or property names; optional property rules, <code>warn</code> or <code>strict</code> (<a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md#3-tenant-registration">usage</a>).</p></div>
 <div class="card"><h4>Fast, idempotent writes</h4><p>Batches, NDJSON bulk and snapshot import as COPY-staged upserts, 37–156× faster than per-row Cypher <code>MERGE</code> in our measurements (<a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md#4-writing-data">usage</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/apache-age.md">AGE notes</a>).</p></div>
@@ -107,7 +116,7 @@
 <div class="card"><h4>Operable</h4><p>Prometheus metrics, JSON logs with <code>traceparent</code>, an audit log and per-user rate limiting (<a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md#11-operations">usage</a>).</p></div>
 </div></div>
 
-  <h2 id="benchmarks"><span class="sec"><span class="num">03 · Benchmarks</span></span>Bulk writes 37–156× faster than per-row Cypher MERGE</h2>
+  <h2 id="benchmarks"><span class="sec"><span class="num">04 · Benchmarks</span></span>Bulk writes 37–156× faster than per-row Cypher MERGE</h2>
   <p class="lead-in">Every write goes through COPY-staged SQL upserts instead of Cypher, every label gets its indexes at registration, and the same graph reads faster on PostgreSQL 18 with AGE 1.8, which graphos now requires. Measured with the scripts in <code>scripts/</code>, by profiling queries and by timing requests against a running service: orders of magnitude, not guarantees.</p>
   <div class="tbl">
     <table class="bench">
@@ -132,13 +141,19 @@
     <div class="stat"><b>0 of 840</b><span>requests failed in the read mix, on either database</span></div>
   </div>
 
-  <h2 id="how"><span class="sec"><span class="num">04 · How it fits</span></span>One service owns the graph</h2>
+  <h2 id="how"><span class="sec"><span class="num">05 · How it works</span></span>One service owns the graph</h2>
   <figure class="fig pic">
     <img class="pic-light" src="images/architecture-light.svg" alt="Consumers call graphos-api over the graphos-net network with a bearer token. graphos-api checks tenant scope and read/write access, validates typed contracts, builds SQL internally, times out bad queries and emits metrics and audit logs. Only graphos-api reaches PostgreSQL 18 with Apache AGE on an internal network; each tenant is its own AGE graph.">
     <img class="pic-dark" src="images/architecture-dark.svg" alt="" aria-hidden="true">
+    <figcaption><span class="fig-n">Fig 02</span><span>The boundary: consumers reach graphos-api only, with a bearer token; graphos-api alone reaches the database, on an internal network.</span></figcaption>
+  </figure>
+  <figure class="fig pic">
+    <img class="pic-light" src="images/communities-light.svg" alt="A call to recompute-communities, by a user with maintain on the tenant, streams edges out of PostgreSQL as integer ids with plain SQL, builds a weighted undirected igraph with its vertices in id order, runs Louvain in a separate process with a fixed seed, and matches each new cluster to its predecessor from the last run by Jaccard overlap of at least 0.5 so community ids stay stable. Results are written back with COPY and a single UPDATE, then the community id is denormalised onto every edge so scoped traversals use an index. Only one run per tenant happens at a time, a dry run previews the partition, and the response reports time per step and modularity.">
+    <img class="pic-dark" src="images/communities-dark.svg" alt="" aria-hidden="true">
+    <figcaption><span class="fig-n">Fig 03</span><span>Communities, computed beside the data: Louvain in its own process, ids kept stable from run to run, written back with COPY (<a href="https://github.com/pomentum/graphos/blob/main/docs/algorithms.md">what each algorithm finds</a>).</span></figcaption>
   </figure>
 
-  <h2 id="ui"><span class="sec"><span class="num">05 · Web UI</span></span>Explore, edit, query</h2>
+  <h2 id="ui"><span class="sec"><span class="num">06 · Web UI</span></span>Explore, edit, query</h2>
   <div class="shots">
 <figure class="fig"><img class="shot" src="images/ui-explore-graph-dark.png" alt="The Explore view of the demo tenant, an invented software ecosystem: about 450 nodes coloured by the community Louvain found, six clusters around shared core libraries; the selected library's panel shows its community id and the graph metrics graphos computed." loading="lazy" width="1440" height="900"><figcaption><span class="fig-n">UI 01</span><span>Explore, on the <a href="https://github.com/pomentum/graphos/blob/main/clients/python/examples/08_demo_ecosystem.py">demo tenant</a>: coloured by community, a core library selected with the metrics graphos computed for it.</span></figcaption></figure>
 <figure class="fig"><img class="shot" src="images/ui-schema-editor-dark.png" alt="The schema diagram of the demo tenant: Library, Framework and Tool in a block under their parent label Package, the selected label's relationships, its properties in a panel (declared, or carried without a definition), and the Add menu for a new label, relationship type, search index or property." loading="lazy" width="1440" height="900"><figcaption><span class="fig-n">UI 02</span><span>The schema editor: labels with their kinds, relationship types, and adding to the schema in place.</span></figcaption></figure>
@@ -148,7 +163,7 @@
 <figure class="fig"><img class="shot" src="images/ui-csv-import-dark.png" alt="The CSV import dialog: a semicolon-separated file of people mapped to the Person label, its columns as properties with their types, and graphos's check of every row before anything is written: one row refused for an empty id, a repeated id merged, a value that does not read as a number left out." loading="lazy" width="1440" height="900"><figcaption><span class="fig-n">UI 06</span><span>Importing a CSV file: the columns mapped to a label's properties, and graphos's check of every row before anything is written.</span></figcaption></figure>
   </div>
 
-  <h2 id="start"><span class="sec"><span class="num">06 · Get started</span></span>Run it on your machine</h2>
+  <h2 id="start"><span class="sec"><span class="num">07 · Get started</span></span>Run it on your machine</h2>
   <p class="prose">Docker with Compose v2 and about 4 GB of memory for Docker.</p>
   <pre class="record">git clone https://github.com/pomentum/graphos.git &amp;&amp; cd graphos
 
@@ -173,7 +188,7 @@ ADMIN_TOKEN=$(curl -s -X POST http://127.0.0.1:8080/v1/me/password -H &quot;Auth
     <li>Load the demo tenant to explore: <a href="https://github.com/pomentum/graphos/blob/main/clients/python/examples/08_demo_ecosystem.py"><code>08_demo_ecosystem.py</code></a>.</li>
   </ol>
 
-  <h2 id="docs"><span class="sec"><span class="num">07 · Documentation</span></span>Read further</h2>
+  <h2 id="docs"><span class="sec"><span class="num">08 · Documentation</span></span>Read further</h2>
   <dl class="gloss docs">
 <div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/installation.md">Installation guide</a></dt><dd>Installing, the first sign-in, users, single sign-on, production settings, upgrading</dd></div>
 <div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/without-graphos.md">Reading graphos&#x27;s data without graphos</a></dt><dd>The table layout, reading it with SQL or Cypher, taking it out, loading an export into plain AGE</dd></div>

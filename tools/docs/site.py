@@ -11,7 +11,9 @@ the repository already has, so nothing on the page is written twice:
 
 - the README's features (Build, Explore, Run), web UI screenshots and captions, first
   quickstart block and documentation table;
-- the version from ``services/graphos/pyproject.toml``.
+- the version from ``services/graphos/pyproject.toml``;
+- the alt text of each diagram it shows, from the ``<desc>`` that ``diagrams.mjs`` writes
+  into ``docs/images/<name>-light.svg``.
 
 Links into the repository (``docs/usage.md``) point to GitHub. The script fails when a
 slot is left unfilled or a local link or picture points at a file ``docs/`` does not have.
@@ -166,6 +168,15 @@ def check_links(page: str) -> list[str]:
     return missing
 
 
+def diagram_alt(name: str) -> str:
+    """A diagram's alt text: the description diagrams.mjs gave it, as an attribute value."""
+    svg = (DOCS / "images" / f"{name}-light.svg").read_text(encoding="utf-8")
+    m = re.search(r"<desc[^>]*>(.*?)</desc>", svg, re.DOTALL)
+    if not m:
+        raise SystemExit(f"docs/images/{name}-light.svg has no <desc>")
+    return html.escape(html.unescape(" ".join(m.group(1).split())))
+
+
 def render() -> str:
     """The page, its slots filled from the README and the version."""
     readme = sections((REPO / "README.md").read_text(encoding="utf-8"))
@@ -175,6 +186,8 @@ def render() -> str:
         "shots": shots(readme["web ui"]),
         "quickstart": first_code_block(readme["quickstart"]),
         "docs": docs_table(readme["documentation"]),
+        "alt_problem": diagram_alt("problem"),
+        "alt_communities": diagram_alt("communities"),
     }
     frame = FRAME.read_text(encoding="utf-8")
     page = re.sub(r"\{\{ (\w+) \}\}", lambda m: values[m.group(1)], frame)
