@@ -130,6 +130,10 @@ read **Upgrading** before moving to this version.
 - Web UI, CSV import: a file moved, renamed or deleted after it was chosen made the check or the
   import say graphos could not be reached; it now says the file can no longer be read, and to
   choose it again.
+- Web UI, MCP sign-in page (`/authorize`): with single sign-on on, a stale or hand-made link
+  offered graphos's password form, then said graphos could not be reached. It now says the MCP
+  client signs in at the identity provider, and, where graphos does not sign MCP clients in
+  (`/mcp` off), says so.
 
 ## 0.12.0 — 2026-10-16
 
