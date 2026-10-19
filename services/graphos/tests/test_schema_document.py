@@ -83,7 +83,7 @@ def test_the_same_schema_gives_the_same_document() -> None:
 @pytest.mark.parametrize(
     ("header", "needle"),
     [
-        ({"format": "graphos.schema", "version": 3, "graphos": "9.0.0"}, "version 3"),
+        ({"format": "graphos.schema", "version": 4, "graphos": "9.0.0"}, "version 4"),
         ({"format": "something.else", "version": 1}, "something.else"),
         ({"version": "1"}, "positive integer"),
         ("graphos.schema", "object"),

@@ -2,7 +2,7 @@
 
 A registration that changes the tenant's schema (labels, edge types,
 declared pairs, label hierarchy, search indexes, resolve rules, property
-indexes, generated columns, ``meta`` keys, display and property schema
+indexes, generated columns, ``meta`` keys, display, property schema and deprecated
 entries, ``strict_endpoints``, the property mode) is recorded with what it
 added, removed, changed or switched; one that changes nothing (a consumer
 re-registering at startup) records nothing. Removing a declared pair,
@@ -21,7 +21,7 @@ from graphos import by_entry, changes, declared
 from graphos.bootstrap import TenantSpec
 
 # Spec keys kept per label and edge type (graphos.by_entry), recorded by entry.
-_BY_ENTRY = ("display", "property_schema")
+_BY_ENTRY = ("display", "property_schema", "deprecated")
 
 
 def _sets(spec: TenantSpec | None) -> dict[str, set[Any]]:

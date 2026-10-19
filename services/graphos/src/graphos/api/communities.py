@@ -18,7 +18,7 @@ from typing import Annotated, Any
 import asyncpg
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 
-from graphos import analysis
+from graphos import analysis, renames
 from graphos.api.graph import _check_tenant
 from graphos.auth import ReadPrincipal, Tenant
 from graphos.bootstrap import registered_tenants
@@ -535,6 +535,7 @@ def _check_label(tenant: str, label: str, *, kind: str) -> None:
         )
     allowed = set(spec.vertex_labels) if kind == "vertex" else set(spec.edge_labels)
     if label not in allowed:
+        renames.refuse_renamed(spec, label)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(

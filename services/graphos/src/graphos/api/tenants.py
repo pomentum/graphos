@@ -45,6 +45,7 @@ from graphos import (
     by_entry,
     declared,
     lifecycle,
+    renames,
     schema_breaking,
     schema_changes,
     schema_document,
@@ -76,11 +77,13 @@ from graphos.bootstrap import (
 from graphos.contracts.property_schema import PropertySchemaSpec
 from graphos.contracts.tenants import (
     BreakingChange,
+    DeprecatedSpec,
     DisplaySpec,
     GeneratedColumnSpec,
     PropertyIndexSpec,
     RegisterDryRunResponse,
     RegisterResponse,
+    SchemaRename,
     TenantInfo,
     TenantList,
     TenantSpecBody,
@@ -106,7 +109,7 @@ _SCHEMA_DOCUMENT = {
             "description": "What the file is; a registration checks it and ignores it.",
             "properties": {
                 "format": {"type": "string", "enum": [schema_document.FORMAT]},
-                "version": {"type": "integer", "enum": [1, 2]},
+                "version": {"type": "integer", "enum": [1, 2, 3]},
                 "graphos": {"type": "string", "description": "The exporting graphos version."},
                 "tenant": {"type": "string"},
                 "exported_at": {"type": "string", "format": "date-time"},
@@ -138,6 +141,8 @@ def _spec_to_info(spec: TenantSpec) -> TenantInfo:
         search_indexes=dict(spec.search_indexes),
         display=DisplaySpec.model_validate(spec.display),
         property_schema=PropertySchemaSpec.model_validate(spec.property_schema),
+        deprecated=DeprecatedSpec.model_validate(spec.deprecated),
+        renames=[SchemaRename.model_validate(r) for r in spec.renames],
     )
 
 
@@ -171,6 +176,32 @@ def _display(body: TenantSpecBody) -> tuple[dict[str, Any], by_entry.Removed]:
     return by_entry.split(body.display, lambda e: e.model_dump(exclude_none=True))
 
 
+def _deprecated(body: TenantSpecBody) -> tuple[dict[str, Any], by_entry.Removed]:
+    """The deprecations a registration declares, and those it removes."""
+    return by_entry.split(
+        body.deprecated, lambda e: e.model_dump(exclude_none=True, exclude_defaults=True),
+    )
+
+
+def _validate_deprecated(
+    deprecated: dict[str, Any], *, vertex_labels: set[str], edge_labels: set[str],
+) -> None:
+    """Deprecations name the tenant's labels and types, and what replaces a label
+    or type is one of them too."""
+    for part, known, kind in (
+        ("vertex", vertex_labels, "vertex label"), ("edge", edge_labels, "edge label"),
+    ):
+        for name, entry in (deprecated.get(part) or {}).items():
+            if name not in known:
+                raise ValueError(f"deprecated: {name!r} is not a {kind} of the tenant")
+            replacement = entry.get("replaced_by")
+            if replacement is not None and replacement not in known:
+                raise ValueError(
+                    f"deprecated: {name!r} is replaced by {replacement!r}, "
+                    f"not a {kind} of the tenant"
+                )
+
+
 def _validate_declared(
     body: TenantSpecBody, known: TenantSpec | None, vertex_labels: set[str],
 ) -> None:
@@ -202,12 +233,13 @@ async def _dry_run(
     *, replace: bool, endpoints_stated: bool, meta_removed: tuple[str, ...] = (),
     display_removed: tuple[tuple[str, str], ...] = (),
     schema_removed: tuple[tuple[str, str], ...] = (),
+    deprecated_removed: tuple[tuple[str, str], ...] = (),
 ) -> RegisterDryRunResponse:
     """What registering ``spec`` would change, checked as bootstrap would."""
     after = schema_document.merged(
         previous, spec, replace=replace, endpoints_stated=endpoints_stated,
         meta_removed=meta_removed, display_removed=display_removed,
-        schema_removed=schema_removed,
+        schema_removed=schema_removed, deprecated_removed=deprecated_removed,
     )
     try:
         _validate_label_hierarchy(spec.label_hierarchy, spec.vertex_labels)
@@ -441,6 +473,11 @@ async def register(
     known = registered_tenants().get(body.name)
     display, display_removed = _display(body)
     property_schema, schema_removed = _property_schema(body)
+    deprecated, deprecated_removed = _deprecated(body)
+    if known is not None:
+        # A name renamed away is not created again by an old client registering it.
+        for name in (*body.vertex_labels, *edge_label_names):
+            renames.refuse_renamed(known, name)
     try:
         vertex_labels = {*body.vertex_labels, *(known.vertex_labels if known else ())}
         edge_labels = {*edge_label_names, *(known.edge_labels if known else ())}
@@ -463,6 +500,11 @@ async def register(
             ),
             replace=force_shrink,
         )
+        _validate_deprecated(
+            deprecated,
+            vertex_labels=set(body.vertex_labels) if force_shrink else vertex_labels,
+            edge_labels=set(edge_label_names) if force_shrink else edge_labels,
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc),
@@ -482,6 +524,7 @@ async def register(
         search_indexes={k: v.model_dump() for k, v in body.search_indexes.items()},
         display=display,
         property_schema=property_schema,
+        deprecated=deprecated,
         edge_endpoints=edge_endpoints,
         strict_endpoints=body.strict_endpoints,
     )
@@ -504,7 +547,7 @@ async def register(
             pool, known, spec, replace=force_shrink,
             endpoints_stated="edge_endpoints" in body.model_fields_set,
             meta_removed=meta_removed, display_removed=display_removed,
-            schema_removed=schema_removed,
+            schema_removed=schema_removed, deprecated_removed=deprecated_removed,
         )
         return result.model_copy(update={"exists": previous is not None, "restores": restores})
     if restores:
@@ -538,7 +581,7 @@ async def register(
     else:
         await persist_spec(
             pool, spec, meta_removed=meta_removed, display_removed=display_removed,
-            schema_removed=schema_removed,
+            schema_removed=schema_removed, deprecated_removed=deprecated_removed,
         )
     # Persisting merges with the stored spec (unless force_shrink); keep the
     # merged result in memory so a partial re-registration never hides labels

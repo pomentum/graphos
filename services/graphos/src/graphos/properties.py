@@ -11,6 +11,12 @@ Modes: ``off`` (nothing checked), ``warn`` (checked, written anyway, counted)
 and ``strict`` (a row with an error is refused).  ``recommended`` properties
 and ``undeclared: warn`` only ever warn.  ``id``, ``graphos_*`` and
 ``community_id`` are always allowed.
+
+Whatever the mode, a deprecated label, type or property (``deprecated``,
+ADR-0009) is a warning (rule ``deprecated``), and a property renamed away is
+refused once its rename is done (rule ``renamed``; a warning while the rename
+job still runs).  A patch is checked as it leaves the row, so a deprecation
+never refuses: an old row keeps its old property until rewritten.
 """
 
 from __future__ import annotations
@@ -23,7 +29,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from typing import Any
 
-from graphos import reserved
+from graphos import renames, reserved
 from graphos.contracts.property_schema import ALL
 
 # A longer value fails a pattern without the pattern being run.
@@ -190,17 +196,31 @@ class Policy:
     undeclared: str = "allow"
     undeclared_source: str = ALL
     properties: Mapping[str, Definition] = field(default_factory=dict)
+    # The label or type it applies to (``*`` for one not registered).
+    name: str = ALL
+    # The label or type itself deprecated: why (a warning on every row).
+    deprecated_label: str | None = None
+    # Deprecated properties: name -> why (a warning).
+    deprecated: Mapping[str, str] = field(default_factory=dict)
+    # Properties renamed away: name -> (why, refused).
+    renamed: Mapping[str, tuple[str, bool]] = field(default_factory=dict)
 
     @property
     def checks(self) -> bool:
-        return self.mode != "off"
+        return self.mode != "off" or self.names_checked
+
+    @property
+    def names_checked(self) -> bool:
+        """Whether deprecated or renamed names are checked, whatever the mode."""
+        return bool(self.deprecated_label or self.deprecated or self.renamed)
 
     def check(self, properties: Mapping[str, Any], *, row_id: str | None = None) -> list[Violation]:
         """Every violation of a row's properties (as sent, or as a patch leaves
-        them), errors and warnings; nothing when the mode is off."""
-        if not self.checks:
-            return []
-        out: list[Violation] = []
+        them), errors and warnings; only deprecated and renamed names when the
+        mode is off."""
+        out = self._names(properties) if self.names_checked else []
+        if self.mode == "off":
+            return out
         for name, definition in self.properties.items():
             out.extend(self._check_one(name, definition, properties, row_id))
         if self.undeclared != "allow":
@@ -210,6 +230,19 @@ class Policy:
                 for name in properties
                 if name not in self.properties and not always_allowed(name)
             )
+        return out
+
+    def _names(self, properties: Mapping[str, Any]) -> list[Violation]:
+        out: list[Violation] = []
+        if self.deprecated_label:
+            out.append(Violation(ALL, "deprecated", self.deprecated_label, self.name, WARNING))
+        for name in properties:
+            if name in self.renamed:
+                why, refused = self.renamed[name]
+                severity = ERROR if refused else WARNING
+                out.append(Violation(name, "renamed", why, self.name, severity))
+            elif name in self.deprecated:
+                out.append(Violation(name, "deprecated", self.deprecated[name], self.name, WARNING))
         return out
 
     @staticmethod
@@ -263,6 +296,37 @@ def _narrowed(before: Definition, name: str, spec: Mapping[str, Any], source: st
     if combined["required"]:
         combined.pop("recommended", None)
     return Definition.of(combined, source)
+
+
+def _names_of(
+    spec_deprecated: Mapping[str, Any], spec_renames: Iterable[Mapping[str, Any]],
+    part: str, chain: list[str],
+) -> dict[str, Any]:
+    """A label's or type's deprecated and renamed names (``chain``: its ancestors from
+    the root down, then itself; a property deprecated or renamed on a parent is so on
+    its children)."""
+    entries = spec_deprecated.get(part) or {}
+    own = entries.get(chain[-1]) or {}
+    kind = "vertex label" if part == "vertex" else "edge type"
+    deprecated: dict[str, str] = {}
+    for name in chain:
+        for prop, entry in ((entries.get(name) or {}).get("properties") or {}).items():
+            deprecated[prop] = renames.deprecation_note(entry, "the property")
+    renamed: dict[str, tuple[str, bool]] = {}
+    for entry in spec_renames:
+        if entry.get("kind") == "property" and entry.get("on") in chain:
+            to = entry.get("to")
+            renamed[str(entry["from"])] = (
+                (f"renamed to {to!r}", True) if entry.get("status", "done") == "done"
+                else (f"being renamed to {to!r}: write {to!r}", False)
+            )
+    return {
+        "deprecated_label": (
+            renames.deprecation_note(own, f"the {kind}") if own.get("deprecated") else None
+        ),
+        "deprecated": deprecated,
+        "renamed": renamed,
+    }
 
 
 def _merge(entries: Iterable[tuple[str, Mapping[str, Any]]], tenant_mode: str) -> Policy:
@@ -319,27 +383,42 @@ class Policies:
         return any(p.checks for p in every)
 
 
-def compile_schema(
+def compile_schema(  # noqa: PLR0913 -- the spec's parts
     schema: Mapping[str, Any],
     vertex_labels: Iterable[str],
     edge_labels: Iterable[str],
     hierarchy: Mapping[str, str],
+    deprecated: Mapping[str, Any] | None = None,
+    spec_renames: Iterable[Mapping[str, Any]] = (),
 ) -> Policies:
     """Compile a stored ``property_schema`` for every label and edge type (one
-    added later falls back to ``*``).  Raises :class:`SchemaError`."""
+    added later falls back to ``*``), with the spec's deprecated and renamed
+    names.  Raises :class:`SchemaError`."""
     mode = schema.get("mode") or "off"
     vertex_entries: Mapping[str, Any] = schema.get("vertex") or {}
     edge_entries: Mapping[str, Any] = schema.get("edge") or {}
+    deprecated = deprecated or {}
+    spec_renames = list(spec_renames)
 
     def chain(entries: Mapping[str, Any], names: Iterable[str]) -> list[tuple[str, Any]]:
         return [(name, entries[name]) for name in (ALL, *names) if name in entries]
 
+    def vertex(label: str) -> Policy:
+        names = [*_ancestors(label, hierarchy), label]
+        return replace(
+            _merge(chain(vertex_entries, names), mode), name=label,
+            **_names_of(deprecated, spec_renames, "vertex", names),
+        )
+
+    def edge(edge_type: str) -> Policy:
+        return replace(
+            _merge(chain(edge_entries, [edge_type]), mode), name=edge_type,
+            **_names_of(deprecated, spec_renames, "edge", [edge_type]),
+        )
+
     return Policies(
-        vertex={
-            label: _merge(chain(vertex_entries, [*_ancestors(label, hierarchy), label]), mode)
-            for label in vertex_labels
-        },
-        edge={t: _merge(chain(edge_entries, [t]), mode) for t in edge_labels},
+        vertex={label: vertex(label) for label in vertex_labels},
+        edge={t: edge(t) for t in edge_labels},
         default_vertex=_merge(chain(vertex_entries, []), mode),
         default_edge=_merge(chain(edge_entries, []), mode),
     )
@@ -352,7 +431,7 @@ def policies_for(spec: Any) -> Policies:
     """The compiled policies of a ``TenantSpec``, cached per spec content."""
     key = json.dumps(
         [spec.name, spec.property_schema, sorted(spec.vertex_labels), sorted(spec.edge_labels),
-         sorted(spec.label_hierarchy)],
+         sorted(spec.label_hierarchy), spec.deprecated, list(spec.renames)],
         sort_keys=True, default=str,
     )
     found = _cache.get(key)
@@ -361,6 +440,7 @@ def policies_for(spec: Any) -> Policies:
             _cache.clear()
         found = _cache[key] = compile_schema(
             spec.property_schema, spec.vertex_labels, spec.edge_labels, dict(spec.label_hierarchy),
+            spec.deprecated, spec.renames,
         )
     return found
 
@@ -423,8 +503,11 @@ class Tally:
         bucket[violation.key] = bucket.get(violation.key, 0) + 1
 
     def add(self, policy: Policy, violations: list[Violation]) -> bool:
-        """Count one row's violations; whether the row is refused."""
-        refused = policy.mode == "strict" and any(v.severity == ERROR for v in violations)
+        """Count one row's violations; whether the row is refused (an error in
+        ``strict``, or a property renamed away in any mode)."""
+        refused = any(v.severity == ERROR for v in violations) and (
+            policy.mode == "strict" or any(v.rule == "renamed" for v in violations)
+        )
         for v in violations:
             self.note(v, refused=refused and v.severity == ERROR)
         return refused

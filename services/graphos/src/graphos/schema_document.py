@@ -31,9 +31,10 @@ from graphos.bootstrap import TenantSpec
 from graphos.search import value_sql
 
 FORMAT = "graphos.schema"
-# Version 2 when the document declares properties (``property_schema``): a
-# server that does not know them refuses the file rather than dropping them.
-VERSION = 2
+# Version 2 when the document declares properties (``property_schema``), 3
+# when it declares deprecations: a server that does not know them refuses the
+# file rather than dropping them.
+VERSION = 3
 
 # A search index over more rows than this is worth a warning: it is built
 # concurrently, which can take minutes.
@@ -100,6 +101,13 @@ def document(spec: TenantSpec, *, now: datetime) -> dict[str, Any]:
     if spec.property_schema:
         doc["_export"]["version"] = 2
         doc["property_schema"] = _sorted_schema(spec.property_schema)
+    if spec.deprecated:
+        # A server before 3 refuses the key: say so in the version.
+        doc["_export"]["version"] = 3
+        doc["deprecated"] = {
+            part: dict(sorted(spec.deprecated[part].items()))
+            for part in ("vertex", "edge") if spec.deprecated.get(part)
+        }
     return doc
 
 
@@ -159,6 +167,7 @@ def merged(
     meta_removed: Iterable[str] = (),
     display_removed: Iterable[tuple[str, str]] = (),
     schema_removed: Iterable[tuple[str, str]] = (),
+    deprecated_removed: Iterable[tuple[str, str]] = (),
 ) -> TenantSpec:
     """The spec registering ``incoming`` would leave, as the server stores it.
 
@@ -166,9 +175,10 @@ def merged(
     pairs are added to the stored ones, ``meta`` merged key by key (the keys
     in ``meta_removed``, sent as ``null``, removed), search indexes replaced
     by name, display entries replaced by entry (those in ``display_removed``
-    removed).  ``replace`` (``force_shrink``): the incoming
+    removed), and deprecations likewise.  ``replace`` (``force_shrink``): the incoming
     spec, but declared pairs only when the request states them.  Either way
-    ``strict_endpoints`` stays as stored when the request leaves it out.
+    ``strict_endpoints`` stays as stored when the request leaves it out, and
+    the ``renames`` history as stored.
     """
     if previous is None:
         return dc_replace(incoming, strict_endpoints=bool(incoming.strict_endpoints))
@@ -178,7 +188,10 @@ def merged(
     )
     if replace:
         endpoints = incoming.edge_endpoints if endpoints_stated else previous.edge_endpoints
-        return dc_replace(incoming, edge_endpoints=endpoints, strict_endpoints=bool(strict))
+        return dc_replace(
+            incoming, edge_endpoints=endpoints, strict_endpoints=bool(strict),
+            renames=previous.renames,
+        )
     return TenantSpec(
         name=previous.name,
         vertex_labels=_union(previous.vertex_labels, incoming.vertex_labels),
@@ -196,6 +209,10 @@ def merged(
         property_schema=merged_property_schema(
             previous.property_schema, incoming.property_schema, tuple(schema_removed),
         ),
+        deprecated=by_entry.merge(
+            previous.deprecated, incoming.deprecated, tuple(deprecated_removed),
+        ),
+        renames=previous.renames,
         edge_endpoints=_union(previous.edge_endpoints, incoming.edge_endpoints),
         strict_endpoints=bool(strict),
     )

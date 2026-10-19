@@ -39,7 +39,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import ValidationError
 
-from graphos import lookup, properties, reserved, writes
+from graphos import lookup, properties, renames, reserved, writes
 from graphos.api.graph import UNIQUE_VIOLATION_RESPONSE, _check_tenant
 from graphos.auth import Tenant, WritePrincipal
 from graphos.bootstrap import registered_tenants
@@ -134,7 +134,11 @@ class NodeWriter(_Writer):
         if found := reserved.reserved_keys(node.properties):
             self.refuse(where, reserved.refusal(found))
         elif node.label not in self._labels:
-            self.refuse(where, f"label '{node.label}' is not registered for tenant")
+            self.refuse(
+                where,
+                renames.why_unknown(self.spec, node.label)
+                or f"label '{node.label}' is not registered for tenant",
+            )
         elif why := self.tally.line(self.checks.for_vertex(node.label), node.properties, node.id):
             self.refuse(where, why)
         else:
@@ -171,12 +175,17 @@ def _validate_edge_labels(
     edge: EdgeUpsert,
     allowed_v: set[str],
     allowed_e: set[str],
+    spec: Any = None,
 ) -> str | None:
     """Return a human-readable error string, or None if the edge is OK."""
     bad_v = {edge.src_label, edge.dst_label} - allowed_v
     bad_e = {edge.type} - allowed_e
     if not bad_v and not bad_e:
         return None
+    if spec is not None:
+        for name in (*sorted(bad_e), *sorted(bad_v)):
+            if why := renames.why_unknown(spec, name):
+                return why
     parts: list[str] = []
     if bad_v:
         parts.append(f"unknown vertex labels {sorted(bad_v)}")
@@ -206,7 +215,7 @@ class EdgeWriter(_Writer):
         found = reserved.reserved_keys(edge.properties)
         err = (
             (reserved.refusal(found) if found else None)
-            or _validate_edge_labels(edge, self._vertices, self._types)
+            or _validate_edge_labels(edge, self._vertices, self._types, self.spec)
             or self._pairs.refusal(edge.type, edge.src_label, edge.dst_label)
             or self.tally.line(self.checks.for_edge(edge.type), edge.properties, None)
         )
