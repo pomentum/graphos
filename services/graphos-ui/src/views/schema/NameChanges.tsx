@@ -411,6 +411,15 @@ export function DeprecateDialog(props: NameDialogProps) {
 export function RenamesSection({ schema }: { schema: TenantSchema }) {
   const { t } = useTranslation();
   const renames = renamesNewestFirst(schema);
+  const refresh = useRefreshSchema();
+  // A rename done or failed since this page read the schema: what names properties is read again.
+  const signature = renames.map((r) => `${r.kind}:${r.on ?? ""}:${r.from}:${r.to}:${r.status}`).join("|");
+  const seen = useRef(signature);
+  useEffect(() => {
+    if (seen.current === signature) return;
+    seen.current = signature;
+    void refresh();
+  }, [signature, refresh]);
   if (renames.length === 0) return null;
   return (
     <section>
@@ -432,13 +441,14 @@ function RenameRow({ rename: r }: { rename: SchemaRename }) {
   const job = useJob(r.status === "running" ? r.job_id : null);
   const refresh = useRefreshSchema();
   const again = useRenameSchema();
-  const wasRunning = useRef(false);
-  const running = isActiveJob(job.data);
-  // The job ended: the schema now says done (or failed).
+  const ended = useRef<string | null>(null);
+  const finished = r.status === "running" && job.data !== undefined && !isActiveJob(job.data);
+  // The job ended while the schema still says running: read the schema again, once.
   useEffect(() => {
-    if (wasRunning.current && !running) void refresh();
-    wasRunning.current = running;
-  }, [running, refresh]);
+    if (!finished || ended.current === job.data?.id) return;
+    ended.current = job.data?.id ?? null;
+    void refresh();
+  }, [finished, job.data?.id, refresh]);
   const progress = job.data?.progress;
   const what =
     r.kind === "property"

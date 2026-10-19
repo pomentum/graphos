@@ -53,10 +53,10 @@ function fakeGraphos(routes: Record<string, unknown>) {
   return { calls, fetchImpl };
 }
 
-function ui(fetchImpl: typeof fetch, children: React.ReactNode, who: Me = me()) {
+function ui(fetchImpl: typeof fetch, children: React.ReactNode, who: Me = me(), client = new QueryClient()) {
   return (
     <MantineProvider theme={theme}>
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={client}>
         <SessionProvider initial={{ me: who, tokens: TOKENS, tenant: "acme" }} fetchImpl={fetchImpl}>
           {children}
         </SessionProvider>
@@ -216,5 +216,44 @@ describe("the renames", () => {
     expect(rows).toEqual(["mail → email", "Doc → Docu"]);
     expect(screen.getByText("property on Person")).toBeInTheDocument();
     expect(await screen.findByRole("progressbar", { name: "Renaming mail" })).toHaveAttribute("aria-valuenow", "25");
+  });
+
+  it("reads the schema again when a running rename's job has ended", async () => {
+    const { fetchImpl } = fakeGraphos({
+      "GET /v1/jobs/j1": {
+        id: "j1",
+        kind: "rename_property",
+        tenant: "acme",
+        status: "succeeded",
+        params: {},
+        result: {},
+        error: null,
+        consumer: "olive",
+        cancel_requested: false,
+        sync: false,
+        created_at: "2026-10-19T10:00:00Z",
+        started_at: "2026-10-19T10:00:01Z",
+        finished_at: "2026-10-19T10:00:02Z",
+      },
+    });
+    const client = new QueryClient();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const schema: TenantSchema = {
+      ...SCHEMA,
+      renames: [
+        {
+          kind: "property",
+          from: "mail",
+          to: "email",
+          on: "Person",
+          at: "2026-10-19T10:00:00Z",
+          status: "running",
+          job_id: "j1",
+        },
+      ],
+    };
+    render(ui(fetchImpl, <RenamesSection schema={schema} />, me(), client));
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["schema", "acme"] }));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["propertyDefinitions", "acme"] });
   });
 });
