@@ -46,7 +46,8 @@ def test_every_tool_is_a_read_with_a_static_description() -> None:
     assert len(names) == len(set(names))
     assert {"list_tenants", "get_schema", "check_edges", "get_property_values",
             "run_cypher"} <= set(names)
-    assert "run_cypher" not in {t.name for t in mcp_server.tool_list(Settings(db_password="x"))}
+    off = Settings(db_password="x", cypher=False)
+    assert "run_cypher" not in {t.name for t in mcp_server.tool_list(off)}
     for spec, tool in zip(mcp_server.TOOLS, tools, strict=True):
         assert spec.access == "read"
         assert tool.annotations is not None and tool.annotations.read_only_hint is True
@@ -59,8 +60,11 @@ async def test_an_agent_lists_the_tools_and_the_resources() -> None:
     async with _client(_app()) as client:
         tools = await client.list_tools()
         templates = await client.list_resource_templates()
-    assert [t.name for t in tools.tools] == [t.name for t in mcp_server.offered()]
-    assert "run_cypher" not in [t.name for t in tools.tools]      # the console is off
+    assert [t.name for t in tools.tools] == [t.name for t in mcp_server.TOOLS]
+    assert "run_cypher" in [t.name for t in tools.tools]          # the console is on by default
+    async with _client(_app(cypher=False)) as client:
+        off = await client.list_tools()
+    assert "run_cypher" not in [t.name for t in off.tools]
     assert {t.uri_template for t in templates.resource_templates} == {
         "graphos://{tenant}/schema/summary", "graphos://{tenant}/properties",
         "graphos://{tenant}/saved-queries",

@@ -70,6 +70,12 @@ under one version.
 
 ### Changed
 
+- **The Cypher console is on by default** ([ADR-0006](docs/adrs/ADR-0006-console-on-by-default.md)):
+  `GRAPHOS_CYPHER` now defaults to `true`, so the UI's Query page, saved queries and the MCP
+  `run_cypher` tool work on a fresh install. Its guard, limits, audit and level
+  (`GRAPHOS_CYPHER_LEVEL`, `read`) are unchanged, and its pool opens no connection until a query
+  needs one. **An install that never set `GRAPHOS_CYPHER` gets the console on when it upgrades**;
+  set `GRAPHOS_CYPHER=false` to keep it off.
 - The compose file sets `GRAPHOS_MASTER_KEY_FILE`: **run `scripts/init-secrets.sh` once** when
   upgrading an existing installation, or graphos-api does not start (it names the missing file).
   Back up `master_key.txt` apart from the database.

@@ -15,7 +15,7 @@ with Apache AGE 1.8 as the data plane (PostgreSQL 16 with AGE 1.6 still runs,
 deprecated: §2.4), and a FastAPI process (`graphos-api`)
 in front of it as the only way in. Consumers speak typed HTTP/JSON (NDJSON for
 bulk writes). They never receive a Postgres DSN and cannot submit SQL, nor
-Cypher outside the opt-in, read-only console (§3.1).
+Cypher outside the read-only console (§3.1).
 
 Design points:
 
@@ -485,7 +485,7 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `POST /v1/{tenant}/recompute-communities` | Louvain (§5); 501 without the extra | `maintain` |
 | `POST …/graph/metrics:compute` | Degree, PageRank, weakly connected components and betweenness, stored on the nodes as `graphos_*` properties | `maintain` |
 | `POST …/graph/properties:check` | Check the stored rows against the property schema as if every rule applied; writes nothing | `maintain` |
-| **Cypher console** (opt-in, §3.1; 404 while off) | | |
+| **Cypher console** (§3.1; on unless `GRAPHOS_CYPHER=false`, 404 while off) | | |
 | `POST /v1/{tenant}/cypher` `{query, params?, limit?}` | Run read-only Cypher; a table and the graph it makes | `GRAPHOS_CYPHER_LEVEL` (`read`) |
 | `GET /v1/{tenant}/cypher/saved` | The tenant's saved queries | as running one |
 | `PUT / DELETE /v1/{tenant}/cypher/saved/{name}` | Save (replace) or delete a named, parameterised query | `maintain` |
@@ -533,7 +533,7 @@ or running on the tenant.
 Not in the surface: SQL execution, Cypher that writes, connection-string
 passthrough, any `DROP` other than deleting a whole tenant as above, and any
 consumer-supplied DDL: indexes and generated columns are declared, and
-graphos writes their SQL. Read-only Cypher runs only in the opt-in console
+graphos writes their SQL. Read-only Cypher runs only in the console
 (§3.1).
 
 #### 2.5.2 Requests, responses, errors
@@ -1063,10 +1063,10 @@ graphos picks the tables and indexes directly, and `statement_timeout` and
 cancellation always apply. (On an 8M-edge tenant, AGE's Cypher executor ran a
 node-plus-edges pattern for over ten minutes without stopping at either.)
 
-The one exception is the opt-in Cypher console (`GRAPHOS_CYPHER=true`,
-`POST /v1/{tenant}/cypher`): read-only Cypher on one tenant's graph, for
-people who know Cypher (`console.py`). Before the query reaches the
-database, graphos refuses (400):
+The one exception is the Cypher console (on unless `GRAPHOS_CYPHER=false`,
+[ADR-0006](adrs/ADR-0006-console-on-by-default.md); `POST /v1/{tenant}/cypher`):
+read-only Cypher on one tenant's graph, for people who know Cypher
+(`console.py`). Before the query reaches the database, graphos refuses (400):
 
 - a write clause (`CREATE`, `MERGE`, `SET`, `DELETE`, `DETACH`, `REMOVE`;
   `console.write_clauses`, outside strings and comments): AGE 1.6 carries out

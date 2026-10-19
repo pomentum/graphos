@@ -93,7 +93,7 @@ class ToolSpec:
     route: Callable[[dict[str, Any]], tuple[str, str, dict[str, Any], Any]]
     access: str = "read"
     needs_tenant: bool = True
-    # Offered only where the Cypher console is on (GRAPHOS_CYPHER=true).
+    # Offered only where the Cypher console is on (unless GRAPHOS_CYPHER=false).
     needs_console: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 

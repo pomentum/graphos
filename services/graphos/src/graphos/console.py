@@ -1,6 +1,6 @@
 """The Cypher console: read-only Cypher on one tenant's graph.
 
-Off unless ``GRAPHOS_CYPHER=true``.  graphos runs the query, so graphos
+On unless ``GRAPHOS_CYPHER=false`` (ADR-0006).  graphos runs the query, so graphos
 decides what runs and how (see docs/concept.md §3.1, "Cypher / SQL
 boundary"):
 

@@ -30,7 +30,7 @@ into the extra columns (`graphos_rev` is NOT NULL) and a `CREATE` fails with
 Because of the last row (and the throughput gap in §3), graphos writes
 no rows through Cypher: every write is SQL in `graphos.writes`, and every
 node and edge upsert is the COPY-staged SQL path of §3. Every API read is
-SQL too; Cypher runs only in the opt-in, read-only console. What follows is
+SQL too; Cypher runs only in the read-only console. What follows is
 what graphos does,
 plus the workaround a per-row Cypher write would need:
 

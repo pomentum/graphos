@@ -193,10 +193,10 @@ class Settings(BaseSettings):
     oidc_http_timeout_s: float = Field(default=10.0, gt=0)
 
     # ── Cypher console (graphos.console) ───────────────────────────────
-    # Read-only Cypher on one tenant's graph, off unless an operator turns it
-    # on.  It runs on a small pool of its own (as graphos's own user); graphos
+    # Read-only Cypher on one tenant's graph, on unless an operator turns it
+    # off (ADR-0006).  It runs on a small pool of its own (as graphos's own user); graphos
     # checks every query before it runs (graphos.console).
-    cypher: bool = False
+    cypher: bool = True
     # The level on a tenant needed to run queries on it.
     cypher_level: Literal["read", "write", "maintain"] = "read"
     cypher_timeout_s: float = Field(default=30.0, gt=0)

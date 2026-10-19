@@ -6,7 +6,7 @@
 - ``DELETE /v1/{tenant}/cypher/saved/{name}``      delete one (``maintain``)
 - ``POST /v1/{tenant}/cypher/saved/{name}:run``    run one with its parameters
 
-Every route answers 404 while the console is off (``GRAPHOS_CYPHER``).
+Every route answers 404 while the console is off (``GRAPHOS_CYPHER=false``).
 Running and listing need ``GRAPHOS_CYPHER_LEVEL`` on the tenant (``read`` by
 default).  Each run is written to the audit log, and logged with its text.
 """
@@ -89,7 +89,7 @@ async def _run(  # noqa: PLR0913
     "/{tenant}/cypher",
     summary="Run a read-only Cypher query on the tenant's graph",
     description=(
-        "Off unless the server runs with `GRAPHOS_CYPHER=true` (404); needs "
+        "Off (404) where the server runs with `GRAPHOS_CYPHER=false`; needs "
         "`GRAPHOS_CYPHER_LEVEL` on the tenant (`read` by default). The query runs in a "
         "read-only transaction on the tenant's graph, with `params` as `$name`. Only "
         "Cypher's own functions; no variable-length patterns (`-[*1..3]->`) or "

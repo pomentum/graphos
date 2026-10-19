@@ -637,7 +637,7 @@
       "run": "Run",
       "save": "Save…",
       "failed": "The query did not run",
-      "off": "The Cypher console is off on this graphos. An operator turns it on with GRAPHOS_CYPHER=true.",
+      "off": "The Cypher console is off on this graphos: it runs with GRAPHOS_CYPHER=false.",
       "summary_one": "{{rows}} row in {{ms}} ms",
       "summary_other": "{{rows}} rows in {{ms}} ms",
       "truncated": "more rows matched (the console's limit)",

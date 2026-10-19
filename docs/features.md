@@ -14,7 +14,7 @@ Apache AGE 1.8 behind a typed FastAPI REST surface. PostgreSQL 16 with AGE 1.6,
 bundled up to 0.9, still runs but is deprecated (§10). Storage is ordinary
 Postgres (MVCC, WAL, standard backup tooling). Requests are JSON, with NDJSON
 for bulk writes. Every API read and write is plain SQL against AGE's per-label
-tables; Cypher runs only in the opt-in, read-only console (§4,
+tables; Cypher runs only in the read-only console (§4,
 [concept §3.1](concept.md#31-cypher--sql-boundary)).
 
 graphos ships no labels, property keys, or relationship types. Every analytics
@@ -322,7 +322,7 @@ reported in the response.
   graphology `Graph.from()`), bounded by `limit_nodes` (default 5000, max
   50000). This is the only export format; converting to other formats is up
   to the caller.
-- **Cypher console** (opt-in, `GRAPHOS_CYPHER=true`; `POST /v1/{tenant}/cypher`):
+- **Cypher console** (on unless `GRAPHOS_CYPHER=false`; `POST /v1/{tenant}/cypher`):
   read-only Cypher on one tenant's graph for people who know Cypher, with
   `$name` parameters; it answers a table and the graph its nodes and edges
   make. Before the query reaches the database graphos refuses:
@@ -724,9 +724,9 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
 
 ## 11. What graphos does not do
 
-- **No SQL endpoint, and Cypher only read-only and opt-in.** The surface stays
+- **No SQL endpoint, and Cypher only read-only.** The surface stays
   typed so limits, timeouts, and tenant checks remain enforceable; the
-  optional Cypher console reads one tenant's graph under graphos's checks
+  Cypher console reads one tenant's graph under graphos's checks
   and refuses write clauses before the database (§4). The bundled compose gives
   `graphos-db` no published port and keeps it on an internal-only network.
   People who must read the tables directly get a read-only database role of

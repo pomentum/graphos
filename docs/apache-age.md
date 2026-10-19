@@ -36,8 +36,8 @@ SQL in one module, `graphos.writes`: node and edge upserts go through the
 COPY-staged path of §6 (`writes.upsert_nodes` / `writes.upsert_edges`), and
 node deletes are one SQL statement that removes the nodes and their edges
 together. §5 gives the two reasons (throughput and a backend segfault).
-Every API read is SQL too; Cypher runs only in the opt-in, read-only
-console (`GRAPHOS_CYPHER=true`). The rows above about inlined map literals and
+Every API read is SQL too; Cypher runs only in the read-only console
+(on unless `GRAPHOS_CYPHER=false`). The rows above about inlined map literals and
 per-row `cypher()` calls describe what a Cypher write needs on AGE 1.6;
 graphos does not write that way. §11 lists which of these AGE has fixed
 since, and in which release.
@@ -122,7 +122,7 @@ Two different access paths, two different indexes:
   operator. It does *not* lower to `properties->'"id"' = …`, so the btree
   unique index is **not** used by Cypher MATCH. GIN on `properties` is
   what keeps a Cypher read by id off a sequential scan. (graphos's own reads
-  run no Cypher and read by id in SQL, through the unique btree; the opt-in
+  run no Cypher and read by id in SQL, through the unique btree; the
   console's `MATCH {id: …}` uses this GIN index.)
 - **Direct SQL** that compares `properties->'"id"'` (node-by-id reads,
   property stamping, the `ON CONFLICT` of every node write, and the edge

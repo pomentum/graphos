@@ -6,9 +6,9 @@
 
 A multi-tenant property-graph service: **PostgreSQL + [Apache AGE](https://age.apache.org/) behind a typed HTTP API.**
 
-Your services send JSON over HTTP. graphos owns the database, writes the SQL against AGE's tables, enforces tenant isolation, and gives you bulk loading, traversal, aggregation, graph algorithms (communities, PageRank, betweenness, components) and a web UI. Consumers never get a connection string; raw Cypher runs only in an opt-in, read-only console that graphos controls.
+Your services send JSON over HTTP. graphos owns the database, writes the SQL against AGE's tables, enforces tenant isolation, and gives you bulk loading, traversal, aggregation, graph algorithms (communities, PageRank, betweenness, components) and a web UI. Consumers never get a connection string; raw Cypher runs only in a read-only console that graphos controls.
 
-<img src="docs/images/graphos-infographic.svg" width="100%" alt="graphos capabilities: a typed HTTP API over PostgreSQL 18 + Apache AGE 1.8. Build: tenants and schema, bulk writes and data transfer, composable reads, rule-derived edges. Explore: graph map and aggregates, Louvain and graph metrics, an opt-in read-only Cypher console, the web UI. Run: users, SSO and grants, change feed, operations, the Python client.">
+<img src="docs/images/graphos-infographic.svg" width="100%" alt="graphos capabilities: a typed HTTP API over PostgreSQL 18 + Apache AGE 1.8. Build: tenants and schema, bulk writes and data transfer, composable reads, rule-derived edges. Explore: graph map and aggregates, Louvain and graph metrics, a read-only Cypher console, the web UI. Run: users, SSO and grants, change feed, operations, the Python client.">
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture-dark.svg">
@@ -35,7 +35,7 @@ The picture above is the map; each line below links to the section that covers i
 
 - **Graph analytics:** a map of every label and the edges between them (about a second on ten million edges), aggregates, top-K by degree ([usage](docs/usage.md#6-aggregates)).
 - **Graph algorithms:** Louvain communities (optional extra), PageRank, betweenness, components and degree, run beside the API and written onto the nodes ([what each finds](docs/algorithms.md)).
-- **Cypher console (opt-in):** read-only Cypher on one tenant, write clauses refused, with a timeout, a row cap and saved queries ([usage](docs/usage.md#cypher-console-opt-in)).
+- **Cypher console:** read-only Cypher on one tenant, write clauses refused, with a timeout, a row cap and saved queries ([usage](docs/usage.md#cypher-console)).
 - **Web UI (optional):** explore, inspect and edit, query, extend the schema, follow changes live and export what is on screen ([below](#web-ui)).
 
 **Run**
@@ -208,7 +208,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | `GRAPHOS_AUTH_DISABLED` | `false` | `true` makes every request an anonymous admin: local development only |
 | `GRAPHOS_STATEMENT_TIMEOUT_S` | `60` | Per-statement limit; exceeded → `504` problem+json |
 | `GRAPHOS_IMPORT_MAX_BYTES` | `17179869184` (16 GiB) | Most bytes `snapshot-import` reads from one body, after gzip decompression; beyond → `413` |
-| `GRAPHOS_CYPHER` | `false` | `true` turns on the read-only Cypher console (`POST /v1/{tenant}/cypher`, the UI's Query page); see [usage](docs/usage.md#cypher-console-opt-in) |
+| `GRAPHOS_CYPHER` | `true` | `false` turns off the read-only Cypher console (`POST /v1/{tenant}/cypher`, the UI's Query page); see [usage](docs/usage.md#cypher-console) |
 | `GRAPHOS_CYPHER_LEVEL` | `read` | Level on a tenant needed to run console queries (`read`, `write`, `maintain`) |
 | `GRAPHOS_CYPHER_TIMEOUT_S`, `GRAPHOS_CYPHER_MAX_ROWS` | `30`, `5000` | Per console query: time before it is stopped (504), rows returned at most |
 | `GRAPHOS_CYPHER_POOL_SIZE`, `GRAPHOS_CYPHER_PER_USER` | `5`, `1` | Console queries running at once per replica, and per user |

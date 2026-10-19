@@ -89,7 +89,7 @@ as the caller, so it answers exactly what the route does (§ references are to [
 | `check_edges` | whether each of up to 1,000 edges exists | `POST …/graph/edges:check` |
 | `list_communities`, `community_summary` | the communities of the last recompute | `GET …/graph/communities`, `…/community-summary` |
 | `list_saved_queries`, `get_saved_query`, `run_saved_query` | the tenant's saved Cypher queries (text, description, typed parameters), one by name, run with its parameters | `…/cypher/saved[/{name}[:run]]` (needs the console on) |
-| `run_cypher` | a read-only openCypher query with `$name` parameters | `POST /v1/{t}/cypher`; offered only with `GRAPHOS_CYPHER=true`, held to `GRAPHOS_CYPHER_LEVEL` |
+| `run_cypher` | a read-only openCypher query with `$name` parameters | `POST /v1/{t}/cypher`; offered unless `GRAPHOS_CYPHER=false`, held to `GRAPHOS_CYPHER_LEVEL` |
 
 Resources: `graphos://{tenant}/schema/summary` (the summary as text),
 `graphos://{tenant}/properties` (the property definitions) and `graphos://{tenant}/saved-queries`

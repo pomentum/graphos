@@ -1090,11 +1090,11 @@ scope property.
 
 ---
 
-### Cypher console (opt-in)
+### Cypher console
 
-For people who know Cypher, graphos can run **read-only** Cypher on one tenant's graph. It is off
-unless an operator sets `GRAPHOS_CYPHER=true`; `GET /v1/info` then says `"cypher": true` and the
-web UI shows a Query page: an editor that colours Cypher and suggests the tenant's labels, edge
+For people who know Cypher, graphos can run **read-only** Cypher on one tenant's graph. It is on
+unless an operator sets `GRAPHOS_CYPHER=false`; while it is on, `GET /v1/info` says `"cypher": true`
+and the web UI shows a Query page: an editor that colours Cypher and suggests the tenant's labels, edge
 types and property names as you type (Ctrl+Space asks), the result as a table and on the canvas,
 and the tenant's saved queries.
 

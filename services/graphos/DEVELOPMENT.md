@@ -86,8 +86,8 @@ Changing one takes an [ADR](../../docs/adrs/README.md) first.
   (`-[*1..3]->`), no `vertex_stats()`: AGE refuses to load label tables with
   extra columns and can leave a lock held forever (`console.py`,
   apache-age.md §5).
-- **The Cypher console is read-only and guarded.** It is off unless
-  `GRAPHOS_CYPHER=true`. Write clauses, schema-qualified calls and
+- **The Cypher console is read-only and guarded.** It is on unless
+  `GRAPHOS_CYPHER=false` (ADR-0006). Write clauses, schema-qualified calls and
   non-Cypher functions are refused before the database; the query runs in
   `BEGIN READ ONLY` on its own pool, bounded and cancellable. It is the only
   place that sends Cypher to the database
