@@ -18,8 +18,10 @@ Only the shots named on the command line are taken when any are given:
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -130,6 +132,61 @@ def schema_styles(page: Page) -> None:
     page.wait_for_timeout(1000)
 
 
+def explore_selection(page: Page) -> None:
+    """Several nodes picked with a loop drawn by Shift-drag, and the bar of what to do with them."""
+    _go(page, "/explore")
+    _mode(page, "Graph")
+    page.wait_for_timeout(SETTLE_MS)
+    box = page.locator("[data-testid=graph-canvas]").bounding_box()
+    assert box is not None
+    cx, cy = box["x"] + box["width"] * 0.45, box["y"] + box["height"] * 0.55
+    loop = [
+        (cx + 170 * math.cos(a / 40 * math.tau), cy + 110 * math.sin(a / 40 * math.tau))
+        for a in range(41)
+    ]
+    page.keyboard.down("Shift")
+    page.mouse.move(*loop[0])
+    page.mouse.down()
+    for x, y in loop[1:]:
+        page.mouse.move(x, y, steps=2)
+    page.mouse.up()
+    page.keyboard.up("Shift")
+    page.wait_for_timeout(1000)
+
+
+# Invented people, as the demo's, with what a check should show: a repeated id,
+# a value that is not a number, a row without an id.
+_PEOPLE_CSV = (
+    "id;Full name;age;team\n"
+    "person:ana.ruiz;Ana Ruiz;34;platform\n"
+    "person:ana.ruiz;;35;\n"
+    "person:li.wei;Li Wei;n/a;data\n"
+    "person:sam.okafor;Sam Okafor;29;security\n"
+    ";Nobody;41;\n"
+)
+
+
+def csv_import(page: Page) -> None:
+    """A CSV file mapped to a label, and graphos's check of every row before anything is written."""
+    _go(page, "/overview")
+    page.get_by_role("button", name="Import CSV").click()
+    page.wait_for_timeout(600)
+    dialog = page.locator("[role=dialog]")
+    # The browser reads the chosen file again for every check: it must outlive the shot.
+    folder = tempfile.mkdtemp()
+    path = Path(folder) / "people.csv"
+    path.write_text(_PEOPLE_CSV, encoding="utf-8")
+    dialog.locator("input[type=file]").set_input_files(str(path))
+    page.wait_for_timeout(2000)
+    dialog.get_by_role("textbox", name="Label").click()
+    page.get_by_role("option", name="Person", exact=True).click()
+    dialog.locator("tr", has_text="age").get_by_role("textbox").last.click()
+    page.get_by_role("option", name="Number", exact=True).click()
+    page.wait_for_timeout(SETTLE_MS)
+    dialog.get_by_text("graphos's check", exact=False).first.scroll_into_view_if_needed()
+    page.wait_for_timeout(600)
+
+
 SHOTS: dict[str, Callable[[Page], None]] = {
     "explore-graph": explore_graph,
     "explore-groups": explore_groups,
@@ -138,6 +195,8 @@ SHOTS: dict[str, Callable[[Page], None]] = {
     "query": query,
     "explore-styles": explore_styles,
     "schema-styles": schema_styles,
+    "explore-selection": explore_selection,
+    "csv-import": csv_import,
 }
 
 

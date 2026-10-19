@@ -12,6 +12,12 @@ under one version.
   must do itself, known security limits), `CONTRIBUTING.md` (where the rules are, how to open a
   pull request), issue templates for bugs and feature requests, and a pull request template.
 
+### Fixed
+
+- Web UI, CSV import: a file moved, renamed or deleted after it was chosen made the check or the
+  import say graphos could not be reached; it now says the file can no longer be read, and to
+  choose it again.
+
 ## 0.12.0 — 2026-10-16
 
 Team tools in the web UI and the server work behind them: select several nodes on the canvas,

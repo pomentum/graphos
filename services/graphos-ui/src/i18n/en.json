@@ -1403,7 +1403,8 @@
       "warnings": "Written with property warnings: {{list}}",
       "moreErrors": "and {{count}} more"
     },
-    "failed": "The import failed: {{message}}"
+    "failed": "The import failed: {{message}}",
+    "fileGone": "The file can no longer be read: it was moved, renamed or deleted after you chose it. Choose it again."
   },
   "errors": {
     "notSaved": "Not saved",
