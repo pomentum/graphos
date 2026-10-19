@@ -104,15 +104,19 @@ def features(body: str) -> str:
 
 
 def shots(body: str) -> str:
-    """The README's web UI screenshots, each with its alt text and caption."""
+    """The README's web UI screenshots, each with its alt text and caption: the WebP copy
+    screenshots.py writes beside each PNG, a quarter of its size, and the PNG for a browser
+    without WebP."""
     out: list[str] = []
     pairs = re.findall(
         r'<img src="([^"]+)" width="100%" alt="([^"]+)">\s*\n\s*\*(.+?)\*\s*\n', body
     )
     for n, (src, alt, caption) in enumerate(pairs, 1):
+        png = repo_link(src)
         out.append(
-            f'<figure class="fig"><img class="shot" src="{repo_link(src)}" alt="{alt}" '
-            f'loading="lazy" width="1440" height="900"><figcaption><span class="fig-n">'
+            f'<figure class="fig"><picture><source type="image/webp" '
+            f'srcset="{png.removesuffix(".png")}.webp"><img class="shot" src="{png}" alt="{alt}" '
+            f'loading="lazy" width="1440" height="900"></picture><figcaption><span class="fig-n">'
             f"UI {n:02d}</span><span>{inline(caption)}</span></figcaption></figure>"
         )
     return "\n".join(out)
@@ -158,7 +162,7 @@ def check_links(page: str) -> list[str]:
     links to a place in the page that no element's ``id`` names."""
     missing: list[str] = []
     ids = set(re.findall(r'\sid="([^"]+)"', page))
-    for target in re.findall(r'(?:href|src)="([^"]+)"', page):
+    for target in re.findall(r'(?:href|src|srcset)="([^"]+)"', page):
         url = urlsplit(target)
         if not (url.scheme or url.netloc or url.path):
             if url.fragment and url.fragment not in ids:

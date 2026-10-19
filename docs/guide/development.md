@@ -135,12 +135,13 @@ node tools/docs/diagrams.mjs --check   # CI: exit 1 when a file is not what the 
   </picture>
   ```
 
-**UI screenshots** (`ui-<shot>-dark.png`, shown by the README, the docs and
-the website) are taken by `tools/docs/screenshots.py` with Playwright, in
-dark mode at 1440x900, of the demo tenant only:
+**UI screenshots** (`ui-<shot>-dark.png`, shown by the README and the docs,
+and a `.webp` copy beside each, which the website shows) are taken by
+`tools/docs/screenshots.py` with Playwright, in dark mode at 1440x900, of
+the demo tenant only:
 
 ```bash
-pip install playwright && playwright install chromium   # or --channel msedge / chrome
+pip install playwright pillow && playwright install chromium   # or --channel msedge / chrome
 python clients/python/examples/08_demo_ecosystem.py     # load the demo tenant
 export GRAPHOS_USER=... GRAPHOS_PASSWORD=...            # a user granted only the demo tenant
 python tools/docs/screenshots.py --ui http://localhost:5173              # every shot
