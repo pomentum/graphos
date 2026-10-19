@@ -17,7 +17,7 @@ import { useTranslation } from "react-i18next";
 import { ApiError } from "../../api/http";
 import type { CsvImportResult, TenantSchema } from "../../api/types";
 import { usePropertyDefinitions, useRefreshAfterImport, useSchema } from "../../data/queries";
-import { readFileText, type CsvDelimiter, type CsvTable } from "../../lib/csv";
+import { readFileText, stillReadable, type CsvDelimiter, type CsvTable } from "../../lib/csv";
 import {
   DELIMITER_NAMES,
   HEAD_BYTES,
@@ -116,6 +116,12 @@ const RUNNING: Phase[] = ["sending", "writing"];
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Why a request failed; a failure without an answer may be the file, gone since it was chosen. */
+async function failureOf(error: unknown, file: Blob, fileGone: string): Promise<string> {
+  if (!(error instanceof ApiError) && !(await stillReadable(file))) return fileGone;
+  return messageOf(error);
 }
 
 /** The choice if still offered, else the first offered. */
@@ -286,9 +292,11 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
           signal: controller.signal,
           onSent: (bytes, total) => setCheckSent(total ? bytes / total : 1),
         })
-        .then(setCheck, (error: unknown) => {
+        .then(setCheck, async (error: unknown) => {
           if (controller.signal.aborted) return;
-          setCheckError({ mapping: error instanceof ApiError && error.status === 422, message: messageOf(error) });
+          const message = await failureOf(error, loaded.file, t("csvImport.fileGone"));
+          if (controller.signal.aborted) return;
+          setCheckError({ mapping: error instanceof ApiError && error.status === 422, message });
         })
         .finally(() => {
           if (!controller.signal.aborted) setCheckSent(null);
@@ -298,7 +306,7 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [api, plan, query, loaded, hasRows]);
+  }, [api, plan, query, loaded, hasRows, t]);
 
   const start = async () => {
     if (!plan || !query || !loaded) return;
@@ -318,7 +326,7 @@ export function CsvImportDialog({ onClose }: { onClose: () => void }) {
     } catch (error) {
       // graphos writes nothing before it has the whole file; once it has, it may go on.
       if (controller.signal.aborted) setRun({ phase: received ? "stopped" : "cancelled", share: 0 });
-      else setRun({ phase: "failed", share: 0, error: messageOf(error) });
+      else setRun({ phase: "failed", share: 0, error: await failureOf(error, loaded.file, t("csvImport.fileGone")) });
     } finally {
       if (received) void refresh();
       if (sender.current === controller) sender.current = null;
