@@ -6,6 +6,35 @@ under one version.
 
 ## Unreleased
 
+Agents and data upkeep. An MCP endpoint in the API offers graphos's reads to AI agents as 22
+tools, with a schema summary written for models; MCP clients sign people in through graphos or
+through single sign-on. Edges can be reconciled by difference, the edges rules derive included.
+Stored secrets are sealed with a master key, a Host allowlist guards against DNS rebinding, and
+the read-only Cypher console is on by default. PostgreSQL 16 / AGE 1.6 is no longer supported:
+read **Upgrading** before moving to this version.
+
+### Upgrading
+
+- **PostgreSQL 16 / AGE 1.6 is no longer supported**
+  ([ADR-0007](docs/guide/adrs/ADR-0007-drop-postgresql-16.md)): graphos-api refuses to start on
+  PostgreSQL before 18 or AGE before 1.8, naming the versions it found and the
+  [upgrade guide](docs/guide/upgrade-postgresql-18.md), where it used to start with a warning. **A
+  stack still on PostgreSQL 16 must move before or as it upgrades**: with the compose file,
+  `docker compose up -d` moves it by itself, as since 0.10.0 (`graphos-db-export` and
+  `graphos-db-import` stay). `GET /v1/info` no longer has `database_deprecated`. CI runs the
+  integration tests on PostgreSQL 18 / AGE 1.8 only.
+- The compose file sets `GRAPHOS_MASTER_KEY_FILE`: **run `scripts/init-secrets.sh` once** when
+  upgrading an existing installation, or graphos-api does not start (it names the missing file).
+  Back up `master_key.txt` apart from the database.
+- **The Cypher console is on by default** ([ADR-0006](docs/guide/adrs/ADR-0006-console-on-by-default.md)):
+  `GRAPHOS_CYPHER` now defaults to `true`, so the UI's Query page, saved queries and the MCP
+  `run_cypher` tool work on a fresh install. Its guard, limits, audit and level
+  (`GRAPHOS_CYPHER_LEVEL`, `read`) are unchanged, and its pool opens no connection until a query
+  needs one. **An install that never set `GRAPHOS_CYPHER` gets the console on when it upgrades**;
+  set `GRAPHOS_CYPHER=false` to keep it off.
+- `/mcp` is on unless `GRAPHOS_MCP=false`, and the web UI's nginx forwards `/mcp`, `/oauth/` and
+  `/.well-known/oauth-*` to graphos-api.
+
 ### Added
 
 - **An MCP endpoint for agents** ([ADR-0002](docs/guide/adrs/ADR-0002-mcp-surface.md),
@@ -83,47 +112,18 @@ under one version.
   requests for any other `Host` with 400, against DNS rebinding; `localhost` and `127.0.0.1` are
   always allowed. Empty (the default): off.
 
-- **Docs:** a guide for connecting AI agents, `docs/guide/agents.md` (where `/mcp` is, the tokens it
-  takes, how MCP clients sign people in through graphos or single sign-on with Keycloak's
-  settings, the tools and their security); ADR-0006, ADR-0007 and ADR-0008 accepted, ADR-0001
-  and ADR-0002 updated; the installation guide's checklist covers what is on by default.
-- **Docs:** `SECURITY.md` (private vulnerability reporting, supported versions, what a deployment
-  must do itself, known security limits), `CONTRIBUTING.md` (where the rules are, how to open a
-  pull request), issue templates for bugs and feature requests, and a pull request template.
-
-- **Docs:** a website for graphos on GitHub Pages, served from `docs/` on `main`: one page with
-  features, measured benchmarks, the web UI, a quickstart and the documentation. `tools/docs/site.py` writes `docs/index.html` from the README and the version
-  (`--check` tells when it is out of date); no workflow builds or deploys it.
+- **Docs:** a guide for connecting AI agents, [`docs/guide/agents.md`](docs/guide/agents.md): where
+  `/mcp` is, the tokens it takes, how MCP clients sign people in through graphos or single sign-on
+  (with Keycloak's settings), the tools and their security. ADR-0006, ADR-0007 and ADR-0008
+  accepted; the installation guide's checklist covers what is on by default.
+- **Docs:** a website on GitHub Pages: features, measured benchmarks, the web UI, a quickstart and
+  the documentation, on one page.
 
 ### Changed
 
-- **Docs:** the guides and the ADRs moved from `docs/` to `docs/guide/` (`docs/guide/adrs/`), so
-  `docs/` holds only the website and the pictures. Every link in the repository follows, and the
-  server's PostgreSQL 16 refusal names `docs/guide/upgrade-postgresql-18.md`. Links from outside
-  to `docs/<guide>.md` on GitHub now need `docs/guide/<guide>.md`.
-
-- **Docs:** the whitepaper and its Vercel deployment are gone; the website takes their place.
-  `diagrams.mjs` draws the diagrams only, `screenshots.py` writes PNGs only (the JPEG copies were
-  the whitepaper's), and a release no longer dates a page. The README's badge and "Website" line
-  point to the website.
-
-- **PostgreSQL 16 / AGE 1.6 is no longer supported**
-  ([ADR-0007](docs/guide/adrs/ADR-0007-drop-postgresql-16.md)): graphos-api refuses to start on
-  PostgreSQL before 18 or AGE before 1.8, naming the versions it found and the
-  [upgrade guide](docs/guide/upgrade-postgresql-18.md), where it used to start with a warning. **A
-  stack still on PostgreSQL 16 must move before or as it upgrades**: with the compose file,
-  `docker compose up -d` moves it by itself, as since 0.10.0 (`graphos-db-export` and
-  `graphos-db-import` stay). `GET /v1/info` no longer has `database_deprecated`. CI runs the
-  integration tests on PostgreSQL 18 / AGE 1.8 only.
-- **The Cypher console is on by default** ([ADR-0006](docs/guide/adrs/ADR-0006-console-on-by-default.md)):
-  `GRAPHOS_CYPHER` now defaults to `true`, so the UI's Query page, saved queries and the MCP
-  `run_cypher` tool work on a fresh install. Its guard, limits, audit and level
-  (`GRAPHOS_CYPHER_LEVEL`, `read`) are unchanged, and its pool opens no connection until a query
-  needs one. **An install that never set `GRAPHOS_CYPHER` gets the console on when it upgrades**;
-  set `GRAPHOS_CYPHER=false` to keep it off.
-- The compose file sets `GRAPHOS_MASTER_KEY_FILE`: **run `scripts/init-secrets.sh` once** when
-  upgrading an existing installation, or graphos-api does not start (it names the missing file).
-  Back up `master_key.txt` apart from the database.
+- **Docs:** the guides and the ADRs moved from `docs/` to `docs/guide/` (`docs/guide/adrs/`).
+  Links from outside to `docs/<guide>.md` on GitHub now need `docs/guide/<guide>.md`. The
+  whitepaper is gone; the website takes its place.
 
 ### Fixed
 
