@@ -4,7 +4,7 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.13.0 — 2026-10-19
 
 Agents and data upkeep. An MCP endpoint in the API offers graphos's reads to AI agents as 22
 tools, with a schema summary written for models; MCP clients sign people in through graphos or
