@@ -39,7 +39,10 @@ router = APIRouter(tags=["cypher"])
 _ERRORS: dict[int | str, dict[str, Any]] = {
     400: {"description": "AGE rejected the query (its message), or it tried to write."},
     404: {"description": "The console is off, or no such saved query."},
-    429: {"description": "You are running a query already, or the console is busy."},
+    429: {"description": (
+        "Your other query, or the console's other users, kept it waiting past "
+        "`GRAPHOS_CYPHER_WAIT_S`."
+    )},
     504: {"description": "The query ran past the console's timeout and was stopped."},
 }
 

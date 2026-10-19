@@ -271,19 +271,20 @@ async def test_writes_admin_functions_and_other_tenants_are_refused(
 
 @requires_db
 @pytest.mark.asyncio
-async def test_a_runaway_query_is_stopped_and_a_user_runs_one_at_a_time(
+async def test_a_runaway_query_is_stopped_and_the_users_next_one_waits_its_turn(
     api: httpx.AsyncClient,
 ) -> None:
     # 10^12 rows: it would run for hours.
     runaway = "UNWIND range(1, 1000000) AS x UNWIND range(1, 1000000) AS y RETURN count(*)"
     slow = asyncio.create_task(_query(api, runaway))
     await asyncio.sleep(0.5)
-    busy = await _query(api, "MATCH (d:Doc) RETURN d.id")
-    assert busy.status_code == HTTPStatus.TOO_MANY_REQUESTS
+    # One query per user: the next waits for the runaway to be stopped (2 s), then runs.
+    queued = await _query(api, "MATCH (d:Doc) RETURN count(d)")
+    assert slow.done()
+    assert queued.status_code == HTTPStatus.OK, queued.text
+    assert queued.json()["rows"] == [[2]]
     stopped = await slow
     assert stopped.status_code == HTTPStatus.GATEWAY_TIMEOUT, stopped.text
-    # The connection is usable again.
-    assert (await _query(api, "MATCH (d:Doc) RETURN count(d)")).json()["rows"] == [[2]]
 
 
 @requires_db

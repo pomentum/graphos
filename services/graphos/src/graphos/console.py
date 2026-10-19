@@ -26,7 +26,9 @@ boundary"):
   backend if a query outlives the timeout or the caller goes away (AGE
   sees a cancel late while it builds large lists), and, should the backend
   still not stop, closes the connection so the caller is answered and the
-  slot freed; one query per user, on a small pool of its own.
+  slot freed; one query per user at a time, on a small pool of its own (a
+  user's next query waits its turn, as a query waits for a connection: up
+  to ``GRAPHOS_CYPHER_WAIT_S`` in all, then 429).
 - **Nothing that needs AGE's in-memory graph** (:func:`needs_age_graph`):
   variable-length patterns (``-[*1..3]->``) and ``vertex_stats()``.  AGE
   serves them from a copy of the whole graph it loads under a process-wide
@@ -387,6 +389,7 @@ class Console:
     owner: asyncpg.Pool
     settings: Settings
     _running: dict[str, int] = field(default_factory=dict)
+    _turns: asyncio.Condition = field(default_factory=asyncio.Condition)
 
     async def run(  # noqa: PLR0913 — one query's inputs
         self,
@@ -439,18 +442,18 @@ class Console:
                 "paths (POST /v1/{tenant}/graph/paths, the Path page)",
             )
         cap = min(limit or self.settings.cypher_max_rows, self.settings.cypher_max_rows)
-        if self._running.get(consumer, 0) >= self.settings.cypher_per_user:
-            raise ConsoleError(429, "you are running a query already; wait for it or cancel it")
         tag = f"$q_{secrets.token_hex(6)}$"
         while tag in text:
             tag = f"$q_{secrets.token_hex(6)}$"
         names = return_columns(text)
 
-        self._running[consumer] = self._running.get(consumer, 0) + 1
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.settings.cypher_wait_s
+        await self._take_turn(consumer, deadline)
         try:
             try:
                 conn = await asyncio.wait_for(
-                    self.pool.acquire(), timeout=self.settings.cypher_wait_s,
+                    self.pool.acquire(), timeout=max(0.0, deadline - loop.time()),
                 )
             except TimeoutError as exc:
                 raise ConsoleError(429, "the console is busy; try again in a moment") from exc
@@ -467,9 +470,31 @@ class Console:
             finally:
                 await self.pool.release(conn)
         finally:
+            await self._end_turn(consumer)
+
+    async def _take_turn(self, consumer: str, deadline: float) -> None:
+        """One of ``consumer``'s ``GRAPHOS_CYPHER_PER_USER`` turns, waited for until
+        ``deadline``: an agent sends its queries together, a person seldom does."""
+        loop = asyncio.get_running_loop()
+        async with self._turns:
+            while self._running.get(consumer, 0) >= self.settings.cypher_per_user:
+                left = deadline - loop.time()
+                if left <= 0:
+                    waited = f"{self.settings.cypher_wait_s:g}"
+                    raise ConsoleError(
+                        429, f"your other query did not finish within {waited} s; "
+                        "wait for it or cancel it",
+                    )
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(self._turns.wait(), left)
+            self._running[consumer] = self._running.get(consumer, 0) + 1
+
+    async def _end_turn(self, consumer: str) -> None:
+        async with self._turns:
             self._running[consumer] -= 1
             if not self._running[consumer]:
                 del self._running[consumer]
+            self._turns.notify_all()
 
     async def _on(  # noqa: PLR0913
         self, conn: asyncpg.Connection, tenant: str, text: str, tag: str,

@@ -22,6 +22,7 @@ from graphos.config import Settings
 from graphos.console import (
     MAX_COLUMNS,
     Console,
+    ConsoleError,
     _cell,
     _column_counts,
     _Graph,
@@ -321,6 +322,67 @@ async def test_the_watchdog_stops_when_the_query_ends_even_if_its_cancel_is_lost
     with contextlib.suppress(asyncio.CancelledError):
         await asyncio.wait_for(watchdog, 2)
     assert asyncio.get_running_loop().time() - started < 1.0
+
+class _Pool:
+    async def acquire(self) -> object:
+        return object()
+
+    async def release(self, conn: object) -> None:
+        pass
+
+
+def _timed_console(wait_s: float, run_s: float, ran: list[str]) -> Console:
+    console = Console(
+        pool=_Pool(), owner=None, settings=Settings(db_password="x", cypher_wait_s=wait_s),  # type: ignore[arg-type]
+    )
+
+    async def on(conn: object, tenant: str, text: str, *rest: object) -> dict[str, Any]:
+        ran.append(f"start {text}")
+        await asyncio.sleep(run_s)
+        ran.append(f"end {text}")
+        return {"rows": []}
+
+    console._on = on  # type: ignore[method-assign]
+    return console
+
+
+async def _nobody_left() -> bool:
+    return False
+
+
+@pytest.mark.asyncio
+async def test_a_users_next_query_waits_its_turn_instead_of_being_refused() -> None:
+    # An agent sends its queries together; with one query per user the second
+    # used to answer 429 at once.
+    ran: list[str] = []
+    console = _timed_console(wait_s=5, run_s=0.1, ran=ran)
+    first, second = ("MATCH (a) RETURN a", "MATCH (b) RETURN b")
+    await asyncio.gather(*(
+        console.run("t", q, params=None, limit=None, consumer="agent", gone=_nobody_left)
+        for q in (first, second)
+    ))
+    assert ran == [f"start {first}", f"end {first}", f"start {second}", f"end {second}"]
+    assert console._running == {}
+    other = await asyncio.gather(*(
+        console.run("t", q, params=None, limit=None, consumer=who, gone=_nobody_left)
+        for q, who in ((first, "a"), (second, "b"))
+    ))
+    assert len(other) == 2  # noqa: PLR2004  two users run side by side
+
+
+@pytest.mark.asyncio
+async def test_a_turn_not_given_within_the_wait_is_429() -> None:
+    ran: list[str] = []
+    console = _timed_console(wait_s=0.05, run_s=0.5, ran=ran)
+    results = await asyncio.gather(*(
+        console.run("t", q, params=None, limit=None, consumer="agent", gone=_nobody_left)
+        for q in ("MATCH (a) RETURN a", "MATCH (b) RETURN b")
+    ), return_exceptions=True)
+    refused = [r for r in results if isinstance(r, ConsoleError)]
+    assert len(refused) == 1 and refused[0].status == 429  # noqa: PLR2004
+    assert "did not finish within 0.05 s" in str(refused[0])
+    assert console._running == {}
+
 
 def test_the_console_is_on_unless_it_is_turned_off() -> None:
     assert Settings(db_password="placeholder").cypher is True        # ADR-0006

@@ -23,8 +23,9 @@ Then let graphos trust the UI's scheme header (`GRAPHOS_FORWARDED_ALLOW_IPS` cov
 container, so it knows the client used `https`), and list the UI's host name in
 `GRAPHOS_ALLOWED_HOSTS` when you set it, next to `graphos-api` (the UI's own `/api/`
 requests reach graphos under that name). Turn on the rate limiter
-(`GRAPHOS_RATE_LIMIT_ENABLED=true`): agents call often. A tool returns at most 256 KiB; a longer
-result has its longest lists shortened, stays valid JSON, and says what was left out (§4).
+(`GRAPHOS_RATE_LIMIT_ENABLED=true`): agents call often. A tool returns at most 64 KiB, below what
+MCP clients take in one result (Claude Code: 25,000 tokens by default); a longer result has its
+longest lists shortened, stays valid JSON, and says what was left out (§4).
 
 ## 2. Get a token
 
@@ -149,10 +150,18 @@ as the caller, so it answers exactly what the route does (§ references are to [
   the rest. `scan_nodes` has its route's own `project`.
 - `run_saved_query` and `run_cypher` leave out the answer's `graph`, the rows' nodes and edges
   drawn again for the UI's canvas.
-- A result over 256 KiB keeps its first items: its longest lists are shortened from the end
+- A result over 64 KiB keeps its first items: its longest lists are shortened from the end
   until it fits, and `result_cut` says so (`{"bytes", "max_bytes", "lists": [{"list", "kept",
   "of"}], "note"}`). A result that does not fit even with empty lists is an error asking for
   less.
+
+**Saved queries first.** The server's instructions tell the agent to run a saved query when one
+answers the question, rather than write its own Cypher: a saved query holds the tenant's agreed
+definition (what counts as "critical", which edge means "depends on").
+
+**Several calls at once.** Agents send calls together. A caller's Cypher queries
+(`run_cypher`, `run_saved_query`) still run one at a time (`GRAPHOS_CYPHER_PER_USER`), but the
+next one waits its turn, up to `GRAPHOS_CYPHER_WAIT_S` (10 s), instead of answering 429 at once.
 
 Resources: `graphos://{tenant}/schema/summary` (the summary as text),
 `graphos://{tenant}/properties` (the property definitions) and `graphos://{tenant}/saved-queries`
