@@ -50,7 +50,9 @@ log = logging.getLogger(__name__)
 
 
 # Exempt routes — orchestrator-facing, no auth, never rate-limited.
-_EXEMPT_PATHS = frozenset({"/healthz", "/readyz", "/metrics"})
+# /mcp itself is not counted: each tool call runs a route in process, which
+# counts against the caller as any request would (graphos.mcp_server).
+_EXEMPT_PATHS = frozenset({"/healthz", "/readyz", "/metrics", "/mcp"})
 
 
 # Prometheus counter so dashboards see when limits fire.

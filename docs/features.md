@@ -188,7 +188,9 @@ one id (or one src/dst pair) in a batch collapse into one row.
   of a type between two labels, as JSON or NDJSON) and graphos makes the stored
   set equal to it in one transaction: missing edges added, changed ones
   rewritten, the rest deleted; unchanged edges keep their revision. A reload
-  costs the difference instead of a rebuild. `dry_run` answers the counts.
+  costs the difference instead of a rebuild. `dry_run` answers the counts. It
+  manages the consumer's edges: a rule's derived edge it does not name is left
+  alone, and one it names (or any write to it) becomes the consumer's.
 - **Dataset export** (`GET …/graph/snapshot`): the whole tenant as one NDJSON
   file (gzip optional), framed by a header (format, counts, the schema) and an
   end line; each node once with its own label, nodes before edges; one
@@ -533,8 +535,9 @@ POST /v1/acme/graph/edges:resolve
 - Requesting a type with no rule → 400.
 - Re-running adds only missing edges. Edges a rule writes carry
   `graphos_derived: true`; `"mode": "reconcile"` also removes the marked edges no
-  rule derives any more (never an edge a consumer wrote), `adopt_unmarked` takes
-  older unmarked ones as derived, and `dry_run` shows the effect first.
+  rule derives any more, on every edge type (never an edge a consumer wrote or
+  took over), `adopt_unmarked` takes older unmarked ones as derived, and
+  `dry_run` shows the effect first.
 
 ---
 

@@ -14,14 +14,15 @@ the ones that touch it:
 |---|---|---|
 | `GRAPHOS_MCP` | `true` | `false` turns `/mcp` off |
 | `GRAPHOS_CYPHER` | `true` | `false` removes the `run_cypher` tool; the saved-query tools then answer 404 |
-| `GRAPHOS_ALLOWED_HOSTS` | — | Set it to the public host name: `/mcp` also refuses a browser `Origin` outside it |
+| `GRAPHOS_ALLOWED_HOSTS` | — | Set it to the public host name: `/mcp` also refuses a browser `Origin` outside it (without it, only loopback origins) |
 
 Behind a proxy, route `/mcp`, `/oauth/` and `/.well-known/oauth-*` to graphos-api as well as
 `/v1`, and pass the `Host` header on. The bundled web UI's nginx already does: give MCP clients
 the UI's address (`https://graph.example.com/mcp`), and people sign in on the UI's own screen.
 Then let graphos trust the UI's scheme header (`GRAPHOS_FORWARDED_ALLOW_IPS` covering the UI
 container, so it knows the client used `https`), and list the UI's host name in
-`GRAPHOS_ALLOWED_HOSTS` when you set it. Turn on the rate limiter
+`GRAPHOS_ALLOWED_HOSTS` when you set it, next to `graphos-api` (the UI's own `/api/`
+requests reach graphos under that name). Turn on the rate limiter
 (`GRAPHOS_RATE_LIMIT_ENABLED=true`): agents call often. A tool returns at most 256 KiB; a longer
 result is cut and says so.
 
@@ -59,8 +60,10 @@ token to paste. graphos is then the client's authorization server
    address, graphos's sign-in page says the same and asks for the name and password. Both count
    towards the throttle and lock-out of `/v1/auth/login`.
 3. The client exchanges the code (once, within 5 minutes) at `/oauth/token` for a graphos access
-   token and a refresh token, a graphos session bound to that client, and renews by itself until
-   the session ends (`GRAPHOS_SESSION_IDLE_S`, `GRAPHOS_SESSION_MAX_S`) or is revoked
+   token that **only reads** (the person's tenants, at `read`; every write and account change is
+   refused) and a refresh token, a graphos session that belongs to that client. It renews by
+   itself, at `/oauth/token` only, until the session ends (`GRAPHOS_SESSION_IDLE_S`,
+   `GRAPHOS_SESSION_MAX_S`, and never after the UI session that allowed it) or is revoked
    (`/oauth/revoke`).
 
 **A person, with single sign-on**, lets the MCP client sign them in at the provider instead;

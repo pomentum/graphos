@@ -32,10 +32,13 @@ under one version.
   new **Authorize** screen and clicks Allow (`GET /v1/auth/mcp/request`,
   `POST /v1/auth/mcp/approve`; the UI's nginx now forwards `/mcp`, `/oauth/` and
   `/.well-known/oauth-*`), and at graphos-api's own address on its sign-in page, styled like the
-  UI; a single-use code is exchanged for a graphos access token and a refresh
-  token that is a graphos session bound to the client, and `/oauth/revoke` ends it. With single
-  sign-on the provider signs MCP clients in and none of this is served. Two new tables,
-  `graphos_meta.oauth_clients` and `graphos_meta.oauth_codes`.
+  UI; a single-use code is exchanged for a graphos access token that only reads (refused on every
+  write and account change) and a refresh token that is a graphos session belonging to the
+  client (renewed only by it, at `/oauth/token`; one allowed in the UI ends no later than the
+  allowing session; allowing is audited), and `/oauth/revoke` ends it. Registration is bounded
+  (small fields, 10 a minute from one address, at most 1,000 clients, unused ones forgotten).
+  With single sign-on the provider signs MCP clients in and none of this is served. New tables
+  `graphos_meta.oauth_clients` and `graphos_meta.oauth_codes`, and `graphos_meta.sessions.client`.
 - **One saved query by name**: `GET /v1/{tenant}/cypher/saved/{name}` (text, description,
   parameters), with the access running it needs; 404 while the console is off or when there is
   none.
@@ -54,13 +57,16 @@ under one version.
   change rewritten (`props`: `merge` or `replace`), the rest deleted; an unchanged edge keeps its
   revision. Scopes: `node` (one node's edges of a type, in a direction, towards a label; JSON) and
   `type` (every edge of a type between two labels; JSON up to 10,000 edges, or NDJSON up to
-  `GRAPHOS_RECONCILE_MAX_EDGES`, 2,000,000). The upsert checks apply; a wanted edge whose end does
-  not exist is skipped; `dry_run=true` answers the counts. The change feed gets one `upsert` and
-  one `delete` record with `detail.reconcile`. Client: `reconcile_node_edges()`,
+  `GRAPHOS_RECONCILE_MAX_EDGES`, 200,000). The upsert checks apply; a wanted edge whose end does
+  not exist is skipped, and one sent without `props` that turns out to be new is checked as
+  `{}`; `dry_run=true` answers the counts. It manages the consumer's own edges: a rule's derived
+  edge it does not name is left alone, one it names is taken over. The change feed gets one
+  `upsert` and one `delete` record with `detail.reconcile`. Client: `reconcile_node_edges()`,
   `reconcile_type_edges()`, with the `ReconcileEdge` and `EdgesReconcileResponse` models.
 - **`edges:resolve` by difference**: edges a rule writes now carry `graphos_derived: true`, and
-  `"mode": "reconcile"` also deletes the marked edges no rule derives any more, never an edge a
-  consumer wrote. `"adopt_unmarked": true` takes the unmarked edges of the type between the rules'
+  `"mode": "reconcile"` also deletes the marked edges no rule derives any more, on every edge type
+  of the tenant (a type whose last rule was removed included), never an edge a consumer wrote; a
+  consumer's upsert, patch or reconcile of a derived edge takes it over (the mark is cleared). `"adopt_unmarked": true` takes the unmarked edges of the type between the rules'
   label pairs as derived (edges resolved before this release); `"dry_run": true` answers
   `edges_removed` and `edges_marked` and writes nothing. `insert` stays the default for this
   release. Client: `resolve_edges(mode=, adopt_unmarked=, dry_run=)`.

@@ -186,6 +186,24 @@ async def upsert_nodes(
     return written
 
 
+# The mark on the edges a resolve rule derived (ADR-0001): ``edges:resolve`` in
+# reconcile mode removes only marked edges, and a consumer's write to an edge
+# takes it over by clearing the mark, so neither removes the other's edges.
+DERIVED = "graphos_derived"
+_MARKED = "e.properties::text::jsonb @> '{\"graphos_derived\": true}'"
+
+
+def _taken_over(edge_type: str) -> str:
+    """An upsert's merged properties, without the rules' mark when there was one
+    (the text test keeps the usual upsert free of jsonb casts)."""
+    old = f'"{edge_type}".properties'
+    return (
+        f"CASE WHEN {old}::text LIKE '%{DERIVED}%' "
+        f"THEN (({old} || EXCLUDED.properties)::text::jsonb - '{DERIVED}')::text::agtype "
+        f"ELSE {old} || EXCLUDED.properties END"
+    )
+
+
 async def upsert_edges(
     pool: asyncpg.Pool,
     *,
@@ -268,7 +286,7 @@ async def upsert_edges(
                 f'JOIN "{tenant}"."{dst_label}" dst '
                 f"  ON dst.properties->'\"id\"' = to_jsonb(stg.dst_ext)::text::agtype "
                 f"ON CONFLICT (start_id, end_id) "
-                f'DO UPDATE SET properties = "{edge_type}".properties || EXCLUDED.properties, '
+                f"DO UPDATE SET properties = {_taken_over(edge_type)}, "
                 f'{lookup.REV} = "{edge_type}".{lookup.REV} + 1;'
             )
             written = _rows_written(status, default=len(rows) - skipped)
@@ -475,6 +493,9 @@ async def patch_edge(  # noqa: PLR0913 — the edge's identity has this many par
             if edge is None:
                 return None
             properties = apply_merge_patch(edge.properties, dict(patch))
+            if isinstance(properties, dict):
+                # A consumer's write takes a derived edge over (ADR-0001).
+                properties.pop(DERIVED, None)
             if check is not None:
                 check(edge_type, None, properties)
             rev = await conn.fetchval(
@@ -793,8 +814,13 @@ async def reconcile_edges(  # noqa: PLR0913, PLR0915 — a scope has this many p
     props_mode: str = "merge",
     dry_run: bool = False,
     timeout_s: float | None = None,
+    check_added: Callable[[Sequence[tuple[str, str]]], None] | None = None,
 ) -> ReconcileCounts:
-    """Make the ``edge_type`` edges of a scope exactly ``rows``.
+    """Make the consumer's ``edge_type`` edges of a scope exactly ``rows``.
+
+    The edges a resolve rule derived (marked ``graphos_derived``) are the
+    rules': one in ``rows`` is taken over (kept, its mark cleared), the others
+    are left as they are (ADR-0001).
 
     Args:
         rows: ``{"src_id", "dst_id", "props"}``; ``props`` absent or None
@@ -808,6 +834,9 @@ async def reconcile_edges(  # noqa: PLR0913, PLR0915 — a scope has this many p
         props_mode: ``merge`` (into the kept edge's properties) or
             ``replace`` (the given properties become all of them; graphos's
             own ``graphos_*`` keys stay).
+        check_added: called, before anything is committed, with the added
+            edges that came without properties (they are written as ``{}``);
+            raising undoes the whole reconcile.
 
     Returns:
         The counts; with ``dry_run`` nothing is written.
@@ -839,14 +868,16 @@ async def reconcile_edges(  # noqa: PLR0913, PLR0915 — a scope has this many p
     scope_args: tuple[Any, ...] = () if scope == "type" else (anchor,)
     table = f'"{tenant}"."{edge_type}"'
     detail = {"reconcile": "type" if scope == "type" else "node"}
+    # The properties a kept edge ends with: never the rules' mark.
     if props_mode == "replace":
         new_props = (
-            "w.props || COALESCE((SELECT jsonb_object_agg(k, v) "
-            "FROM jsonb_each(e.properties::text::jsonb) AS old(k, v) "
-            "WHERE k LIKE 'graphos\\_%'), '{}'::jsonb)"
+            f"(CASE WHEN w.props IS NULL THEN e.properties::text::jsonb "
+            f"ELSE w.props || COALESCE((SELECT jsonb_object_agg(k, v) "
+            f"FROM jsonb_each(e.properties::text::jsonb) AS old(k, v) "
+            f"WHERE k LIKE 'graphos\\_%'), '{{}}'::jsonb) END) - '{DERIVED}'"
         )
     else:
-        new_props = "e.properties::text::jsonb || w.props"
+        new_props = f"(e.properties::text::jsonb || COALESCE(w.props, '{{}}'::jsonb)) - '{DERIVED}'"
 
     counts: ReconcileCounts | None = None
     with _db_errors(
@@ -882,15 +913,16 @@ async def reconcile_edges(  # noqa: PLR0913, PLR0915 — a scope has this many p
                 await conn.execute("ANALYZE _want;")
                 found = {
                     (r["src_ext"], r["dst_ext"])
-                    for r in await conn.fetch("SELECT src_ext, dst_ext FROM _want;")
+                    for r in await conn.fetch("SELECT DISTINCT src_ext, dst_ext FROM _want;")
                 }
+                wanted = await conn.fetchval("SELECT count(*) FROM _want;")
                 sent = list(dict.fromkeys((s, d) for s, d, _ in records))
                 skipped = [p for p in sent if p not in found]
 
-                # Remove what is in the scope and not wanted.
+                # Remove what is in the scope and not wanted, the rules' edges aside.
                 removed_rows = await conn.fetch(
                     f"WITH gone AS ("
-                    f"  DELETE FROM ONLY {table} e WHERE {in_scope} "
+                    f"  DELETE FROM ONLY {table} e WHERE {in_scope} AND NOT ({_MARKED}) "
                     f"  AND NOT EXISTS (SELECT 1 FROM _want w "
                     f"                  WHERE w.start_id = e.start_id AND w.end_id = e.end_id) "
                     f"  RETURNING e.start_id, e.end_id) "
@@ -902,12 +934,12 @@ async def reconcile_edges(  # noqa: PLR0913, PLR0915 — a scope has this many p
                 )
                 removed = [(r["src_ext"], r["dst_ext"]) for r in removed_rows]
 
-                # Rewrite the kept edges whose properties change.
+                # Rewrite the kept edges whose properties change (a derived one
+                # named here changes: it loses the mark).
                 changed_rows = await conn.fetch(
                     f"UPDATE {table} e SET properties = ({new_props})::text::agtype, {_BUMP} "
                     f"FROM _want w "
                     f"WHERE e.start_id = w.start_id AND e.end_id = w.end_id "
-                    f"AND w.props IS NOT NULL "
                     f"AND ({new_props}) IS DISTINCT FROM e.properties::text::jsonb "
                     f"RETURNING w.src_ext, w.dst_ext;"
                 )
@@ -915,21 +947,22 @@ async def reconcile_edges(  # noqa: PLR0913, PLR0915 — a scope has this many p
 
                 # Add the wanted edges that are not stored.
                 added_rows = await conn.fetch(
-                    f"INSERT INTO {table} (start_id, end_id, properties) "
-                    f"SELECT w.start_id, w.end_id, COALESCE(w.props, '{{}}'::jsonb)::text::agtype "
-                    f"FROM _want w "
-                    f"WHERE NOT EXISTS (SELECT 1 FROM {table} e "
-                    f"                  WHERE e.start_id = w.start_id AND e.end_id = w.end_id) "
-                    f"ON CONFLICT (start_id, end_id) DO NOTHING "
-                    f"RETURNING start_id, end_id;"
+                    f"WITH ins AS ("
+                    f"  INSERT INTO {table} (start_id, end_id, properties) "
+                    f"  SELECT w.start_id, w.end_id, "
+                    f"         COALESCE(w.props, '{{}}'::jsonb)::text::agtype "
+                    f"  FROM _want w "
+                    f"  WHERE NOT EXISTS (SELECT 1 FROM {table} e "
+                    f"                    WHERE e.start_id = w.start_id AND e.end_id = w.end_id) "
+                    f"  ON CONFLICT (start_id, end_id) DO NOTHING "
+                    f"  RETURNING start_id, end_id) "
+                    f"SELECT w.src_ext, w.dst_ext, w.props IS NULL AS bare FROM ins "
+                    f"JOIN _want w ON w.start_id = ins.start_id AND w.end_id = ins.end_id;"
                 )
-                added_ids = {(str(r["start_id"]), str(r["end_id"])) for r in added_rows}
-                added = [
-                    (r["src_ext"], r["dst_ext"]) for r in await conn.fetch(
-                        "SELECT start_id::text AS s, end_id::text AS d, src_ext, dst_ext "
-                        "FROM _want;"
-                    ) if (r["s"], r["d"]) in added_ids
-                ]
+                added = [(r["src_ext"], r["dst_ext"]) for r in added_rows]
+                bare = [(r["src_ext"], r["dst_ext"]) for r in added_rows if r["bare"]]
+                if check_added is not None and bare:
+                    check_added(bare)
 
                 written = [*added, *changed]
                 if written:
@@ -944,9 +977,10 @@ async def reconcile_edges(  # noqa: PLR0913, PLR0915 — a scope has this many p
                         src_label=src_label, dst_label=dst_label,
                         ids=_listed(removed), count=len(removed), detail=detail,
                     )
+                # Counted per stored edge: an id in two child labels is two edges.
                 counts = ReconcileCounts(
                     added=len(added), changed=len(changed),
-                    kept=len(found) - len(added) - len(changed), removed=len(removed),
+                    kept=wanted - len(added) - len(changed), removed=len(removed),
                     skipped=skipped[:100], skipped_count=len(skipped),
                 )
                 if dry_run:
@@ -978,10 +1012,14 @@ async def reconcile_resolved_edges(
     Returns:
         ``(added, removed, marked)``; with ``dry_run`` nothing is written.
     """
-    if compiled.candidates_sql is None:
-        return 0, 0, 0
+    # No rule (any more), or rules no label matches: nothing is derived, so
+    # every marked edge of the type goes.
+    candidates_sql = compiled.candidates_sql or (
+        "SELECT NULL::graphid AS start_id, NULL::graphid AS end_id WHERE false"
+    )
+    params = compiled.params if compiled.candidates_sql else ()
     table = f'"{tenant}"."{compiled.edge_type}"'
-    marked_sql = "e.properties::text::jsonb @> '{\"graphos_derived\": true}'"
+    marked_sql = _MARKED
     pairs_sql = " OR ".join(
         f'(EXISTS (SELECT 1 FROM "{tenant}"."{sl}" s WHERE s.id = e.start_id) '
         f'AND EXISTS (SELECT 1 FROM "{tenant}"."{dl}" d WHERE d.id = e.end_id))'
@@ -999,8 +1037,8 @@ async def reconcile_resolved_edges(
                 await allow_long_statements(conn, timeout_s)
                 await _type_lock(conn, tenant, compiled.edge_type)
                 await conn.execute(
-                    f"CREATE TEMP TABLE _derived ON COMMIT DROP AS {compiled.candidates_sql};",
-                    *compiled.params, timeout=timeout_s,
+                    f"CREATE TEMP TABLE _derived ON COMMIT DROP AS {candidates_sql};",
+                    *params, timeout=timeout_s,
                 )
                 await conn.execute("CREATE INDEX ON _derived (start_id, end_id);")
                 await conn.execute("ANALYZE _derived;")

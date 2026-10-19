@@ -87,7 +87,11 @@ worse than what is written here.
 - **MCP clients register themselves without signing in** (RFC 7591), where graphos signs them in
   (no single sign-on). A registration holds no secret and grants nothing: a person still signs
   in on graphos's page, which names the client and where it sends the answer. Callbacks must
-  be loopback ones, and at most 1,000 clients are kept.
+  be loopback ones; registrations are small, 10 a minute from one address, at most 1,000 kept,
+  and one that never signs anyone in is forgotten after an hour. What a client gets only reads,
+  and its session ends no later than the one that allowed it.
+- **Without `GRAPHOS_ALLOWED_HOSTS`, `/mcp` accepts browser requests only from loopback
+  origins.** A browser-based MCP client served from another host needs that host listed.
 - **Reads by direct SQL roles are not in graphos's audit log.** Use PostgreSQL's logging
   (`log_statement`, `pgaudit`) if they must be.
 - **Community detection (Louvain)** installs python-igraph from PyPI into the container at start

@@ -10,7 +10,13 @@ from pydantic import BaseModel, Field
 class ValueCount(BaseModel):
     """One value a property takes, and on how many rows."""
 
-    value: str = Field(..., description="The value as text (longer ones cut at 80 characters).")
+    value: str = Field(..., description=(
+        "The value as text: a string as it is, any other value as JSON (`5`, `true`, `null`). "
+        "One longer than 80 characters is cut and ends with `…`."
+    ))
+    kind: str | None = Field(None, description=(
+        "The value's JSON type: `string`, `number`, `boolean`, `null`, `array` or `object`."
+    ))
     count: int = Field(..., description="Rows that hold it (estimated when the property is).")
 
 

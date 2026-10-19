@@ -21,7 +21,7 @@ The checks are an upsert's: registered type and labels, declared pairs under
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from collections.abc import Sequence
 from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -49,14 +49,6 @@ router = APIRouter(tags=["graph"], prefix="/{tenant}/graph")
 TYPE_SCOPE_TIMEOUT_S = 600.0
 
 
-@dataclass(frozen=True, slots=True)
-class _Row:
-    """One wanted edge as the property checks read it."""
-
-    type: str
-    src_id: str
-    dst_id: str
-    properties: dict[str, Any]
 
 
 def _body_schema() -> dict[str, Any]:
@@ -214,11 +206,20 @@ async def reconcile_edges(  # noqa: PLR0912 — one check per rule an upsert has
     if refusal is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=refusal)
     reserved.check(*(e.props for e in body.edges))
-    tally = properties.enforce(properties.edge_rows(
-        properties.policies_for(spec),
-        (_Row(body.type, s, d, dict(e.props)) for (s, d), e in zip(pairs, body.edges, strict=True)
-         if e.props is not None),
-    ))
+    policy = properties.policies_for(spec).for_edge(body.type)
+    # The edges sent with properties are checked now; one sent without is
+    # checked as {} if it turns out to be new (an edge kept keeps its own).
+    tally = properties.enforce(
+        (policy, dict(e.props), None, {"index": i, "type": body.type, "src_id": s, "dst_id": d})
+        for i, ((s, d), e) in enumerate(zip(pairs, body.edges, strict=True))
+        if e.props is not None
+    )
+
+    def check_added(bare: Sequence[tuple[str, str]]) -> None:
+        properties.enforce(
+            (policy, {}, None, {"type": body.type, "src_id": s, "dst_id": d}) for s, d in bare
+        )
+
     rows = [
         {"src_id": s, "dst_id": d, "props": e.props}
         for (s, d), e in zip(pairs, body.edges, strict=True)
@@ -227,7 +228,7 @@ async def reconcile_edges(  # noqa: PLR0912 — one check per rule an upsert has
         counts = await writes.reconcile_edges(
             pool, tenant=tenant, edge_type=body.type, src_label=src_label,
             dst_label=dst_label, rows=rows, scope=scope, anchor=anchor,
-            props_mode=body.props, dry_run=dry_run,
+            props_mode=body.props, dry_run=dry_run, check_added=check_added,
             timeout_s=TYPE_SCOPE_TIMEOUT_S if scope == "type" else None,
         )
     except CypherError as exc:

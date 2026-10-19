@@ -170,6 +170,19 @@ Keeping removed edges with an `ended_at` time, as some graph tools do, is left o
   so `"removed": "end"` later means "delete and archive", with the same request shape. The edge
   history ADR carries the reasons, `as_of` reads, retention and purge.
 
+### Who owns an edge (settled while building it)
+
+- **A rule's edge** carries `graphos_derived`. A consumer's write to it (an upsert, a patch,
+  or naming it in an `edges:reconcile` set) takes it over: the mark is cleared, and the rules
+  leave it alone from then on.
+- **`edges:reconcile` manages the consumer's edges only.** It removes the unmarked edges of
+  its scope that are not in the set; a rule's edge it does not name stays the rules'.
+- **`edges:resolve` with `mode: reconcile`** removes only marked edges, and visits every edge
+  type of the tenant: a type whose last rule was removed, or whose rules no label matches any
+  more, loses its marked edges.
+- Neither writer therefore removes the other's edges, and the two cannot undo each other in
+  turn.
+
 ## Decision options
 
 | Option | For | Against |

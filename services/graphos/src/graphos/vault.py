@@ -19,9 +19,10 @@ database: one key per line, ``<version>:<base64 of 32 bytes>``.  The
 highest version seals; every version listed opens, so a new key is added
 as a new line, everything is re-sealed (``python -m graphos.vault reseal``)
 and the old line removed.  Losing the file means losing what it sealed:
-the signing keys (graphos makes a new one, and every token is signed
-again at the next renewal) and the ID tokens (sign-out at the provider
-asks again).
+graphos refuses to start on sealed signing keys it cannot open.  To
+recover, delete the rows of ``graphos_meta.signing_keys`` (graphos makes a
+new key; everyone signs in again) and null ``id_token`` in
+``graphos_meta.sessions`` (docs/installation.md §8).
 
 **Without a master key** values are stored as they are, as before, with a
 warning at start.  A value that is not sealed is read as it is, so rows

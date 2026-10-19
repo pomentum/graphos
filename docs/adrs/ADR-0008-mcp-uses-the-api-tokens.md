@@ -56,10 +56,12 @@ the identity provider. Without it, nothing signs people in for MCP clients.
       (`http://localhost`, `127.0.0.1` or `[::1]`, any port: desktop and command-line clients,
       and nothing elsewhere can receive the code). A web client's callback is not served here:
       with single sign-on the identity provider, which then signs MCP clients in, holds the
-      clients and their callbacks; graphos needs no setting for them. At most 1,000 clients.
-      Every client
-      is registered as a public one (no client secret; PKCE binds the code to it), so graphos
-      keeps no client secret.
+      clients and their callbacks; graphos needs no setting for them. Every client is registered
+      as a public one (no client secret; PKCE binds the code to it), so graphos keeps no client
+      secret. Registration needs no token, so it is bounded: a 16 KB body, fields of at most
+      300 characters and 5 redirect URIs, 10 registrations a minute from one address, at most
+      1,000 clients kept; a client that never signed anyone in is forgotten after an hour, one
+      unused for 90 days after that.
     - **Where the person signs in.** Through the web UI, when the client reached graphos at the
       UI's address: the UI's nginx forwards `/mcp`, `/oauth/` and `/.well-known/oauth-*` to the
       API with the client's own `Host`, and marks them. `/oauth/login` then sends the browser to
@@ -78,9 +80,16 @@ the identity provider. Without it, nothing signs people in for MCP clients.
       can exchange them. The request between `authorize` and the sign-in page travels in the page
       and is checked again when the person signs in (the client, its redirect URI, a PKCE
       challenge), so it needs no storage either.
-    - **Tokens** are graphos's own: an access token as from `/v1/auth/login`, and a refresh token
-      that is a graphos session (rotation, reuse detection, idle and absolute expiry, revocation),
-      bound to its client. `revoke` ends the session.
+    - **Tokens** are graphos's own and **only read**: MCP tools read, so the client gets no more.
+      The access token carries a read-only mark, and graphos holds its principal to `read` on
+      every tenant it may see, refuses every route that needs more, and refuses the account
+      changes declared as reads (password, preferences, allowing another client). The refresh
+      token is a graphos session that belongs to the client (rotation, reuse detection, idle and
+      absolute expiry): only that client renews it, only at `/oauth/token`, never at
+      `/v1/auth/refresh`; `revoke` ends it.
+    - **Allowing cannot stretch a sign-in.** In the web UI, Allow needs a token from the person's
+      own sign-in session (not an MCP client's), and the client's session ends no later than
+      that session. Allowing is audited.
 - **Removed:** `POST /v1/auth/token` and its form; graphos's direct dependency on
   `python-multipart` (the MCP SDK still brings it); the settings `GRAPHOS_MCP_RESOURCE`,
   `GRAPHOS_MCP_MAX_RESULT_BYTES` (now a fixed 256 KiB) and `GRAPHOS_SCHEMA_SUMMARY_TTL_S` (now a
@@ -89,7 +98,9 @@ the identity provider. Without it, nothing signs people in for MCP clients.
   endpoints off. With nothing left to configure and nothing it can do that REST cannot, it
   follows the console (ADR-0006).
 - **Origin.** `/mcp` reads `GRAPHOS_ALLOWED_HOSTS` through the same helper as the Host check, so
-  the two cannot disagree (`*` turned the Host check off but refused every browser `Origin`).
+  the two cannot disagree. Without a list, a browser's request must come from a loopback origin:
+  a rebinding page names its own host as both `Host` and `Origin`, so matching the two would
+  prove nothing.
 
 ## Decision options
 
@@ -145,6 +156,10 @@ None.
 
 - A token from `/v1/auth/login` works on `/mcp`; a call without a valid token answers 401 with
   the metadata URL; `POST /v1/auth/token` answers 404.
+- A token an MCP client got through graphos reads and is refused on writes and account changes;
+  its session is renewed only by that client at `/oauth/token`; one allowed in the UI ends no
+  later than the allowing session; a read-only token cannot allow; registration is throttled
+  and bounded, and unused clients are forgotten.
 - Without single sign-on, an MCP client registers, signs a person in on `/oauth/login`,
   exchanges the code once (a second exchange fails), calls `/mcp`, renews with the refresh token
   and revokes it; a redirect URI that is not a loopback one is refused at registration.

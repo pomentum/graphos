@@ -28,8 +28,8 @@ result over :data:`MAX_RESULT_BYTES` is cut and says so.
 
 **Host and Origin.**  The app's ``GRAPHOS_ALLOWED_HOSTS`` check runs first;
 a browser request's ``Origin`` must name an allowed host too (or, with no
-list, the request's own), against DNS rebinding; both read the setting
-through :func:`graphos.config.allowed_hosts`.
+list, a loopback one), against DNS rebinding; both read the setting through
+:func:`graphos.config.allowed_hosts`.
 """
 
 from __future__ import annotations
@@ -46,6 +46,7 @@ import mcp.types as mt
 from mcp.server.lowlevel.server import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.shared.exceptions import MCPError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
@@ -54,12 +55,15 @@ from starlette.types import Receive, Scope, Send
 from graphos import __version__, oauth
 from graphos.api.schema_summary import TTL_S as SUMMARY_TTL_S
 from graphos.auth import LentTokens
-from graphos.config import Settings, allowed_hosts
+from graphos.config import LOOPBACK_HOSTS, Settings, allowed_hosts
 from graphos.identity import ANONYMOUS_ADMIN, Principal
 
 log = logging.getLogger(__name__)
 
 PRINCIPAL_KEY = "graphos.mcp_principal"
+# JSON-RPC errors of a resource read (the MCP specification's codes).
+RESOURCE_NOT_FOUND = -32002
+INTERNAL_ERROR = -32603
 # Bytes of one tool result at most; a longer one is cut and says so.
 MAX_RESULT_BYTES = 262_144
 INSTRUCTIONS = (
@@ -391,13 +395,15 @@ class McpEndpoint:
         await self.manager.handle_request(scope, receive, send)
 
     def _origin_ok(self, request: Request) -> bool:
+        """A browser's request must come from an allowed host, or, with no
+        ``GRAPHOS_ALLOWED_HOSTS``, from a loopback one: a rebinding page names
+        its own host in both ``Host`` and ``Origin``, so matching the two would
+        prove nothing."""
         origin = request.headers.get("origin")
         if not origin:
             return True
         host = (urlsplit(origin).hostname or "").lower()
-        allowed = allowed_hosts(self.settings.allowed_hosts)
-        if not allowed:
-            return host == (request.url.hostname or "").lower()
+        allowed = allowed_hosts(self.settings.allowed_hosts) or list(LOOPBACK_HOSTS)
         return any(host == a or (a.startswith("*.") and host.endswith(a[1:])) for a in allowed)
 
     async def _principal(self, request: Request) -> Principal | None:
@@ -441,7 +447,7 @@ class McpEndpoint:
         parts = urlsplit(uri)
         tenant = parts.netloc
         if parts.scheme != "graphos" or not tenant:
-            raise ValueError(f"unknown resource {uri!r}")
+            raise MCPError(RESOURCE_NOT_FOUND, f"unknown resource {uri!r}")
         ttl = SUMMARY_TTL_S * 1000
         if parts.path == "/schema/summary":
             status, payload = await self._run(
@@ -461,9 +467,11 @@ class McpEndpoint:
             )
             text, mime = json.dumps(payload), "application/json"
         else:
-            raise ValueError(f"unknown resource {uri!r}")
+            raise MCPError(RESOURCE_NOT_FOUND, f"unknown resource {uri!r}")
         if status >= 400:  # noqa: PLR2004 — an HTTP error status
-            raise ValueError(f"{status}: {payload}")
+            detail = payload.get("detail") if isinstance(payload, dict) else payload
+            code = INTERNAL_ERROR if status >= 500 else RESOURCE_NOT_FOUND  # noqa: PLR2004
+            raise MCPError(code, f"{status}: {detail}")
         return mt.ReadResourceResult(
             contents=[mt.TextResourceContents(uri=uri, mime_type=mime, text=text)], ttl_ms=ttl,
         )
@@ -479,7 +487,10 @@ class McpEndpoint:
         lent: LentTokens = self.app.state.lent_tokens
         with lent.lend(principal, tool) as token:
             async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=self.app), base_url="http://localhost",
+                # A route that fails answers 500 here, as it would over HTTP, so
+                # the model gets a tool error and no traceback text.
+                transport=httpx.ASGITransport(app=self.app, raise_app_exceptions=False),
+                base_url="http://localhost",
                 timeout=None,
             ) as client:
                 resp = await client.request(

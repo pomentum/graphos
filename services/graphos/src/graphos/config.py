@@ -143,8 +143,9 @@ class Settings(BaseSettings):
     # The MCP endpoint at /mcp (read tools only), on unless turned off; it
     # takes the tokens the REST API takes.
     mcp: bool = True
-    # Edges an NDJSON ``edges:reconcile`` body may carry (held in memory).
-    reconcile_max_edges: int = Field(default=2_000_000, ge=1)
+    # Edges an NDJSON ``edges:reconcile`` body may carry: held in memory, about
+    # 1 KB each in the worker, so the default stays near 200 MB.
+    reconcile_max_edges: int = Field(default=200_000, ge=1)
     # Host names the API answers to (Starlette's TrustedHostMiddleware;
     # ``*.example.com`` wildcards), comma-separated.  Empty: any Host.  Behind
     # a proxy, the names clients use, as the proxy forwards them.

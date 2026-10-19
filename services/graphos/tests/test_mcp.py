@@ -129,17 +129,19 @@ async def test_without_a_valid_token_it_answers_401_with_its_metadata() -> None:
 @pytest.mark.asyncio
 async def test_origin_follows_the_host_allowlist_and_a_star_turns_both_off() -> None:
     for allowed, origin, ok in (
-        ("", "http://localhost", True),                  # no list: the request's own host
+        ("", "http://localhost", True),                  # no list: a loopback origin
         ("", "https://evil.example", False),
         ("graph.example.com", "https://graph.example.com", True),
         ("graph.example.com", "https://evil.example", False),
         ("*.example.com", "https://a.example.com", True),
         ("*", "http://localhost", True),                 # off, as the Host check
         ("*", "https://evil.example", False),
+        ("", "http://evil.example", False),           # a rebinding page: its own Host
     ):
         app = _app(allowed_hosts=allowed)
+        host = "http://evil.example" if origin == "http://evil.example" else "http://localhost"
         async with app.state.mcp.manager.run(), httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://localhost",
+            transport=httpx.ASGITransport(app=app), base_url=host,
         ) as http:
             r = await http.post(
                 "/mcp", json={}, headers={"Authorization": "Bearer nope", "Origin": origin},

@@ -45,6 +45,7 @@ from graphos.contracts.auth import (
     RefreshRequest,
     TokenResponse,
 )
+from graphos.observability.audit import audit_this
 
 log = logging.getLogger(__name__)
 
@@ -104,12 +105,13 @@ def _refused(exc: Exception) -> HTTPException:
 
 
 async def _tokens(d: AuthDeps, user: identity.User, *, session: bool) -> TokenResponse:
-    access, ttl = d.signer.issue(user)
-    refresh = None
+    refresh = until = None
     if session and user.kind == "person":
-        refresh = await identity.open_session(
+        opened = await identity.open_session(
             d.pool, user.name, idle_s=d.settings.session_idle_s, max_s=d.settings.session_max_s,
         )
+        refresh, until = opened.token, int(opened.until.timestamp())
+    access, ttl = d.signer.issue(user, session_until=until)
     return TokenResponse(
         access_token=access, expires_in=ttl, refresh_token=refresh, session=refresh is not None,
         must_change=user.must_change,
@@ -209,9 +211,10 @@ async def refresh(body: RefreshRequest, request: Request, response: Response) ->
         renewed = await identity.rotate_session(d.pool, token, idle_s=d.settings.session_idle_s)
     except identity.SessionError as exc:
         raise _refused(exc) from None
+    until = int(renewed.until.timestamp()) if renewed.until else None
     if renewed.identity is not None:
         # Signed in at the identity provider: issued again from its claims.
-        access, ttl = d.signer.issue_for(renewed.identity)
+        access, ttl = d.signer.issue_for(renewed.identity, session_until=until)
         tokens = TokenResponse(
             access_token=access, expires_in=ttl, refresh_token=renewed.refresh_token, session=True,
         )
@@ -219,7 +222,7 @@ async def refresh(body: RefreshRequest, request: Request, response: Response) ->
         user = d.store.user(renewed.user)
         if user is None or user.disabled:
             raise _refused(identity.SessionError("session ended"))
-        access, ttl = d.signer.issue(user)
+        access, ttl = d.signer.issue(user, session_until=until)
         tokens = TokenResponse(
             access_token=access, expires_in=ttl, refresh_token=renewed.refresh_token, session=True,
             must_change=user.must_change,
@@ -279,7 +282,11 @@ async def auth_config(request: Request) -> AuthConfig:
 _MCP_RESPONSES: dict[int | str, dict[str, Any]] = {
     400: {"description": "Not a request `/oauth/authorize` would pass on: unknown client, a "
                          "callback it did not register, or no PKCE challenge."},
-    403: {"description": "Not a person: a service account signs in with `/v1/auth/login`."},
+    403: {"description": (
+        "Not a person who may sign an MCP client in: a service account (it signs in with "
+        "`/v1/auth/login`), the local admin where `GRAPHOS_LOCAL_ADMIN=false`, a token an MCP "
+        "client got (it only reads), or one not from a sign-in session."
+    )},
     404: {"description": "graphos does not sign MCP clients in here: single sign-on is on (the "
                          "provider does it), `/mcp` is off, or sign-in is disabled."},
 }
@@ -295,12 +302,20 @@ def _signs_clients_in(request: Request) -> oauth.GraphosOAuth:
     return provider
 
 
-def _person(principal: identity.Principal) -> str:
+def _person(request: Request, principal: identity.Principal) -> str:
+    """The person answering an MCP client's request, from a token of their own sign-in."""
+    def refuse(detail: str) -> HTTPException:
+        return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
     if principal.kind != "person" or not (principal.subject or "").startswith("user:"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="only a person signs an MCP client in; a service account uses /v1/auth/login",
-        )
+        raise refuse("only a person signs an MCP client in; a service account uses /v1/auth/login")
+    if principal.read_only or principal.session_until is None:
+        # An MCP client's token, or none from a sign-in session: it could otherwise
+        # start sessions that outlast the one the person signed in with.
+        raise refuse("sign in to graphos to answer an MCP client")
+    settings: Settings = request.app.state.settings
+    if principal.consumer == identity.ADMIN_USER and not settings.local_admin:
+        raise refuse(identity.REFUSED_MESSAGE)
     return principal.consumer
 
 
@@ -336,7 +351,7 @@ async def mcp_request(
     )],
 ) -> McpRequestInfo:
     provider = _signs_clients_in(request)
-    _person(principal)
+    _person(request, principal)
     client = await _request_of(provider, {
         "client_id": client_id, "redirect_uri": redirect_uri, "code_challenge": code_challenge,
     })
@@ -362,11 +377,14 @@ async def mcp_approve(
     request: Request, principal: ReadPrincipal, body: McpApproval,
 ) -> McpApprovalResponse:
     provider = _signs_clients_in(request)
-    user = _person(principal)
+    user = _person(request, principal)
+    # A credential is issued: audited, although the route only needs `read`.
+    audit_this(request)
     fields = {k: str(v) for k, v in body.model_dump(exclude={"allow"}).items() if v is not None}
     await _request_of(provider, fields)
+    until = datetime.fromtimestamp(principal.session_until or 0, UTC)
     return McpApprovalResponse(
-        redirect=await oauth.answer(provider, fields, user if body.allow else None),
+        redirect=await oauth.answer(provider, fields, user if body.allow else None, until=until),
     )
 
 
@@ -491,12 +509,13 @@ async def oidc_callback(body: OidcCallback, request: Request, response: Response
     except oidc.OidcError as exc:
         log.warning("single sign-on refused: %s", exc)
         raise _refused(identity.AuthError("the identity provider's answer was not valid")) from None
-    access, ttl = d.signer.issue_for(who)
-    refresh = await identity.open_session(
+    opened = await identity.open_session(
         d.pool, identity.OIDC_SUB_PREFIX + who.subject,
         idle_s=d.settings.session_idle_s, max_s=d.settings.session_max_s, identity=who,
         id_token=id_token,
     )
+    refresh = opened.token
+    access, ttl = d.signer.issue_for(who, session_until=int(opened.until.timestamp()))
     log.info("signed in through the identity provider", extra={"user": who.consumer})
     signed = OidcSignedIn(
         access_token=access, expires_in=ttl, refresh_token=refresh, session=True,

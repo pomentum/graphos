@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 import os
 import secrets
 from collections.abc import AsyncIterator
@@ -148,8 +149,22 @@ async def test_an_mcp_client_signs_a_person_in_and_renews(app: Any) -> None:
         assert again.status_code == HTTPStatus.BAD_REQUEST
         assert again.json()["error"] == "invalid_grant"           # a code is used once
 
-        me = await http.get("/v1/me", headers={"Authorization": f"Bearer {issued['access_token']}"})
+        mcp_auth = {"Authorization": f"Bearer {issued['access_token']}"}
+        me = await http.get("/v1/me", headers=mcp_auth)
         assert me.json()["consumer"] == "graphos"
+        # The client got a token that only reads, and a session only it renews, only here.
+        write = await http.patch("/v1/me/preferences", headers=mcp_auth, json={"theme": "dark"})
+        assert write.status_code == HTTPStatus.FORBIDDEN
+        tenant = await http.post("/v1/tenants", headers=mcp_auth, json={"name": "acme_x"})
+        assert tenant.status_code == HTTPStatus.FORBIDDEN
+        session = issued["refresh_token"].partition(".")[2]
+        ui_refresh = await http.post("/v1/auth/refresh", json={"refresh_token": session})
+        assert ui_refresh.status_code == HTTPStatus.UNAUTHORIZED
+        approve = await http.post("/v1/auth/mcp/approve", headers=mcp_auth, json={
+            "client_id": client["client_id"], "redirect_uri": CALLBACK,
+            "code_challenge": challenge, "allow": True,
+        })
+        assert approve.status_code == HTTPStatus.FORBIDDEN       # cannot approve another
 
         renewed = await http.post("/oauth/token", data={
             "grant_type": "refresh_token", "refresh_token": issued["refresh_token"],
@@ -283,3 +298,71 @@ async def test_through_the_ui_the_person_allows_on_the_ui_and_the_client_gets_it
             "/v1/auth/mcp/approve", headers=auth, json={**fields, "allow": False},
         )
         assert "error=access_denied" in refused.json()["redirect"]
+
+    # The client's session ends no later than the one that allowed it.
+    async with app.state.pool.acquire() as conn:
+        mine = await conn.fetchval(
+            "SELECT max(absolute_expires_at) FROM graphos_meta.sessions WHERE client IS NULL;",
+        )
+        theirs = await conn.fetchval(
+            "SELECT max(absolute_expires_at) FROM graphos_meta.sessions WHERE client = $1;",
+            client["client_id"],
+        )
+    assert theirs is not None and theirs <= mine
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_allowing_is_audited_and_the_local_admin_rule_holds(
+    app: Any, caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="graphos.audit")
+    async with _http(app) as http:
+        client = (await _register(http)).json()
+        _, challenge = _pkce()
+        fields = await _sign_in_page(http, client["client_id"], challenge)
+        token = (await http.post(
+            "/v1/auth/login", json={"user": "graphos", "password": SECOND},
+        )).json()["access_token"]
+        auth = {"Authorization": f"Bearer {token}"}
+        allowed = await http.post(
+            "/v1/auth/mcp/approve", headers=auth, json={**fields, "allow": True},
+        )
+        assert allowed.status_code == HTTPStatus.OK, allowed.text
+        assert any(getattr(r, "path", None) == "/v1/auth/mcp/approve" for r in caplog.records)
+        app.state.settings = app.state.settings.model_copy(update={"local_admin": False})
+        admin = await http.post(
+            "/v1/auth/mcp/approve", headers=auth, json={**fields, "allow": True},
+        )
+        assert admin.status_code == HTTPStatus.FORBIDDEN
+        page = await http.post("/oauth/login", data={
+            **fields, "user": "graphos", "password": SECOND, "action": "allow",
+        })
+        assert page.status_code == HTTPStatus.UNAUTHORIZED
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_registration_is_bounded_and_unused_clients_are_forgotten(app: Any) -> None:
+    async with _http(app) as http:
+        long_name = await http.post("/oauth/register", json={
+            "redirect_uris": [CALLBACK], "client_name": "x" * 301,
+        })
+        assert long_name.status_code == HTTPStatus.BAD_REQUEST
+        many = await http.post("/oauth/register", json={
+            "redirect_uris": [f"http://127.0.0.1:{p}/cb" for p in range(40000, 40006)],
+        })
+        assert many.status_code == HTTPStatus.BAD_REQUEST
+        async with app.state.pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO graphos_meta.oauth_clients (client_id, info, created_at) "
+                "VALUES ('stale', '{}', now() - interval '2 hours');",
+            )
+        statuses = [(await _register(http)).status_code for _ in range(8)]
+        assert statuses == [HTTPStatus.CREATED] * 8
+        async with app.state.pool.acquire() as conn:
+            assert await conn.fetchval(
+                "SELECT count(*) FROM graphos_meta.oauth_clients WHERE client_id = 'stale';",
+            ) == 0
+        # Ten a minute from one address, the two refused above included.
+        assert (await _register(http)).status_code == HTTPStatus.TOO_MANY_REQUESTS

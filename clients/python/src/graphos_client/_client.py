@@ -736,6 +736,8 @@ class GraphosClient:
             content=("\n".join(lines) + "\n").encode("utf-8"),
             content_type="application/x-ndjson",
             params={"dry_run": "true"} if dry_run else None,
+            # A whole type's edges: long, and not resent on a 5xx.
+            idempotent=False,
         )
         return EdgesReconcileResponse.model_validate(resp.json())
 

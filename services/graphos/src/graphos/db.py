@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import re
 from typing import Any
 
 import asyncpg
@@ -108,10 +109,19 @@ MIN_POSTGRES_MAJOR = 18
 MIN_AGE = (1, 8)
 
 
+def _leading(version: str | None, parts: int) -> tuple[int, ...]:
+    """The first ``parts`` numbers of a version (``18beta1`` → ``(18,)``,
+    ``1.8.0-rc1`` → ``(1, 8)``); ``()`` when it starts with none."""
+    found = re.match(r"\s*(\d+)(?:\.(\d+))?", version or "")
+    if not found:
+        return ()
+    return tuple(int(n) for n in found.groups()[:parts] if n is not None)
+
+
 def unsupported_database(postgres_version: str, age_version: str | None) -> str | None:
     """Why graphos does not start on this PostgreSQL / AGE pair, or ``None``."""
-    major = int(postgres_version.split(maxsplit=1)[0].split(".", maxsplit=1)[0])
-    age = tuple(int(p) for p in (age_version or "0").split(".")[:2] if p.isdigit())
+    major = (_leading(postgres_version, 1) or (0,))[0]
+    age = _leading(age_version, 2)
     if major < MIN_POSTGRES_MAJOR or age < MIN_AGE:
         return (
             f"PostgreSQL {major} with AGE {age_version or '(none)'} is not supported: graphos "
@@ -379,6 +389,9 @@ ALTER TABLE graphos_meta.sessions ADD COLUMN IF NOT EXISTS claims jsonb;
 -- The provider's ID token, kept server-side only, sent back as id_token_hint
 -- when signing out there (providers otherwise ask the person to confirm).
 ALTER TABLE graphos_meta.sessions ADD COLUMN IF NOT EXISTS id_token text;
+-- The MCP client a session belongs to (graphos.oauth, ADR-0008): renewed only by
+-- that client, at /oauth/token, and its tokens only read.
+ALTER TABLE graphos_meta.sessions ADD COLUMN IF NOT EXISTS client text;
 CREATE INDEX IF NOT EXISTS sessions_family ON graphos_meta.sessions (family);
 
 -- A sign-in at the identity provider in progress: graphos keeps the PKCE
@@ -399,6 +412,8 @@ CREATE TABLE IF NOT EXISTS graphos_meta.oauth_clients (
     info        jsonb NOT NULL,
     created_at  timestamptz NOT NULL DEFAULT now()
 );
+-- The last sign-in or renewal: unused clients are forgotten (graphos.oauth).
+ALTER TABLE graphos_meta.oauth_clients ADD COLUMN IF NOT EXISTS last_used_at timestamptz;
 -- Their authorization codes: only the hash is kept, single use, 5 minutes.
 CREATE TABLE IF NOT EXISTS graphos_meta.oauth_codes (
     code_hash   text PRIMARY KEY,

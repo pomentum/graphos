@@ -247,3 +247,123 @@ async def test_resolve_by_difference_removes_only_what_a_rule_no_longer_derives(
     assert set(await _edges(db_pool, "TAGGED")) == {("d1", "red")}
     refused = await api.post("/edges:resolve", json={"edge_types": ["TAGGED"], "dry_run": True})
     assert refused.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_consumers_write_takes_a_derived_edge_over_and_neither_removes_the_others(
+    api: httpx.AsyncClient, db_pool: asyncpg.Pool,
+) -> None:
+    await writes.upsert_nodes(db_pool, tenant=TENANT, label="Tag", rows=[
+        {"id": t, "props": {"name": t}} for t in ("red", "blue", "green")
+    ])
+    await writes.upsert_nodes(db_pool, tenant=TENANT, label="Doc", rows=[
+        {"id": "d1", "props": {"tags": ["red", "blue", "green"]}},
+    ])
+    await api.post("/edges:resolve", json={"edge_types": ["TAGGED"]})
+    # An upsert of a derived edge makes it the consumer's.
+    await writes.upsert_edges(
+        db_pool, tenant=TENANT, src_label="Doc", dst_label="Tag", edge_type="TAGGED",
+        rows=[{"src_id": "d1", "dst_id": "red", "props": {"by": "hand"}}],
+    )
+    assert (await _edges(db_pool, "TAGGED"))[("d1", "red")][1] == {"by": "hand"}
+    # The consumer's reconcile names blue (taken over) and not red (its own: removed);
+    # green stays the rule's.
+    body = {"scope": "node", "type": "TAGGED", "node": {"label": "Doc", "id": "d1"},
+            "other_label": "Tag", "edges": [{"id": "blue"}]}
+    done = await api.post("/edges:reconcile", json=body)
+    assert done.status_code == HTTPStatus.OK, done.text
+    assert (done.json()["removed"], done.json()["changed"]) == (1, 1)
+    stored = await _edges(db_pool, "TAGGED")
+    assert stored[("d1", "blue")][1] == {}
+    assert stored[("d1", "green")][1] == {"graphos_derived": True}
+    assert ("d1", "red") not in stored
+    # The document drops its tags: the rule's edge goes, the consumer's stays.
+    await writes.patch_node(db_pool, tenant=TENANT, external_id="d1", patch={"tags": []})
+    rerun = await api.post("/edges:resolve", json={"edge_types": ["TAGGED"], "mode": "reconcile"})
+    assert rerun.json()["total_edges_removed"] == 1
+    assert set(await _edges(db_pool, "TAGGED")) == {("d1", "blue")}
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_reconcile_mode_removes_the_derived_edges_nothing_derives_any_more(
+    api: httpx.AsyncClient, db_pool: asyncpg.Pool,
+) -> None:
+    await writes.upsert_nodes(db_pool, tenant=TENANT, label="Tag", rows=[
+        {"id": "red", "props": {"name": "red"}},
+    ])
+    await writes.upsert_nodes(db_pool, tenant=TENANT, label="Doc", rows=[
+        {"id": "d1", "props": {"tags": ["red"]}},
+    ])
+    await api.post("/edges:resolve", json={"edge_types": ["TAGGED"]})
+    assert len(await _edges(db_pool, "TAGGED")) == 1
+    # No label carries the rule's property any more: the rule compiles to nothing.
+    await writes.patch_node(db_pool, tenant=TENANT, external_id="d1", patch={"tags": None})
+    done = await api.post("/edges:resolve", json={"edge_types": ["TAGGED"], "mode": "reconcile"})
+    assert done.status_code == HTTPStatus.OK, done.text
+    assert done.json()["total_edges_removed"] == 1
+    assert await _edges(db_pool, "TAGGED") == {}
+    # A type with no rule at all is visited in reconcile mode, and may be named.
+    named = await api.post("/edges:resolve", json={"edge_types": ["CALLS"], "mode": "reconcile"})
+    assert named.status_code == HTTPStatus.OK, named.text
+    assert named.json()["total_edges_removed"] == 0      # the consumer's CALLS edge stays
+    insert_only = await api.post("/edges:resolve", json={"edge_types": ["CALLS"]})
+    assert insert_only.status_code == HTTPStatus.BAD_REQUEST
+
+
+STRICT = TENANT + "_strict"
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_an_edge_added_without_properties_meets_the_schema_and_kept_counts_add_up(
+    db_pool: asyncpg.Pool,
+) -> None:
+    async with db_pool.acquire() as conn:
+        if await conn.fetchval("SELECT 1 FROM ag_catalog.ag_graph WHERE name = $1;", STRICT):
+            await conn.execute(f"SELECT drop_graph('{STRICT}', true);")
+        await conn.execute("DELETE FROM graphos_meta.tenants WHERE name = $1;", STRICT)
+    forget(STRICT)
+    await register_tenant(db_pool, TenantSpec(
+        name=STRICT, vertex_labels=("Service",), edge_labels=("CALLS",),
+        property_schema={"edge": {"CALLS": {
+            "mode": "strict", "properties": {"since": {"type": "integer", "required": True}},
+        }}},
+    ))
+    await writes.upsert_nodes(db_pool, tenant=STRICT, label="Service",
+                              rows=[{"id": s, "props": {}} for s in ("a", "b", "c")])
+    await writes.upsert_edges(
+        db_pool, tenant=STRICT, src_label="Service", dst_label="Service", edge_type="CALLS",
+        rows=[{"src_id": "a", "dst_id": "b", "props": {"since": 1}}],
+    )
+    app = create_app(Settings(db_password="placeholder", auth_disabled=True))
+    app.state.pool = db_pool
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url=f"http://test/v1/{STRICT}/graph",
+        ) as api:
+            body = {"scope": "node", "type": "CALLS", "node": {"label": "Service", "id": "a"},
+                    "other_label": "Service"}
+            # a→b is kept as it is; a→c would be new without its required property.
+            refused = await api.post("/edges:reconcile", json={
+                **body, "edges": [{"id": "b"}, {"id": "c"}],
+            })
+            assert refused.status_code == HTTPStatus.UNPROCESSABLE_ENTITY, refused.text
+            assert ("a", "c") not in {
+                (r["s"], r["d"]) for r in await db_pool.fetch(
+                    f'SELECT s.properties::text::jsonb ->> \'id\' AS s, '
+                    f'd.properties::text::jsonb ->> \'id\' AS d FROM "{STRICT}"."CALLS" e '
+                    f'JOIN "{STRICT}"."_ag_label_vertex" s ON s.id = e.start_id '
+                    f'JOIN "{STRICT}"."_ag_label_vertex" d ON d.id = e.end_id;')
+            }
+            kept = await api.post("/edges:reconcile", json={
+                **body, "edges": [{"id": "b"}, {"id": "c", "props": {"since": 2}}],
+            })
+            assert kept.status_code == HTTPStatus.OK, kept.text
+            assert (kept.json()["kept"], kept.json()["added"]) == (1, 1)
+    finally:
+        async with db_pool.acquire() as conn:
+            await conn.execute(f"SELECT drop_graph('{STRICT}', true);")
+            await conn.execute("DELETE FROM graphos_meta.tenants WHERE name = $1;", STRICT)
+        forget(STRICT)

@@ -497,7 +497,8 @@ It leaves out what only maintainers see (property indexes, generated columns, ru
 **Schema summary, for a model.** `GET /v1/{tenant}/schema/summary` (`read`) answers what an agent
 needs before it writes a query, measured from the data rather than declared: each label with its
 node count, parent and properties (the declared type, `required` and enum; the rows that hold the
-property, its distinct values and, when there are at most 20, every value with its count), the
+property, its distinct values and, when there are at most 20, every value with its count and
+JSON type: a string as it is, any other value as JSON, a long one cut and ending with `…`), the
 label pairs per edge type with their counts, the search indexes, the saved queries with their
 parameters, and the `graphos_*` names graphos computes itself. Lists are capped (40 labels, 25
 properties a label, 60 label pairs) and say how many there were; labels above 50,000 nodes are read
@@ -838,7 +839,11 @@ curl -s -X POST "$G/v1/acme_copy/graph/snapshot-import?mode=empty" \
 and makes the stored set equal to it in one transaction: missing edges are added, kept edges whose
 properties change are rewritten, and the edges of the scope not in the set are deleted. A kept edge
 that does not change is not written, so its revision stays. It replaces "delete the run, then
-reload" (a full rebuild, with readers seeing missing data meanwhile) by the difference.
+reload" (a full rebuild, with readers seeing missing data meanwhile) by the difference. It manages
+your own edges: an edge a resolve rule derived (`graphos_derived`) that the set does not name is
+left to the rules, and one it names becomes yours (its mark is cleared), as it does when you
+upsert or patch it. An edge sent without `props` that turns out to be new is checked against the
+property schema as `{}`.
 
 | Scope | What the set replaces | Body |
 |---|---|---|
@@ -1382,11 +1387,13 @@ curl -s -X POST "$G/v1/acme/graph/edges:resolve" \
 # → {"results":[{"edge_type":"TAGGED_WITH","edges_written":…,"duration_ms":…,"warning":null}],"total_edges_written":…,...}
 ```
 
-`edges:resolve` needs `write` on the tenant; an edge type without a rule returns 400. Inserts use
+`edges:resolve` needs `write` on the tenant; an edge type without a rule returns 400, except in
+reconcile mode. Inserts use
 `ON CONFLICT (start_id, end_id) DO NOTHING`, so re-runs only add missing edges. The edges a rule
 writes carry `graphos_derived: true`. With `"mode": "reconcile"` the run also deletes the marked
-edges no rule derives any more (a document dropped a tag): an edge a consumer wrote itself is never
-removed. Edges derived before the mark existed are unmarked: `"adopt_unmarked": true` takes the
+edges no rule derives any more (a document dropped a tag): an edge a consumer wrote itself, or
+wrote to since, is never removed. Reconcile mode visits every edge type of the tenant, so a type
+whose last rule was removed, or whose rules no label matches any more, loses its marked edges. Edges derived before the mark existed are unmarked: `"adopt_unmarked": true` takes the
 unmarked edges of the type between the rules' label pairs as the rules' own, marking those the
 rules derive and deleting the others; try it with `"dry_run": true` first, which answers
 `edges_removed` and `edges_marked` and writes nothing. `insert` stays the default for this release. Candidate labels and

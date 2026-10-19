@@ -10,7 +10,7 @@
 map $uri $graphos_ui_cache {
   ~^/assets/ "public, max-age=31536000, immutable";
   ~^/api/    "";
-  ~^/(mcp|oauth/|\.well-known/oauth-) "";
+  ~^/(mcp|oauth/(authorize|login|token|register|revoke)|\.well-known/oauth-[a-z-]+(/mcp)?)$ "";
   default    "no-cache";
 }
 
@@ -51,10 +51,11 @@ server {
   }
 
   # The MCP endpoint and graphos's sign-in for MCP clients, at the UI's address, so a
+  # (exact paths only: a tenant's own pages, /mcp_x/... or /oauth/..., stay the UI's)
   # person signs in on the UI's own screen (ADR-0008). graphos names these URLs by the
   # address the client used, so the Host goes on unchanged (with its port); the mark
   # tells graphos to send the browser to the UI's /authorize.
-  location ~ ^/(mcp|oauth/|\.well-known/oauth-) {
+  location ~ ^/(mcp|oauth/(authorize|login|token|register|revoke)|\.well-known/oauth-[a-z-]+(/mcp)?)$ {
     proxy_pass $graphos_api;
     proxy_http_version 1.1;
     proxy_set_header Host $http_host;

@@ -1527,8 +1527,9 @@ Postgres instance.
    5,000-row (snapshot) flush commits independently.
 3. **One edge per type per ordered node pair** (§2.3).
 4. **`edges:resolve` inserts by default.** Edges whose rule no longer matches are
-   removed only with `mode: reconcile`, and only the marked ones (`graphos_derived`):
-   edges derived before 0.13 need one `adopt_unmarked` run. `reconcile` becomes the
+   removed only with `mode: reconcile`, and only the marked ones (`graphos_derived`; a
+   consumer's write to a derived edge clears the mark and takes it over): edges derived
+   before 0.13 need one `adopt_unmarked` run. `reconcile` becomes the
    default in a later release.
 5. **Community freshness.** `end_community_id`, `start_community_id` and
    `community_id` change only when Louvain writes; new edges are invisible to community-scoped `expand`

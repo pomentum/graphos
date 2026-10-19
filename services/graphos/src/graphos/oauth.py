@@ -16,10 +16,12 @@ the sign-in page, and issues the tokens.
 **Clients** are public ones whatever they ask for (no secret: PKCE binds a
 code to the client that asked for it), so no client secret is kept.  A
 redirect URI must be a loopback one (any port: desktop and command-line
-clients listen there, and a page elsewhere cannot receive the code); at most
-:data:`MAX_CLIENTS` register.  A web client's callback is not served here:
-with single sign-on the identity provider, which signs such clients in,
-holds it.
+clients listen there, and a page elsewhere cannot receive the code).
+Registration needs no token, so it is bounded: small fields, a few a minute
+from one address, at most :data:`MAX_CLIENTS` kept, and a client that never
+signed anyone in is forgotten after :data:`UNUSED_CLIENT_S`.  A web client's
+callback is not served here: with single sign-on the identity provider, which
+signs such clients in, holds it.
 
 **Where the person signs in.**  A request that came through the web UI's
 proxy carries :data:`UI_MARK`; ``/oauth/login`` then sends the browser to the
@@ -31,10 +33,12 @@ asks and where the answer goes, count towards the throttle and lock-out of
 travels with the browser and needs no storage.  The page is never framed.
 
 **Codes** are 256 random bits, kept hashed, single use, :data:`CODE_TTL_S`.
-**Tokens** are graphos's own: the access token of ``/v1/auth/login``, and a
-graphos session as the refresh token (rotation, reuse detection, expiry,
-revocation), written ``<client_id>.<session token>`` so it renews only for
-the client it was issued to.
+**Tokens** are graphos's own, held to reading (:func:`graphos.auth.reading_only`):
+MCP tools only read, so a client gets no more.  The refresh token is a graphos
+session that belongs to the client (rotation, reuse detection, expiry,
+revocation), written ``<client_id>.<session token>``: only that client renews
+it, only here.  It ends no later than the session of the person who allowed
+it from the web UI, so allowing cannot stretch a sign-in.
 """
 
 from __future__ import annotations
@@ -44,6 +48,7 @@ import html
 import json
 import logging
 import secrets
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlencode, urlsplit
 
@@ -79,6 +84,15 @@ CODE_TTL_S = 300
 # Set by the web UI's nginx on what it forwards here (deploy/default.conf.template).
 UI_MARK = "x-graphos-ui"
 MAX_CLIENTS = 1_000
+# A registered client that never signed anyone in is forgotten after this long;
+# one that did, after a quarter of a year without a sign-in or a renewal.
+UNUSED_CLIENT_S = 3_600
+IDLE_CLIENT_S = 90 * 86_400
+# Registrations one address may make in a minute, and the size of one.
+REGISTER_PER_MIN = 10
+REGISTER_MAX_BYTES = 16_384
+MAX_REDIRECT_URIS = 5
+MAX_FIELD_CHARS = 300
 LOOPBACK = ("localhost", "127.0.0.1", "::1")
 _PAGE_HEADERS = {
     "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
@@ -114,6 +128,7 @@ class GraphosOAuth:
 
     def __init__(self, app: Any) -> None:
         self.app = app
+        self.registrations = identity.Throttle(REGISTER_PER_MIN)
 
     @property
     def _state(self) -> Any:
@@ -130,11 +145,17 @@ class GraphosOAuth:
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         uris = [str(u) for u in client_info.redirect_uris or []]
         refused = [u for u in uris if not redirect_allowed(u)]
-        if not uris or refused:
+        if not uris or refused or len(uris) > MAX_REDIRECT_URIS:
             raise RegistrationError(
                 "invalid_redirect_uri",
-                "only a loopback redirect URI (http://localhost or 127.0.0.1) may register; "
-                f"a web client signs in through single sign-on: {', '.join(refused) or '(none)'}",
+                f"1 to {MAX_REDIRECT_URIS} loopback redirect URIs (http://localhost or 127.0.0.1) "
+                "may register; a web client signs in through single sign-on: "
+                f"{', '.join(refused) or '(none)'}",
+            )
+        texts = [*uris, client_info.client_name or "", client_info.scope or ""]
+        if any(len(t) > MAX_FIELD_CHARS for t in texts):
+            raise RegistrationError(
+                "invalid_client_metadata", f"a field is longer than {MAX_FIELD_CHARS} characters",
             )
         # A public client: the SDK's answer echoes this object, so the client
         # learns it has no secret.
@@ -143,6 +164,12 @@ class GraphosOAuth:
         client_info.client_secret_expires_at = None
         async with self._state.pool.acquire() as conn, conn.transaction():
             await conn.execute("LOCK TABLE graphos_meta.oauth_clients IN EXCLUSIVE MODE;")
+            await conn.execute(
+                "DELETE FROM graphos_meta.oauth_clients WHERE (last_used_at IS NULL "
+                "AND created_at < now() - make_interval(secs => $1)) "
+                "OR last_used_at < now() - make_interval(secs => $2);",
+                float(UNUSED_CLIENT_S), float(IDLE_CLIENT_S),
+            )
             if await conn.fetchval("SELECT count(*) FROM graphos_meta.oauth_clients;") >= (
                 MAX_CLIENTS
             ):
@@ -173,12 +200,18 @@ class GraphosOAuth:
             "resource": params.resource,
         }))
 
-    async def issue_code(self, request: dict[str, str], user: str) -> str:
+    async def issue_code(
+        self, request: dict[str, str], user: str, until: datetime | None = None,
+    ) -> str:
+        """A code for ``user``; ``until`` caps the session it opens (the session
+        that allowed it, in the web UI)."""
         code = secrets.token_urlsafe(32)
-        data = {k: request.get(k) for k in (
+        data: dict[str, Any] = {k: request.get(k) for k in (
             "redirect_uri", "explicit", "code_challenge", "scope", "resource")}
+        data["until"] = until.timestamp() if until else None
         async with self._state.pool.acquire() as conn:
             await conn.execute("DELETE FROM graphos_meta.oauth_codes WHERE expires_at < now();")
+            await self._used(conn, request["client_id"])
             await conn.execute(
                 "INSERT INTO graphos_meta.oauth_codes (code_hash, client_id, user_name, data, "
                 "expires_at) VALUES ($1, $2, $3, $4::jsonb, now() + make_interval(secs => $5));",
@@ -209,20 +242,21 @@ class GraphosOAuth:
         self, client: OAuthClientInformationFull, authorization_code: AuthorizationCode,
     ) -> OAuthToken:
         # Deleting is the single use: of two exchanges at once, one gets the row.
-        user_name = await self._state.pool.fetchval(
+        row = await self._state.pool.fetchrow(
             "DELETE FROM graphos_meta.oauth_codes WHERE code_hash = $1 AND client_id = $2 "
-            "AND expires_at >= now() RETURNING user_name;",
+            "AND expires_at >= now() RETURNING user_name, data->>'until' AS until;",
             _hash(authorization_code.code), client.client_id,
         )
-        if user_name is None:
+        if row is None:
             raise TokenError("invalid_grant", "the code was used, or has expired")
-        user = self._person(user_name)
+        user = self._person(row["user_name"])
         settings = self._state.settings
-        session = await identity.open_session(
+        until = datetime.fromtimestamp(float(row["until"]), UTC) if row["until"] else None
+        opened = await identity.open_session(
             self._state.pool, user.name, idle_s=settings.session_idle_s,
-            max_s=settings.session_max_s,
+            max_s=settings.session_max_s, client=client.client_id, until=until,
         )
-        return self._tokens(user, f"{client.client_id}.{session}")
+        return self._tokens(user, f"{client.client_id}.{opened.token}", opened.until)
 
     # ── Refresh and revocation ──────────────────────────────────────────
 
@@ -241,13 +275,16 @@ class GraphosOAuth:
         try:
             renewed = await identity.rotate_session(
                 self._state.pool, session, idle_s=self._state.settings.session_idle_s,
+                client=client.client_id,
             )
         except identity.SessionError as exc:
             raise TokenError("invalid_grant", str(exc)) from None
         user = self._person(renewed.user)
+        async with self._state.pool.acquire() as conn:
+            await self._used(conn, client.client_id)
         # Within the reuse grace a session renews without rotating: keep the token.
         fresh = f"{client.client_id}.{renewed.refresh_token}" if renewed.refresh_token else None
-        return self._tokens(user, fresh or refresh_token.token)
+        return self._tokens(user, fresh or refresh_token.token, renewed.until)
 
     async def load_access_token(self, token: str) -> AccessToken | None:
         try:
@@ -269,13 +306,26 @@ class GraphosOAuth:
 
     def _person(self, name: str) -> identity.User:
         user = self._state.access_store.user(name)
-        if user is None or user.disabled or user.kind != "person" or user.must_change:
+        refused = (
+            user is None or user.disabled or user.kind != "person" or user.must_change
+            or (user.name == identity.ADMIN_USER and not self._state.settings.local_admin)
+        )
+        if refused or user is None:
             raise TokenError("invalid_grant", "this user may not sign in here")
         return user
 
-    def _tokens(self, user: identity.User, refresh: str) -> OAuthToken:
-        access, ttl = self._state.signer.issue(user)
+    def _tokens(self, user: identity.User, refresh: str, until: datetime | None) -> OAuthToken:
+        access, ttl = self._state.signer.issue(
+            user, read_only=True, session_until=int(until.timestamp()) if until else None,
+        )
         return OAuthToken(access_token=access, expires_in=ttl, refresh_token=refresh)
+
+    @staticmethod
+    async def _used(conn: Any, client_id: str) -> None:
+        await conn.execute(
+            "UPDATE graphos_meta.oauth_clients SET last_used_at = now() WHERE client_id = $1;",
+            client_id,
+        )
 
 
 def _drop_none(d: dict[str, str | None]) -> dict[str, str]:
@@ -419,13 +469,17 @@ def login_endpoint(provider: GraphosOAuth) -> Any:
     return login
 
 
-async def answer(provider: GraphosOAuth, fields: dict[str, str], user: str | None) -> str:
+async def answer(
+    provider: GraphosOAuth, fields: dict[str, str], user: str | None,
+    until: datetime | None = None,
+) -> str:
     """The client's callback: with a new code for ``user``, or ``access_denied``
-    (``user`` None).  ``fields`` is a request :func:`checked` accepted."""
+    (``user`` None).  ``fields`` is a request :func:`checked` accepted;
+    ``until`` caps the session the code opens."""
     back, state = fields["redirect_uri"], fields.get("state")
     if user is None:
         return construct_redirect_uri(back, error="access_denied", state=state)
-    code = await provider.issue_code(fields, user)
+    code = await provider.issue_code(fields, user, until)
     log.info("signed in", extra={"user": user, "oauth_client": fields["client_id"]})
     return construct_redirect_uri(back, code=code, state=state)
 
@@ -472,10 +526,26 @@ def revoke_endpoint(provider: GraphosOAuth, clients: ClientAuthenticator) -> Any
     return revoke
 
 
-def _api(handler: Any, methods: list[str], *, cors: bool) -> ASGIApp:
-    app: ASGIApp = RequestBodyLimitMiddleware(
-        request_response(handler), DEFAULT_MAX_REQUEST_BODY_SIZE,
-    )
+def register_endpoint(provider: GraphosOAuth) -> Any:
+    """The SDK's registration, a few a minute from one address."""
+    handler = RegistrationHandler(provider, options=ClientRegistrationOptions(enabled=True))
+
+    async def register(request: Request) -> Response:
+        if not provider.registrations.admit(request.client.host if request.client else "-"):
+            return JSONResponse(
+                {"error": "invalid_client_metadata",
+                 "error_description": "too many registrations from this address; wait a minute"},
+                status_code=429, headers={"Retry-After": "60"},
+            )
+        return await handler.handle(request)
+
+    return register
+
+
+def _api(
+    handler: Any, methods: list[str], *, cors: bool, max_bytes: int = DEFAULT_MAX_REQUEST_BODY_SIZE,
+) -> ASGIApp:
+    app: ASGIApp = RequestBodyLimitMiddleware(request_response(handler), max_bytes)
     if cors:
         # Browser-based MCP clients call these with fetch; they carry no cookie.
         app = CORSMiddleware(app, allow_origins="*", allow_methods=methods)
@@ -502,9 +572,9 @@ def routes(app: Any) -> list[Route]:
         Route("/oauth/token", endpoint=_api(
             TokenHandler(provider, clients).handle, ["POST", "OPTIONS"], cors=True),
               methods=["POST", "OPTIONS"]),
-        Route("/oauth/register", endpoint=_api(RegistrationHandler(
-            provider, options=ClientRegistrationOptions(enabled=True)).handle,
-            ["POST", "OPTIONS"], cors=True), methods=["POST", "OPTIONS"]),
+        Route("/oauth/register", endpoint=_api(
+            register_endpoint(provider), ["POST", "OPTIONS"], cors=True,
+            max_bytes=REGISTER_MAX_BYTES), methods=["POST", "OPTIONS"]),
         Route("/oauth/revoke", endpoint=_api(
             revoke_endpoint(provider, clients), ["POST", "OPTIONS"], cors=True),
               methods=["POST", "OPTIONS"]),

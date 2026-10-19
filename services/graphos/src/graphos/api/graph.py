@@ -4055,14 +4055,22 @@ def _resolve_plan(
     for et, rule in spec.resolve_rules:
         rules_by_type[et].append(dict(rule))
 
+    # In reconcile mode a type with no rule (any more) is visited too: the edges
+    # its removed rules derived are the ones to remove (ADR-0001).
+    reconciling = body.mode == "reconcile"
     if body.edge_types is None:
         requested = list(rules_by_type.keys())
+        if reconciling:
+            requested += [t for t in spec.edge_labels if t not in rules_by_type]
     else:
         requested = list(body.edge_types)
         # Reject up-front if any requested type lacks a rule —
         # otherwise the caller sees a silent zero and might assume
         # the rule fired.
-        missing = [t for t in requested if t not in rules_by_type]
+        missing = [
+            t for t in requested
+            if t not in rules_by_type and not (reconciling and t in spec.edge_labels)
+        ]
         if missing:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

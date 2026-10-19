@@ -83,9 +83,9 @@ async def test_a_sessions_id_token_is_sealed_and_comes_back_at_sign_out(
     clean: asyncpg.Pool, tmp_path: Path,
 ) -> None:
     vault.configure(_key_file(tmp_path, vault.new_key_line()))
-    refresh = await identity.open_session(
+    refresh = (await identity.open_session(
         clean, "someone", idle_s=60, max_s=600, id_token="eyJ.provider.token",
-    )
+    )).token
     stored = await clean.fetchval("SELECT id_token FROM graphos_meta.sessions;")
     assert vault.Vault.is_sealed(stored) and "provider" not in stored
     renewed = await identity.rotate_session(clean, refresh, idle_s=60)

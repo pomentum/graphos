@@ -742,6 +742,7 @@ class DeleteEdgeResponse(BaseModel):
 
 class SummaryValueCount(BaseModel):
     value: str
+    kind: str | None = None
     count: int
 
 

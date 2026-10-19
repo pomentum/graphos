@@ -76,7 +76,7 @@ async def test_the_summary_lists_what_the_data_holds_and_is_cached(
     assert body["links"] == [
         {"src_label": "Person", "type": "AUTHORED", "dst_label": "Doc", "count": 1},
     ]
-    assert body["cached"] is False and "'ACT' 20" in body["text"]
+    assert body["cached"] is False and '"ACT" 20' in body["text"]   # strings quoted as JSON
     again = (await api.get("/schema/summary")).json()
     assert again["cached"] is True and again["labels"] == body["labels"]
     text = await api.get("/schema/summary", params={"format": "text"})
