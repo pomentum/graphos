@@ -542,7 +542,7 @@ class DisplaySpec(BaseModel):
 
 
 class DeprecatedProperty(BaseModel):
-    """A property on its way out: writes naming it carry a warning (refused in `strict`)."""
+    """A property on its way out: writes naming it carry a warning, whatever the mode."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -603,8 +603,8 @@ class DeprecatedEntry(BaseModel):
 
 class DeprecatedSpec(BaseModel):
     """Per vertex label and edge type, what is deprecated: writes naming it succeed
-    with a warning (`property_warnings`, rule `deprecated`), or are refused when the
-    property schema's mode is `strict`."""
+    with a warning (`property_warnings`, rule `deprecated`), whatever the property
+    schema's mode."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -834,8 +834,9 @@ class TenantSpecBody(BaseModel):
         default_factory=DeprecatedSpec,
         description=(
             "Labels, edge types and properties on their way out, with what replaces them: "
-            "writes naming them carry a warning, refused in `strict` mode. An entry declared "
-            "again replaces the stored one; `null` removes it."
+            "writes naming them carry a warning, whatever the mode. An entry declared again "
+            "replaces the stored one; `null` removes it. An empty deprecated label or type is "
+            "dropped with `DELETE /v1/tenants/{name}/labels/{label}`."
         ),
     )
 
