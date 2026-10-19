@@ -53,8 +53,11 @@ the identity provider. Without it, nothing signs people in for MCP clients.
     - **Endpoints** under `/oauth/`: `authorize`, `token`, `register`, `revoke`, from the MCP
       SDK's handlers, which check PKCE (S256 only), client authentication and redirect URIs.
     - **Clients register themselves** (RFC 7591). A redirect URI must be a loopback one
-      (`http://localhost`, `127.0.0.1` or `[::1]`, any port: desktop and command-line clients) or
-      listed in `GRAPHOS_MCP_REDIRECT_URIS` (web clients). At most 1,000 clients. Every client
+      (`http://localhost`, `127.0.0.1` or `[::1]`, any port: desktop and command-line clients,
+      and nothing elsewhere can receive the code). A web client's callback is not served here:
+      with single sign-on the identity provider, which then signs MCP clients in, holds the
+      clients and their callbacks; graphos needs no setting for them. At most 1,000 clients.
+      Every client
       is registered as a public one (no client secret; PKCE binds the code to it), so graphos
       keeps no client secret.
     - **The sign-in page** (`/oauth/login`) asks for a person's name and password and says which
@@ -111,7 +114,8 @@ the identity provider. Without it, nothing signs people in for MCP clients.
   one public endpoint and three settings fewer.
 - **Worse:** graphos is an OAuth authorization server where there is no single sign-on: a sign-in
   page, client registration open to anyone (bounded by the loopback rule, the cap and the
-  consent line), and two tables. A provider that sets the audience only from `resource` issues
+  consent line), and two tables. A web MCP client (one that signs in from a hosted service, such
+  as a hosted chat's connector) cannot sign people in through graphos: it needs single sign-on. A provider that sets the audience only from `resource` issues
   tokens graphos refuses, until it is configured to add graphos's audience. The flow through a
   provider is documented but not tested against a real one.
 - `/mcp` is a public surface on every install unless turned off. It reads only, through the
@@ -128,7 +132,7 @@ None.
   the metadata URL; `POST /v1/auth/token` answers 404.
 - Without single sign-on, an MCP client registers, signs a person in on `/oauth/login`,
   exchanges the code once (a second exchange fails), calls `/mcp`, renews with the refresh token
-  and revokes it; a non-loopback, unlisted redirect URI is refused at registration.
+  and revokes it; a redirect URI that is not a loopback one is refused at registration.
 - With single sign-on, the metadata names the provider and `/oauth/*` is not served.
 - `Settings().mcp` is `true`; the removed settings are gone from `config.py`, the compose file,
   the README and the agents guide.

@@ -27,8 +27,8 @@ under one version.
   `Origin` must be an allowed host. New dependency: `mcp` 2.3 (MIT).
 - **MCP clients sign people in without a pasted token.** Without single sign-on, graphos is
   their OAuth authorization server (`/.well-known/oauth-authorization-server`, endpoints under
-  `/oauth/`): clients register themselves as public ones (PKCE, a loopback callback or one in
-  the new `GRAPHOS_MCP_REDIRECT_URIS`), a sign-in page names the client and takes the person's
+  `/oauth/`): clients register themselves as public ones (PKCE, a loopback callback, as
+  desktop and command-line clients use), a sign-in page names the client and takes the person's
   graphos password, a single-use code is exchanged for a graphos access token and a refresh
   token that is a graphos session bound to the client, and `/oauth/revoke` ends it. With single
   sign-on the provider signs MCP clients in and none of this is served. Two new tables,

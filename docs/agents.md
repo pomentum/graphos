@@ -15,7 +15,6 @@ the ones that touch it:
 | `GRAPHOS_MCP` | `true` | `false` turns `/mcp` off |
 | `GRAPHOS_CYPHER` | `true` | `false` removes the `run_cypher` tool; the saved-query tools then answer 404 |
 | `GRAPHOS_ALLOWED_HOSTS` | — | Set it to the public host name: `/mcp` also refuses a browser `Origin` outside it |
-| `GRAPHOS_MCP_REDIRECT_URIS` | `[]` | Without single sign-on: the callback URLs of web MCP clients that may sign people in, as a JSON list (loopback callbacks always may) |
 
 Behind a proxy, route `/mcp`, `/oauth/` and `/.well-known/oauth-*` to graphos-api as well as
 `/v1`, and pass the `Host` header on. Turn on the rate limiter
@@ -46,8 +45,9 @@ token to paste. graphos is then the client's authorization server
 
 1. The client calls `/mcp`, gets a 401 pointing at the metadata, and registers itself at
    `/oauth/register`. It is registered as a public client (no secret; PKCE binds each code to
-   it). Its callback must be a loopback one (`http://localhost` or `127.0.0.1`, any port: desktop
-   and command-line clients) or listed in `GRAPHOS_MCP_REDIRECT_URIS`.
+   it). Its callback must be a loopback one (`http://localhost` or `127.0.0.1`, any port), as
+   desktop and command-line clients use. A web client, such as a hosted chat's connector, signs
+   people in through single sign-on, where the provider holds its callback.
 2. It opens a browser at `/oauth/authorize`, which leads to graphos's sign-in page: the person
    sees which client asks and where the answer goes, and signs in with their graphos name and
    password (the same throttle and lock-out as `/v1/auth/login`; a password that must change is

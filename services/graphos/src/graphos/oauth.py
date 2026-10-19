@@ -16,8 +16,10 @@ the sign-in page, and issues the tokens.
 **Clients** are public ones whatever they ask for (no secret: PKCE binds a
 code to the client that asked for it), so no client secret is kept.  A
 redirect URI must be a loopback one (any port: desktop and command-line
-clients listen there) or listed in ``GRAPHOS_MCP_REDIRECT_URIS``; at most
-:data:`MAX_CLIENTS` register.
+clients listen there, and a page elsewhere cannot receive the code); at most
+:data:`MAX_CLIENTS` register.  A web client's callback is not served here:
+with single sign-on the identity provider, which signs such clients in,
+holds it.
 
 **The sign-in page** takes a person's name and password, says which client
 asks and where the answer goes, and is never framed.  It counts towards the
@@ -92,10 +94,8 @@ def origin(request: Request) -> str:
     return f"{request.url.scheme}://{request.url.netloc}"
 
 
-def redirect_allowed(uri: str, listed: list[str]) -> bool:
-    """Whether an MCP client may register ``uri``: a loopback ``http`` one, or listed."""
-    if uri in listed:
-        return True
+def redirect_allowed(uri: str) -> bool:
+    """Whether an MCP client may register ``uri``: a loopback ``http`` one."""
     parts = urlsplit(uri)
     return parts.scheme == "http" and (parts.hostname or "") in LOOPBACK
 
@@ -122,14 +122,13 @@ class GraphosOAuth:
         return OAuthClientInformationFull.model_validate_json(info) if info else None
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
-        listed = self._state.settings.mcp_redirect_uris
         uris = [str(u) for u in client_info.redirect_uris or []]
-        refused = [u for u in uris if not redirect_allowed(u, listed)]
+        refused = [u for u in uris if not redirect_allowed(u)]
         if not uris or refused:
             raise RegistrationError(
                 "invalid_redirect_uri",
-                f"not a loopback redirect URI, nor one in GRAPHOS_MCP_REDIRECT_URIS: "
-                f"{', '.join(refused) or '(none)'}",
+                "only a loopback redirect URI (http://localhost or 127.0.0.1) may register; "
+                f"a web client signs in through single sign-on: {', '.join(refused) or '(none)'}",
             )
         # A public client: the SDK's answer echoes this object, so the client
         # learns it has no secret.

@@ -18,23 +18,19 @@ from graphos.oauth import redirect_allowed
 
 
 @pytest.mark.parametrize(
-    ("uri", "listed", "allowed"),
+    ("uri", "allowed"),
     [
-        ("http://127.0.0.1:33418/callback", [], True),
-        ("http://localhost:6274/oauth/callback", [], True),
-        ("http://[::1]:8080/cb", [], True),
-        ("https://127.0.0.1/cb", [], False),                  # loopback is plain http
-        ("http://127.0.0.1.evil.example/cb", [], False),
-        ("https://app.example.com/cb", [], False),
-        ("https://app.example.com/cb", ["https://app.example.com/cb"], True),
-        ("https://app.example.com/cb2", ["https://app.example.com/cb"], False),
-        ("cursor://callback", [], False),
+        ("http://127.0.0.1:33418/callback", True),
+        ("http://localhost:6274/oauth/callback", True),
+        ("http://[::1]:8080/cb", True),
+        ("https://127.0.0.1/cb", False),                  # loopback is plain http
+        ("http://127.0.0.1.evil.example/cb", False),
+        ("https://app.example.com/cb", False),             # a web client: single sign-on
+        ("cursor://callback", False),
     ],
 )
-def test_only_loopback_and_listed_redirects_may_register(
-    uri: str, listed: list[str], allowed: bool,  # noqa: FBT001
-) -> None:
-    assert redirect_allowed(uri, listed) is allowed
+def test_only_loopback_redirects_may_register(uri: str, allowed: bool) -> None:  # noqa: FBT001
+    assert redirect_allowed(uri) is allowed
 
 
 async def _get(app: Any, path: str) -> httpx.Response:

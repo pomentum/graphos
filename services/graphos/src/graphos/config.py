@@ -143,9 +143,6 @@ class Settings(BaseSettings):
     # The MCP endpoint at /mcp (read tools only), on unless turned off; it
     # takes the tokens the REST API takes.
     mcp: bool = True
-    # Redirect URIs of web MCP clients that may register (graphos.oauth, without
-    # single sign-on); loopback ones (desktop, command line) always may.
-    mcp_redirect_uris: list[str] = Field(default_factory=list)
     # Edges an NDJSON ``edges:reconcile`` body may carry (held in memory).
     reconcile_max_edges: int = Field(default=2_000_000, ge=1)
     # Host names the API answers to (Starlette's TrustedHostMiddleware;
