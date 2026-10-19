@@ -208,8 +208,12 @@ curl -s -X POST "$G/v1/grants" -H "Authorization: Bearer $TOKEN" -H "Content-Typ
 ```
 
 These endpoints need no token: `/healthz`, `/readyz`, `/metrics`, `/v1/info`, `/`, `/docs`, `/redoc`,
-`/openapi.json`, `/api-docs-assets/`, and
-`/v1/auth/login`, `/refresh`, `/logout`, `/config`, `/oidc/start`, `/oidc/callback`.
+`/openapi.json`, `/api-docs-assets/`,
+`/v1/auth/login`, `/refresh`, `/logout`, `/config`, `/oidc/start`, `/oidc/callback`, and for MCP
+clients `/.well-known/oauth-protected-resource[/mcp]` and, without single sign-on, graphos's
+sign-in for them: `/.well-known/oauth-authorization-server` and `/oauth/authorize`, `/login`,
+`/token`, `/register`, `/revoke` ([agents guide](agents.md)). `/mcp` itself takes the same tokens
+as the API.
 
 `GET /v1/me` tells a signed-in user who it is: `{"consumer", "kind", "via", "admin",
 "must_change", "tenants", "levels", "create_tenants", "preferences"}` (`via`: `password` or `oidc`), where `tenants` lists the registered tenants it may use
@@ -848,7 +852,7 @@ property schema as `{}`.
 | Scope | What the set replaces | Body |
 |---|---|---|
 | `node` | the edges of `type` at one `node`, in `direction` (`out`, the default, or `in`), whose other end has `other_label` | JSON; each edge names the other end by `id` |
-| `type` | every edge of `type` from `src_label` to `dst_label` | JSON up to 10,000 edges, or NDJSON: a header line `{"scope": "type", "type", "src_label", "dst_label", "props"}`, then one `{"src_id", "dst_id", "props"}` per line (up to `GRAPHOS_RECONCILE_MAX_EDGES`, 2,000,000) |
+| `type` | every edge of `type` from `src_label` to `dst_label` | JSON up to 10,000 edges, or NDJSON: a header line `{"scope": "type", "type", "src_label", "dst_label", "props"}`, then one `{"src_id", "dst_id", "props"}` per line (up to `GRAPHOS_RECONCILE_MAX_EDGES`, 200,000) |
 
 Labels take in their child labels. Edges of the same type to other labels, and other types, are not
 touched. `props`: `merge` (the default) merges an edge's given properties into the stored ones,

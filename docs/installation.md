@@ -251,6 +251,12 @@ the communities. Then open the UI, pick `demo`, and use *Explore → Graph → C
   development only.
 - **SSO redirect URIs.** Set `GRAPHOS_OIDC_REDIRECT_URIS` to the UI's callback address.
 - **One service account per program**, with the lowest level it needs on its own tenants.
+- **What is on by default.** The read-only Cypher console (`GRAPHOS_CYPHER=false` turns it off)
+  and the MCP endpoint for agents, `/mcp` (`GRAPHOS_MCP=false`). Both only read, with the
+  caller's grants. Without single sign-on, graphos also signs people in for MCP clients at
+  `/oauth/`; give clients the UI's address so they sign in on the UI's own screen, and list the
+  UI container in `GRAPHOS_FORWARDED_ALLOW_IPS` so graphos names its `https` address
+  ([agents guide](agents.md)).
 - **Signing key.** By default graphos generates its token-signing key at the first start and keeps
   it in the database, so every replica shares it. To keep the key in your secret manager
   instead, mount it as a PEM EC P-256 private key and set `GRAPHOS_AUTH_SIGNING_KEY_FILE`
@@ -337,6 +343,7 @@ lists every one; the README the most common). Those for sign-in, besides the OID
 | `GRAPHOS_AUTH_SIGNING_KEY_FILE` | unset | A PEM EC P-256 private key to sign tokens with, instead of the generated one (§8). |
 | `GRAPHOS_MASTER_KEY_FILE` | unset (compose: `master_key.txt`) | Master keys sealing the stored signing keys and ID tokens (§8). Unset: stored in clear, with a warning. |
 | `GRAPHOS_ALLOWED_HOSTS` | empty (any) | Host names graphos answers to, comma-separated; `localhost` and `127.0.0.1` always (§8). |
+| `GRAPHOS_MCP` | `true` | The MCP endpoint `/mcp` for agents and, without single sign-on, graphos's sign-in for MCP clients at `/oauth/`; `false` turns both off ([agents guide](agents.md)). |
 | `GRAPHOS_AUTH_ISSUER` | `graphos` | `iss` of the tokens graphos signs. |
 | `GRAPHOS_RATE_LIMIT_ENABLED` | `false` | Per-user request rate limit. |
 | `GRAPHOS_FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxies whose `X-Forwarded-*` headers are trusted. |

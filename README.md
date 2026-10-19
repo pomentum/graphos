@@ -27,6 +27,7 @@ The picture above is the map; each line below links to the section that covers i
 - **Edit in place, safely:** patch or delete one node or edge, or delete up to 1,000 nodes in one transaction; `If-Match` turns a concurrent edit into a `412` instead of a lost update ([usage](docs/usage.md#4-writing-data)).
 - **Composable reads:** search (substring or ranked indexes), neighbors, multi-hop expand, shortest paths, scans and subgraphs ([usage](docs/usage.md#5-reads-that-compose)).
 - **Rule-derived edges:** declare a property-match rule once; `edges:resolve` writes the edges in SQL ([usage](docs/usage.md#9-rule-based-edges-resolve_rule)).
+- **Reconcile by difference:** send the whole set of a node's or a type's edges; graphos adds, changes and removes only the difference, in one transaction ([usage](docs/usage.md#reconcile-make-the-stored-edges-equal-to-a-set)).
 - **Copy, back up and restore:** a tenant's schema and data as files, restored exactly or loaded into plain AGE ([usage](docs/usage.md#dataset-export-and-import), [without graphos](docs/without-graphos.md)).
 - **Python client:** async and typed; signs in and renews its token by itself ([below](#python-client)).
 
@@ -35,11 +36,12 @@ The picture above is the map; each line below links to the section that covers i
 - **Graph analytics:** a map of every label and the edges between them (about a second on ten million edges), aggregates, top-K by degree ([usage](docs/usage.md#6-aggregates)).
 - **Graph algorithms:** Louvain communities (optional extra), PageRank, betweenness, components and degree, run beside the API and written onto the nodes ([what each finds](docs/algorithms.md)).
 - **Cypher console:** read-only Cypher on one tenant, write clauses refused, with a timeout, a row cap and saved queries ([usage](docs/usage.md#cypher-console)).
+- **AI agents (MCP):** `/mcp` serves graphos's reads to agents as tools and resources, with the caller's grants and a schema summary made for models; MCP clients sign people in themselves ([agents guide](docs/agents.md)).
 - **Web UI (optional):** explore, inspect and edit, work on many nodes at once, import a CSV file, query, extend the schema, follow changes live and export what is on screen ([below](#web-ui)).
 
 **Run**
 
-- **Safe by default:** 15-minute tokens for people and service accounts, single sign-on, a level per tenant, statement timeouts, the database out of reach ([installation](docs/installation.md#8-before-other-people-use-it), [single sign-on](docs/sso.md)).
+- **Safe by default:** 15-minute tokens for people and service accounts, single sign-on, a level per tenant, stored secrets sealed with a master key, a Host allowlist, statement timeouts, the database out of reach ([installation](docs/installation.md#8-before-other-people-use-it), [single sign-on](docs/sso.md)).
 - **Change feed:** every write recorded in its transaction; read after a cursor or follow live ([usage](docs/usage.md#10-change-feed)).
 - **Background jobs:** long operations answer `202` at once, then can be polled and cancelled ([usage](docs/usage.md#background-jobs)).
 - **Operable:** Prometheus metrics, JSON logs with `traceparent`, an audit log and per-user rate limiting ([usage](docs/usage.md#11-operations)).
@@ -228,6 +230,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | `GRAPHOS_DB_USER` | `graphos` (compose: `graphos_app`) | Database role; compose uses an unprivileged role created at init |
 | `GRAPHOS_FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxies whose `X-Forwarded-*` headers are trusted |
 | `GRAPHOS_DB_POOL_MAX_SIZE` | `16` | asyncpg pool size per replica |
+| `GRAPHOS_RECONCILE_MAX_EDGES` | `200000` | Most edges an NDJSON `edges:reconcile` body may carry (held in memory, about 1 KB each) |
 | `GRAPHOS_JOB_CONCURRENCY` | `1` | Background jobs each replica runs at once |
 | `GRAPHOS_JOB_RETENTION_H` | `168` | Hours finished jobs are kept |
 | `GRAPHOS_BETWEENNESS_MAX_NODES` | `20000` | Betweenness is skipped when more nodes take part (it is the costly metric) |
