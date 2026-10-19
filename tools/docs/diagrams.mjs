@@ -1,17 +1,13 @@
 #!/usr/bin/env node
 /**
- * diagrams.mjs — the diagrams in the README and the whitepaper, drawn as SVG.
+ * diagrams.mjs — the diagrams in the README, the docs and the website, drawn as SVG.
  *
  *   node tools/docs/diagrams.mjs          write docs/images/<name>-light.svg and <name>-dark.svg
  *   node tools/docs/diagrams.mjs --check  exit 1 if any file differs from what this draws
  *
- * It also embeds the web UI screenshots (docs/images/ui-*.jpg, taken by
- * tools/docs/screenshots.py) in the whitepaper, and --check fails when the page holds
- * other pictures than the committed ones.
- *
  * Each diagram comes in two files because GitHub picks one per reader's theme through a
- * <picture> element, and the whitepaper page embeds both and lets its own theme choose. The
- * drawing lives in code rather than in a design tool, so a label change is a reviewable diff
+ * <picture> element, and the website shows the one its own theme asks for. The drawing lives
+ * in code rather than in a design tool, so a label change is a reviewable diff
  * and the light and dark versions cannot drift apart.
  *
  * Colour carries meaning: blue is graphos, violet is PostgreSQL + Apache AGE, red is what a
@@ -24,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const OUT = join(ROOT, 'docs', 'images');
 
-// The same palette as docs/whitepaper.html: flat fills, hairline strokes, no shadows.
+// The same palette as the website (docs/site.css): flat fills, hairline strokes, no shadows.
 const THEMES = {
   light: {
     ink: '#131A22', soft: '#4A5563', rule: '#C4CDD6', card: '#F7F8F9', well: '#E6EAEE',
@@ -244,42 +240,6 @@ ${text(530, 236, 'ids persist across runs as membership drifts', { size: 13 })}
 
 const DIAGRAMS = { problem, architecture, communities };
 
-// The whitepaper carries each picture as inline SVG, so the page is one self-contained file
-// that renders in any HTML viewer: opened from disk, attached to a message, in a preview pane
-// that blocks data: URIs, or served from anywhere. The page holds <!--fig:<name>-<theme>-->
-// markers and this script fills them. Ids are prefixed per picture because six SVGs share one
-// document, and the dark copy is hidden from assistive tech since it repeats the light one.
-const PAGE = join(ROOT, 'docs', 'whitepaper.html');
-const embedded = new Map();
-
-function inline(svg, fig, theme) {
-  return svg
-    .replace('<svg ', `<svg class="pic-${theme}"${theme === 'dark' ? ' aria-hidden="true"' : ''} `)
-    .replace(/ width="\d+" height="\d+"/, '')
-    .replace('aria-labelledby="title desc"', `aria-labelledby="${fig}-title ${fig}-desc"`)
-    .replace(/id="(title|desc|h\d+)"/g, `id="${fig}-$1"`)
-    .replace(/url\(#(h\d+)\)/g, `url(#${fig}-$1)`)
-    .trimEnd();
-}
-
-// The UI screenshots: photographs, so they cannot be inline SVG. The page carries the
-// JPEG copies as data: URIs, which keeps it one file; where a viewer blocks data: URIs only
-// these pictures are missing. The alt text says what each one shows.
-const SHOTS = {
-  'ui-explore-graph-dark': 'The Explore view of the demo tenant, an invented software ecosystem: about 450 nodes coloured by the community Louvain found and sized by PageRank, six clusters around a core of shared libraries. The core library corelog is selected; its panel shows what graphos computed for it (its group, PageRank, betweenness, degree and component), its properties and its relationships.',
-  'ui-explore-groups-dark': 'The Groups mode of Explore: one bubble per community of the last Louvain recompute, named after its best-connected member, with lines for the relationships between communities.',
-  'ui-explore-map-dark': 'The Map mode of Explore: one bubble per label, sized by its nodes, and a line per pair of labels that are linked.',
-  'ui-schema-editor-dark': 'The schema diagram of the demo tenant. Library, Framework and Tool sit in a block under their parent label Package; the selected label, Library, shows its relationship types to the other labels and, in a panel, its properties and relationships. The Add menu offers a new label, relationship type or search index.',
-  'ui-query-dark': 'The Query page of the demo tenant: the Cypher of the saved query maintainers_of, coloured by kind of word, its parameter (Package name: corelog) as a field, and the result as a table: two maintainers of corelog with their teams, each node shown with its label icon. The five saved queries of the tenant are listed on the right.',
-  'ui-explore-styles-dark': 'The canvas showing the result of a query laid out in layers from left to right: the package shiplite, the packages it depends on, and theirs, each drawn in the colour of its label with its icon (a code sign for Library, a box for Framework, a cog for Tool), with a legend of the labels.',
-  'ui-schema-styles-dark': 'The Schema page of the demo tenant: a colour swatch or icon before each label and relationship type. The style editor is open on Library: ten colours to choose from or a hexadecimal colour, a caption property, sized by graphos_pagerank, the icon code, and Reset and Save buttons.',
-};
-for (const [name, alt] of Object.entries(SHOTS)) {
-  let jpeg;
-  try { jpeg = readFileSync(join(OUT, `${name}.jpg`)); } catch { continue; }
-  embedded.set(name, `<img class="shot" src="data:image/jpeg;base64,${jpeg.toString('base64')}" width="1440" height="900" loading="lazy" alt="${alt}">`);
-}
-
 const check = process.argv.includes('--check');
 let stale = 0;
 mkdirSync(OUT, { recursive: true });
@@ -287,7 +247,6 @@ for (const [name, draw] of Object.entries(DIAGRAMS)) {
   for (const [theme, t] of Object.entries(THEMES)) {
     const file = join(OUT, `${name}-${theme}.svg`);
     const svg = draw(t);
-    embedded.set(`${name}-${theme}`, inline(svg, `${name}-${theme}`, theme));
     if (check) {
       let cur = '';
       try { cur = readFileSync(file, 'utf8').replaceAll('\r\n', '\n'); } catch {}
@@ -296,20 +255,6 @@ for (const [name, draw] of Object.entries(DIAGRAMS)) {
       writeFileSync(file, svg);
       console.log(`diagrams: wrote docs/images/${name}-${theme}.svg`);
     }
-  }
-}
-{
-  // Compare ignoring line endings, so a CRLF checkout does not fail --check.
-  const page = readFileSync(PAGE, 'utf8').replaceAll('\r\n', '\n');
-  const next = page.replace(/<!--(fig|shot):([a-z-]+)-->[\s\S]*?<!--\/\1:\2-->/g, (m, kind, fig) => {
-    if (!embedded.has(fig)) throw new Error(`whitepaper.html: unknown ${kind === 'fig' ? 'figure' : 'screenshot'} "${fig}"`);
-    return `<!--${kind}:${fig}-->${embedded.get(fig)}<!--/${kind}:${fig}-->`;
-  });
-  if (check) {
-    if (next !== page) { console.error('diagrams: docs/whitepaper.html embeds stale pictures'); stale++; }
-  } else if (next !== page) {
-    writeFileSync(PAGE, next);
-    console.log('diagrams: embedded pictures in docs/whitepaper.html');
   }
 }
 if (check) {

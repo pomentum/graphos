@@ -117,7 +117,7 @@ commit what it writes. Every picture has alt text that says what it shows.
 two themes cannot drift apart.
 
 ```bash
-node tools/docs/diagrams.mjs           # write the SVGs, embed every picture in the whitepaper
+node tools/docs/diagrams.mjs           # write the SVGs
 node tools/docs/diagrams.mjs --check   # CI: exit 1 when a file is not what the script draws
 ```
 
@@ -134,8 +134,8 @@ node tools/docs/diagrams.mjs --check   # CI: exit 1 when a file is not what the 
   </picture>
   ```
 
-**UI screenshots** (`ui-<shot>-dark.png` for the docs, `.jpg` for the
-whitepaper) are taken by `tools/docs/screenshots.py` with Playwright, in
+**UI screenshots** (`ui-<shot>-dark.png`, shown by the README, the docs and
+the website) are taken by `tools/docs/screenshots.py` with Playwright, in
 dark mode at 1440x900, of the demo tenant only:
 
 ```bash
@@ -144,22 +144,14 @@ python clients/python/examples/08_demo_ecosystem.py     # load the demo tenant
 export GRAPHOS_USER=... GRAPHOS_PASSWORD=...            # a user granted only the demo tenant
 python tools/docs/screenshots.py --ui http://localhost:5173              # every shot
 python tools/docs/screenshots.py --ui http://localhost:5173 query        # or name them
-node tools/docs/diagrams.mjs                            # embed the new JPEGs in the whitepaper
+python tools/docs/site.py                               # the website's page shows the README's shots
 ```
 
 The shots are `explore-graph`, `explore-groups`, `explore-map`,
-`explore-styles`, `schema-editor`, `schema-styles` and `query`. A new shot
-is a function in `SHOTS` of `screenshots.py`, its alt text in `SHOTS` of
-`diagrams.mjs`, and a marker in the whitepaper. Never take a screenshot of
-real data.
-
-**The whitepaper** (`docs/whitepaper.html`) is one self-contained page.
-Its pictures sit between markers, `<!--fig:<name>-<theme>-->…<!--/fig:…-->`
-for diagrams and `<!--shot:<name>-->…<!--/shot:…-->` for screenshots, that
-`diagrams.mjs` fills: edit the text around them, never what is inside.
-The `whitepaper` workflow publishes the page on every push to `main` that
-touches it, `docs/images/` or `tools/docs/`, so merging such a change
-publishes it.
+`explore-styles`, `explore-selection`, `schema-editor`, `schema-styles`,
+`query` and `csv-import`. A new shot is a function in `SHOTS` of
+`screenshots.py`; where it is shown, its alt text says what it shows. Never
+take a screenshot of real data.
 
 **The website** (`https://pomentum.github.io/graphos/`) is `docs/` as it is
 on `main`: GitHub Pages serves the folder (Settings → Pages → Deploy from a
@@ -168,7 +160,7 @@ branch, `main`, `/docs`) and runs no build of ours. Its page,
 the frame `tools/docs/site.html` with the README's features, screenshots,
 first quickstart block and documentation table, and the version. Edit the
 README or the frame, never `docs/index.html`. Beside it sit `site.css` and
-`site.js` (the whitepaper's design and theme switch), `favicon.svg`,
+`site.js` (its design and light/dark switch), `favicon.svg`,
 `404.html` and `.nojekyll`; its pictures are `docs/images/`. Everything
 committed under `docs/` is published, so keep private notes in
 `docs/design/`, which git ignores.
@@ -243,7 +235,7 @@ project with a running stack. So:
   case, plain English, no trailing period. Types in use: `feat`, `fix`,
   `docs`, `test`, `perf`, `refactor`, `ci`, `chore`. Scopes in use: `ui`,
   `api`, `graph`, `cypher`, `db`, `dataset`, `compose`, `client`, `auth`,
-  `tenants`, `schema`, `whitepaper`, `age`.
+  `tenants`, `schema`, `age`.
   A security fix says so: `fix(cypher): ... (security)`. Releases are
   `chore: release X.Y.Z`.
 - **Never commit secrets.** Passwords, keys and tokens live in

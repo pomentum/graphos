@@ -23,7 +23,7 @@ The rules for working on graphos are written once, for people and coding agents 
 | The service (`services/graphos/`) | [services/graphos/DEVELOPMENT.md](services/graphos/DEVELOPMENT.md): where to look, database tests, data-model invariants, Python conventions |
 | The Python client (`clients/python/`) | [clients/python/DEVELOPMENT.md](clients/python/DEVELOPMENT.md): models that mirror the service, retries |
 | The web UI (`services/graphos-ui/`) | [services/graphos-ui/DEVELOPMENT.md](services/graphos-ui/DEVELOPMENT.md): layers, text, screenshots |
-| Diagrams, screenshots, the whitepaper | [docs/development.md, Pictures and docs tools](docs/development.md#pictures-and-docs-tools): never edit a picture by hand |
+| Diagrams, screenshots, the website's page | [docs/development.md, Pictures and docs tools](docs/development.md#pictures-and-docs-tools): never edit a picture by hand |
 
 [AGENTS.md](AGENTS.md) sums up the hard rules for coding agents.
 

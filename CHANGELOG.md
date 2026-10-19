@@ -87,12 +87,16 @@ under one version.
   must do itself, known security limits), `CONTRIBUTING.md` (where the rules are, how to open a
   pull request), issue templates for bugs and feature requests, and a pull request template.
 
-- **Docs:** a website for graphos on GitHub Pages, served from `docs/` on `main`: one page in
-  the whitepaper's design, with features, measured benchmarks, the web UI, a quickstart and the
-  documentation. `tools/docs/site.py` writes `docs/index.html` from the README and the version
+- **Docs:** a website for graphos on GitHub Pages, served from `docs/` on `main`: one page with
+  features, measured benchmarks, the web UI, a quickstart and the documentation. `tools/docs/site.py` writes `docs/index.html` from the README and the version
   (`--check` tells when it is out of date); no workflow builds or deploys it.
 
 ### Changed
+
+- **Docs:** the whitepaper and its Vercel deployment are gone; the website takes their place.
+  `diagrams.mjs` draws the diagrams only, `screenshots.py` writes PNGs only (the JPEG copies were
+  the whitepaper's), and a release no longer dates a page. The README's badge and "Website" line
+  point to the website.
 
 - **PostgreSQL 16 / AGE 1.6 is no longer supported**
   ([ADR-0007](docs/adrs/ADR-0007-drop-postgresql-16.md)): graphos-api refuses to start on

@@ -1,6 +1,6 @@
 /**
- * The colour tokens of graphos UI: black and greys, with the whitepaper's
- * blue as the one accent. Every colour on screen comes from here.
+ * The colour tokens of graphos UI: black and greys, with graphos's blue
+ * (the website's and the diagrams') as the one accent. Every colour on screen comes from here.
  */
 export interface Palette {
   /** Window frame and toolbar. */

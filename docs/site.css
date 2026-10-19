@@ -1,6 +1,5 @@
-/* The graphos website's stylesheet.
-   Its first part is the graphos whitepaper's stylesheet (docs/whitepaper.html), copied so the
-   site looks like the paper and stands on its own; what the page adds follows it. */
+/* The graphos website's stylesheet: drafting-paper ground, one spot colour, hairlines instead of
+   shadows. Its first part sets the type, colours and shared pieces; what the page adds follows. */
 
 /* Drafting-paper ground, one spot colour, hairlines instead of shadows, figures framed like
    plates. Blue is graphos and violet is PostgreSQL + Apache AGE, in the page and in every diagram. */

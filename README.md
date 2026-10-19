@@ -2,7 +2,7 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Version](https://img.shields.io/github/v/tag/pomentum/graphos?sort=semver&label=version)](CHANGELOG.md)
-[![Whitepaper](https://img.shields.io/badge/whitepaper-read-1D5BD6)](https://graphos-pomentum.vercel.app)
+[![Website](https://img.shields.io/badge/website-pomentum.github.io%2Fgraphos-1D5BD6)](https://pomentum.github.io/graphos/)
 
 A multi-tenant property-graph service: **PostgreSQL + [Apache AGE](https://age.apache.org/) behind a typed HTTP API.**
 
@@ -13,7 +13,7 @@ Your services send JSON over HTTP. graphos owns the database, writes the SQL aga
   <img src="docs/images/architecture-light.svg" width="100%" alt="Consumers call graphos-api over the graphos-net network with a bearer token. graphos-api checks tenant scope and read/write access, validates typed contracts, builds SQL internally, times out bad queries and emits metrics and audit logs. Only graphos-api reaches PostgreSQL 18 with Apache AGE on an internal network; each tenant is its own AGE graph.">
 </picture>
 
-**Why:** read the [whitepaper](https://graphos-pomentum.vercel.app) for the problem graphos solves and what it gives you.
+**Website:** [pomentum.github.io/graphos](https://pomentum.github.io/graphos/): the problem graphos solves, what it gives you, measured benchmarks and a quickstart.
 
 ## Features
 
@@ -175,7 +175,7 @@ Community detection uses [python-igraph](https://python.igraph.org/), which is G
 
 The [`graphos-image`](.github/workflows/image.yml) workflow builds and smoke-tests both variants (`linux/amd64`) on every pull request and push, and publishes the default (permissive-only) variant for `linux/amd64` and `linux/arm64` to `ghcr.io/<owner>/graphos-api`, and the web UI to `ghcr.io/<owner>/graphos-ui`, from `main` and version tags. The `louvain` variant is built and smoke-tested but not published.
 
-**Releasing.** What changed in each version is in [CHANGELOG.md](CHANGELOG.md). Push a version tag such as `0.12.0` to publish the images (`ghcr.io/<owner>/graphos-api:0.12.0` and `:0.12`, and the same for `graphos-ui`); set the version first with `node tools/release/version.mjs X.Y.Z`, which writes it everywhere it lives (server, client, UI), turns the changelog's *Unreleased* heading into the release and dates the whitepaper; CI and the release workflows check with `--check` that every place matches the tag. [`graphos-client`](clients/python/) is not published to PyPI automatically: the [`graphos-client-release`](.github/workflows/client-release.yml) workflow is run by hand from a version tag.
+**Releasing.** What changed in each version is in [CHANGELOG.md](CHANGELOG.md). Push a version tag such as `0.12.0` to publish the images (`ghcr.io/<owner>/graphos-api:0.12.0` and `:0.12`, and the same for `graphos-ui`); set the version first with `node tools/release/version.mjs X.Y.Z`, which writes it everywhere it lives (server, client, UI), turns the changelog's *Unreleased* heading into the release; CI and the release workflows check with `--check` that every place matches the tag. [`graphos-client`](clients/python/) is not published to PyPI automatically: the [`graphos-client-release`](.github/workflows/client-release.yml) workflow is run by hand from a version tag.
 
 ## Python client
 
@@ -246,7 +246,6 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 
 | Doc | Read it for |
 |---|---|
-| [Whitepaper](https://graphos-pomentum.vercel.app) ([source](docs/whitepaper.html)) | The problem, the approach, the benefits |
 | [Installation guide](docs/installation.md) | Installing, the first sign-in, users, single sign-on, production settings, upgrading |
 | [Reading graphos's data without graphos](docs/without-graphos.md) | The table layout, reading it with SQL or Cypher, taking it out, loading an export into plain AGE |
 | [Upgrading the database](docs/upgrade-postgresql-18.md) | Moving from PostgreSQL 16 / AGE 1.6 (no longer supported) to PostgreSQL 18 / AGE 1.8 with `docker compose up` |
@@ -273,8 +272,9 @@ pip install -e "services/graphos[dev,louvain]" -e "clients/python[dev]"
 pytest -m "not db" services/graphos/tests      # unit tests, no database
 pytest clients/python/tests
 bash scripts/run-db-tests.sh                   # integration tests against the compose stack
-node tools/docs/diagrams.mjs                    # regenerate docs/images/*.svg and embed them, and the UI screenshots, in the whitepaper
+node tools/docs/diagrams.mjs                    # regenerate the diagrams, docs/images/*.svg
 python tools/docs/screenshots.py --ui <url>     # retake the UI screenshots (docs/images/ui-*), of the demo tenant
+python tools/docs/site.py                       # regenerate the website's page, docs/index.html
 (cd services/graphos-ui && npm ci && npm test)  # the web UI: tests (npm run dev to run it)
 ```
 

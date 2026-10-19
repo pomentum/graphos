@@ -1,4 +1,4 @@
-// The light/dark switch, as in the graphos whitepaper: dark until the reader picks;
+// The light/dark switch: dark until the reader picks;
 // the pick is kept in localStorage where the browser allows it.
 (function(){
   var toc = document.getElementById('toc');
