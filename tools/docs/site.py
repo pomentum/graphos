@@ -15,7 +15,7 @@ the repository already has, so nothing on the page is written twice:
 - the alt text of each diagram it shows, from the ``<desc>`` that ``diagrams.mjs`` writes
   into ``docs/images/<name>-light.svg``.
 
-Links into the repository (``docs/usage.md``) point to GitHub. The script fails when a
+Links into the repository (``docs/guide/usage.md``) point to GitHub. The script fails when a
 slot is left unfilled or a local link or picture points at a file ``docs/`` does not have.
 
     python tools/docs/site.py           # write docs/index.html

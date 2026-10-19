@@ -7,7 +7,7 @@ body:
       value: |
         Please use neutral data in examples (`acme`, `Doc`, `LINKS_TO`): no real names, schemas or hosts.
         A change to the design (an invariant, a new public surface, the supported databases) needs an
-        architecture decision record before the code: see docs/adrs/README.md.
+        architecture decision record before the code: see docs/guide/adrs/README.md.
   - type: textarea
     id: problem
     attributes:

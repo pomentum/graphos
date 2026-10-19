@@ -5,9 +5,9 @@
   table), services/graphos/pyproject.toml (the version) and the diagrams'
   own descriptions (their alt text). The rest is written
   here and must say only what the docs say: At a glance matches
-  docs/features.md or the README, and every benchmark figure is quoted, with
-  its setup, from docs/apache-age.md, docs/concept.md, docs/features.md or
-  docs/upgrade-postgresql-18.md.
+  docs/guide/features.md or the README, and every benchmark figure is quoted, with
+  its setup, from docs/guide/apache-age.md, docs/guide/concept.md, docs/guide/features.md or
+  docs/guide/upgrade-postgresql-18.md.
 -->
 <html lang="en" data-theme="dark">
 <head>
@@ -110,7 +110,7 @@
       </tbody>
     </table>
   </div>
-  <p class="note">The COPY figures come from <a href="https://github.com/pomentum/graphos/blob/main/scripts/bench_bulk_write.py"><code>scripts/bench_bulk_write.py</code></a>; the per-row <code>MERGE</code> baseline was measured with an earlier graphos that still had a Cypher write path and can no longer be rerun. PostgreSQL 16 / AGE 1.6 was measured before graphos dropped it; a stack on it still moves to 18 by itself on <code>docker compose up</code>. The PostgreSQL 18 database was freshly restored and the 16 one carried about 3× dead space, which favours 18. Details: <a href="https://github.com/pomentum/graphos/blob/main/docs/apache-age.md#5-why-every-write-is-sql">why every write is SQL</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/concept.md#23-indexes-created-at-registration">indexes created at registration</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/apache-age.md#12-measured-on-postgresql-18--age-18">measured on PostgreSQL 18</a>.</p>
+  <p class="note">The COPY figures come from <a href="https://github.com/pomentum/graphos/blob/main/scripts/bench_bulk_write.py"><code>scripts/bench_bulk_write.py</code></a>; the per-row <code>MERGE</code> baseline was measured with an earlier graphos that still had a Cypher write path and can no longer be rerun. PostgreSQL 16 / AGE 1.6 was measured before graphos dropped it; a stack on it still moves to 18 by itself on <code>docker compose up</code>. The PostgreSQL 18 database was freshly restored and the 16 one carried about 3× dead space, which favours 18. Details: <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/apache-age.md#5-why-every-write-is-sql">why every write is SQL</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/concept.md#23-indexes-created-at-registration">indexes created at registration</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/apache-age.md#12-measured-on-postgresql-18--age-18">measured on PostgreSQL 18</a>.</p>
   <div class="stats">
     <div class="stat"><b>~1 s</b><span>a map of every label and the edges between them, on ten million edges (sampled)</span></div>
     <div class="stat"><b>12 min</b><span>a 9.5 GB database with five tenants moved from PostgreSQL 16 to 18 by <code>docker compose up</code></span></div>
@@ -127,7 +127,7 @@
   <figure class="fig pic">
     <img class="pic-light" src="images/communities-light.svg" alt="{{ alt_communities }}">
     <img class="pic-dark" src="images/communities-dark.svg" alt="" aria-hidden="true">
-    <figcaption><span class="fig-n">Fig 03</span><span>Communities, computed beside the data: Louvain in its own process, ids kept stable from run to run, written back with COPY (<a href="https://github.com/pomentum/graphos/blob/main/docs/algorithms.md">what each algorithm finds</a>).</span></figcaption>
+    <figcaption><span class="fig-n">Fig 03</span><span>Communities, computed beside the data: Louvain in its own process, ids kept stable from run to run, written back with COPY (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/algorithms.md">what each algorithm finds</a>).</span></figcaption>
   </figure>
 
   <h2 id="ui"><span class="sec"><span class="num">06 · Web UI</span></span>Explore, edit, query</h2>
@@ -139,8 +139,8 @@
   <p class="prose">Docker with Compose v2 and about 4 GB of memory for Docker.</p>
   <pre class="record">{{ quickstart }}</pre>
   <ol class="next prose">
-    <li>Sign in to the UI at <code>http://127.0.0.1:8081</code> as <code>graphos</code> / <code>graphos</code> and choose a new password: the <a href="https://github.com/pomentum/graphos/blob/main/docs/installation.md">installation guide</a>.</li>
-    <li>Register a tenant, write nodes and edges, read them back: the <a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md">usage guide</a>, or the <a href="https://github.com/pomentum/graphos/tree/main/clients/python">Python client</a>.</li>
+    <li>Sign in to the UI at <code>http://127.0.0.1:8081</code> as <code>graphos</code> / <code>graphos</code> and choose a new password: the <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/installation.md">installation guide</a>.</li>
+    <li>Register a tenant, write nodes and edges, read them back: the <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md">usage guide</a>, or the <a href="https://github.com/pomentum/graphos/tree/main/clients/python">Python client</a>.</li>
     <li>Load the demo tenant to explore: <a href="https://github.com/pomentum/graphos/blob/main/clients/python/examples/08_demo_ecosystem.py"><code>08_demo_ecosystem.py</code></a>.</li>
   </ol>
 

@@ -241,7 +241,7 @@ async def _vertex_label_tables(conn: asyncpg.Connection, tenant: str) -> set[str
 # writes made in plain SQL (graphos's) invalidate its in-memory graph, the one
 # variable-length patterns read. Its 1.7.0 -> 1.8.0 upgrade script adds it to
 # the label tables that already exist; a dump of an AGE 1.6 database restored
-# into AGE 1.8 (docs/upgrade-postgresql-18.md) runs no upgrade script, so its
+# into AGE 1.8 (docs/guide/upgrade-postgresql-18.md) runs no upgrade script, so its
 # tables come without it. The same trigger as AGE's, where missing. The
 # function exists from AGE 1.8 on; before that there is nothing to install.
 CACHE_TRIGGER = "_age_cache_invalidate"

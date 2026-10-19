@@ -4,7 +4,7 @@ Streams synthetic nodes, then edges, to the ``:bulk`` endpoints in batches
 and reports client- and server-side rates.
 
 Every graphos write goes through this path.  The per-row Cypher ``MERGE``
-baseline quoted in docs/apache-age.md (31 edges/s) was measured with an
+baseline quoted in docs/guide/apache-age.md (31 edges/s) was measured with an
 earlier version that still had a Cypher write path; it can no longer be
 reproduced with this script.
 

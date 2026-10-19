@@ -3,19 +3,19 @@
 Instructions for coding agents working on graphos (the
 [agents.md](https://agents.md) convention).
 
-**The rules are in [`docs/development.md`](docs/development.md)** and the
+**The rules are in [`docs/guide/development.md`](docs/guide/development.md)** and the
 guide of the component you change. They are the single source of truth;
 read them before changing anything. This file only repeats the hard rules
 and the commands.
 
 | Changing | Read |
 |---|---|
-| Anything | [`docs/development.md`](docs/development.md): layout, docs, test stacks, git, privacy |
+| Anything | [`docs/guide/development.md`](docs/guide/development.md): layout, docs, test stacks, git, privacy |
 | `services/graphos/` | [`services/graphos/DEVELOPMENT.md`](services/graphos/DEVELOPMENT.md): data-model invariants, database tests |
 | `clients/python/` | [`clients/python/DEVELOPMENT.md`](clients/python/DEVELOPMENT.md): models mirror the service, retries |
 | `services/graphos-ui/` | [`services/graphos-ui/DEVELOPMENT.md`](services/graphos-ui/DEVELOPMENT.md): layers, text, screenshots |
-| `docs/images/`, the website's page, API docs assets | [`docs/development.md`, Pictures and docs tools](docs/development.md#pictures-and-docs-tools): never edit a picture by hand |
-| A design decision | [`docs/adrs/README.md`](docs/adrs/README.md): when an ADR is needed, its template |
+| `docs/images/`, the website's page, API docs assets | [`docs/guide/development.md`, Pictures and docs tools](docs/guide/development.md#pictures-and-docs-tools): never edit a picture by hand |
+| A design decision | [`docs/guide/adrs/README.md`](docs/guide/adrs/README.md): when an ADR is needed, its template |
 
 ## Hard rules
 

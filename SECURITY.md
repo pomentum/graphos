@@ -33,14 +33,14 @@ go into the latest minor release only.
 | Database | Supported |
 |---|---|
 | PostgreSQL 18 / Apache AGE 1.8 (the compose's default) | yes |
-| PostgreSQL 16 / Apache AGE 1.6 | no: graphos-api does not start on it. Move to 18 ([guide](docs/upgrade-postgresql-18.md)) |
+| PostgreSQL 16 / Apache AGE 1.6 | no: graphos-api does not start on it. Move to 18 ([guide](docs/guide/upgrade-postgresql-18.md)) |
 
 graphos is before 1.0: a minor release may change the API, and the changelog says how.
 
 ## What a deployment must do itself
 
 graphos is meant to run behind a reverse proxy with TLS, on a private network. The checklist is
-[installation.md §8, Before other people use it](docs/installation.md#8-before-other-people-use-it).
+[installation.md §8, Before other people use it](docs/guide/installation.md#8-before-other-people-use-it).
 In short:
 
 - put TLS in front of the UI and the API (both bind to `127.0.0.1` in the compose file), and list
@@ -59,7 +59,7 @@ In short:
 - the read-only Cypher console is on by default and needs `read` on a tenant: turn it off with
   `GRAPHOS_CYPHER=false` where no one needs it, or raise `GRAPHOS_CYPHER_LEVEL`;
 - the MCP endpoint `/mcp` is on by default, reads only, with the caller's grants: turn on the rate
-  limiter for agents, or turn it off with `GRAPHOS_MCP=false` ([agents guide](docs/agents.md)).
+  limiter for agents, or turn it off with `GRAPHOS_MCP=false` ([agents guide](docs/guide/agents.md)).
 
 ## Known limits
 
@@ -73,7 +73,7 @@ worse than what is written here.
   tokens for any user. Without a master key graphos stores them in clear, as 0.12 did, and
   warns at start. To keep the signing key out of the database altogether, mount it from a secret
   manager with `GRAPHOS_AUTH_SIGNING_KEY_FILE`
-  ([installation.md §8](docs/installation.md#8-before-other-people-use-it)); grant direct SQL
+  ([installation.md §8](docs/guide/installation.md#8-before-other-people-use-it)); grant direct SQL
   readers nothing on `graphos_meta` either way.
 - **The `Host` allowlist is off by default.** With `GRAPHOS_ALLOWED_HOSTS` empty graphos answers
   any `Host` header; set it, or let the reverse proxy accept only the names it serves.

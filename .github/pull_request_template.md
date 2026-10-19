@@ -9,8 +9,8 @@
 ## Checklist
 
 - [ ] Tests for the change, and the checks of the parts it touches pass (see `CONTRIBUTING.md`)
-- [ ] `CHANGELOG.md` under `## Unreleased`, and the docs the change touches (`docs/development.md` §3)
+- [ ] `CHANGELOG.md` under `## Unreleased`, and the docs the change touches (`docs/guide/development.md` §3)
 - [ ] An API change updates the Python client and its models, and the UI's `src/api/` when the UI uses it
 - [ ] A visible UI change retakes the screenshots it affects, of the demo tenant only
-- [ ] A design change has an ADR in `docs/adrs/`
+- [ ] A design change has an ADR in `docs/guide/adrs/`
 - [ ] Neutral data only: no real names, schemas, hosts, local paths, passwords, keys or tokens

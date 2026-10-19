@@ -36,7 +36,7 @@ long it takes, how to check it and how to go back.
 
 graphos's API and data do not change: the same tenants, users, grants, saved queries, change
 feed, revisions and sessions, the same requests and answers. (What else the release that brings
-the move changes is in the [changelog](../CHANGELOG.md).)
+the move changes is in the [changelog](../../CHANGELOG.md).)
 
 ## Before you start
 
@@ -223,7 +223,7 @@ a worker dies). The same dump restores correctly without `-j` (checked on Postgr
 the contents matched by checksum). Only the restore must be serial: a parallel dump
 (`pg_dump -Fd -j N`) is fine.
 
-[`deploy/db-upgrade/import-pg18.sh`](../services/graphos/deploy/db-upgrade/import-pg18.sh) is the
+[`deploy/db-upgrade/import-pg18.sh`](../../services/graphos/deploy/db-upgrade/import-pg18.sh) is the
 same procedure as the compose runs it. On a managed PostgreSQL that offers AGE 1.8 on PostgreSQL 18,
 the same steps apply where its tools allow them (a serial `pg_restore`, then the catalogue fix and the
 trigger block);

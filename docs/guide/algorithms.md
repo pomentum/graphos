@@ -40,7 +40,7 @@ shows a node's group and metrics.
 
 ## The demo
 
-[`08_demo_ecosystem.py`](../clients/python/examples/08_demo_ecosystem.py) loads a tenant built to
+[`08_demo_ecosystem.py`](../../clients/python/examples/08_demo_ecosystem.py) loads a tenant built to
 show what these find: an invented open-source ecosystem of about 450 packages, maintainers, teams,
 organisations and topics in six ecosystems (web, frontend, data, machine learning, operations,
 security), joined by a few shared core libraries and some cross-ecosystem dependencies. It then
@@ -61,7 +61,7 @@ communities: 6, modularity 0.741
   and two ecosystems drift apart.
 - **Components** finds two packages that depend only on each other, apart from everything else.
 
-![The Explore view of the demo tenant, coloured by community, with the core library corelog selected and its computed values in the panel](images/ui-explore-graph-dark.png)
+![The Explore view of the demo tenant, coloured by community, with the core library corelog selected and its computed values in the panel](../images/ui-explore-graph-dark.png)
 
 *Explore, coloured by community: six ecosystems around the shared core. The selected library's
 panel shows its `community_id` and the `graphos_*` metrics.*
@@ -88,7 +88,7 @@ structure, the demo scores 0.74.
   indexed columns, so each hop is an index lookup.
 - **Pictures.** Colour by community (the UI's *Colours → By group*).
 
-**How graphos runs it.** Louvain with python-igraph, an [optional extra](../README.md#louvain-is-an-optional-extra)
+**How graphos runs it.** Louvain with python-igraph, an [optional extra](../../README.md#louvain-is-an-optional-extra)
 (GPL), on an undirected graph; `rel_weights` weighs each relationship type (the demo weighs a
 dependency twice a maintainer link). `resolution` above 1 gives more, smaller communities; below 1,
 fewer and larger. Communities smaller than `min_community_size` (default 3) get no id. The seed is
@@ -106,7 +106,7 @@ curl -s -X POST "$G/v1/demo/recompute-communities" -H "Authorization: Bearer $TO
        "rel_weights": {"MAINTAINS": 0.5, "MEMBER_OF": 0.5, "TAGGED": 0.3}}'
 ```
 
-![The Groups view of the demo tenant: six communities named after their hubs, with lines between them](images/ui-explore-groups-dark.png)
+![The Groups view of the demo tenant: six communities named after their hubs, with lines between them](../images/ui-explore-groups-dark.png)
 
 *The community map in the UI: one bubble per community, named after its best-connected member.*
 
@@ -231,7 +231,7 @@ question (PageRank over dependencies is "what everything relies on", over every 
 is most connected"); run the metrics and the community recompute again after large loads; and key
 caches by `community_id`, which stays the same from run to run.
 
-[`09_better_answers.py`](../clients/python/examples/09_better_answers.py) runs all of this on the
+[`09_better_answers.py`](../../clients/python/examples/09_better_answers.py) runs all of this on the
 demo tenant: search by text score next to search ranked by importance, a walk unscoped and scoped,
 the best hit per community, and the bridges among the nodes reached.
 

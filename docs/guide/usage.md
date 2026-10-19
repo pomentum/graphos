@@ -118,7 +118,7 @@ for writes, since graphos checks the token before doing anything). Errors raise 
 than 504, but never a read/write timeout, nor the long or one-off calls: `edges:resolve`,
 `recompute-communities`, `metrics:compute`, `snapshot-import`, vacuum, Cypher queries, a restore,
 a delete with `drop_data`, job submissions and cancels. Every method is listed in the
-[client's README](../clients/python/README.md#what-the-client-covers). Without a wrapper (use
+[client's README](../../clients/python/README.md#what-the-client-covers). Without a wrapper (use
 HTTP): users, grants and sign-in (`/v1/users`, `/v1/grants`, `/v1/auth/*`, `/v1/me/password`),
 `PATCH /v1/me/preferences`, `GET …/graph/properties` and `properties:check`,
 `snapshot-import?properties=report`, `property` and `refresh` on `catalogue`, and `limit` on
@@ -456,7 +456,7 @@ column name is lower case and may not be one graphos uses (`id`, `properties`, `
 Before 0.6.0 both were SQL statements (`indexes`, and strings in `generated_columns`); a request
 that still sends SQL in them gets 422, while the empty lists older clients send are accepted and
 ignored. Specs stored by an earlier version are converted when the server
-starts: see the [changelog](../CHANGELOG.md).
+starts: see the [changelog](../../CHANGELOG.md).
 
 ```bash
 curl -s -X POST "$G/v1/tenants" \
@@ -1546,13 +1546,13 @@ docker compose -f docker-compose.graphos.yml --profile ui up -d    # http://127.
 ```
 
 or run `ghcr.io/pomentum/graphos-ui` with `GRAPHOS_API_UPSTREAM` pointing at graphos. See
-[services/graphos-ui/README.md](../services/graphos-ui/README.md).
+[services/graphos-ui/README.md](../../services/graphos-ui/README.md).
 
-![Explore's Map: one bubble per label of the demo tenant, a line per linked pair](images/ui-explore-map-dark.png)
+![Explore's Map: one bubble per label of the demo tenant, a line per linked pair](../images/ui-explore-map-dark.png)
 
-![Explore's Graph: the demo tenant coloured by community, a library selected](images/ui-explore-graph-dark.png)
+![Explore's Graph: the demo tenant coloured by community, a library selected](../images/ui-explore-graph-dark.png)
 
-![The Query page: a saved query's Cypher, coloured, and its result with label icons](images/ui-query-dark.png)
+![The Query page: a saved query's Cypher, coloured, and its result with label icons](../images/ui-query-dark.png)
 
 ### Several replicas
 

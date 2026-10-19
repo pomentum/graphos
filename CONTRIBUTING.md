@@ -11,7 +11,7 @@ welcome.
   open the issue first, so the design can be agreed before the code is written.
 - **A change to the design** (an invariant, a new public surface, the supported databases, or an
   earlier decision reversed) needs an architecture decision record first: read
-  [docs/adrs/README.md](docs/adrs/README.md).
+  [docs/guide/adrs/README.md](docs/guide/adrs/README.md).
 
 ## Where the rules are
 
@@ -19,11 +19,11 @@ The rules for working on graphos are written once, for people and coding agents 
 
 | Changing | Read |
 |---|---|
-| Anything | [docs/development.md](docs/development.md): layout, running the stack, docs discipline, test stacks, git, privacy |
+| Anything | [docs/guide/development.md](docs/guide/development.md): layout, running the stack, docs discipline, test stacks, git, privacy |
 | The service (`services/graphos/`) | [services/graphos/DEVELOPMENT.md](services/graphos/DEVELOPMENT.md): where to look, database tests, data-model invariants, Python conventions |
 | The Python client (`clients/python/`) | [clients/python/DEVELOPMENT.md](clients/python/DEVELOPMENT.md): models that mirror the service, retries |
 | The web UI (`services/graphos-ui/`) | [services/graphos-ui/DEVELOPMENT.md](services/graphos-ui/DEVELOPMENT.md): layers, text, screenshots |
-| Diagrams, screenshots, the website's page | [docs/development.md, Pictures and docs tools](docs/development.md#pictures-and-docs-tools): never edit a picture by hand |
+| Diagrams, screenshots, the website's page | [docs/guide/development.md, Pictures and docs tools](docs/guide/development.md#pictures-and-docs-tools): never edit a picture by hand |
 
 [AGENTS.md](AGENTS.md) sums up the hard rules for coding agents.
 
@@ -33,7 +33,7 @@ The rules for working on graphos are written once, for people and coding agents 
    it; please do not rebase a branch others have seen.
 2. Make the change with its tests and its docs. A change is done when its docs are: the
    [changelog](CHANGELOG.md) under `## Unreleased`, and the other files listed in
-   [docs/development.md §3](docs/development.md#3-docs-discipline).
+   [docs/guide/development.md §3](docs/guide/development.md#3-docs-discipline).
 3. Run the checks of what you changed (the commands are in each `DEVELOPMENT.md`):
 
    ```bash
@@ -47,7 +47,7 @@ The rules for working on graphos are written once, for people and coding agents 
    CI runs the database tests on PostgreSQL 18 / AGE 1.8; a change must pass there.
 4. Write commit messages as [conventional commits](https://www.conventionalcommits.org/), in the
    style of `git log`: `type(scope): summary`, lower case, no trailing period
-   ([docs/development.md §6](docs/development.md#6-git) lists the types and scopes).
+   ([docs/guide/development.md §6](docs/guide/development.md#6-git) lists the types and scopes).
 5. Open the pull request and fill in its template.
 
 ## Data and privacy
@@ -55,7 +55,7 @@ The rules for working on graphos are written once, for people and coding agents 
 graphos is public. Code, tests, fixtures, commit messages and docs use neutral data only (`acme`,
 `Doc`, `LINKS_TO`, the demo ecosystem in `clients/python/examples/`): no names of customers or
 projects, no real schemas, hosts, addresses or local paths, and never a password, key or token
-([docs/development.md §7](docs/development.md#7-privacy)). Screenshots show the demo tenant only.
+([docs/guide/development.md §7](docs/guide/development.md#7-privacy)). Screenshots show the demo tenant only.
 
 ## Licence
 

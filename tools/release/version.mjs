@@ -117,7 +117,7 @@ function set(version, date) {
   const docs = [
     ['README.md', /(Push a version tag such as `)\d+\.\d+\.\d+(`)/, `$1${version}$2`],
     ['README.md', /(graphos-api:)\d+\.\d+\.\d+(` and `:)\d+\.\d+(`)/, `$1${version}$2${minor}$3`],
-    ['docs/installation.md', /(image: ghcr\.io\/pomentum\/graphos-(?:api|ui):)\d+\.\d+\.\d+/g, `$1${version}`],
+    ['docs/guide/installation.md', /(image: ghcr\.io\/pomentum\/graphos-(?:api|ui):)\d+\.\d+\.\d+/g, `$1${version}`],
   ];
   for (const [file, pattern, replacement] of docs) {
     const before = read(file);

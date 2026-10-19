@@ -6,9 +6,9 @@
   table), services/graphos/pyproject.toml (the version) and the diagrams'
   own descriptions (their alt text). The rest is written
   here and must say only what the docs say: At a glance matches
-  docs/features.md or the README, and every benchmark figure is quoted, with
-  its setup, from docs/apache-age.md, docs/concept.md, docs/features.md or
-  docs/upgrade-postgresql-18.md.
+  docs/guide/features.md or the README, and every benchmark figure is quoted, with
+  its setup, from docs/guide/apache-age.md, docs/guide/concept.md, docs/guide/features.md or
+  docs/guide/upgrade-postgresql-18.md.
 -->
 <html lang="en" data-theme="dark">
 <head>
@@ -93,27 +93,27 @@
 
   <h2 id="features"><span class="sec"><span class="num">03 · Features</span></span>Build, explore, run</h2>
 <div class="group"><h3>Build</h3><div class="cards">
-<div class="card"><h4>Tenants and schema</h4><p>Each tenant is its own AGE graph with its own labels; no built-in labels or property names; optional property rules, <code>warn</code> or <code>strict</code> (<a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md#3-tenant-registration">usage</a>).</p></div>
-<div class="card"><h4>Fast, idempotent writes</h4><p>Batches, NDJSON bulk and snapshot import as COPY-staged upserts, 37–156× faster than per-row Cypher <code>MERGE</code> in our measurements (<a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md#4-writing-data">usage</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/apache-age.md">AGE notes</a>).</p></div>
-<div class="card"><h4>Load a CSV file</h4><p>Send the file itself; graphos maps its columns to properties, merges rows that repeat an id, checks every row (a dry run writes nothing) and writes them as bulk loads do (<a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md#csv-import">usage</a>).</p></div>
-<div class="card"><h4>Edit in place, safely</h4><p>Patch or delete one node or edge, or delete up to 1,000 nodes in one transaction; <code>If-Match</code> turns a concurrent edit into a <code>412</code> instead of a lost update (<a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md#4-writing-data">usage</a>).</p></div>
-<div class="card"><h4>Composable reads</h4><p>Search (substring or ranked indexes), neighbors, multi-hop expand, shortest paths, scans and subgraphs (<a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md#5-reads-that-compose">usage</a>).</p></div>
-<div class="card"><h4>Rule-derived edges</h4><p>Declare a property-match rule once; <code>edges:resolve</code> writes the edges in SQL (<a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md#9-rule-based-edges-resolve_rule">usage</a>).</p></div>
-<div class="card"><h4>Copy, back up and restore</h4><p>A tenant's schema and data as files, restored exactly or loaded into plain AGE (<a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md#dataset-export-and-import">usage</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/without-graphos.md">without graphos</a>).</p></div>
+<div class="card"><h4>Tenants and schema</h4><p>Each tenant is its own AGE graph with its own labels; no built-in labels or property names; optional property rules, <code>warn</code> or <code>strict</code> (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md#3-tenant-registration">usage</a>).</p></div>
+<div class="card"><h4>Fast, idempotent writes</h4><p>Batches, NDJSON bulk and snapshot import as COPY-staged upserts, 37–156× faster than per-row Cypher <code>MERGE</code> in our measurements (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md#4-writing-data">usage</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/apache-age.md">AGE notes</a>).</p></div>
+<div class="card"><h4>Load a CSV file</h4><p>Send the file itself; graphos maps its columns to properties, merges rows that repeat an id, checks every row (a dry run writes nothing) and writes them as bulk loads do (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md#csv-import">usage</a>).</p></div>
+<div class="card"><h4>Edit in place, safely</h4><p>Patch or delete one node or edge, or delete up to 1,000 nodes in one transaction; <code>If-Match</code> turns a concurrent edit into a <code>412</code> instead of a lost update (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md#4-writing-data">usage</a>).</p></div>
+<div class="card"><h4>Composable reads</h4><p>Search (substring or ranked indexes), neighbors, multi-hop expand, shortest paths, scans and subgraphs (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md#5-reads-that-compose">usage</a>).</p></div>
+<div class="card"><h4>Rule-derived edges</h4><p>Declare a property-match rule once; <code>edges:resolve</code> writes the edges in SQL (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md#9-rule-based-edges-resolve_rule">usage</a>).</p></div>
+<div class="card"><h4>Copy, back up and restore</h4><p>A tenant's schema and data as files, restored exactly or loaded into plain AGE (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md#dataset-export-and-import">usage</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/without-graphos.md">without graphos</a>).</p></div>
 <div class="card"><h4>Python client</h4><p>Async and typed; signs in and renews its token by itself (<a href="https://github.com/pomentum/graphos/tree/main/clients/python">below</a>).</p></div>
 </div></div>
 <div class="group"><h3>Explore</h3><div class="cards">
-<div class="card"><h4>Graph analytics</h4><p>A map of every label and the edges between them (about a second on ten million edges), aggregates, top-K by degree (<a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md#6-aggregates">usage</a>).</p></div>
-<div class="card"><h4>Graph algorithms</h4><p>Louvain communities (optional extra), PageRank, betweenness, components and degree, run beside the API and written onto the nodes (<a href="https://github.com/pomentum/graphos/blob/main/docs/algorithms.md">what each finds</a>).</p></div>
-<div class="card"><h4>Cypher console</h4><p>Read-only Cypher on one tenant, write clauses refused, with a timeout, a row cap and saved queries (<a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md#cypher-console">usage</a>).</p></div>
-<div class="card"><h4>Agents (MCP)</h4><p>An MCP endpoint at <code>/mcp</code> serves graphos's reads to AI agents as 22 read tools, with the API's own tokens, grants, caps and timeouts and every call audited (<a href="https://github.com/pomentum/graphos/blob/main/docs/agents.md">agents guide</a>).</p></div>
+<div class="card"><h4>Graph analytics</h4><p>A map of every label and the edges between them (about a second on ten million edges), aggregates, top-K by degree (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md#6-aggregates">usage</a>).</p></div>
+<div class="card"><h4>Graph algorithms</h4><p>Louvain communities (optional extra), PageRank, betweenness, components and degree, run beside the API and written onto the nodes (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/algorithms.md">what each finds</a>).</p></div>
+<div class="card"><h4>Cypher console</h4><p>Read-only Cypher on one tenant, write clauses refused, with a timeout, a row cap and saved queries (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md#cypher-console">usage</a>).</p></div>
+<div class="card"><h4>Agents (MCP)</h4><p>An MCP endpoint at <code>/mcp</code> serves graphos's reads to AI agents as 22 read tools, with the API's own tokens, grants, caps and timeouts and every call audited (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/agents.md">agents guide</a>).</p></div>
 <div class="card"><h4>Web UI (optional)</h4><p>Explore, inspect and edit, work on many nodes at once, import a CSV file, query, extend the schema, follow changes live and export what is on screen (<a href="#web-ui">below</a>).</p></div>
 </div></div>
 <div class="group"><h3>Run</h3><div class="cards">
-<div class="card"><h4>Safe by default</h4><p>15-minute tokens for people and service accounts, single sign-on, a level per tenant, statement timeouts, the database out of reach (<a href="https://github.com/pomentum/graphos/blob/main/docs/installation.md#8-before-other-people-use-it">installation</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/sso.md">single sign-on</a>).</p></div>
-<div class="card"><h4>Change feed</h4><p>Every write recorded in its transaction; read after a cursor or follow live (<a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md#10-change-feed">usage</a>).</p></div>
-<div class="card"><h4>Background jobs</h4><p>Long operations answer <code>202</code> at once, then can be polled and cancelled (<a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md#background-jobs">usage</a>).</p></div>
-<div class="card"><h4>Operable</h4><p>Prometheus metrics, JSON logs with <code>traceparent</code>, an audit log and per-user rate limiting (<a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md#11-operations">usage</a>).</p></div>
+<div class="card"><h4>Safe by default</h4><p>15-minute tokens for people and service accounts, single sign-on, a level per tenant, statement timeouts, the database out of reach (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/installation.md#8-before-other-people-use-it">installation</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/sso.md">single sign-on</a>).</p></div>
+<div class="card"><h4>Change feed</h4><p>Every write recorded in its transaction; read after a cursor or follow live (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md#10-change-feed">usage</a>).</p></div>
+<div class="card"><h4>Background jobs</h4><p>Long operations answer <code>202</code> at once, then can be polled and cancelled (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md#background-jobs">usage</a>).</p></div>
+<div class="card"><h4>Operable</h4><p>Prometheus metrics, JSON logs with <code>traceparent</code>, an audit log and per-user rate limiting (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md#11-operations">usage</a>).</p></div>
 </div></div>
 
   <h2 id="benchmarks"><span class="sec"><span class="num">04 · Benchmarks</span></span>Bulk writes 37–156× faster than per-row Cypher MERGE</h2>
@@ -133,7 +133,7 @@
       </tbody>
     </table>
   </div>
-  <p class="note">The COPY figures come from <a href="https://github.com/pomentum/graphos/blob/main/scripts/bench_bulk_write.py"><code>scripts/bench_bulk_write.py</code></a>; the per-row <code>MERGE</code> baseline was measured with an earlier graphos that still had a Cypher write path and can no longer be rerun. PostgreSQL 16 / AGE 1.6 was measured before graphos dropped it; a stack on it still moves to 18 by itself on <code>docker compose up</code>. The PostgreSQL 18 database was freshly restored and the 16 one carried about 3× dead space, which favours 18. Details: <a href="https://github.com/pomentum/graphos/blob/main/docs/apache-age.md#5-why-every-write-is-sql">why every write is SQL</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/concept.md#23-indexes-created-at-registration">indexes created at registration</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/apache-age.md#12-measured-on-postgresql-18--age-18">measured on PostgreSQL 18</a>.</p>
+  <p class="note">The COPY figures come from <a href="https://github.com/pomentum/graphos/blob/main/scripts/bench_bulk_write.py"><code>scripts/bench_bulk_write.py</code></a>; the per-row <code>MERGE</code> baseline was measured with an earlier graphos that still had a Cypher write path and can no longer be rerun. PostgreSQL 16 / AGE 1.6 was measured before graphos dropped it; a stack on it still moves to 18 by itself on <code>docker compose up</code>. The PostgreSQL 18 database was freshly restored and the 16 one carried about 3× dead space, which favours 18. Details: <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/apache-age.md#5-why-every-write-is-sql">why every write is SQL</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/concept.md#23-indexes-created-at-registration">indexes created at registration</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/apache-age.md#12-measured-on-postgresql-18--age-18">measured on PostgreSQL 18</a>.</p>
   <div class="stats">
     <div class="stat"><b>~1 s</b><span>a map of every label and the edges between them, on ten million edges (sampled)</span></div>
     <div class="stat"><b>12 min</b><span>a 9.5 GB database with five tenants moved from PostgreSQL 16 to 18 by <code>docker compose up</code></span></div>
@@ -150,7 +150,7 @@
   <figure class="fig pic">
     <img class="pic-light" src="images/communities-light.svg" alt="A call to recompute-communities, by a user with maintain on the tenant, streams edges out of PostgreSQL as integer ids with plain SQL, builds a weighted undirected igraph with its vertices in id order, runs Louvain in a separate process with a fixed seed, and matches each new cluster to its predecessor from the last run by Jaccard overlap of at least 0.5 so community ids stay stable. Results are written back with COPY and a single UPDATE, then the community id is denormalised onto every edge so scoped traversals use an index. Only one run per tenant happens at a time, a dry run previews the partition, and the response reports time per step and modularity.">
     <img class="pic-dark" src="images/communities-dark.svg" alt="" aria-hidden="true">
-    <figcaption><span class="fig-n">Fig 03</span><span>Communities, computed beside the data: Louvain in its own process, ids kept stable from run to run, written back with COPY (<a href="https://github.com/pomentum/graphos/blob/main/docs/algorithms.md">what each algorithm finds</a>).</span></figcaption>
+    <figcaption><span class="fig-n">Fig 03</span><span>Communities, computed beside the data: Louvain in its own process, ids kept stable from run to run, written back with COPY (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/algorithms.md">what each algorithm finds</a>).</span></figcaption>
   </figure>
 
   <h2 id="ui"><span class="sec"><span class="num">06 · Web UI</span></span>Explore, edit, query</h2>
@@ -183,23 +183,23 @@ ADMIN_TOKEN=$(curl -s -X POST http://127.0.0.1:8080/v1/me/password -H &quot;Auth
   -H &quot;content-type: application/json&quot; \
   -d &#x27;{&quot;current&quot;: &quot;graphos&quot;, &quot;new&quot;: &quot;choose-your-own-password&quot;}&#x27; | jq -r .access_token)</pre>
   <ol class="next prose">
-    <li>Sign in to the UI at <code>http://127.0.0.1:8081</code> as <code>graphos</code> / <code>graphos</code> and choose a new password: the <a href="https://github.com/pomentum/graphos/blob/main/docs/installation.md">installation guide</a>.</li>
-    <li>Register a tenant, write nodes and edges, read them back: the <a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md">usage guide</a>, or the <a href="https://github.com/pomentum/graphos/tree/main/clients/python">Python client</a>.</li>
+    <li>Sign in to the UI at <code>http://127.0.0.1:8081</code> as <code>graphos</code> / <code>graphos</code> and choose a new password: the <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/installation.md">installation guide</a>.</li>
+    <li>Register a tenant, write nodes and edges, read them back: the <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md">usage guide</a>, or the <a href="https://github.com/pomentum/graphos/tree/main/clients/python">Python client</a>.</li>
     <li>Load the demo tenant to explore: <a href="https://github.com/pomentum/graphos/blob/main/clients/python/examples/08_demo_ecosystem.py"><code>08_demo_ecosystem.py</code></a>.</li>
   </ol>
 
   <h2 id="docs"><span class="sec"><span class="num">08 · Documentation</span></span>Read further</h2>
   <dl class="gloss docs">
-<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/installation.md">Installation guide</a></dt><dd>Installing, the first sign-in, users, single sign-on, production settings, upgrading</dd></div>
-<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/without-graphos.md">Reading graphos&#x27;s data without graphos</a></dt><dd>The table layout, reading it with SQL or Cypher, taking it out, loading an export into plain AGE</dd></div>
-<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/upgrade-postgresql-18.md">Upgrading the database</a></dt><dd>Moving from PostgreSQL 16 / AGE 1.6 (no longer supported) to PostgreSQL 18 / AGE 1.8 with <code>docker compose up</code></dd></div>
-<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/sso.md">Single sign-on</a></dt><dd>Registering graphos at an OpenID Connect provider, a Keycloak example, troubleshooting</dd></div>
-<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/algorithms.md">Graph algorithms</a></dt><dd>What Louvain, PageRank, betweenness, components and degree find, and what they are for</dd></div>
-<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/usage.md">Usage guide</a></dt><dd>Practical integration patterns</dd></div>
-<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/agents.md">Connecting an agent (MCP)</a></dt><dd>Where <code>/mcp</code> is, getting a token, configuring a client, the tools and resources, security</dd></div>
-<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/features.md">Feature survey</a></dt><dd>Every capability, briefly</dd></div>
-<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/concept.md">Concept</a></dt><dd>Architecture, endpoint catalogue, capacity planning</dd></div>
-<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/apache-age.md">Apache AGE notes</a></dt><dd>AGE pitfalls, indexing, Postgres tuning, measured numbers</dd></div>
+<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/guide/installation.md">Installation guide</a></dt><dd>Installing, the first sign-in, users, single sign-on, production settings, upgrading</dd></div>
+<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/guide/without-graphos.md">Reading graphos&#x27;s data without graphos</a></dt><dd>The table layout, reading it with SQL or Cypher, taking it out, loading an export into plain AGE</dd></div>
+<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/guide/upgrade-postgresql-18.md">Upgrading the database</a></dt><dd>Moving from PostgreSQL 16 / AGE 1.6 (no longer supported) to PostgreSQL 18 / AGE 1.8 with <code>docker compose up</code></dd></div>
+<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/guide/sso.md">Single sign-on</a></dt><dd>Registering graphos at an OpenID Connect provider, a Keycloak example, troubleshooting</dd></div>
+<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/guide/algorithms.md">Graph algorithms</a></dt><dd>What Louvain, PageRank, betweenness, components and degree find, and what they are for</dd></div>
+<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md">Usage guide</a></dt><dd>Practical integration patterns</dd></div>
+<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/guide/agents.md">Connecting an agent (MCP)</a></dt><dd>Where <code>/mcp</code> is, getting a token, configuring a client, the tools and resources, security</dd></div>
+<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/guide/features.md">Feature survey</a></dt><dd>Every capability, briefly</dd></div>
+<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/guide/concept.md">Concept</a></dt><dd>Architecture, endpoint catalogue, capacity planning</dd></div>
+<div><dt><a href="https://github.com/pomentum/graphos/blob/main/docs/guide/apache-age.md">Apache AGE notes</a></dt><dd>AGE pitfalls, indexing, Postgres tuning, measured numbers</dd></div>
 <div><dt><a href="https://github.com/pomentum/graphos/blob/main/services/graphos-ui/README.md">Web UI</a></dt><dd>Running the UI, its views, how its code and text are organised</dd></div>
   </dl>
 </main>
