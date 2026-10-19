@@ -8,8 +8,10 @@
  *   node tools/release/version.mjs --check 0.4.0       ... and equal to 0.4.0 (a tag), with a changelog entry
  *
  * graphos-api, graphos-ui and graphos-client are released together under one version, which
- * lives in six places (both pyproject.toml files, both __version__ strings, the UI's package.json
- * and package-lock.json). Setting it also turns the changelog's "## Unreleased" heading into
+ * lives in seven places: both pyproject.toml files, both __version__ strings, the UI's
+ * package.json and package-lock.json, and the website's page (docs/index.html, which
+ * tools/docs/site.py generates; the README's badge reads the newest tag itself, the page is
+ * static). Setting it also turns the changelog's "## Unreleased" heading into
  * "## <version> — <date>" and updates the README's release example and the
  * installation guide's published-image tags. CI runs --check on every push, and the release
  * workflows run it against the tag they publish.
@@ -36,6 +38,10 @@ const PLACES = [
       (doc, v) => { doc.version = v; doc.packages[''].version = v; },
     ),
   },
+  {
+    file: 'docs/index.html',
+    ...shown([/(· version )(\d+\.\d+\.\d+)(<\/p>)/, /(<dt>Latest<\/dt><dd>)(\d+\.\d+\.\d+)(<\/dd>)/]),
+  },
 ];
 
 function line(pattern, render) {
@@ -54,6 +60,19 @@ function json(get, set) {
       set(doc, v);
       return `${JSON.stringify(doc, null, 2)}\n`;
     },
+  };
+}
+
+// A version a page shows in several spots, each pattern's second group: one version
+// when they agree, "a / b" when they do not (as the package-lock above).
+function shown(patterns) {
+  return {
+    read: (text) => {
+      const found = patterns.map((pattern) => text.match(pattern)?.[2]);
+      if (found.some((v) => !v)) return undefined;
+      return new Set(found).size === 1 ? found[0] : found.join(' / ');
+    },
+    write: (text, v) => patterns.reduce((out, pattern) => out.replace(pattern, `$1${v}$3`), text),
   };
 }
 
