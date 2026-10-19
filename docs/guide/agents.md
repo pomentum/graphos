@@ -24,7 +24,7 @@ container, so it knows the client used `https`), and list the UI's host name in
 `GRAPHOS_ALLOWED_HOSTS` when you set it, next to `graphos-api` (the UI's own `/api/`
 requests reach graphos under that name). Turn on the rate limiter
 (`GRAPHOS_RATE_LIMIT_ENABLED=true`): agents call often. A tool returns at most 256 KiB; a longer
-result is cut and says so.
+result has its longest lists shortened, stays valid JSON, and says what was left out (§4).
 
 ## 2. Get a token
 
@@ -120,7 +120,7 @@ as the caller, so it answers exactly what the route does (§ references are to [
 | Tool | What it reads | Route |
 |---|---|---|
 | `list_tenants` | the tenants the caller may read, with its level | `GET /v1/me` |
-| `get_schema` | labels, counts, properties and their real values, label pairs, search indexes, saved queries | `GET /v1/{t}/schema/summary` |
+| `get_schema` | labels, counts, properties and their real values, label pairs, search indexes, saved queries, as compact text (`format: json` for the structured form) | `GET /v1/{t}/schema/summary?format=text` |
 | `get_graph_map` | every label with its node count, every label pair per edge type with its count | `GET …/graph/map` |
 | `get_property_definitions` | the declared property definitions and their modes | `GET …/graph/properties` |
 | `get_graph_stats` | counts per label, and whether metrics and communities are current | `GET …/graph/stats` |
@@ -137,6 +137,22 @@ as the caller, so it answers exactly what the route does (§ references are to [
 | `list_communities`, `community_summary` | the communities of the last recompute | `GET …/graph/communities`, `…/community-summary` |
 | `list_saved_queries`, `get_saved_query`, `run_saved_query` | the tenant's saved Cypher queries (text, description, typed parameters), one by name, run with its parameters | `…/cypher/saved[/{name}[:run]]` (needs the console on) |
 | `run_cypher` | a read-only openCypher query with `$name` parameters | `POST /v1/{t}/cypher`; offered unless `GRAPHOS_CYPHER=false`, held to `GRAPHOS_CYPHER_LEVEL` |
+
+**Keeping results small.** A model reads every byte a tool returns, so:
+
+- `get_schema` answers the compact text, a fraction of the JSON; `format: json` gives the
+  structured form, with the same text in `text`.
+- `search_nodes`, `get_neighbors`, `expand_subgraph`, `shortest_paths`, `run_saved_query` and
+  `run_cypher` take `properties`: the node and edge properties to return, `id` always. Every
+  property bag of the answer (`properties`, `end_properties`, `neighbor_properties`, …) is cut
+  down to them; `[]` leaves ids and labels. The route still reads every property; the tool drops
+  the rest. `scan_nodes` has its route's own `project`.
+- `run_saved_query` and `run_cypher` leave out the answer's `graph`, the rows' nodes and edges
+  drawn again for the UI's canvas.
+- A result over 256 KiB keeps its first items: its longest lists are shortened from the end
+  until it fits, and `result_cut` says so (`{"bytes", "max_bytes", "lists": [{"list", "kept",
+  "of"}], "note"}`). A result that does not fit even with empty lists is an error asking for
+  less.
 
 Resources: `graphos://{tenant}/schema/summary` (the summary as text),
 `graphos://{tenant}/properties` (the property definitions) and `graphos://{tenant}/saved-queries`

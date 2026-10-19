@@ -6,6 +6,7 @@ agent would call it.  Calls that read a tenant are in ``test_mcp_db.py``.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -55,6 +56,7 @@ def test_every_tool_is_a_read_with_a_static_description() -> None:
         assert tool.annotations is not None and tool.annotations.read_only_hint is True
         assert tool.description and tool.input_schema["type"] == "object"
         assert ("tenant" in tool.input_schema["required"]) is spec.needs_tenant
+        assert ("properties" in tool.input_schema["properties"]) is spec.projects
 
 
 def _sample(schema: dict[str, Any]) -> Any:
@@ -147,6 +149,51 @@ async def test_origin_follows_the_host_allowlist_and_a_star_turns_both_off() -> 
                 "/mcp", json={}, headers={"Authorization": "Bearer nope", "Origin": origin},
             )
         assert (r.status_code != 403) is ok, (allowed, origin, r.status_code)  # noqa: PLR2004
+
+
+def test_properties_keeps_the_named_ones_in_every_property_bag() -> None:
+    payload = {
+        "paths": [{"end_id": "a", "end_properties": {"id": "a", "name": "A", "run_id": "r1"}}],
+        "neighbors": [{"neighbor_properties": {"id": "b", "name": "B", "hash": "h"},
+                       "edge_properties": {"since": 2020, "source": "s"}}],
+        "rows": [[{"node": {"id": "c", "label": "Doc", "properties": {"id": "c", "x": 1}}}]],
+        "labels": [{"name": "Doc", "properties": [{"name": "x"}]}],
+    }
+    out = mcp_server.project(payload, {"name", "since"})
+    assert out["paths"][0]["end_properties"] == {"id": "a", "name": "A"}
+    assert out["neighbors"][0]["neighbor_properties"] == {"id": "b", "name": "B"}
+    assert out["neighbors"][0]["edge_properties"] == {"since": 2020}
+    assert out["rows"][0][0]["node"] == {"id": "c", "label": "Doc", "properties": {"id": "c"}}
+    assert out["labels"] == payload["labels"]                  # a list of definitions, not a bag
+    assert mcp_server.project(payload, set())["paths"][0]["end_properties"] == {"id": "a"}
+
+
+def test_a_long_result_is_cut_to_valid_json_that_says_what_was_left_out() -> None:
+    rows = [{"id": f"n{i}", "text": "x" * 1000} for i in range(400)]
+    payload = {"tenant": "acme", "truncated": False, "rows": rows, "graph": {"nodes": rows[:50]}}
+    answer = mcp_server.result(payload)
+    text = answer.content[0].text
+    assert len(text.encode("utf-8")) <= mcp_server.MAX_RESULT_BYTES
+    parsed = json.loads(text)
+    assert parsed == answer.structured_content
+    assert parsed["tenant"] == "acme"
+    cut = parsed["result_cut"]
+    assert cut["bytes"] > mcp_server.MAX_RESULT_BYTES
+    assert cut["lists"][0] == {"list": "rows", "kept": len(parsed["rows"]), "of": 400}
+    assert 0 < len(parsed["rows"]) < 400  # noqa: PLR2004
+    assert parsed["rows"] == rows[: len(parsed["rows"])]        # the first ones, whole
+    small = mcp_server.result({"rows": rows[:3]})
+    assert "result_cut" not in small.structured_content
+
+
+def test_a_result_that_no_cut_makes_fit_is_an_error_and_text_stays_text() -> None:
+    huge = mcp_server.result({"blob": "x" * (mcp_server.MAX_RESULT_BYTES + 1)})
+    assert huge.is_error and "ask for less" in huge.content[0].text
+    text = mcp_server.result("Doc (3 nodes)\n  status: ACT 2, OLD 1")
+    assert text.content[0].text.startswith("Doc (3 nodes)")
+    assert text.structured_content is None
+    listed = mcp_server.result([{"name": "q"}])
+    assert listed.structured_content == {"result": [{"name": "q"}]}
 
 
 def test_mcp_is_on_by_default_and_can_be_turned_off() -> None:

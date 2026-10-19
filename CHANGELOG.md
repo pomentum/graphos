@@ -49,9 +49,12 @@ read **Upgrading** before moving to this version.
   three resources (`graphos://{tenant}/schema/summary`, `…/properties`, `…/saved-queries`). Each tool runs
   the REST route it wraps, in process and as the caller, so grants, caps and timeouts are the
   route's; every call is audited with `mcp_tool`, reads included. The tool list carries no tenant
-  data. Results over 256 KiB are cut and say so. It takes the tokens the REST API takes: a token
-  from `POST /v1/auth/login`, single sign-on, or the identity provider's access token for
-  graphos's audience. A call without one answers 401 with `resource_metadata`, which names who
+  data. Results are kept small for a model: `get_schema` answers the compact text (`format: json`
+  for the structured form); the tools that return nodes take `properties`, the node and edge
+  properties to keep; the Cypher tools leave out the UI's `graph`; and a result over 256 KiB has
+  its longest lists shortened, stays valid JSON and says so in `result_cut`. It takes the tokens
+  the REST API takes: a token from `POST /v1/auth/login`, single sign-on, or the identity
+  provider's access token for graphos's audience. A call without one answers 401 with `resource_metadata`, which names who
   signs people in for the client (`/.well-known/oauth-protected-resource[/mcp]`); a browser
   `Origin` must be an allowed host. New dependency: `mcp` 2.3 (MIT).
 - **MCP clients sign people in without a pasted token.** Without single sign-on, graphos is
