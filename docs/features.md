@@ -711,7 +711,10 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   over Streamable HTTP in stateless mode, inside the API: the same grants per
   tenant, caps and timeouts, and every call audited with its tool's name. The
   tool list carries no tenant data. It takes the tokens the REST API takes
-  (`/v1/auth/login`, single sign-on, the provider's tokens for graphos). See
+  (`/v1/auth/login`, single sign-on, the provider's tokens for graphos), and
+  MCP clients sign people in without a pasted token: through graphos's own
+  sign-in page (OAuth with PKCE, self-registered public clients, graphos
+  sessions as refresh tokens), or with single sign-on at the provider. See
   [agents.md](agents.md).
 - **Schema summary** (`GET /v1/{tenant}/schema/summary`): what a model needs
   before querying, measured from the data: labels with counts and properties

@@ -51,7 +51,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
-from graphos import __version__
+from graphos import __version__, oauth
 from graphos.api.schema_summary import TTL_S as SUMMARY_TTL_S
 from graphos.auth import LentTokens
 from graphos.config import Settings, allowed_hosts
@@ -514,15 +514,14 @@ def _error(message: str) -> mt.CallToolResult:
     return mt.CallToolResult(content=[mt.TextContent(type="text", text=message)], is_error=True)
 
 
-def _origin(request: Request) -> str:
-    """The scheme and host the caller reached graphos at: the proxy passes
-    ``Host`` on, and uvicorn takes the scheme from a trusted proxy's
-    ``X-Forwarded-Proto``; ``GRAPHOS_ALLOWED_HOSTS`` bounds the host."""
-    return f"{request.url.scheme}://{request.url.netloc}"
+def signs_clients_in(settings: Settings) -> bool:
+    """Whether graphos is the authorization server of MCP clients (graphos.oauth):
+    with sign-in on and no single sign-on, whose provider is it otherwise."""
+    return not settings.auth_disabled and not settings.oidc_issuer
 
 
 def _unauthorized(request: Request) -> Response:
-    metadata = f"{_origin(request)}/.well-known/oauth-protected-resource/mcp"
+    metadata = f"{oauth.origin(request)}/.well-known/oauth-protected-resource/mcp"
     return JSONResponse(
         {"detail": "a valid graphos token is needed"}, status_code=401,
         headers={"WWW-Authenticate": f'Bearer resource_metadata="{metadata}"'},
@@ -530,10 +529,13 @@ def _unauthorized(request: Request) -> Response:
 
 
 def protected_resource_metadata(request: Request, settings: Settings) -> dict[str, Any]:
-    """RFC 9728 metadata for ``/mcp``."""
-    servers = [settings.oidc_issuer] if settings.oidc_issuer else []
+    """RFC 9728 metadata for ``/mcp``: the identity provider, or graphos itself."""
+    if settings.oidc_issuer:
+        servers = [settings.oidc_issuer]
+    else:
+        servers = [oauth.origin(request)] if signs_clients_in(settings) else []
     return {
-        "resource": f"{_origin(request)}/mcp",
+        "resource": f"{oauth.origin(request)}/mcp",
         "authorization_servers": servers,
         "bearer_methods_supported": ["header"],
         "resource_name": "graphos",
@@ -541,8 +543,9 @@ def protected_resource_metadata(request: Request, settings: Settings) -> dict[st
 
 
 def install(app: Any, settings: Settings) -> McpEndpoint:
-    """Mount ``/mcp`` and its metadata on ``app``; the app's lifespan runs the
-    session manager (``graphos.app.mcp_running``)."""
+    """Mount ``/mcp``, its metadata and, where graphos signs MCP clients in, the
+    authorization server (graphos.oauth); the app's lifespan runs the session
+    manager (``graphos.app.mcp_running``)."""
     endpoint = McpEndpoint(app, settings)
 
     async def metadata(request: Request) -> Response:
@@ -552,5 +555,7 @@ def install(app: Any, settings: Settings) -> McpEndpoint:
     for path in ("/.well-known/oauth-protected-resource",
                  "/.well-known/oauth-protected-resource/mcp"):
         app.router.routes.append(Route(path, endpoint=metadata, methods=["GET"]))
+    if signs_clients_in(settings):
+        app.router.routes.extend(oauth.routes(app))
     app.state.mcp = endpoint
     return endpoint

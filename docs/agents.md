@@ -15,9 +15,10 @@ the ones that touch it:
 | `GRAPHOS_MCP` | `true` | `false` turns `/mcp` off |
 | `GRAPHOS_CYPHER` | `true` | `false` removes the `run_cypher` tool; the saved-query tools then answer 404 |
 | `GRAPHOS_ALLOWED_HOSTS` | — | Set it to the public host name: `/mcp` also refuses a browser `Origin` outside it |
+| `GRAPHOS_MCP_REDIRECT_URIS` | `[]` | Without single sign-on: the callback URLs of web MCP clients that may sign people in, as a JSON list (loopback callbacks always may) |
 
-Behind a proxy, route `/mcp` and `/.well-known/oauth-protected-resource*` to graphos-api as
-well as `/v1`, and pass the `Host` header on. Turn on the rate limiter
+Behind a proxy, route `/mcp`, `/oauth/` and `/.well-known/oauth-*` to graphos-api as well as
+`/v1`, and pass the `Host` header on. Turn on the rate limiter
 (`GRAPHOS_RATE_LIMIT_ENABLED=true`): agents call often. A tool returns at most 256 KiB; a longer
 result is cut and says so.
 
@@ -39,7 +40,25 @@ granted `read` on the tenants the agent may see; its secret comes from that call
 `POST /v1/users/{name}:reset-secret`. Tokens last `GRAPHOS_ACCESS_TOKEN_TTL_S` (15 minutes by
 default): a long-running program signs in again before it expires.
 
-**A person, with single sign-on**, lets the MCP client sign them in. A call without a valid token
+**A person, without single sign-on**, lets the MCP client sign them in through graphos: no
+token to paste. graphos is then the client's authorization server
+(`/.well-known/oauth-authorization-server`):
+
+1. The client calls `/mcp`, gets a 401 pointing at the metadata, and registers itself at
+   `/oauth/register`. It is registered as a public client (no secret; PKCE binds each code to
+   it). Its callback must be a loopback one (`http://localhost` or `127.0.0.1`, any port: desktop
+   and command-line clients) or listed in `GRAPHOS_MCP_REDIRECT_URIS`.
+2. It opens a browser at `/oauth/authorize`, which leads to graphos's sign-in page: the person
+   sees which client asks and where the answer goes, and signs in with their graphos name and
+   password (the same throttle and lock-out as `/v1/auth/login`; a password that must change is
+   changed in the web UI first).
+3. The client exchanges the code (once, within 5 minutes) at `/oauth/token` for a graphos access
+   token and a refresh token, a graphos session bound to that client, and renews by itself until
+   the session ends (`GRAPHOS_SESSION_IDLE_S`, `GRAPHOS_SESSION_MAX_S`) or is revoked
+   (`/oauth/revoke`).
+
+**A person, with single sign-on**, lets the MCP client sign them in at the provider instead;
+graphos then serves no `/oauth/` endpoint. A call without a valid token
 answers 401 with `WWW-Authenticate: Bearer resource_metadata="…"`; that metadata
 (`GET /.well-known/oauth-protected-resource/mcp`) names `GRAPHOS_OIDC_ISSUER` as the
 authorization server. The client signs the person in there, in a browser, and sends the
@@ -65,7 +84,8 @@ Any MCP client that speaks Streamable HTTP. With a service account's token, as a
 }
 ```
 
-With single sign-on, give the URL alone: the client finds the provider from the 401.
+For a person, give the URL alone: the client finds graphos's sign-in, or the provider, from the
+401.
 
 ## 4. Tools and resources
 

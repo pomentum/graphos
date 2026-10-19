@@ -110,7 +110,8 @@ property record (`node_properties`, `node_properties_complete`), background
 (`community_map`, `community_links`, `community_map_runs`, written by each
 Louvain recompute), the last written run of each analysis with its change-feed position
 (`analysis_runs`), identity (`users`, `grants`, `sessions`, `signing_keys`,
-`oidc_pending`), `user_preferences` and the console's `saved_queries`, so
+`oidc_pending`, and `oauth_clients` and `oauth_codes` for MCP clients' sign-in),
+`user_preferences` and the console's `saved_queries`, so
 an existing volume picks up new internal tables without re-initialisation.
 
 #### Layer 2 — tenant registration (per tenant, idempotent)
@@ -419,6 +420,7 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `GET /v1/me` | The caller: user, kind, `admin`, `must_change`, its tenants, its level on each, `create_tenants` patterns, its web UI preferences | signed in |
 | `PATCH /v1/me/preferences` | Change one's web UI preferences (`theme`, `last_tenant`) | signed in |
 | `GET /v1/{tenant}/schema/summary[?format=text]` | The schema as a model needs it: labels with counts and properties (declared type, rows, distinct values, the values when few), label pairs per edge type, search indexes, saved queries; cached per tenant | tenant |
+| `/oauth/authorize`, `/oauth/login`, `/oauth/token`, `/oauth/register`, `/oauth/revoke`, `/.well-known/oauth-authorization-server` | Without single sign-on, graphos signs people in for MCP clients: registration (public clients, loopback or listed callbacks), a sign-in page, single-use codes, graphos sessions as refresh tokens (`graphos.oauth`, ADR-0008) | none (the page takes a password) |
 | `/mcp` (MCP, on unless `GRAPHOS_MCP=false`) | Read tools for agents over Streamable HTTP, each running the REST route it wraps as the caller (an in-process token lent for the call), audited with the tool's name; the same tokens as the REST API ([agents.md](agents.md), ADR-0008) | per tool |
 | `GET /v1/{tenant}/schema` | Labels, label hierarchy, search indexes, rule-derived edge labels, declared edge endpoints and `strict_endpoints`, `display` and `property_schema` as declared (no DDL, rules or `meta`) | tenant |
 | `DELETE /v1/tenants/{name}/edge_endpoints` | Remove one declared pair | `maintain` |

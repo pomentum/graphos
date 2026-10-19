@@ -84,6 +84,10 @@ worse than what is written here.
   the sign-in throttle count per replica.
 - **Empty `GRAPHOS_OIDC_REDIRECT_URIS` accepts any http(s) redirect URI** from the UI; the
   identity provider's own list still applies.
+- **MCP clients register themselves without signing in** (RFC 7591), where graphos signs them in
+  (no single sign-on). A registration holds no secret and grants nothing: a person still signs
+  in on graphos's page, which names the client and where it sends the answer. Callbacks are
+  loopback ones or those in `GRAPHOS_MCP_REDIRECT_URIS`, and at most 1,000 clients are kept.
 - **Reads by direct SQL roles are not in graphos's audit log.** Use PostgreSQL's logging
   (`log_statement`, `pgaudit`) if they must be.
 - **Community detection (Louvain)** installs python-igraph from PyPI into the container at start

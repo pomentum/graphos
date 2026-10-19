@@ -208,6 +208,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | `GRAPHOS_AUTH_SIGNING_KEY_FILE` | — | A PEM EC P-256 key to sign tokens with (e.g. from a secret manager), instead of the one graphos generates and keeps in the database |
 | `GRAPHOS_MASTER_KEY_FILE` | — (compose: `master_key.txt` from `init-secrets`) | Master key that seals the signing keys and ID tokens graphos stores; without it they are stored in clear (a warning at start). Back it up apart from the database |
 | `GRAPHOS_MCP` | `true` | `false` turns off the MCP endpoint `/mcp` for agents (read tools, the same tokens as the API; [agents guide](docs/agents.md)) |
+| `GRAPHOS_MCP_REDIRECT_URIS` | `[]` | Without single sign-on: callback URLs of web MCP clients that may sign people in through graphos, as a JSON list; loopback callbacks always may |
 | `GRAPHOS_ALLOWED_HOSTS` | — (any) | Host names graphos answers to, comma-separated (`*.example.com` works), against DNS rebinding; `localhost` and `127.0.0.1` always. Add `graphos-api` when the bundled web UI proxies to it |
 | `GRAPHOS_OIDC_ISSUER` | — | Single sign-on: the OpenID Connect provider's issuer (exactly the `issuer` of its discovery document); unset, no SSO |
 | `GRAPHOS_OIDC_CLIENT_ID` | — | Single sign-on: graphos's public client (PKCE) at the provider |

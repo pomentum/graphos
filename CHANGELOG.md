@@ -22,10 +22,17 @@ under one version.
   route's; every call is audited with `mcp_tool`, reads included. The tool list carries no tenant
   data. Results over 256 KiB are cut and say so. It takes the tokens the REST API takes: a token
   from `POST /v1/auth/login`, single sign-on, or the identity provider's access token for
-  graphos's audience. A call without one answers 401 with `resource_metadata`, which names the
-  identity provider for clients that sign people in themselves
-  (`/.well-known/oauth-protected-resource[/mcp]`); a browser `Origin` must be an allowed host.
-  New dependency: `mcp` 2.3 (MIT).
+  graphos's audience. A call without one answers 401 with `resource_metadata`, which names who
+  signs people in for the client (`/.well-known/oauth-protected-resource[/mcp]`); a browser
+  `Origin` must be an allowed host. New dependency: `mcp` 2.3 (MIT).
+- **MCP clients sign people in without a pasted token.** Without single sign-on, graphos is
+  their OAuth authorization server (`/.well-known/oauth-authorization-server`, endpoints under
+  `/oauth/`): clients register themselves as public ones (PKCE, a loopback callback or one in
+  the new `GRAPHOS_MCP_REDIRECT_URIS`), a sign-in page names the client and takes the person's
+  graphos password, a single-use code is exchanged for a graphos access token and a refresh
+  token that is a graphos session bound to the client, and `/oauth/revoke` ends it. With single
+  sign-on the provider signs MCP clients in and none of this is served. Two new tables,
+  `graphos_meta.oauth_clients` and `graphos_meta.oauth_codes`.
 - **One saved query by name**: `GET /v1/{tenant}/cypher/saved/{name}` (text, description,
   parameters), with the access running it needs; 404 while the console is off or when there is
   none.

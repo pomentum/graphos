@@ -91,4 +91,4 @@ What has to be true for the decision to count as carried out (tests, docs).
 | [ADR-0005](ADR-0005-geo-view-and-external-calls.md) | A geographic view, and no third-party calls from the UI by default | Proposed (2026-10-16), to be built only on demand |
 | [ADR-0006](ADR-0006-console-on-by-default.md) | The Cypher console is on by default | Accepted (2026-10-19) |
 | [ADR-0007](ADR-0007-drop-postgresql-16.md) | PostgreSQL 16 / AGE 1.6 is no longer supported | Accepted (2026-10-19) |
-| [ADR-0008](ADR-0008-mcp-uses-the-api-tokens.md) | `/mcp` takes the tokens the REST API takes, and is on by default | Accepted (2026-10-19) |
+| [ADR-0008](ADR-0008-mcp-uses-the-api-tokens.md) | `/mcp` takes the tokens the REST API takes, signs its clients in, and is on by default | Accepted (2026-10-19) |

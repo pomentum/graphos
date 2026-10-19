@@ -391,6 +391,22 @@ CREATE TABLE IF NOT EXISTS graphos_meta.oidc_pending (
     return_to      text NOT NULL,
     expires_at     timestamptz NOT NULL
 );
+
+-- MCP clients that registered themselves (RFC 7591, ADR-0008, graphos.oauth).
+-- All public clients, bound by PKCE, so no client secret is kept.
+CREATE TABLE IF NOT EXISTS graphos_meta.oauth_clients (
+    client_id   text PRIMARY KEY,
+    info        jsonb NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+-- Their authorization codes: only the hash is kept, single use, 5 minutes.
+CREATE TABLE IF NOT EXISTS graphos_meta.oauth_codes (
+    code_hash   text PRIMARY KEY,
+    client_id   text NOT NULL,
+    user_name   text NOT NULL,
+    data        jsonb NOT NULL,
+    expires_at  timestamptz NOT NULL
+);
 CREATE INDEX IF NOT EXISTS sessions_user ON graphos_meta.sessions (user_name);
 
 -- Keys graphos signs its tokens with (ES256).  The newest unretired key
