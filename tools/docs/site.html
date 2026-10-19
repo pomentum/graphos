@@ -62,7 +62,7 @@
       <ul>
         <li><span class="k">The problem</span><span>Connected data turns up in most systems. Once several services need it, each one ends up holding database credentials, its own Cypher, and its own answers to bulk loading, indexing and isolation.</span></li>
         <li><span class="k">The approach</span><span>One service owns the graph. Consumers call a typed REST API; graphos alone talks to PostgreSQL + Apache AGE on a private network.</span></li>
-        <li><span class="k">What it is not</span><span>Not a query passthrough for applications (Cypher is offered to people, read-only and opt-in), not a new database engine, and not tied to any domain: graphos ships no labels of its own.</span></li>
+        <li><span class="k">What it is not</span><span>Not a query passthrough for applications (Cypher is offered read-only, under graphos's checks), not a new database engine, and not tied to any domain: graphos ships no labels of its own.</span></li>
         <li><span class="k">Licence</span><span>Apache 2.0, like the Apache AGE extension it is built on.</span></li>
       </ul>
     </section>
@@ -78,14 +78,14 @@
     <div><dt>Images</dt><dd><code>ghcr.io/pomentum/graphos-api</code> and <code>graphos-ui</code>, amd64 and arm64</dd></div>
     <div><dt>Licence</dt><dd>Apache-2.0</dd></div>
     <div><dt>Latest</dt><dd>{{ version }}</dd></div>
-    <div><dt>Source</dt><dd><a href="https://github.com/pomentum/graphos">github.com/pomentum/graphos</a></dd></div>
+    <div><dt>Agents</dt><dd>An MCP endpoint, <code>/mcp</code>: 22 read tools on the API's tokens and grants</dd></div>
   </dl>
 
   <h2 id="features"><span class="sec"><span class="num">02 · Features</span></span>Build, explore, run</h2>
 {{ features }}
 
   <h2 id="benchmarks"><span class="sec"><span class="num">03 · Benchmarks</span></span>Bulk writes 37–156× faster than per-row Cypher MERGE</h2>
-  <p class="lead-in">Every write goes through COPY-staged SQL upserts instead of Cypher, every label gets its indexes at registration, and the same graph reads faster on PostgreSQL 18 with AGE 1.8. Measured with the scripts in <code>scripts/</code>, by profiling queries and by timing requests against a running service: orders of magnitude, not guarantees.</p>
+  <p class="lead-in">Every write goes through COPY-staged SQL upserts instead of Cypher, every label gets its indexes at registration, and the same graph reads faster on PostgreSQL 18 with AGE 1.8, which graphos now requires. Measured with the scripts in <code>scripts/</code>, by profiling queries and by timing requests against a running service: orders of magnitude, not guarantees.</p>
   <div class="tbl">
     <table class="bench">
       <caption>Factor = before ÷ after; bars on a log scale. Writes: 13k nodes and 44k edges, 4 GB <code>shared_buffers</code>, one host. Lookups: a ~117k-row label. Reads: 251,246 nodes and 940,144 edges, the image's default settings, a laptop, 30 warm runs of 12 reads.</caption>
@@ -101,7 +101,7 @@
       </tbody>
     </table>
   </div>
-  <p class="note">The COPY figures come from <a href="https://github.com/pomentum/graphos/blob/main/scripts/bench_bulk_write.py"><code>scripts/bench_bulk_write.py</code></a>; the per-row <code>MERGE</code> baseline was measured with an earlier graphos that still had a Cypher write path and can no longer be rerun. The PostgreSQL 18 database was freshly restored and the 16 one carried about 3× dead space, which favours 18. Details: <a href="https://github.com/pomentum/graphos/blob/main/docs/apache-age.md#5-why-every-write-is-sql">why every write is SQL</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/concept.md#23-indexes-created-at-registration">indexes created at registration</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/apache-age.md#12-measured-on-postgresql-18--age-18">measured on PostgreSQL 18</a>.</p>
+  <p class="note">The COPY figures come from <a href="https://github.com/pomentum/graphos/blob/main/scripts/bench_bulk_write.py"><code>scripts/bench_bulk_write.py</code></a>; the per-row <code>MERGE</code> baseline was measured with an earlier graphos that still had a Cypher write path and can no longer be rerun. PostgreSQL 16 / AGE 1.6 was measured before graphos dropped it; a stack on it still moves to 18 by itself on <code>docker compose up</code>. The PostgreSQL 18 database was freshly restored and the 16 one carried about 3× dead space, which favours 18. Details: <a href="https://github.com/pomentum/graphos/blob/main/docs/apache-age.md#5-why-every-write-is-sql">why every write is SQL</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/concept.md#23-indexes-created-at-registration">indexes created at registration</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/apache-age.md#12-measured-on-postgresql-18--age-18">measured on PostgreSQL 18</a>.</p>
   <div class="stats">
     <div class="stat"><b>~1 s</b><span>a map of every label and the edges between them, on ten million edges (sampled)</span></div>
     <div class="stat"><b>12 min</b><span>a 9.5 GB database with five tenants moved from PostgreSQL 16 to 18 by <code>docker compose up</code></span></div>
