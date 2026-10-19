@@ -35,6 +35,7 @@ from graphos import (
     oidc,
     openapi,
     properties,
+    schema_rename,
     vault,
 )
 from graphos.api import (
@@ -127,6 +128,7 @@ JOB_KINDS: dict[str, JobKind] = {
     "compute_metrics": JobKind(run=_run_metrics, needs="maintain"),
     "resolve_edges": JobKind(run=_run_resolve),
     "check_properties": JobKind(run=_run_check, needs="maintain"),
+    "rename_property": JobKind(run=schema_rename.run_property_job, needs="owner"),
     "vacuum": JobKind(run=_run_vacuum, needs="admin"),
 }
 

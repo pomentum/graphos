@@ -1251,6 +1251,57 @@ async def set_node_metrics(
     return written
 
 
+async def rename_property_batch(  # noqa: PLR0913 -- one batch's inputs
+    pool: asyncpg.Pool,
+    *,
+    tenant: str,
+    table: str,
+    kind: str,
+    on: str,
+    old: str,
+    new: str,
+    batch: int = METRICS_BATCH,
+) -> int:
+    """Rename the property ``old`` to ``new`` on up to ``batch`` rows of one label
+    or edge-type table (``ONLY``: not the tables below it), in one transaction:
+    ``new`` takes ``old``'s value and ``old`` goes (ADR-0009 §3).  Each row gets
+    a new revision; one change record summarises the batch.  Rows are found by
+    their physical position, so no index on the property is needed.
+
+    Returns:
+        Rows rewritten (0 when none has ``old`` any more).
+    """
+    with _db_errors("property rename failed", query=f'UPDATE "{table}" rename', graph=tenant):
+        async with pool.acquire() as conn, conn.transaction():
+            await allow_long_statements(conn, 600.0)
+            done = await conn.fetchval(
+                f'WITH renamed AS (UPDATE ONLY "{tenant}"."{table}" t '
+                f"SET properties = (((t.properties::text)::jsonb - $1::text) "
+                f"|| jsonb_build_object($2::text, (t.properties::text)::jsonb -> $1::text))"
+                f"::text::agtype, {lookup.REV} = t.{lookup.REV} + 1 "
+                f"WHERE t.ctid = ANY(ARRAY("
+                f'SELECT ctid FROM ONLY "{tenant}"."{table}" '
+                f"WHERE (properties::text)::jsonb ? $1::text LIMIT $3)) "
+                f"AND (t.properties::text)::jsonb ? $1::text RETURNING 1) "
+                f"SELECT count(*) FROM renamed;",
+                old, new, batch,
+                timeout=600.0,
+            )
+            if done:
+                if kind == "node":
+                    await conn.execute(
+                        "INSERT INTO graphos_meta.node_properties (tenant, label, property) "
+                        "VALUES ($1, $2, $3) ON CONFLICT DO NOTHING;",
+                        tenant, table, new,
+                    )
+                await changes.record(
+                    conn, tenant=tenant, op="patch", kind="node" if kind == "node" else "edge",
+                    count=done, label=table,
+                    detail={"renamed_property": {"on": on, "from": old, "to": new}},
+                )
+    return int(done or 0)
+
+
 # Vertices per edge-community UPDATE (see :func:`set_edge_end_communities`).
 EDGE_COMMUNITY_CHUNK = 50_000
 

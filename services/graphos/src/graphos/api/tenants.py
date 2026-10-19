@@ -39,7 +39,7 @@ from typing import Annotated, Any, cast
 
 import asyncpg
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
 from graphos import (
     by_entry,
@@ -645,23 +645,32 @@ async def register(
     summary="Rename a vertex label, an edge type or a property",
     response_model=SchemaRenameResponse, response_model_by_alias=True,
     description=(
-        "`owner` on the tenant (it changes what every consumer of the tenant sees). A vertex "
-        "label or edge type is renamed in place, in one transaction: its rows, their ids and "
-        "the edges between them stay as they are, and everything graphos keeps that names "
-        "it (property definitions, display, declared pairs, indexes, resolve rules, label "
-        "hierarchy, deprecations) is renamed with it. Afterwards a write or a read naming "
-        "the old name answers 409 saying where it went, and registering it again is refused; "
-        "Cypher naming it returns nothing, so the answer lists the saved queries that name it "
-        "(not rewritten). One `schema` change record. With `dry_run=true`, what it would "
-        "change, writing nothing."
+        "`owner` on the tenant (it changes what every consumer of the tenant sees).\n\n"
+        "**A vertex label or edge type** is renamed in place, in one transaction: its rows, "
+        "their ids and the edges between them stay as they are, and everything graphos keeps "
+        "that names it (property definitions, display, declared pairs, indexes, resolve "
+        "rules, label hierarchy, deprecations) is renamed with it. Afterwards a write or a "
+        "read naming the old name answers 409 saying where it went, and registering it again "
+        "is refused; Cypher naming it returns nothing, so the answer lists the saved queries "
+        "that name it (not rewritten). One `schema` change record.\n\n"
+        "**A property** (`on`: its vertex label, with the labels below it, or edge type) is "
+        "renamed by a background job (202, `Location: /v1/jobs/{id}`, progress on the job): "
+        "rows are rewritten in batches (each row a new revision, one `patch` record per "
+        "batch); meanwhile writes naming the old name carry a warning, afterwards they are "
+        "refused. Its definitions, property and search indexes and styles follow. Refused "
+        "when rows have both names, or a generated column, a resolve rule or a search index "
+        "over other labels uses it. A failed or cancelled rename resumes when asked again.\n\n"
+        "With `dry_run=true`, what it would change, writing nothing."
     ),
     responses={
-        400: {"description": "Not a label or type of the tenant, the new name is taken or "
-                             "invalid, or the old and new names are the same."},
+        202: {"model": SchemaRenameResponse,
+              "description": "A property rename: queued as a job (`job_id`, `Location`)."},
+        400: {"description": "Not a label, type or property the tenant can rename this way: "
+                             "the new name is taken or invalid, the names are the same, or "
+                             "something still uses the property (see the description)."},
         404: {"description": "The tenant is not registered."},
-        409: {"description": "A job runs on the tenant, a reconcile holds the edge type, or "
-                             "its tables stay in use (5 s)."},
-        501: {"description": "A property rename (not built yet)."},
+        409: {"description": "A job runs on the tenant (a property rename: another one), a "
+                             "reconcile holds the edge type, or its tables stay in use (5 s)."},
     },
 )
 async def rename_schema_name(
@@ -672,18 +681,17 @@ async def rename_schema_name(
     dry_run: Annotated[
         bool, Query(description="Answer what the rename would change, writing nothing."),
     ] = False,
-) -> SchemaRenameResponse:
+) -> SchemaRenameResponse | JSONResponse:
     require_level(principal, name, Level.OWNER)
     spec = registered_tenants().get(name)
     if spec is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"tenant '{name}' is not registered",
         )
-    if body.kind == "property":
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="property renames: not yet",
-        )
     pool = request.app.state.pool
+    if body.kind == "property":
+        return await _rename_property(request, name, spec, body, dry_run=dry_run,
+                                      by=principal.consumer)
     try:
         if dry_run:
             done = await schema_rename.plan(pool, spec, body.kind, body.from_, body.to)
@@ -700,6 +708,41 @@ async def rename_schema_name(
         tenant=name, kind=body.kind, from_=body.from_, to=body.to, dry_run=dry_run,
         spec_parts=done.spec_parts, indexes=[list(pair) for pair in done.indexes],
         endpoints=done.endpoints, rows=done.rows, saved_queries=done.saved_queries,
+    )
+
+
+async def _rename_property(
+    request: Request, name: str, spec: TenantSpec, body: SchemaRenameRequest,
+    *, dry_run: bool, by: str | None,
+) -> SchemaRenameResponse | JSONResponse:
+    """A property rename: its plan, or its job queued (202)."""
+    on = cast("str", body.on)
+    pool = request.app.state.pool
+    try:
+        found = await schema_rename.plan_property(pool, spec, on, body.from_, body.to)
+        if dry_run:
+            return SchemaRenameResponse(
+                tenant=name, kind="property", from_=body.from_, to=body.to, on=on,
+                dry_run=True, spec_parts=found.spec_parts, rows=found.rows,
+                saved_queries=found.saved_queries,
+            )
+        job_id = await schema_rename.start_property(pool, name, on, body.from_, body.to, by=by)
+    except schema_rename.RenameError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except lifecycle.TenantBusyError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    runner = getattr(request.app.state, "job_runner", None)
+    if runner is not None:
+        runner.notify()
+    answer = SchemaRenameResponse(
+        tenant=name, kind="property", from_=body.from_, to=body.to, on=on,
+        spec_parts=found.spec_parts, rows=found.rows, saved_queries=found.saved_queries,
+        job_id=job_id,
+    )
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content=answer.model_dump(mode="json", by_alias=True),
+        headers={"Location": f"/v1/jobs/{job_id}", "Retry-After": "2"},
     )
 
 
