@@ -317,6 +317,36 @@ describe("the CSV import", { timeout: 20_000 }, () => {
     expect(screen.getByRole("button", { name: "Import" })).toBeEnabled();
   });
 
+  it("says the file can no longer be read when it went away after being chosen, not that graphos is unreachable", async () => {
+    let gone = false;
+    class LeavingFile extends File {
+      override slice(start?: number, end?: number, type?: string): Blob {
+        if (!gone) return super.slice(start, end, type);
+        return { arrayBuffer: () => Promise.reject(new DOMException("gone", "NotFoundError")) } as unknown as Blob;
+      }
+    }
+    reply = (xhr) => {
+      setTimeout(() => xhr.onerror?.(), 0);
+      return null;
+    };
+    render(ui(<CsvImportDialog onClose={() => undefined} />));
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+    fireEvent.change(input, { target: { files: [new LeavingFile(["id,Age\np1,3\n"], "people.csv")] } });
+    expect(
+      await screen.findByText("graphos couldn't check the file: Couldn't reach graphos", {}, READ),
+    ).toBeInTheDocument();
+
+    gone = true;
+    fireEvent.change(input, { target: { files: [new LeavingFile(["id,Age\np2,4\n"], "people.csv")] } });
+    expect(
+      await screen.findByText(
+        "graphos couldn't check the file: The file can no longer be read: it was moved, renamed or deleted after you chose it. Choose it again.",
+        {},
+        READ,
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("sends relationships to edges:csv with their type, labels and end columns", async () => {
     reply = (xhr) =>
       xhr.dryRun && xhr.path.endsWith("edges:csv")

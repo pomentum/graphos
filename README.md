@@ -23,7 +23,8 @@ The picture above is the map; each line below links to the section that covers i
 
 - **Tenants and schema:** each tenant is its own AGE graph with its own labels; no built-in labels or property names; optional property rules, `warn` or `strict` ([usage](docs/usage.md#3-tenant-registration)).
 - **Fast, idempotent writes:** batches, NDJSON bulk and snapshot import as COPY-staged upserts, 37–156× faster than per-row Cypher `MERGE` in our measurements ([usage](docs/usage.md#4-writing-data), [AGE notes](docs/apache-age.md)).
-- **Edit in place, safely:** patch or delete one node or edge; `If-Match` turns a concurrent edit into a `412` instead of a lost update ([usage](docs/usage.md#4-writing-data)).
+- **Load a CSV file:** send the file itself; graphos maps its columns to properties, merges rows that repeat an id, checks every row (a dry run writes nothing) and writes them as bulk loads do ([usage](docs/usage.md#csv-import)).
+- **Edit in place, safely:** patch or delete one node or edge, or delete up to 1,000 nodes in one transaction; `If-Match` turns a concurrent edit into a `412` instead of a lost update ([usage](docs/usage.md#4-writing-data)).
 - **Composable reads:** search (substring or ranked indexes), neighbors, multi-hop expand, shortest paths, scans and subgraphs ([usage](docs/usage.md#5-reads-that-compose)).
 - **Rule-derived edges:** declare a property-match rule once; `edges:resolve` writes the edges in SQL ([usage](docs/usage.md#9-rule-based-edges-resolve_rule)).
 - **Copy, back up and restore:** a tenant's schema and data as files, restored exactly or loaded into plain AGE ([usage](docs/usage.md#dataset-export-and-import), [without graphos](docs/without-graphos.md)).
@@ -34,7 +35,7 @@ The picture above is the map; each line below links to the section that covers i
 - **Graph analytics:** a map of every label and the edges between them (about a second on ten million edges), aggregates, top-K by degree ([usage](docs/usage.md#6-aggregates)).
 - **Graph algorithms:** Louvain communities (optional extra), PageRank, betweenness, components and degree, run beside the API and written onto the nodes ([what each finds](docs/algorithms.md)).
 - **Cypher console:** read-only Cypher on one tenant, write clauses refused, with a timeout, a row cap and saved queries ([usage](docs/usage.md#cypher-console)).
-- **Web UI (optional):** explore, inspect and edit, query, extend the schema, follow changes live and export what is on screen ([below](#web-ui)).
+- **Web UI (optional):** explore, inspect and edit, work on many nodes at once, import a CSV file, query, extend the schema, follow changes live and export what is on screen ([below](#web-ui)).
 
 **Run**
 
@@ -60,6 +61,14 @@ The picture above is the map; each line below links to the section that covers i
 <img src="docs/images/ui-explore-styles-dark.png" width="100%" alt="A query's result on the canvas, laid out in layers from left to right: a package, the packages it depends on and theirs, each drawn in its label's colour with its icon, with a legend of the labels and their counts.">
 
 *A query's result on the canvas, laid out in layers along its edges and drawn with the tenant's label styles.*
+
+<img src="docs/images/ui-explore-selection-dark.png" width="100%" alt="The Explore canvas of the demo tenant with 31 nodes picked by a loop drawn with Shift-drag, shown in the accent colour; a bar at the foot offers Expand, Hide, Export and Delete for them, and a minimap in the corner frames the part of the graph on screen.">
+
+*Many nodes at once: a loop drawn with Shift-drag (or Ctrl / ⌘ click) picks them; the bar expands, hides, exports or deletes them together. A minimap frames the part on screen.*
+
+<img src="docs/images/ui-csv-import-dark.png" width="100%" alt="The CSV import dialog: a semicolon-separated file of people mapped to the Person label, its columns as properties with their types, and graphos's check of every row before anything is written: one row refused for an empty id, a repeated id merged, a value that does not read as a number left out.">
+
+*Importing a CSV file: the columns mapped to a label's properties, and graphos's check of every row before anything is written.*
 
 ## Quickstart
 
@@ -142,7 +151,8 @@ curl -s -X POST http://127.0.0.1:8080/v1/acme/graph/metrics:compute \
 ```
 
 The full, live API contract is at `http://127.0.0.1:8080/docs` (Swagger UI), `/redoc` (ReDoc) and
-`/openapi.json`.
+`/openapi.json`: every route with the errors it can answer, the bodies it takes and a description of
+every field.
 
 **A tenant to explore:** `GRAPHOS_URL=http://127.0.0.1:8080 GRAPHOS_USER=graphos GRAPHOS_PASSWORD=<yours> python clients/python/examples/08_demo_ecosystem.py` loads the demo tenant (an invented software ecosystem, about 450 nodes) and runs the algorithms on it; then open the UI.
 
@@ -206,6 +216,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | `GRAPHOS_AUTH_DISABLED` | `false` | `true` makes every request an anonymous admin: local development only |
 | `GRAPHOS_STATEMENT_TIMEOUT_S` | `60` | Per-statement limit; exceeded → `504` problem+json |
 | `GRAPHOS_IMPORT_MAX_BYTES` | `17179869184` (16 GiB) | Most bytes `snapshot-import` reads from one body, after gzip decompression; beyond → `413` |
+| `GRAPHOS_CSV_MAX_BYTES` | `268435456` (256 MiB) | Most bytes `nodes:csv` / `edges:csv` read from one file (its rows are held to merge repeated ids); beyond → `413` |
 | `GRAPHOS_CYPHER` | `true` | `false` turns off the read-only Cypher console (`POST /v1/{tenant}/cypher`, the UI's Query page); see [usage](docs/usage.md#cypher-console) |
 | `GRAPHOS_CYPHER_LEVEL` | `read` | Level on a tenant needed to run console queries (`read`, `write`, `maintain`) |
 | `GRAPHOS_CYPHER_TIMEOUT_S`, `GRAPHOS_CYPHER_MAX_ROWS` | `30`, `5000` | Per console query: time before it is stopped (504), rows returned at most |

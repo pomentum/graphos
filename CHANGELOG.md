@@ -84,6 +84,12 @@ under one version.
   upgrading an existing installation, or graphos-api does not start (it names the missing file).
   Back up `master_key.txt` apart from the database.
 
+### Fixed
+
+- Web UI, CSV import: a file moved, renamed or deleted after it was chosen made the check or the
+  import say graphos could not be reached; it now says the file can no longer be read, and to
+  choose it again.
+
 ## 0.12.0 — 2026-10-16
 
 Team tools in the web UI and the server work behind them: select several nodes on the canvas,

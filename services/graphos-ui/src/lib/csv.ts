@@ -228,3 +228,21 @@ export function readFileText(file: Blob): Promise<string> {
     reader.readAsText(file, "utf-8");
   });
 }
+
+/**
+ * Whether a file the user chose can still be read. The browser reads it again
+ * on every upload, so one moved, renamed or deleted since makes the upload fail
+ * as if graphos could not be reached.
+ */
+export function stillReadable(file: Blob): Promise<boolean> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(true);
+    reader.onerror = () => resolve(false);
+    try {
+      reader.readAsArrayBuffer(file.slice(0, 1));
+    } catch {
+      resolve(false);
+    }
+  });
+}
