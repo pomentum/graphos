@@ -159,6 +159,10 @@ as the caller, so it answers exactly what the route does (§ references are to [
 answers the question, rather than write its own Cypher: a saved query holds the tenant's agreed
 definition (what counts as "critical", which edge means "depends on").
 
+**Node ids.** Tools take a node's `id` property (`properties.id` in results). Some results also
+carry graphos's internal number as `id` beside `label`; no tool takes it, and the instructions
+and every node-id argument say so.
+
 **Several calls at once.** Agents send calls together. A caller's Cypher queries
 (`run_cypher`, `run_saved_query`) still run one at a time (`GRAPHOS_CYPHER_PER_USER`), but the
 next one waits its turn, up to `GRAPHOS_CYPHER_WAIT_S` (10 s), instead of answering 429 at once.
