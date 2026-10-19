@@ -9,7 +9,7 @@ again is refused the same way.
 
 ``deprecated`` (per vertex label and edge type, merged by entry as
 ``display`` is) marks names on their way out; the property checks turn it
-into warnings, refused in ``strict`` mode (``graphos.properties``).
+into warnings, in every mode (``graphos.properties``).
 """
 
 from __future__ import annotations

@@ -147,8 +147,9 @@ TOOLS: tuple[ToolSpec, ...] = (
         "get_schema",
         "A tenant's schema as measured, as compact text: labels with node counts and their "
         "properties (declared type, rows, distinct values, and the values themselves when few), "
-        "edge types between label pairs with counts, search indexes and saved queries. Call it "
-        "first. `format: json` answers the same as structured JSON, several times longer.",
+        "edge types between label pairs with counts, search indexes, saved queries, deprecated "
+        "names with what replaces them and the latest renames. Call it first. `format: json` "
+        "answers the same as structured JSON, several times longer.",
         _schema(["tenant"], tenant=_TENANT,
                 format={"type": "string", "enum": ["text", "json"],
                         "description": "text (default) or json."}),

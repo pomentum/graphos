@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ValueCount(BaseModel):
@@ -81,6 +81,29 @@ class SummarySavedQuery(BaseModel):
     )
 
 
+class SummaryDeprecated(BaseModel):
+    """A vertex label, edge type or property on its way out (ADR-0009)."""
+
+    kind: Literal["label", "edge_type", "property"] = Field(..., description="What it is.")
+    name: str = Field(..., description="The deprecated name.")
+    on: str | None = Field(None, description="For a property: its label or edge type.")
+    replaced_by: str | None = Field(None, description="What to use instead.")
+    note: str | None = Field(None, description="Why, or until when.")
+
+
+class SummaryRename(BaseModel):
+    """A rename of the tenant's schema: the old name is gone."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    kind: Literal["label", "edge_type", "property"] = Field(..., description="What was renamed.")
+    from_: str = Field(..., alias="from", description="The old name.")
+    to: str = Field(..., description="The new name.")
+    on: str | None = Field(None, description="For a property: its label or edge type.")
+    at: str | None = Field(None, description="When (ISO 8601).")
+    status: str = Field("done", description="`done`, `running` or `failed`.")
+
+
 class SchemaSummaryResponse(BaseModel):
     """The tenant's schema as a model needs it before querying: compact and measured."""
 
@@ -98,6 +121,14 @@ class SchemaSummaryResponse(BaseModel):
     computed: list[str] = Field(
         default_factory=list,
         description="Properties graphos computes and writes itself (read-only to consumers).",
+    )
+    deprecated: list[SummaryDeprecated] = Field(
+        default_factory=list,
+        description="Names on their way out, with what replaces them: avoid them in new writes.",
+    )
+    renames: list[SummaryRename] = Field(
+        default_factory=list,
+        description="The latest renames (at most 20), the newest first: the old names are gone.",
     )
     estimated: bool = Field(..., description="Some counts come from samples.")
     text: str = Field(..., description="The same summary as compact text, for a prompt.")

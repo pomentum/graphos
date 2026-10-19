@@ -12,7 +12,10 @@ The summary gives it, compactly, what the data really holds:
   count (B4);
 - the label pairs per edge type with their edge counts;
 - the search indexes, the saved queries with their typed parameters, and the
-  names graphos computes itself, once.
+  names graphos computes itself, once;
+- the deprecated names with what replaces them, and the latest renames
+  (ADR-0009), so a model neither writes a name on its way out nor one that
+  is gone.
 
 Caps keep it short (40 labels, 25 properties a label, 60 label pairs, 20
 values a property, values cut at 80 characters); each list says how many
@@ -40,10 +43,12 @@ from graphos.auth import ReadPrincipal, Tenant
 from graphos.bootstrap import TenantSpec, registered_tenants
 from graphos.contracts.schema_summary import (
     SchemaSummaryResponse,
+    SummaryDeprecated,
     SummaryFormat,
     SummaryLabel,
     SummaryLink,
     SummaryProperty,
+    SummaryRename,
     SummarySavedQuery,
     SummarySearchIndex,
     ValueCount,
@@ -56,6 +61,7 @@ MAX_PROPERTIES = 25
 MAX_LINKS = 60
 MAX_VALUES = 20
 MAX_VALUE_CHARS = 80
+MAX_RENAMES = 20
 SAMPLE_ROWS = 50_000
 # How long a tenant's summary is kept; a schema change drops it at once.
 TTL_S = 300
@@ -77,7 +83,8 @@ async def _fingerprint(conn: asyncpg.Connection, tenant: str, spec: TenantSpec) 
     )
     return json.dumps(
         [sorted(spec.vertex_labels), sorted(spec.edge_labels), sorted(spec.label_hierarchy),
-         spec.property_schema, spec.search_indexes, row["graph"], row["saved"]],
+         spec.property_schema, spec.search_indexes, spec.deprecated, spec.renames,
+         row["graph"], row["saved"]],
         sort_keys=True, default=str,
     )
 
@@ -126,6 +133,39 @@ def _cut(text: str) -> str:
     return text if len(text) <= MAX_VALUE_CHARS else text[: MAX_VALUE_CHARS - 1] + "…"
 
 
+def _deprecated(spec: TenantSpec) -> list[SummaryDeprecated]:
+    out: list[SummaryDeprecated] = []
+    for part, kind in (("vertex", "label"), ("edge", "edge_type")):
+        for name, entry in sorted((spec.deprecated.get(part) or {}).items()):
+            if entry.get("deprecated"):
+                out.append(SummaryDeprecated(
+                    kind=kind, name=name, replaced_by=entry.get("replaced_by"),
+                    note=entry.get("note"),
+                ))
+            props = cast("dict[str, Any]", entry.get("properties") or {})
+            for prop, about in sorted(props.items()):
+                out.append(SummaryDeprecated(
+                    kind="property", name=prop, on=name, replaced_by=about.get("replaced_by"),
+                    note=about.get("note"),
+                ))
+    return out
+
+
+def _renames(spec: TenantSpec) -> list[SummaryRename]:
+    return [
+        SummaryRename(
+            kind=r["kind"], from_=r["from"], to=r["to"], on=r.get("on"),
+            at=str(r["at"]) if r.get("at") else None, status=str(r.get("status") or "done"),
+        )
+        for r in list(reversed(spec.renames))[:MAX_RENAMES]
+    ]
+
+
+def _named(kind: str, name: str, on: str | None) -> str:
+    return f"property {on}.{name}" if kind == "property" else (
+        f"label {name}" if kind == "label" else f"edge type {name}")
+
+
 def _render(s: SchemaSummaryResponse) -> str:
     """The compact text form, for a prompt."""
     lines = [
@@ -164,6 +204,16 @@ def _render(s: SchemaSummaryResponse) -> str:
             + (f" - {q.description}" if q.description else "") for q in s.saved_queries))
     if s.computed:
         lines.append("Computed by graphos (read-only): " + ", ".join(s.computed))
+    if s.deprecated:
+        lines.append("Deprecated (still readable; do not use in new writes): " + "; ".join(
+            _named(d.kind, d.name, d.on)
+            + (f", use {d.replaced_by}" if d.replaced_by else "")
+            + (f" ({d.note})" if d.note else "") for d in s.deprecated))
+    if s.renames:
+        lines.append("Renamed (the old names are gone): " + "; ".join(
+            f"{_named(r.kind, r.from_, r.on)} -> {r.to}"
+            + (f" ({r.at[:10]})" if r.at and r.status == "done" else "")
+            + (f" ({r.status})" if r.status != "done" else "") for r in s.renames))
     lines.append(
         "Use label, type, property names and values exactly as written here (strings are "
         "quoted, other values are JSON; a value ending with … was cut); look a property's "
@@ -263,7 +313,8 @@ async def _build(
             for x in the_map.links[:MAX_LINKS]
         ],
         links_total=len(the_map.links), search_indexes=indexes, saved_queries=saved_queries,
-        computed=sorted(computed), estimated=estimated, text="", cached=False, elapsed_ms=0,
+        computed=sorted(computed), deprecated=_deprecated(spec), renames=_renames(spec),
+        estimated=estimated, text="", cached=False, elapsed_ms=0,
     )
     return summary.model_copy(update={
         "text": _render(summary), "elapsed_ms": int((time.perf_counter() - started) * 1000),
@@ -278,8 +329,9 @@ async def _build(
         "Labels with their node counts, parent and properties (the declared type, `required` "
         "and enum, the rows that hold each property, its distinct values and, when there are "
         "at most 20, every value with its count), the label pairs per edge type with their "
-        "counts, the search indexes, the saved queries with their parameters, and the names "
-        "graphos computes itself. Compact on purpose (about 1,000 tokens on a mid-sized "
+        "counts, the search indexes, the saved queries with their parameters, the names "
+        "graphos computes itself, the deprecated names with what replaces them and the "
+        "latest renames. Compact on purpose (about 1,000 tokens on a mid-sized "
         "tenant): capped lists say how many there were. `text` is the same as compact text; "
         "`format=text` answers it alone (`text/plain`). Kept per tenant for "
         "five minutes and dropped when the schema changes."
