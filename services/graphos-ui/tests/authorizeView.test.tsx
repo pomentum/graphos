@@ -113,6 +113,46 @@ describe("AuthorizeView", () => {
     expect(await screen.findByText(/This sign-in link is not valid/)).toBeInTheDocument();
   });
 
+  it("says graphos does not sign MCP clients in when it answers 404", async () => {
+    window.history.replaceState(null, "", `/authorize${SEARCH}`);
+    const { fetchImpl } = fakeGraphos();
+    const off = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes("/v1/auth/mcp/request")
+        ? Response.json({ detail: "graphos does not sign MCP clients in on this server" }, { status: 404 })
+        : fetchImpl(input, init),
+    ) as unknown as typeof fetch;
+    renderSignedIn(off, vi.fn());
+    expect(await screen.findByText(/does not sign MCP clients in on this server/)).toBeInTheDocument();
+    expect(screen.queryByText(/Couldn't reach graphos/)).not.toBeInTheDocument();
+  });
+
+  it("with single sign-on, sends the person back to their MCP client instead of signing in", async () => {
+    window.history.replaceState(null, "", `/authorize${SEARCH}`);
+    const { fetchImpl } = fakeGraphos();
+    const sso = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).endsWith("/v1/auth/config")
+        ? Response.json({
+            password: true,
+            oidc: {
+              issuer: "https://idp.example.test",
+              client_id: "graphos",
+              scopes: "openid",
+              display_name: "Acme SSO",
+            },
+          })
+        : fetchImpl(input, init),
+    ) as unknown as typeof fetch;
+    render(
+      <MantineProvider theme={theme}>
+        <SessionProvider fetchImpl={sso}>
+          <AuthorizeView navigate={vi.fn()} />
+        </SessionProvider>
+      </MantineProvider>,
+    );
+    expect(await screen.findByText(/signs you in at Acme SSO, not here/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sign in" })).not.toBeInTheDocument();
+  });
+
   it("asks for a new password first when it must change", async () => {
     window.history.replaceState(null, "", `/authorize${SEARCH}`);
     const { fetchImpl } = fakeGraphos();
