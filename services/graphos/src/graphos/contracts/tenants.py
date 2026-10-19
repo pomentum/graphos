@@ -649,6 +649,70 @@ class SchemaRename(BaseModel):
     job_id: str | None = Field(None, description="The job of a property rename.")
 
 
+class SchemaRenameRequest(BaseModel):
+    """Body for `POST /v1/tenants/{name}/schema:rename`."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    kind: Literal["label", "edge_type", "property"] = Field(
+        ..., description="What to rename: a vertex label, an edge type, or a property.",
+    )
+    from_: str = Field(..., alias="from", description="The current name.")
+    to: str = Field(..., description="The new name.")
+    on: str | None = Field(
+        None,
+        description=(
+            "For a property: the vertex label or edge type it is renamed on (and the labels "
+            "below a vertex label in the hierarchy)."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _on(self) -> SchemaRenameRequest:
+        if (self.kind == "property") != (self.on is not None):
+            raise ValueError("`on` names the label or type of a property rename, and only then")
+        if self.kind == "property":
+            _property_name(self.from_)
+            _property_name(self.to)
+        return self
+
+
+class SchemaRenameResponse(BaseModel):
+    """What a rename changed, or with `dry_run` would change."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    tenant: str = Field(..., description="The tenant.")
+    kind: Literal["label", "edge_type", "property"] = Field(..., description="What was renamed.")
+    from_: str = Field(..., alias="from", description="The old name.")
+    to: str = Field(..., description="The new name.")
+    on: str | None = Field(None, description="For a property: the label or type it is on.")
+    dry_run: bool = Field(False, description="Nothing was changed: this is what would be.")
+    spec_parts: list[str] = Field(
+        default_factory=list,
+        description="The parts of the schema that name it (all renamed with it).",
+    )
+    indexes: list[list[str]] = Field(
+        default_factory=list, description="graphos's indexes renamed with it, `[old, new]`.",
+    )
+    endpoints: int = Field(0, description="Declared label pairs renamed with it.")
+    rows: int | None = Field(
+        None,
+        description=(
+            "Rows of the label or type (not rewritten by a label or type rename); for a "
+            "property, the rows to rewrite."
+        ),
+    )
+    saved_queries: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Saved queries whose Cypher names the old label or type: not rewritten. Cypher "
+            "naming an unknown label returns nothing, so update them."
+        ),
+    )
+    job_id: str | None = Field(None, description="A property rename's job.")
+
+
 class TenantSpecBody(BaseModel):
     """Body for POST /v1/tenants.
 

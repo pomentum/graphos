@@ -573,6 +573,8 @@ async def upsert_nodes(
     grouped = _group_by_label(body.nodes)
     unknown = sorted(set(grouped) - allowed_labels)
     if unknown:
+        for label in unknown:
+            renames.refuse_renamed(spec, label)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
@@ -891,6 +893,8 @@ async def upsert_edges(
         if et not in allowed_e:
             unknown_e.add(et)
     if unknown_v or unknown_e:
+        for name in (*sorted(unknown_e), *sorted(unknown_v)):
+            renames.refuse_renamed(spec, name)
         msg = []
         if unknown_v:
             msg.append(f"vertex labels {sorted(unknown_v)} not registered")

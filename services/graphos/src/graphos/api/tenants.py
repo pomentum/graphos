@@ -49,6 +49,7 @@ from graphos import (
     schema_breaking,
     schema_changes,
     schema_document,
+    schema_rename,
     sync,
 )
 from graphos.api.cache import LRU
@@ -84,6 +85,8 @@ from graphos.contracts.tenants import (
     RegisterDryRunResponse,
     RegisterResponse,
     SchemaRename,
+    SchemaRenameRequest,
+    SchemaRenameResponse,
     TenantInfo,
     TenantList,
     TenantSpecBody,
@@ -634,6 +637,69 @@ async def register(
         strict_endpoints=bool(spec.strict_endpoints),
         n_property_definitions=definitions_count(spec.property_schema),
         property_mode=spec.property_schema.get("mode", "off"),
+    )
+
+
+@router.post(
+    "/{name}/schema:rename",
+    summary="Rename a vertex label, an edge type or a property",
+    response_model=SchemaRenameResponse, response_model_by_alias=True,
+    description=(
+        "`owner` on the tenant (it changes what every consumer of the tenant sees). A vertex "
+        "label or edge type is renamed in place, in one transaction: its rows, their ids and "
+        "the edges between them stay as they are, and everything graphos keeps that names "
+        "it (property definitions, display, declared pairs, indexes, resolve rules, label "
+        "hierarchy, deprecations) is renamed with it. Afterwards a write or a read naming "
+        "the old name answers 409 saying where it went, and registering it again is refused; "
+        "Cypher naming it returns nothing, so the answer lists the saved queries that name it "
+        "(not rewritten). One `schema` change record. With `dry_run=true`, what it would "
+        "change, writing nothing."
+    ),
+    responses={
+        400: {"description": "Not a label or type of the tenant, the new name is taken or "
+                             "invalid, or the old and new names are the same."},
+        404: {"description": "The tenant is not registered."},
+        409: {"description": "A job runs on the tenant, a reconcile holds the edge type, or "
+                             "its tables stay in use (5 s)."},
+        501: {"description": "A property rename (not built yet)."},
+    },
+)
+async def rename_schema_name(
+    name: TenantName,
+    body: SchemaRenameRequest,
+    request: Request,
+    principal: OwnerPrincipal,
+    dry_run: Annotated[
+        bool, Query(description="Answer what the rename would change, writing nothing."),
+    ] = False,
+) -> SchemaRenameResponse:
+    require_level(principal, name, Level.OWNER)
+    spec = registered_tenants().get(name)
+    if spec is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"tenant '{name}' is not registered",
+        )
+    if body.kind == "property":
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="property renames: not yet",
+        )
+    pool = request.app.state.pool
+    try:
+        if dry_run:
+            done = await schema_rename.plan(pool, spec, body.kind, body.from_, body.to)
+        else:
+            done = await schema_rename.rename(
+                pool, spec, body.kind, body.from_, body.to, by=principal.consumer,
+                vertex_graphid_indexes=request.app.state.settings.vertex_graphid_indexes,
+            )
+    except schema_rename.RenameError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except lifecycle.TenantBusyError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return SchemaRenameResponse(
+        tenant=name, kind=body.kind, from_=body.from_, to=body.to, dry_run=dry_run,
+        spec_parts=done.spec_parts, indexes=[list(pair) for pair in done.indexes],
+        endpoints=done.endpoints, rows=done.rows, saved_queries=done.saved_queries,
     )
 
 

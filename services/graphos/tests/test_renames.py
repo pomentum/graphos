@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 import pytest
 from fastapi import HTTPException
 
-from graphos import properties, renames, schema_changes, schema_document
+from graphos import properties, renames, schema_changes, schema_document, schema_rename
 from graphos.bootstrap import TenantSpec, spec_from_json, spec_to_json
 
 NOW = datetime(2026, 10, 19, 9, 30, tzinfo=UTC)
@@ -154,3 +154,51 @@ def test_a_registration_that_deprecates_is_recorded_in_the_feed() -> None:
     detail = schema_changes.diff(before, SPEC)
     assert detail is not None
     assert detail["added"]["deprecated"] == ["edge:DEPENDS", "vertex:Person", "vertex:Servce"]
+
+
+# ── A label or type renamed in the spec (graphos.schema_rename) ────────────
+
+
+def test_a_renamed_label_is_renamed_everywhere_the_spec_names_it() -> None:
+    spec = replace(
+        SPEC,
+        property_indexes=({"label": "Service", "properties": ["kind"]},),
+        search_indexes={"s": {"labels": ["Service"], "properties": ["name"]}},
+        resolve_rules=(("DEPENDS_ON", {"require_dst_label": ["Service", "Person"]}),),
+        edge_endpoints=(("DEPENDS_ON", "Service", "Service"),),
+        display={"vertex": {"Service": {"color": "#112233"}}},
+    )
+    entry = {"kind": "label", "from": "Service", "to": "System"}
+    after = schema_rename.renamed_spec(spec, "label", "Service", "System", entry)
+    assert "System" in after.vertex_labels and "Service" not in after.vertex_labels
+    assert after.property_indexes[0]["label"] == "System"
+    assert after.search_indexes["s"]["labels"] == ["System"]
+    assert after.resolve_rules[0][1]["require_dst_label"] == ["System", "Person"]
+    assert after.edge_endpoints == (("DEPENDS_ON", "System", "System"),)
+    assert "System" in after.display["vertex"]
+    assert after.deprecated["vertex"]["Servce"]["replaced_by"] == "System"
+    assert after.renames[-1] == entry
+    assert set(schema_rename.spec_parts_named(spec, "label", "Service")) == {
+        "property_indexes", "search_indexes", "resolve_rules", "display",
+    }
+
+
+def test_a_renamed_edge_type_takes_its_rules_and_pairs() -> None:
+    spec = replace(SPEC, resolve_rules=(("DEPENDS", {"src_has_array": "x"}),),
+                   edge_endpoints=(("DEPENDS", "Service", "Service"),))
+    after = schema_rename.renamed_spec(spec, "edge_type", "DEPENDS", "USES", {})
+    assert after.edge_labels == ("KNOWS", "USES", "DEPENDS_ON")
+    assert after.resolve_rules[0][0] == "USES"
+    assert after.edge_endpoints == (("USES", "Service", "Service"),)
+    assert "USES" in after.deprecated["edge"]
+
+
+@pytest.mark.parametrize(("query", "named"), [
+    ("MATCH (d:Docu) RETURN d", True),
+    ("MATCH (:Docu)-[:WROTE]->(x) RETURN x", True),
+    ("MATCH (d: `Docu`) RETURN d", True),
+    ("MATCH (d:Document) RETURN d", False),
+    ("MATCH (d:Doc) RETURN d.Docu", False),
+])
+def test_a_saved_query_names_a_label(query: str, named: bool) -> None:  # noqa: FBT001
+    assert schema_rename.mentions(query, "Docu") is named
