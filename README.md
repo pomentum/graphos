@@ -8,8 +8,6 @@ A multi-tenant property-graph service: **PostgreSQL + [Apache AGE](https://age.a
 
 Your services send JSON over HTTP. graphos owns the database, writes the SQL against AGE's tables, enforces tenant isolation, and gives you bulk loading, traversal, aggregation, graph algorithms (communities, PageRank, betweenness, components) and a web UI. Consumers never get a connection string; raw Cypher runs only in a read-only console that graphos controls.
 
-<img src="docs/images/graphos-infographic.svg" width="100%" alt="graphos capabilities: a typed HTTP API over PostgreSQL 18 + Apache AGE 1.8. Build: tenants and schema, bulk writes and data transfer, composable reads, rule-derived edges. Explore: graph map and aggregates, Louvain and graph metrics, a read-only Cypher console, the web UI. Run: users, SSO and grants, change feed, operations, the Python client.">
-
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture-dark.svg">
   <img src="docs/images/architecture-light.svg" width="100%" alt="Consumers call graphos-api over the graphos-net network with a bearer token. graphos-api checks tenant scope and read/write access, validates typed contracts, builds SQL internally, times out bad queries and emits metrics and audit logs. Only graphos-api reaches PostgreSQL 18 with Apache AGE on an internal network; each tenant is its own AGE graph.">
@@ -255,7 +253,7 @@ is deprecated; a stack on it moves to 18 by itself on `docker compose up` ([upgr
 
 ## Development
 
-The rules for working on graphos, for people and coding agents, are in [docs/development.md](docs/development.md), with a `DEVELOPMENT.md` in each package; [AGENTS.md](AGENTS.md) sums up the hard rules.
+The rules for working on graphos, for people and coding agents, are in [docs/development.md](docs/development.md), with a `DEVELOPMENT.md` in each package; [AGENTS.md](AGENTS.md) sums up the hard rules. To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md); to report a vulnerability, [SECURITY.md](SECURITY.md).
 
 ```bash
 pip install -e "services/graphos[dev,louvain]" -e "clients/python[dev]"

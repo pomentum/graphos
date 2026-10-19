@@ -68,6 +68,10 @@ under one version.
   requests for any other `Host` with 400, against DNS rebinding; `localhost` and `127.0.0.1` are
   always allowed. Empty (the default): off.
 
+- **Docs:** `SECURITY.md` (private vulnerability reporting, supported versions, what a deployment
+  must do itself, known security limits), `CONTRIBUTING.md` (where the rules are, how to open a
+  pull request), issue templates for bugs and feature requests, and a pull request template.
+
 ### Changed
 
 - **The Cypher console is on by default** ([ADR-0006](docs/adrs/ADR-0006-console-on-by-default.md)):
