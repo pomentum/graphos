@@ -31,8 +31,8 @@ describe("reading a schema file", () => {
     expect(readSchemaFile('{"_export": {"format": "other"}, "name": "t"}')).toEqual({
       problem: { kind: "notSchema" },
     });
-    expect(readSchemaFile('{"_export": {"version": 3}, "name": "t"}')).toEqual({
-      problem: { kind: "newerVersion", version: 3 },
+    expect(readSchemaFile('{"_export": {"version": 4}, "name": "t"}')).toEqual({
+      problem: { kind: "newerVersion", version: 4 },
     });
   });
 
@@ -155,8 +155,8 @@ describe("the import dialog", () => {
     const { choose } = open();
     choose("{oops");
     expect(await screen.findByText("Not a JSON file")).toBeInTheDocument();
-    choose('{"_export": {"format": "graphos.schema", "version": 3}, "name": "acme"}');
-    expect(await screen.findByText(/newer graphos \(format version 3\)/)).toBeInTheDocument();
+    choose('{"_export": {"format": "graphos.schema", "version": 4}, "name": "acme"}');
+    expect(await screen.findByText(/newer graphos \(format version 4\)/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
   });
 });

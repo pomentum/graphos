@@ -170,6 +170,79 @@ export interface TenantSchema {
   display?: DisplaySpec;
   /** The properties labels and types carry, as declared (absent from older servers). */
   property_schema?: PropertySchema;
+  /** What is on its way out, per label and type (absent from older servers). */
+  deprecated?: DeprecatedSpec;
+  /** Every rename, oldest first: the old names are gone (absent from older servers). */
+  renames?: SchemaRename[];
+}
+
+/** A property on its way out: writes naming it carry a warning. */
+export interface DeprecatedProperty {
+  replaced_by?: string | null;
+  note?: string | null;
+}
+
+/** What is deprecated on one label or type: itself, some of its properties, or both. */
+export interface DeprecatedEntry {
+  deprecated?: boolean;
+  replaced_by?: string | null;
+  note?: string | null;
+  properties?: Record<string, DeprecatedProperty>;
+}
+
+export interface DeprecatedSpec {
+  vertex?: Record<string, DeprecatedEntry>;
+  edge?: Record<string, DeprecatedEntry>;
+}
+
+export type RenameKind = "label" | "edge_type" | "property";
+
+/** One rename of the schema; a property rename is `running` until its job has rewritten every row. */
+export interface SchemaRename {
+  kind: RenameKind;
+  from: string;
+  to: string;
+  /** A property's label or type. */
+  on?: string | null;
+  at: string;
+  by?: string | null;
+  status: "done" | "running" | "failed";
+  job_id?: string | null;
+}
+
+/** `POST /v1/tenants/{name}/schema:rename`. */
+export interface SchemaRenameRequest {
+  kind: RenameKind;
+  from: string;
+  to: string;
+  on?: string;
+}
+
+/** What a rename changed, or with `dry_run` would change; a property rename's job. */
+export interface SchemaRenameResult {
+  tenant: string;
+  kind: RenameKind;
+  from: string;
+  to: string;
+  on?: string | null;
+  dry_run: boolean;
+  /** The parts of the schema that name it (renamed with it). */
+  spec_parts: string[];
+  /** graphos's indexes renamed with it, `[old, new]`. */
+  indexes: string[][];
+  endpoints: number;
+  rows: number | null;
+  /** Saved queries naming the old name: not rewritten. */
+  saved_queries: string[];
+  job_id?: string | null;
+}
+
+/** `DELETE /v1/tenants/{name}/labels/{label}`: a deprecated, empty label or type dropped. */
+export interface SchemaDropResult {
+  tenant: string;
+  kind: "label" | "edge_type";
+  name: string;
+  saved_queries: string[];
 }
 
 export type PropertyType = "string" | "number" | "integer" | "boolean" | "array" | "object" | "any";
@@ -537,6 +610,8 @@ export interface Job {
   consumer: string | null;
   cancel_requested: boolean;
   sync: boolean;
+  /** How much is done, for a job that reports it (a property rename). */
+  progress?: { done: number; total: number | null } | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
@@ -700,6 +775,11 @@ export interface SchemaAddition {
     mode?: PropertyMode;
     vertex?: Record<string, PropertyEntry | null>;
     edge?: Record<string, PropertyEntry | null>;
+  };
+  /** Deprecations to declare (an entry replaces the stored one; `null` removes it). */
+  deprecated?: {
+    vertex?: Record<string, DeprecatedEntry | null>;
+    edge?: Record<string, DeprecatedEntry | null>;
   };
 }
 

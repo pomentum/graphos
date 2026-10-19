@@ -2,7 +2,7 @@ import type { Job, Level } from "../api/types";
 import { t } from "../i18n";
 import { atLeast } from "../session/levels";
 
-const KINDS = ["recompute_communities", "compute_metrics", "resolve_edges", "vacuum"] as const;
+const KINDS = ["recompute_communities", "compute_metrics", "resolve_edges", "vacuum", "rename_property"] as const;
 type KnownKind = (typeof KINDS)[number];
 
 /** The level on the tenant that starting a kind needs, and so cancelling it; vacuum is an admin's. */
@@ -11,6 +11,7 @@ const NEEDS: Record<KnownKind, Level | "admin"> = {
   compute_metrics: "maintain",
   resolve_edges: "write",
   vacuum: "admin",
+  rename_property: "owner",
 };
 
 /** A job that has not ended yet. */

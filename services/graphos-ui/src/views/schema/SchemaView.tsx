@@ -33,6 +33,7 @@ import { useSessionContext, useTenantSession } from "../../session/SessionProvid
 import { browseParams } from "../browse/browseState";
 import { AddToSchemaDialog, type AdditionKind } from "./AddToSchemaDialog";
 import { ImportSchemaDialog } from "./ImportSchemaDialog";
+import { DeprecatedBadge, DeprecationLines, NameActions, RenamesSection } from "./NameChanges";
 import { PropertyChecks } from "./properties/PropertyChecks";
 import { AddPropertyDialog } from "./properties/AddPropertyDialog";
 import { EdgeProperties, SchemaProperties } from "./properties/SchemaProperties";
@@ -53,9 +54,11 @@ const SHOWN_PAIRS = 3;
  * Schema: what the tenant's graph is made of. The labels as a tree under
  * their parents, with node counts and the properties their nodes carry;
  * the relationship types with their edge counts and the label pairs they
- * join; the search indexes. Administrators can add labels, relationship
- * types and search indexes; nothing is ever removed here (graphos keeps
- * every label and the data in it). The same schema can be drawn as a
+ * join; the search indexes; the renames. Administrators can add labels,
+ * relationship types and search indexes, and mark a label, a type or a
+ * property deprecated with what replaces it; owners rename them (after a dry
+ * run of what follows) and drop a deprecated label or type once it is empty.
+ * No data is ever deleted here. The same schema can be drawn as a
  * diagram (`?view=diagram`), where labels are added and a relationship
  * type's label pairs declared by drawing from one label to another. Declared
  * pairs are the schema's associations; administrators can have graphos
@@ -254,6 +257,7 @@ export function SchemaView() {
                       <Text size="sm" fw={500} className={classes.name}>
                         {row.label}
                       </Text>
+                      <DeprecatedBadge schema={schema.data!} part="vertex" name={row.label} />
                       {row.parent ? (
                         <Text size="xs" c="dimmed">
                           {t("views.schema.labels.inherits", { parent: row.parent })}
@@ -275,18 +279,28 @@ export function SchemaView() {
                   </div>
                   {open === `vertex:${row.label}` ? (
                     <div className={classes.detail} style={{ paddingLeft: 12 + row.depth * 18 }}>
+                      <DeprecationLines schema={schema.data!} part="vertex" name={row.label} />
                       {panel(
                         "vertex",
                         row.label,
                         row.properties,
-                        <Button
-                          size="compact-xs"
-                          variant="subtle"
-                          component={Link}
-                          to={`/browse?${browseParams({ label: row.label, filter: null }).toString()}`}
-                        >
-                          {t("views.schema.labels.browse")}
-                        </Button>,
+                        <>
+                          <Button
+                            size="compact-xs"
+                            variant="subtle"
+                            component={Link}
+                            to={`/browse?${browseParams({ label: row.label, filter: null }).toString()}`}
+                          >
+                            {t("views.schema.labels.browse")}
+                          </Button>
+                          <NameActions
+                            schema={schema.data!}
+                            part="vertex"
+                            name={row.label}
+                            rows={row.count}
+                            carried={row.properties}
+                          />
+                        </>,
                       )}
                     </div>
                   ) : null}
@@ -327,6 +341,7 @@ export function SchemaView() {
                       <Text size="sm" fw={500} className={classes.name}>
                         {row.type}
                       </Text>
+                      <DeprecatedBadge schema={schema.data!} part="edge" name={row.type} />
                       {row.derived ? (
                         <Tooltip label={t("views.schema.relationships.derivedTooltip")} withArrow>
                           <Badge size="xs" variant="light" radius="sm" tt="none">
@@ -360,7 +375,23 @@ export function SchemaView() {
                   </div>
                   {open === `edge:${row.type}` ? (
                     <div className={classes.detail} style={{ paddingLeft: 12 }}>
-                      <EdgeProperties type={row.type}>{(carried) => panel("edge", row.type, carried)}</EdgeProperties>
+                      <DeprecationLines schema={schema.data!} part="edge" name={row.type} />
+                      <EdgeProperties type={row.type}>
+                        {(carried) =>
+                          panel(
+                            "edge",
+                            row.type,
+                            carried,
+                            <NameActions
+                              schema={schema.data!}
+                              part="edge"
+                              name={row.type}
+                              rows={map.data && !row.estimated ? row.count : null}
+                              carried={carried}
+                            />,
+                          )
+                        }
+                      </EdgeProperties>
                       {row.declared.length ? (
                         <Text size="xs" c="dimmed" mt={6}>
                           {t("views.schema.relationships.declared", { pairs: pairList(row.declared, t) })}
@@ -404,6 +435,8 @@ export function SchemaView() {
               </div>
             )}
           </section>
+
+          <RenamesSection schema={schema.data} />
         </Stack>
       ) : null}
 

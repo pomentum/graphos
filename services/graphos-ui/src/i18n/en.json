@@ -136,7 +136,8 @@
         "compute_metrics": "Graph metrics",
         "resolve_edges": "Edge resolution",
         "vacuum": "Vacuum",
-        "check_properties": "Property check"
+        "check_properties": "Property check",
+        "rename_property": "Property rename"
       },
       "queued": "Queued",
       "runningFor": "Running for {{duration}}",
@@ -716,8 +717,8 @@
     },
     "schema": {
       "heading": "Schema of {{tenant}}",
-      "readOnly": "Read only. Whoever maintains this tenant can add labels, relationship types and search indexes.",
-      "neverRemoves": "Labels and relationship types are never removed here (graphos keeps them and their data); a declared pair can be.",
+      "readOnly": "Read only. Whoever maintains this tenant can add labels, relationship types and search indexes, and deprecate them; its owners can rename them.",
+      "neverRemoves": "No data is ever deleted here: labels and relationship types are renamed in place, deprecated, and dropped only once deprecated and empty; a declared pair can be removed.",
       "add": "Add",
       "addLabel": "Label",
       "addRelationship": "Relationship type",
@@ -759,7 +760,8 @@
       "sections": {
         "labels": "Labels",
         "relationships": "Relationship types",
-        "indexes": "Search indexes"
+        "indexes": "Search indexes",
+        "renames": "Renames"
       },
       "labels": {
         "inherits": "inherits {{parent}}",
@@ -1056,6 +1058,70 @@
           "target": "Label or relationship type",
           "targetPlaceholder": "Where the definition goes"
         }
+      },
+      "changes": {
+        "deprecated": "deprecated",
+        "deprecatedTooltip": "On its way out: writes naming it still work, with a warning",
+        "useInstead": "use {{name}}",
+        "itselfDeprecated": {
+          "vertex": "This label is deprecated",
+          "edge": "This relationship type is deprecated"
+        },
+        "deprecatedProperties": "Deprecated properties: {{properties}}",
+        "rename": "Rename…",
+        "deprecate": "Deprecate…",
+        "deprecateApply": "Deprecate",
+        "drop": "Drop {{name}}",
+        "dropQuestion": {
+          "vertex": "Drop the empty label {{name}} with its indexes, styles and definitions?",
+          "edge": "Drop the empty relationship type {{name}} with its declared pairs, styles and definitions?"
+        },
+        "itself": {
+          "vertex": "The label {{name}}",
+          "edge": "The relationship type {{name}}"
+        },
+        "property": "Its property {{name}}",
+        "what": "What",
+        "newName": "New name",
+        "invalidName": "Starts with a capital letter, then letters, digits or _",
+        "invalidProperty": "Letters, digits or _, not starting with a digit",
+        "taken": "{{name}} is already a label or relationship type",
+        "same": "That is its name already",
+        "renameTitle": "Rename in {{name}}",
+        "inPlaceHint": "Renamed in place, in one step: its rows keep their ids and edges. Afterwards the old name is refused with where it went, and Cypher naming it returns nothing.",
+        "propertyHint": "The rows are rewritten in the background. Meanwhile writes naming the old name carry a warning; afterwards they are refused.",
+        "preview": "Preview",
+        "apply": "Rename",
+        "report": {
+          "keeps_one": "{{formatted}} row keeps its id and edges.",
+          "keeps_other": "{{formatted}} rows keep their ids and edges.",
+          "rewrites_one": "{{formatted}} row to rewrite.",
+          "rewrites_other": "{{formatted}} rows to rewrite.",
+          "parts": "Renamed with it: {{parts}}",
+          "follow": "Indexes renamed: {{indexes}} · declared pairs: {{pairs}}",
+          "savedQueries": "Saved queries that name {{name}}, not rewritten: {{queries}}. Update them afterwards.",
+          "afterwards": "Consumers writing {{name}} must change to the new name."
+        },
+        "deprecateTitle": "Deprecate in {{name}}",
+        "replacedBy": "Replaced by",
+        "replacedByHint": "Optional: what to use instead",
+        "note": "Note",
+        "noteHint": "Optional: why, or until when",
+        "deprecateHint": "Writes naming it still work, with a warning; the schema summary agents read says what replaces it.",
+        "undeprecate": "Not deprecated",
+        "kinds": {
+          "label": "label",
+          "edge_type": "relationship type",
+          "property": "property on {{on}}"
+        },
+        "status": {
+          "running": "running",
+          "failed": "failed"
+        },
+        "progress": "{{done}} of {{total}} rows rewritten",
+        "progressLabel": "Renaming {{name}}",
+        "resume": "Resume",
+        "when": "{{when}} by {{by}}"
       }
     },
     "access": {
@@ -1292,7 +1358,11 @@
     "schemaUpdated": "Added to the schema",
     "schemaImported": "Schema imported",
     "nodesDeleted_one": "{{count}} node deleted",
-    "nodesDeleted_other": "{{count}} nodes deleted"
+    "nodesDeleted_other": "{{count}} nodes deleted",
+    "renamed": "{{from}} renamed to {{to}}",
+    "renameStarted": "Renaming {{from}} to {{to}} in the background",
+    "deprecationSaved": "Deprecation saved",
+    "labelDropped": "Dropped"
   },
   "csvImport": {
     "entryTitle": "Import a CSV file",
@@ -1434,6 +1504,9 @@
     "countsNotLoaded": "Couldn't load the tenant's counts",
     "schemaNotUpdated": "Not added to the schema",
     "schemaNotImported": "Schema not imported",
-    "schemaNotExported": "Couldn't export the schema"
+    "schemaNotExported": "Couldn't export the schema",
+    "notRenamed": "Not renamed",
+    "deprecationNotSaved": "Deprecation not saved",
+    "labelNotDropped": "Not dropped"
   }
 }
