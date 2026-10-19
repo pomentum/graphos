@@ -14,14 +14,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>graphos: a property-graph service on PostgreSQL and Apache AGE</title>
-<meta name="description" content="graphos is a multi-tenant property-graph service: PostgreSQL and Apache AGE behind a typed HTTP API. Apache-2.0.">
+<meta name="description" content="graphos is a multi-tenant property-graph service on PostgreSQL and Apache AGE: a typed HTTP API, a read-only Cypher console, an MCP endpoint for AI agents and a web UI. Apache-2.0.">
 <link rel="canonical" href="https://www.pomentum.dev/graphos/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="graphos">
-<meta property="og:title" content="graphos">
-<meta property="og:description" content="A multi-tenant property-graph service: PostgreSQL and Apache AGE behind a typed HTTP API.">
+<meta property="og:title" content="graphos: a property-graph service on PostgreSQL and Apache AGE">
+<meta property="og:description" content="A multi-tenant property-graph service on PostgreSQL and Apache AGE: a typed HTTP API, a read-only Cypher console, an MCP endpoint for AI agents and a web UI.">
 <meta property="og:url" content="https://www.pomentum.dev/graphos/">
 <meta property="og:image" content="https://www.pomentum.dev/graphos/images/ui-explore-graph-dark.png">
+<meta property="og:image:width" content="1440">
+<meta property="og:image:height" content="900">
+<meta property="og:image:alt" content="The graphos web UI: the Explore canvas of the demo tenant, coloured by community">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <script>try{var t=localStorage.getItem('graphos-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
 <link rel="stylesheet" href="site.css">
@@ -50,7 +54,7 @@
     <p class="repo"><a href="https://github.com/pomentum/graphos" rel="noopener" aria-label="Read the source on GitHub: pomentum/graphos"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg><span>pomentum/graphos</span></a></p>
     <h1>graphos</h1>
     <p class="lede">A multi-tenant property-graph service: PostgreSQL + Apache AGE behind a typed HTTP API.</p>
-    <p class="meta prose">Your services send JSON over HTTP. graphos owns the database, writes the SQL against AGE's tables, enforces tenant isolation, and gives you bulk loading, traversal, aggregation, graph algorithms and a web UI. Consumers never get a connection string.</p>
+    <p class="meta prose">Your services send JSON over HTTP. graphos owns the database, writes the SQL against AGE's tables, enforces tenant isolation, and gives you bulk loading, traversal, aggregation, graph algorithms, a read-only Cypher console and a web UI. AI agents read the same graphs over MCP. Consumers never get a connection string.</p>
     <div class="cta">
       <a class="btn primary" href="#start">Get started</a>
       <a class="btn" href="#benchmarks">Benchmarks</a>
@@ -62,22 +66,22 @@
     <section class="summary" id="summary">
       <h2>In 30 seconds</h2>
       <ul>
-        <li><span class="k">The problem</span><span>Connected data turns up in most systems. Once several services need it, each one ends up holding database credentials, its own Cypher, and its own answers to bulk loading, indexing and isolation.</span></li>
-        <li><span class="k">The approach</span><span>One service owns the graph. Consumers call a typed REST API; graphos alone talks to PostgreSQL + Apache AGE on a private network.</span></li>
-        <li><span class="k">What it is not</span><span>Not a query passthrough for applications (Cypher is offered read-only, under graphos's checks), not a new database engine, and not tied to any domain: graphos ships no labels of its own.</span></li>
-        <li><span class="k">Licence</span><span>Apache 2.0, like the Apache AGE extension it is built on.</span></li>
+        <li><span class="k">The problem<span class="vh">: </span></span><span>Connected data turns up in most systems. Once several services need it, each one ends up holding database credentials, its own Cypher, and its own answers to bulk loading, indexing and isolation.</span></li>
+        <li><span class="k">The approach<span class="vh">: </span></span><span>One service owns the graph. Consumers call a typed REST API, and AI agents the same reads over MCP; graphos alone talks to PostgreSQL + Apache AGE on a private network.</span></li>
+        <li><span class="k">What it is not<span class="vh">: </span></span><span>Not a query passthrough for applications (Cypher is offered read-only, under graphos's checks), not a new database engine, and not tied to any domain: graphos ships no labels of its own.</span></li>
+        <li><span class="k">Licence<span class="vh">: </span></span><span>Apache 2.0, like the Apache AGE extension it is built on.</span></li>
       </ul>
     </section>
   </div>
 
-  <h2 id="why"><span class="sec"><span class="num">01 · Why</span></span>From many database clients to one graph service</h2>
+  <h2 id="why"><span class="sec" aria-hidden="true"><span class="num">01 · Why</span></span>From many database clients to one graph service</h2>
   <figure class="fig pic">
     <img class="pic-light" src="images/problem-light.svg" alt="{{ alt_problem }}">
-    <img class="pic-dark" src="images/problem-dark.svg" alt="" aria-hidden="true">
+    <img class="pic-dark" src="images/problem-dark.svg" alt="{{ alt_problem }}">
     <figcaption><span class="fig-n">Fig 01</span><span>Without graphos, every service holds a driver, a connection string and its own Cypher. With it, services call typed HTTP and only graphos reaches PostgreSQL + Apache AGE.</span></figcaption>
   </figure>
 
-  <h2 id="glance"><span class="sec"><span class="num">02 · At a glance</span></span>What graphos is made of</h2>
+  <h2 id="glance"><span class="sec" aria-hidden="true"><span class="num">02 · At a glance</span></span>What graphos is made of</h2>
   <dl class="gloss glance">
     <div><dt>Storage</dt><dd>PostgreSQL 18 with Apache AGE 1.8; each tenant is its own AGE graph</dd></div>
     <div><dt>API</dt><dd>Typed HTTP (FastAPI), JSON and NDJSON; the contract at <code>/openapi.json</code></dd></div>
@@ -90,10 +94,10 @@
     <div><dt>Agents</dt><dd>An MCP endpoint, <code>/mcp</code>: 22 read tools on the API's tokens and grants</dd></div>
   </dl>
 
-  <h2 id="features"><span class="sec"><span class="num">03 · Features</span></span>Build, explore, run</h2>
+  <h2 id="features"><span class="sec" aria-hidden="true"><span class="num">03 · Features</span></span>Build, explore, run</h2>
 {{ features }}
 
-  <h2 id="benchmarks"><span class="sec"><span class="num">04 · Benchmarks</span></span>Bulk writes 37–156× faster than per-row Cypher MERGE</h2>
+  <h2 id="benchmarks"><span class="sec" aria-hidden="true"><span class="num">04 · Benchmarks</span></span>Bulk writes 37–156× faster than per-row Cypher MERGE</h2>
   <p class="lead-in">Every write goes through COPY-staged SQL upserts instead of Cypher, every label gets its indexes at registration, and the same graph reads faster on PostgreSQL 18 with AGE 1.8, which graphos now requires. Measured with the scripts in <code>scripts/</code>, by profiling queries and by timing requests against a running service: orders of magnitude, not guarantees.</p>
   <div class="tbl">
     <table class="bench">
@@ -118,24 +122,24 @@
     <div class="stat"><b>0 of 840</b><span>requests failed in the read mix, on either database</span></div>
   </div>
 
-  <h2 id="how"><span class="sec"><span class="num">05 · How it works</span></span>One service owns the graph</h2>
+  <h2 id="how"><span class="sec" aria-hidden="true"><span class="num">05 · How it works</span></span>One service owns the graph</h2>
   <figure class="fig pic">
     <img class="pic-light" src="images/architecture-light.svg" alt="Consumers call graphos-api over the graphos-net network with a bearer token. graphos-api checks tenant scope and read/write access, validates typed contracts, builds SQL internally, times out bad queries and emits metrics and audit logs. Only graphos-api reaches PostgreSQL 18 with Apache AGE on an internal network; each tenant is its own AGE graph.">
-    <img class="pic-dark" src="images/architecture-dark.svg" alt="" aria-hidden="true">
+    <img class="pic-dark" src="images/architecture-dark.svg" alt="Consumers call graphos-api over the graphos-net network with a bearer token. graphos-api checks tenant scope and read/write access, validates typed contracts, builds SQL internally, times out bad queries and emits metrics and audit logs. Only graphos-api reaches PostgreSQL 18 with Apache AGE on an internal network; each tenant is its own AGE graph.">
     <figcaption><span class="fig-n">Fig 02</span><span>The boundary: consumers reach graphos-api only, with a bearer token; graphos-api alone reaches the database, on an internal network.</span></figcaption>
   </figure>
   <figure class="fig pic">
     <img class="pic-light" src="images/communities-light.svg" alt="{{ alt_communities }}">
-    <img class="pic-dark" src="images/communities-dark.svg" alt="" aria-hidden="true">
+    <img class="pic-dark" src="images/communities-dark.svg" alt="{{ alt_communities }}">
     <figcaption><span class="fig-n">Fig 03</span><span>Communities, computed beside the data: Louvain in its own process, ids kept stable from run to run, written back with COPY (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/algorithms.md">what each algorithm finds</a>).</span></figcaption>
   </figure>
 
-  <h2 id="ui"><span class="sec"><span class="num">06 · Web UI</span></span>Explore, edit, query</h2>
+  <h2 id="ui"><span class="sec" aria-hidden="true"><span class="num">06 · Web UI</span></span>Explore, edit, query</h2>
   <div class="shots">
 {{ shots }}
   </div>
 
-  <h2 id="start"><span class="sec"><span class="num">07 · Get started</span></span>Run it on your machine</h2>
+  <h2 id="start"><span class="sec" aria-hidden="true"><span class="num">07 · Get started</span></span>Run it on your machine</h2>
   <p class="prose">Docker with Compose v2 and about 4 GB of memory for Docker.</p>
   <pre class="record">{{ quickstart }}</pre>
   <ol class="next prose">
@@ -144,7 +148,7 @@
     <li>Load the demo tenant to explore: <a href="https://github.com/pomentum/graphos/blob/main/clients/python/examples/08_demo_ecosystem.py"><code>08_demo_ecosystem.py</code></a>.</li>
   </ol>
 
-  <h2 id="docs"><span class="sec"><span class="num">08 · Documentation</span></span>Read further</h2>
+  <h2 id="docs"><span class="sec" aria-hidden="true"><span class="num">08 · Documentation</span></span>Read further</h2>
   <dl class="gloss docs">
 {{ docs }}
   </dl>

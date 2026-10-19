@@ -136,6 +136,9 @@ td.n{font-family:var(--mono); font-size:13.5px; white-space:nowrap}
   background-repeat:no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, repeat}
 .fig img, .fig svg{display:block; width:100%; height:auto}
 .fig img.shot{border:1px solid var(--rule); border-radius:4px}
+.fig picture{display:block}
+/* Read by screen readers, not shown. */
+.vh{position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap}
 .fig figcaption{display:flex; gap:12px; align-items:baseline; margin-top:14px; padding-top:10px; border-top:1px solid var(--rule); font-size:13.5px; color:var(--ink-soft)}
 .fig .fig-n{font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); white-space:nowrap}
 .pic .pic-dark{display:none}
