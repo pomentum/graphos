@@ -84,6 +84,7 @@ class SchemaRenameResult(BaseModel):
     rows: int | None = None
     saved_queries: list[str] = Field(default_factory=list)   # name the old name: not rewritten
     job_id: str | None = None
+    warnings: list[str] = Field(default_factory=list)   # what else to change afterwards
 
 
 class SchemaDropResult(BaseModel):

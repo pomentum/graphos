@@ -68,6 +68,7 @@ class RenamePlan:
     endpoints: int = 0
     rows: int | None = None
     saved_queries: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 # ── The spec, renamed ──────────────────────────────────────────────────────
@@ -657,10 +658,15 @@ async def plan_property(
                         "search_indexes")
         if getattr(after, key) != getattr(spec, key)
     ]
+    warnings = [
+        f"search without an index matches 'name' by default, with graphos's own trigram index "
+        f"on it: afterwards ask it for property={new!r}, or declare a search index on {new!r}"
+    ] if old == "name" and on in spec.vertex_labels else []
     return RenamePlan(
         kind="property", old=old, new=new, spec_parts=parts, rows=rows,
         saved_queries=[q["name"] for q in queries
                        if q["query"] and property_mentions(q["query"], old)],
+        warnings=warnings,
     )
 
 

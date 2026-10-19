@@ -235,6 +235,8 @@ export interface SchemaRenameResult {
   /** Saved queries naming the old name: not rewritten. */
   saved_queries: string[];
   job_id?: string | null;
+  /** What else to change afterwards (absent from older servers). */
+  warnings?: string[];
 }
 
 /** `DELETE /v1/tenants/{name}/labels/{label}`: a deprecated, empty label or type dropped. */

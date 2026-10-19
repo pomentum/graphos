@@ -103,7 +103,16 @@ describe("renaming", () => {
   });
 
   it("renames a property on the label", async () => {
-    const plan = { ...PLAN, kind: "property", from: "mail", to: "email", on: "Person", spec_parts: [], rows: 3 };
+    const plan = {
+      ...PLAN,
+      kind: "property",
+      from: "mail",
+      to: "email",
+      on: "Person",
+      spec_parts: [],
+      rows: 3,
+      warnings: ["ask search for email"],
+    };
     const { calls, fetchImpl } = fakeGraphos({
       "POST /v1/tenants/acme/schema:rename?dry_run=true": plan,
       "POST /v1/tenants/acme/schema:rename": { ...plan, dry_run: false, job_id: "j1" },
@@ -117,6 +126,7 @@ describe("renaming", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "New name" }), { target: { value: "email" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     expect(await screen.findByText("3 rows to rewrite.")).toBeInTheDocument();
+    expect(screen.getByText("ask search for email")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Rename" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(calls[1]!.body).toEqual({ kind: "property", on: "Person", from: "mail", to: "email" });

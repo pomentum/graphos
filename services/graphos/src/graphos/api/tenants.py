@@ -725,7 +725,7 @@ async def _rename_property(
             return SchemaRenameResponse(
                 tenant=name, kind="property", from_=body.from_, to=body.to, on=on,
                 dry_run=True, spec_parts=found.spec_parts, rows=found.rows,
-                saved_queries=found.saved_queries,
+                saved_queries=found.saved_queries, warnings=found.warnings,
             )
         job_id = await schema_rename.start_property(pool, name, on, body.from_, body.to, by=by)
     except schema_rename.RenameError as exc:
@@ -738,7 +738,7 @@ async def _rename_property(
     answer = SchemaRenameResponse(
         tenant=name, kind="property", from_=body.from_, to=body.to, on=on,
         spec_parts=found.spec_parts, rows=found.rows, saved_queries=found.saved_queries,
-        job_id=job_id,
+        job_id=job_id, warnings=found.warnings,
     )
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,

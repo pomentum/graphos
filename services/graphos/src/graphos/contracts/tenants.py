@@ -711,6 +711,9 @@ class SchemaRenameResponse(BaseModel):
         ),
     )
     job_id: str | None = Field(None, description="A property rename's job.")
+    warnings: list[str] = Field(
+        default_factory=list, description="What else to change afterwards (a property rename).",
+    )
 
 
 class SchemaDropResponse(BaseModel):

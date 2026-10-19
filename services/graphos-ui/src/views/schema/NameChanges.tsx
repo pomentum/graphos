@@ -293,6 +293,11 @@ function RenameReport({ result }: { result: SchemaRenameResult }) {
           {t("views.schema.changes.report.follow", { indexes: result.indexes.length, pairs: result.endpoints })}
         </Text>
       ) : null}
+      {(result.warnings ?? []).map((warning) => (
+        <Alert key={warning} color="yellow" variant="light" radius="md" p="xs">
+          <Text size="xs">{warning}</Text>
+        </Alert>
+      ))}
       {result.saved_queries.length ? (
         <Alert color="yellow" variant="light" radius="md" p="xs">
           <Text size="xs">

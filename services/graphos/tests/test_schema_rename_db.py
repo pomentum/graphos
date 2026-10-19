@@ -206,6 +206,18 @@ async def test_a_label_is_renamed_in_place(api: httpx.AsyncClient, db_pool: asyn
 
 @requires_db
 @pytest.mark.asyncio
+async def test_renaming_name_warns_about_search(api: httpx.AsyncClient) -> None:
+    resp = await api.post(
+        f"/v1/tenants/{NAME}/schema:rename?dry_run=true", headers=_as("owner"),
+        json={"kind": "property", "on": "Person", "from": "name", "to": "full_name"},
+    )
+    assert resp.status_code == HTTPStatus.OK, resp.text
+    (warning,) = resp.json()["warnings"]
+    assert "property='full_name'" in warning
+
+
+@requires_db
+@pytest.mark.asyncio
 async def test_the_old_name_answers_where_it_went(api: httpx.AsyncClient) -> None:
     assert (await _rename(api, "label", "Docu", "Document")).status_code == HTTPStatus.OK
     write = await api.post(f"/v1/{NAME}/graph/nodes", headers=_as("owner"), json={
