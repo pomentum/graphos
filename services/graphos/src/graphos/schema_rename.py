@@ -846,3 +846,144 @@ async def _replace_property_indexes(
                 await conn.execute(f'DROP INDEX IF EXISTS "{after.name}"."{name}";')
     except Exception:  # noqa: BLE001 -- never fail a done rename over an index
         log.exception("property rename: replacing indexes failed", extra={"tenant": after.name})
+
+
+# ── Dropping an empty deprecated label or edge type (ADR-0009 §1) ──────────
+
+
+def check_drop(spec: TenantSpec, name: str) -> str:
+    """Refuse dropping ``name`` (:class:`RenameError`) unless it is a deprecated label or
+    type nothing still needs; its part (``vertex`` or ``edge``)."""
+    if name in spec.vertex_labels:
+        part = "vertex"
+    elif name in spec.edge_labels:
+        part = "edge"
+    else:
+        raise RenameError(f"{name!r} is not a vertex label or edge type of tenant '{spec.name}'")
+    if not ((spec.deprecated.get(part) or {}).get(name) or {}).get("deprecated"):
+        raise RenameError(f"{name!r} is not deprecated: deprecate it first")
+    children = sorted(c for c, p in spec.label_hierarchy if p == name)
+    if children:
+        raise RenameError(f"{', '.join(children)} inherit from {name!r}: drop or move them first")
+    needing = sorted(t for t, rule in spec.resolve_rules
+                     if name in _strs(rule.get("require_dst_label")))
+    if needing:
+        raise RenameError(f"the resolve rules of {', '.join(needing)} require {name!r}")
+    replacing = sorted(
+        other for p in ("vertex", "edge") for other, entry in (spec.deprecated.get(p) or {}).items()
+        if entry.get("replaced_by") == name
+    )
+    if replacing:
+        raise RenameError(f"{', '.join(replacing)} name {name!r} as their replacement")
+    return part
+
+
+def dropped_spec(spec: TenantSpec, part: str, name: str) -> TenantSpec:
+    """``spec`` without the label or type ``name`` and everything that named it."""
+
+    def without(value: Mapping[str, Any]) -> dict[str, Any]:
+        out = {p: {n: e for n, e in entries.items() if not (p == part and n == name)}
+               for p, entries in value.items() if isinstance(entries, dict)}
+        rest = {k: v for k, v in value.items() if not isinstance(v, dict)}
+        return {**rest, **{p: e for p, e in out.items() if e}}
+
+    if part == "edge":
+        return replace(
+            spec,
+            edge_labels=tuple(t for t in spec.edge_labels if t != name),
+            resolve_rules=tuple((t, dict(r)) for t, r in spec.resolve_rules if t != name),
+            edge_endpoints=tuple(p for p in spec.edge_endpoints if p[0] != name),
+            display=without(spec.display), property_schema=without(spec.property_schema),
+            deprecated=without(spec.deprecated),
+        )
+    search_indexes: dict[str, dict[str, object]] = {}
+    for index_name, body in spec.search_indexes.items():
+        labels = _strs(body.get("labels"))
+        if labels == [name]:
+            continue
+        search_indexes[index_name] = (
+            {**body, "labels": [lab for lab in labels if lab != name]} if name in labels
+            else dict(body)
+        )
+    return replace(
+        spec,
+        vertex_labels=tuple(lab for lab in spec.vertex_labels if lab != name),
+        label_hierarchy=tuple((c, p) for c, p in spec.label_hierarchy if name not in (c, p)),
+        property_indexes=tuple(dict(x) for x in spec.property_indexes if x.get("label") != name),
+        generated_columns=tuple(
+            dict(x) for x in spec.generated_columns if x.get("label") != name
+        ),
+        search_indexes=search_indexes,
+        edge_endpoints=tuple(p for p in spec.edge_endpoints if name not in (p[1], p[2])),
+        display=without(spec.display), property_schema=without(spec.property_schema),
+        deprecated=without(spec.deprecated),
+    )
+
+
+async def drop_label(pool: asyncpg.Pool, tenant: str, name: str) -> list[str]:
+    """Drop the deprecated label or edge type ``name`` when it has no rows: its AGE
+    label (table, sequence, indexes), and everything graphos keeps that names it,
+    in one transaction under the tenant's lock; one ``schema`` record.  Returns
+    the saved queries that name it (not rewritten).
+
+    Raises:
+        RenameError: it is not a deprecated label or type nothing needs, or it has rows.
+        TenantBusyError: a job runs on the tenant, or its tables stay in use.
+    """
+    try:
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute(f"SET LOCAL lock_timeout = '{DROP_LOCK_TIMEOUT}';")
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0));", tenant)
+            stored = spec_from_json(await conn.fetchval(
+                "SELECT spec::text FROM graphos_meta.tenants WHERE name = $1 FOR UPDATE;", tenant,
+            ))
+            stored = replace(stored, edge_endpoints=tuple(
+                (r["edge_type"], r["src_label"], r["dst_label"]) for r in await conn.fetch(
+                    "SELECT edge_type, src_label, dst_label FROM graphos_meta.edge_endpoints "
+                    "WHERE tenant = $1;", tenant,
+                )
+            ))
+            part = check_drop(stored, name)
+            await _refuse_busy(conn, tenant, "edge_type" if part == "edge" else "label", name)
+            rows = await conn.fetchval(f'SELECT count(*) FROM "{tenant}"."{name}";')
+            if rows:
+                raise RenameError(f"{name!r} has {rows} row(s): delete them first")
+            after = dropped_spec(stored, part, name)
+            saved = await saved_queries_naming(conn, tenant, name)
+            await conn.execute("SELECT ag_catalog.drop_label($1::name, $2::name);", tenant, name)
+            await conn.execute(
+                "UPDATE graphos_meta.tenants SET spec = $2::jsonb, updated_at = now() "
+                "WHERE name = $1;",
+                tenant, json.dumps(_spec_to_jsonable(after)),
+            )
+            if part == "vertex":
+                await conn.execute(
+                    "DELETE FROM graphos_meta.edge_endpoints "
+                    "WHERE tenant = $1 AND (src_label = $2 OR dst_label = $2);",
+                    tenant, name,
+                )
+                await conn.execute(
+                    "DELETE FROM graphos_meta.node_properties WHERE tenant = $1 AND label = $2;",
+                    tenant, name,
+                )
+            else:
+                await conn.execute(
+                    "DELETE FROM graphos_meta.edge_endpoints WHERE tenant = $1 AND edge_type = $2;",
+                    tenant, name,
+                )
+            await changes.record(
+                conn, tenant=tenant, op="schema", kind="tenant", count=1,
+                detail={"dropped": {"kind": "label" if part == "vertex" else "edge_type",
+                                    "name": name}},
+            )
+            await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, tenant)
+    except asyncpg.LockNotAvailableError as exc:
+        raise TenantBusyError(
+            f"tenant '{tenant}' is in use (an export, an import or a long query holds its "
+            "tables); try again when it ends"
+        ) from exc
+    loaded = await load_spec(pool, tenant)
+    if loaded is not None:
+        remember(loaded)
+    log.info("schema drop", extra={"tenant": tenant, "label": name})
+    return saved

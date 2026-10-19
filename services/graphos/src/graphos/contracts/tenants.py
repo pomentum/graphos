@@ -713,6 +713,18 @@ class SchemaRenameResponse(BaseModel):
     job_id: str | None = Field(None, description="A property rename's job.")
 
 
+class SchemaDropResponse(BaseModel):
+    """A deprecated label or edge type dropped."""
+
+    tenant: str = Field(..., description="The tenant.")
+    kind: Literal["label", "edge_type"] = Field(..., description="What was dropped.")
+    name: str = Field(..., description="The dropped label or edge type.")
+    saved_queries: list[str] = Field(
+        default_factory=list,
+        description="Saved queries whose Cypher names it: not rewritten, so update them.",
+    )
+
+
 class TenantSpecBody(BaseModel):
     """Body for POST /v1/tenants.
 

@@ -84,6 +84,7 @@ from graphos.contracts.tenants import (
     PropertyIndexSpec,
     RegisterDryRunResponse,
     RegisterResponse,
+    SchemaDropResponse,
     SchemaRename,
     SchemaRenameRequest,
     SchemaRenameResponse,
@@ -743,6 +744,51 @@ async def _rename_property(
         status_code=status.HTTP_202_ACCEPTED,
         content=answer.model_dump(mode="json", by_alias=True),
         headers={"Location": f"/v1/jobs/{job_id}", "Retry-After": "2"},
+    )
+
+
+@router.delete(
+    "/{name}/labels/{label}",
+    summary="Drop a deprecated vertex label or edge type that has no rows",
+    response_model=SchemaDropResponse,
+    description=(
+        "`owner` on the tenant. Drops a vertex label or edge type marked deprecated, only when "
+        "it has no rows: its table and indexes, and everything graphos keeps that names it "
+        "(property definitions, display, declared pairs, property indexes, generated columns, "
+        "search indexes over it alone, its resolve rule), in one transaction; one `schema` "
+        "change record. Refused while a label inherits from it, a resolve rule requires it as "
+        "a destination, or a deprecation names it as the replacement. The answer lists the "
+        "saved queries that name it (not rewritten)."
+    ),
+    responses={
+        400: {"description": "Not a label or type of the tenant, not deprecated, it has rows, "
+                             "or something still needs it (see the description)."},
+        404: {"description": "The tenant is not registered."},
+        409: {"description": "A job runs on the tenant, a reconcile holds the edge type, or "
+                             "its tables stay in use (5 s)."},
+    },
+)
+async def drop_schema_label(
+    name: TenantName,
+    label: Annotated[str, Path(description="The vertex label or edge type.")],
+    request: Request,
+    principal: OwnerPrincipal,
+) -> SchemaDropResponse:
+    require_level(principal, name, Level.OWNER)
+    spec = registered_tenants().get(name)
+    if spec is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"tenant '{name}' is not registered",
+        )
+    try:
+        saved = await schema_rename.drop_label(request.app.state.pool, name, label)
+    except schema_rename.RenameError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except lifecycle.TenantBusyError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return SchemaDropResponse(
+        tenant=name, kind="label" if label in spec.vertex_labels else "edge_type", name=label,
+        saved_queries=saved,
     )
 
 
