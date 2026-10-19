@@ -1131,9 +1131,9 @@ curl -s -X POST "$G/v1/acme/cypher" -H "Authorization: Bearer $TOKEN" -H 'Conten
   `"limit"` asks for fewer); `GRAPHOS_CYPHER_TIMEOUT_S` (30 s), after which the query is stopped
   (504; graphos also terminates a query AGE is slow to stop, and if even that is not seen, closes
   the connection so the caller is answered; a query the caller cancels answers 499);
-  `GRAPHOS_CYPHER_PER_USER` (1) queries per user at a time (429 for another) and
-  `GRAPHOS_CYPHER_POOL_SIZE` (5) in all, a query waiting up to `GRAPHOS_CYPHER_WAIT_S` (10 s) for
-  a free connection (429 after that); and `GRAPHOS_CYPHER_TEMP_FILE_LIMIT` (1 GB) of temporary
+  `GRAPHOS_CYPHER_PER_USER` (1) queries per user at a time and `GRAPHOS_CYPHER_POOL_SIZE` (5) in
+  all, a query waiting up to `GRAPHOS_CYPHER_WAIT_S` (10 s) in all for its turn and a free
+  connection (429 after that); and `GRAPHOS_CYPHER_TEMP_FILE_LIMIT` (1 GB) of temporary
   files per query, so a query with many hops cannot fill the disk with spilled sorts (PostgreSQL's
   `temp_file_limit`: applied when graphos's role may set it, which the bundled database grants;
   otherwise graphos logs a warning at start with the `GRANT` to run). Cancelling the request stops

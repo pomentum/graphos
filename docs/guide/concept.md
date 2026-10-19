@@ -557,7 +557,7 @@ Error shapes:
 | 413 | `snapshot-import` over 50,000,000 lines, or past `GRAPHOS_IMPORT_MAX_BYTES` after decompression; a CSV file past `GRAPHOS_CSV_MAX_BYTES` | `{"detail": "..."}` |
 | 422 | Request validation; bad `label_hierarchy` at registration; a batch write refused by a `strict` property schema (with its `violations`) | `{"detail": [...]}` (FastAPI) or `{"detail": "..."}` |
 | 428 | `If-Match` missing with `GRAPHOS_REQUIRE_IF_MATCH=true` | `{"detail": "..."}` |
-| 429 | Rate limit (when enabled); the caller's console query still running, or no free console connection within `GRAPHOS_CYPHER_WAIT_S` | `{"detail": ..., "retry_after_s": ...}` + `Retry-After` (rate limit) or `{"detail": "..."}` |
+| 429 | Rate limit (when enabled); the caller's other console query still running, or no free console connection, after `GRAPHOS_CYPHER_WAIT_S` | `{"detail": ..., "retry_after_s": ...}` + `Retry-After` (rate limit) or `{"detail": "..."}` |
 | 499 | A console query whose caller went away | `{"detail": "..."}` |
 | 500 | A read the database refused (`neighbors`, `expand`, `sample_subgraph`): never a smaller result; the error is logged | `{"detail": "..."}` |
 | 501 | Louvain extra not installed | `{"detail": "..."}` |
@@ -1089,7 +1089,8 @@ read-only Cypher on one tenant's graph, for people who know Cypher
 It then runs the query in a read-only transaction on the tenant's graph, on a
 small pool of its own (`GRAPHOS_CYPHER_POOL_SIZE`, 5 per replica; a query
 waits up to `GRAPHOS_CYPHER_WAIT_S` for a connection, then 429), one query per
-user (`GRAPHOS_CYPHER_PER_USER`), with a row cap (`GRAPHOS_CYPHER_MAX_ROWS`),
+user at a time (`GRAPHOS_CYPHER_PER_USER`; the next one waits its turn within the
+same `GRAPHOS_CYPHER_WAIT_S`), with a row cap (`GRAPHOS_CYPHER_MAX_ROWS`),
 a timeout (`GRAPHOS_CYPHER_TIMEOUT_S`) and PostgreSQL's `temp_file_limit`
 (`GRAPHOS_CYPHER_TEMP_FILE_LIMIT`, 1GB, when graphos's role may set it). A
 watchdog cancels, then terminates, the backend if AGE does

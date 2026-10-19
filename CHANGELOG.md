@@ -51,7 +51,7 @@ read **Upgrading** before moving to this version.
   route's; every call is audited with `mcp_tool`, reads included. The tool list carries no tenant
   data. Results are kept small for a model: `get_schema` answers the compact text (`format: json`
   for the structured form); the tools that return nodes take `properties`, the node and edge
-  properties to keep; the Cypher tools leave out the UI's `graph`; and a result over 256 KiB has
+  properties to keep; the Cypher tools leave out the UI's `graph`; and a result over 64 KiB has
   its longest lists shortened, stays valid JSON and says so in `result_cut`. It takes the tokens
   the REST API takes: a token from `POST /v1/auth/login`, single sign-on, or the identity
   provider's access token for graphos's audience. A call without one answers 401 with `resource_metadata`, which names who
@@ -124,6 +124,10 @@ read **Upgrading** before moving to this version.
 
 ### Changed
 
+- **Cypher console: a user's next query waits its turn.** With one query per user
+  (`GRAPHOS_CYPHER_PER_USER`), a second query sent while the first runs used to answer 429 at
+  once; it now waits for the first to end, within the same `GRAPHOS_CYPHER_WAIT_S` (10 s) a query
+  waits for a connection, and answers 429 only after that. Agents send their calls together.
 - **Docs:** the guides and the ADRs moved from `docs/` to `docs/guide/` (`docs/guide/adrs/`).
   Links from outside to `docs/<guide>.md` on GitHub now need `docs/guide/<guide>.md`. The
   whitepaper is gone; the website takes its place.
