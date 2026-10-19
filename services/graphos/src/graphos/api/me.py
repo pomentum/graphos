@@ -53,7 +53,7 @@ async def me(principal: ReadPrincipal, request: Request) -> MeResponse:
         admin=principal.admin,
         must_change=principal.must_change,
         tenants=tenants,
-        levels=levels,  # type: ignore[arg-type]
+        levels=levels,
         create_tenants=["*"] if principal.admin else list(principal.create_tenants),
         preferences=prefs,
     )

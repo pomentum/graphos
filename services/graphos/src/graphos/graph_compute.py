@@ -37,9 +37,9 @@ class EdgeArrays:
     against well over 100 for a Python tuple, and cheap to hand to the
     child process."""
 
-    src: array.array = field(default_factory=lambda: array.array("q"))
-    dst: array.array = field(default_factory=lambda: array.array("q"))
-    rel: array.array = field(default_factory=lambda: array.array("I"))
+    src: array.array[int] = field(default_factory=lambda: array.array("q"))
+    dst: array.array[int] = field(default_factory=lambda: array.array("q"))
+    rel: array.array[int] = field(default_factory=lambda: array.array("I"))
     rel_names: list[str] = field(default_factory=list)
 
     def __len__(self) -> int:

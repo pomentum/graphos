@@ -17,6 +17,11 @@ Paths are under `services/graphos/src/graphos/`.
 | Property names graphos keeps for itself | `reserved.py` |
 | The read-only Cypher console and its guards | `console.py` (and `api/cypher.py`) |
 | Sign-in, tokens, per-route access, grants | `auth.py`, `identity.py`, `oidc.py`, `api/access.py` |
+| Stored secrets sealed with the master key | `vault.py` |
+| The MCP endpoint for agents, its tools | `mcp_server.py` (ADR-0002, ADR-0008) |
+| graphos signing people in for MCP clients | `oauth.py`, and `api/auth.py` for the web UI's Allow card |
+| The schema summary made for models | `api/schema_summary.py` |
+| Reconciling edges by difference | `writes.py` (`reconcile_edges`, `reconcile_resolved_edges`), `api/reconcile.py` |
 | Audit log, metrics, logging, rate limits | `observability/` (`audit.py`, `metrics.py`, `logging.py`, `rate_limit.py`) |
 | Settings and their `GRAPHOS_*` variables | `config.py` |
 | Tenant DDL, registry, start-up maintenance | `bootstrap.py`, `lifecycle.py` |
@@ -37,6 +42,7 @@ Python 3.11 (CI's version), in a venv at `.venv` in the checkout
 ```bash
 pip install -e "services/graphos[dev,louvain]"     # louvain: python-igraph, GPL, optional
 ruff check services/graphos/src services/graphos/tests
+(cd services/graphos && mypy)                       # types, as configured in pyproject.toml
 pytest -m "not db" services/graphos/tests          # unit tests, no database
 ```
 
@@ -97,7 +103,17 @@ Changing one takes an [ADR](../../docs/guide/adrs/README.md) first.
   or `AdminPrincipal` (`auth.py`); on a `{tenant}` route that holds the
   caller to the level on that tenant. Other routes call `require_level`
   for the tenant they act on. `tests/test_access.py` fails on an operation
-  that declares none.
+  that declares none. The two surfaces outside the API's routers check
+  their callers themselves: `/mcp` takes a token like any route and runs
+  each tool as a route, as the caller; `/oauth/` is the sign-in itself.
+- **A token an MCP client got through graphos only reads.** Its principal
+  is held to `read` where it is made (`auth.reading_only`), and the account
+  changes a route declares as reads are refused by name
+  (`auth.READ_ONLY_REFUSED`; `tests/test_read_only.py`).
+- **A rule's edge and a consumer's edge stay apart** (ADR-0001). Edges a
+  rule derives carry `graphos_derived`; a consumer's write to one clears
+  it; `edges:reconcile` removes only unmarked edges and `edges:resolve` in
+  reconcile mode only marked ones.
 - **Names are checked, values are bound.** Tenant, label and edge-type
   names are interpolated into SQL only after they are checked against the
   tenant's registered spec; values always go in as bind parameters.
@@ -114,7 +130,9 @@ Changing one takes an [ADR](../../docs/guide/adrs/README.md) first.
   says why.
 - **Typing:** `from __future__ import annotations` at the top of every
   module; every function annotated; modern syntax (`str | None`,
-  `collections.abc`). The mypy config is `strict`.
+  `collections.abc`). The mypy config is `strict` (with pydantic's plugin,
+  for Linux, as CI runs it) and CI runs it; a `# type: ignore` names the
+  error code and says why.
 - **Docstrings:** every module opens with a docstring that says what it is
   for and why it works the way it does (constraints, AGE behaviour, which
   test enforces it). Functions get a one-line summary, more only when it

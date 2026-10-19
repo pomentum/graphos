@@ -27,7 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import asyncpg
 from fastapi import APIRouter, Query, Request
@@ -248,14 +248,14 @@ async def _build(
                 for k, v in (d.get("params") or {}).items()
             },
         ))
-    indexes = [
-        SummarySearchIndex(
-            name=name, labels=list(body.get("labels") or ["*"]),
-            properties=list(body.get("properties") or []),
-            analyzer=str(body.get("analyzer") or "identifier"),
-        )
-        for name, body in sorted(spec.search_indexes.items())
-    ]
+    indexes = []
+    for name, body in sorted(spec.search_indexes.items()):
+        index = cast("dict[str, Any]", body)
+        indexes.append(SummarySearchIndex(
+            name=name, labels=[str(x) for x in index.get("labels") or ["*"]],
+            properties=[str(x) for x in index.get("properties") or []],
+            analyzer=str(index.get("analyzer") or "identifier"),
+        ))
     summary = SchemaSummaryResponse(
         tenant=tenant, labels=labels, labels_total=len(the_map.labels),
         links=[

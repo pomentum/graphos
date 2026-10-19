@@ -95,27 +95,29 @@ def _registered(tenant: str | None) -> str:
     return tenant
 
 
-async def _run_recompute(pool: asyncpg.Pool, tenant: str | None, params: dict) -> BaseModel:
+async def _run_recompute(
+    pool: asyncpg.Pool, tenant: str | None, params: dict[str, Any],
+) -> BaseModel:
     body = RecomputeCommunitiesRequest.model_validate(params)
     return await louvain.run_recompute(pool, _registered(tenant), body)
 
 
-async def _run_metrics(pool: asyncpg.Pool, tenant: str | None, params: dict) -> BaseModel:
+async def _run_metrics(pool: asyncpg.Pool, tenant: str | None, params: dict[str, Any]) -> BaseModel:
     body = ComputeMetricsRequest.model_validate(params)
     return await graph_metrics.run_compute(pool, _registered(tenant), body)
 
 
-async def _run_resolve(pool: asyncpg.Pool, tenant: str | None, params: dict) -> BaseModel:
+async def _run_resolve(pool: asyncpg.Pool, tenant: str | None, params: dict[str, Any]) -> BaseModel:
     body = ResolveEdgesRequest.model_validate(params)
     return await graph.run_resolve(pool, _registered(tenant), body)
 
 
-async def _run_check(pool: asyncpg.Pool, tenant: str | None, params: dict) -> BaseModel:
+async def _run_check(pool: asyncpg.Pool, tenant: str | None, params: dict[str, Any]) -> BaseModel:
     body = PropertiesCheckRequest.model_validate(params)
     return await property_check.run_check(pool, _registered(tenant), body)
 
 
-async def _run_vacuum(pool: asyncpg.Pool, _tenant: str | None, params: dict) -> BaseModel:
+async def _run_vacuum(pool: asyncpg.Pool, _tenant: str | None, params: dict[str, Any]) -> BaseModel:
     return await db.run_vacuum(pool, VacuumRequest.model_validate(params))
 
 

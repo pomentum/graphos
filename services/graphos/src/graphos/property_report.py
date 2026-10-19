@@ -62,7 +62,7 @@ class _Collector:
                 return ref
             return " -> ".join(names.get(gid, gid) for gid in ref.split(" -> "))
         return LabelCheck(
-            kind=self.kind, name=self.name, rows=self.rows,  # type: ignore[arg-type]
+            kind=self.kind, name=self.name, rows=self.rows,
             rows_with_errors=self.with_errors, rows_with_warnings=self.with_warnings,
             errors=dict(self.errors.most_common()), warnings=dict(self.warnings.most_common()),
             examples={k: [named(r) for r in refs] for k, refs in self.example_refs.items()},

@@ -683,8 +683,8 @@ class Signer:
                         row["kid"], sealer.seal(stored, context),
                     )
         keys = []
-        for kid, pem in pems:
-            key = serialization.load_pem_private_key(pem.encode(), password=None)
+        for kid, text in pems:
+            key = serialization.load_pem_private_key(text.encode(), password=None)
             assert isinstance(key, ec.EllipticCurvePrivateKey)
             keys.append((kid, key))
         self._use(keys)

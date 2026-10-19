@@ -55,7 +55,7 @@ import secrets
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import asyncpg
 
@@ -346,12 +346,12 @@ def _cell(value: Any, graph: _Graph) -> Any:
         props = value.get("properties") or {}
         node = {"id": str(props.get("id", value.get("id"))), "label": value.get("label"),
                 "properties": props}
-        graph.nodes[value.get("id")] = node
+        graph.nodes[cast(int, value.get("id"))] = node
         return {"node": node}
     if isinstance(value, dict) and value.get("__ag") == "edge":
         edge = {"type": value.get("label"), "properties": value.get("properties") or {},
                 "start": value.get("start_id"), "end": value.get("end_id")}
-        graph.edges[value.get("id")] = edge
+        graph.edges[cast(int, value.get("id"))] = edge
         return {"edge": edge}
     if isinstance(value, list):
         return [_cell(v, graph) for v in value]

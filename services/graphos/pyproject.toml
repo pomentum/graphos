@@ -85,3 +85,19 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+plugins = ["pydantic.mypy"]
+files = ["src"]
+# As CI and the image run it: multiprocessing types differ on Windows.
+platform = "linux"
+
+# asyncpg and python-igraph ship no type information.
+[[tool.mypy.overrides]]
+module = ["asyncpg", "igraph"]
+ignore_missing_imports = true
+
+# numpy's stubs use Python 3.12 syntax; graphos targets 3.11 and uses numpy
+# for arrays only, so it is read as untyped.
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true

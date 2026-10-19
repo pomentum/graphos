@@ -28,7 +28,7 @@ import logging
 import time
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, replace
-from typing import Any
+from typing import Any, cast
 
 import asyncpg
 
@@ -791,7 +791,7 @@ def _spec_from_jsonable(payload: dict[str, object]) -> TenantSpec:
     # pairs because asdict() on a tuple-of-tuples produces nested
     # lists in JSON.  Tolerate both shapes (dict or list-of-pairs)
     # for forward compat with the wire body that uses a dict.
-    raw = payload.get("label_hierarchy") or ()
+    raw: Any = payload.get("label_hierarchy") or ()
     if isinstance(raw, dict):
         hierarchy_pairs = tuple((str(k), str(v)) for k, v in raw.items())
     else:
@@ -801,7 +801,7 @@ def _spec_from_jsonable(payload: dict[str, object]) -> TenantSpec:
     # ``resolve_rules`` round-trips as either a dict ``{edge_type:
     # rule_dict}`` (preferred wire shape) or a list of
     # ``[edge_type, rule_dict]`` pairs (asdict on tuple-of-tuples).
-    rules_raw = payload.get("resolve_rules") or ()
+    rules_raw: Any = payload.get("resolve_rules") or ()
     if isinstance(rules_raw, dict):
         rules_pairs = tuple(
             (str(k), dict(v)) for k, v in rules_raw.items()
@@ -814,14 +814,20 @@ def _spec_from_jsonable(payload: dict[str, object]) -> TenantSpec:
         )
     return TenantSpec(
         name=str(payload["name"]),
-        vertex_labels=tuple(payload.get("vertex_labels") or []),
-        edge_labels=tuple(payload.get("edge_labels") or []),
-        property_indexes=tuple(dict(x) for x in payload.get("property_indexes") or []),
-        generated_columns=tuple(dict(x) for x in payload.get("generated_columns") or []),
+        vertex_labels=tuple(cast("list[str]", payload.get("vertex_labels") or [])),
+        edge_labels=tuple(cast("list[str]", payload.get("edge_labels") or [])),
+        property_indexes=tuple(
+            dict(x) for x in cast("list[dict[str, object]]", payload.get("property_indexes") or [])
+        ),
+        generated_columns=tuple(
+            dict(x) for x in cast("list[dict[str, object]]", payload.get("generated_columns") or [])
+        ),
         label_hierarchy=hierarchy_pairs,
         resolve_rules=rules_pairs,
-        meta=dict(payload.get("meta") or {}),
-        search_indexes=dict(payload.get("search_indexes") or {}),
+        meta=dict(cast("dict[str, str]", payload.get("meta") or {})),
+        search_indexes=dict(
+            cast("dict[str, dict[str, object]]", payload.get("search_indexes") or {})
+        ),
         display=display_of(payload.get("display")),
         property_schema=property_schema_of(payload.get("property_schema")),
     )
@@ -914,7 +920,7 @@ async def remove_edge_endpoint(
 ) -> bool:
     """Remove one declared pair.  True if it was declared.  Data is not touched."""
     async with pool.acquire() as conn, conn.transaction():
-        result = await conn.execute(
+        result: str = await conn.execute(
             """
             DELETE FROM graphos_meta.edge_endpoints
             WHERE tenant = $1 AND edge_type = $2 AND src_label = $3 AND dst_label = $4;

@@ -25,7 +25,7 @@ from __future__ import annotations
 import random
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from graphos import graph_compute
 from graphos.graph_compute import EdgeArrays
@@ -35,6 +35,8 @@ try:
     import igraph as ig
 except ImportError:  # pragma: no cover - exercised by installs without the extra
     ig = None
+
+IGRAPH_AVAILABLE = ig is not None
 
 
 @dataclass(frozen=True)
@@ -134,7 +136,9 @@ def compute(
 async def compute_in_process(edges: EdgeArrays, **options: Any) -> Partition:
     """:func:`compute` in a child process (:func:`graphos.graph_compute.run_in_child`).
     Cancelling the awaiting task terminates the child."""
-    return await graph_compute.run_in_child(compute, edges, options, what="Louvain")
+    return cast(
+        Partition, await graph_compute.run_in_child(compute, edges, options, what="Louvain"),
+    )
 
 
 def terminate_running() -> None:

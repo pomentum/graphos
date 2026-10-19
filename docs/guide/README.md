@@ -8,7 +8,7 @@ Start with **[`concept.md`](concept.md)** — the standing reference. It describ
 - **[`features.md`](features.md)** — capabilities at a glance.
 - **[`algorithms.md`](algorithms.md)** — the graph algorithms (Louvain, PageRank, betweenness, components, degree): what each finds and what it is for.
 - **[`usage.md`](usage.md)** — worked requests for every endpoint group, limits and errors.
-- **[`agents.md`](agents.md)** — connecting an AI agent over MCP: turning `/mcp` on, tokens for it, the tools and their security.
+- **[`agents.md`](agents.md)** — connecting an AI agent over MCP: where `/mcp` is, the tokens it takes, how MCP clients sign people in (graphos's own sign-in, or single sign-on, with Keycloak's settings), the tools and their security.
 - **[`sso.md`](sso.md)** — single sign-on with any OpenID Connect provider: what to register, settings, troubleshooting.
 - **[`../services/graphos-ui/README.md`](../../services/graphos-ui/README.md)** — the web UI: running it, its views, how its code and text are organised.
 - **[`apache-age.md`](apache-age.md)** and **[`graph_age_practices.md`](graph_age_practices.md)** — Apache AGE lessons and the write-path templates (including why graphos writes every row through COPY-staged SQL rather than Cypher).

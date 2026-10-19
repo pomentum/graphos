@@ -83,6 +83,10 @@ under one version.
   requests for any other `Host` with 400, against DNS rebinding; `localhost` and `127.0.0.1` are
   always allowed. Empty (the default): off.
 
+- **Docs:** a guide for connecting AI agents, `docs/guide/agents.md` (where `/mcp` is, the tokens it
+  takes, how MCP clients sign people in through graphos or single sign-on with Keycloak's
+  settings, the tools and their security); ADR-0006, ADR-0007 and ADR-0008 accepted, ADR-0001
+  and ADR-0002 updated; the installation guide's checklist covers what is on by default.
 - **Docs:** `SECURITY.md` (private vulnerability reporting, supported versions, what a deployment
   must do itself, known security limits), `CONTRIBUTING.md` (where the rules are, how to open a
   pull request), issue templates for bugs and feature requests, and a pull request template.

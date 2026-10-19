@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import ValidationError
@@ -112,7 +112,7 @@ def _choices(columns: str | None) -> dict[str, dict[str, Any]]:
     )
     if not ok:
         raise _unprocessable('columns must map headers to {"property": ..., "type": ...}')
-    return parsed
+    return cast("dict[str, dict[str, Any]]", parsed)
 
 
 def _unprocessable(detail: str) -> HTTPException:
@@ -150,7 +150,7 @@ def _answer(
     return CsvImportResponse(
         tenant=writer.tenant,
         dry_run=writer.dry_run,
-        delimiter=name,  # type: ignore[arg-type]
+        delimiter=name,
         rows=len(table.rows),
         records=records,
         rows_invalid=writer.invalid,

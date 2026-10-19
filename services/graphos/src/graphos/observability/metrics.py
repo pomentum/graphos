@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, cast
 
 from fastapi import Request, Response
 from fastapi.responses import PlainTextResponse
@@ -89,7 +89,7 @@ def _route_label(request: Request) -> str:
     """
     route = request.scope.get("route")
     if route is not None and hasattr(route, "path"):
-        return route.path
+        return cast(str, route.path)
     return "<unmatched>"
 
 

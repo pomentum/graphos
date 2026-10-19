@@ -32,7 +32,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 from uuid import UUID
 
 import asyncpg
@@ -117,13 +117,14 @@ async def submit(
 
 async def _active_of(pool: asyncpg.Pool, kind: str, tenant: str | None) -> UUID:
     """The queued or running job that ``kind`` cannot run beside."""
-    return await pool.fetchval(
+    job_id: UUID = await pool.fetchval(
         "SELECT id FROM graphos_meta.jobs "
         "WHERE kind = ANY($1::text[]) AND tenant IS NOT DISTINCT FROM $2 "
         "  AND status IN ('queued', 'running') "
         "ORDER BY created_at LIMIT 1;",
         list(EXCLUSIVE.get(kind, (kind,))), tenant,
     )
+    return job_id
 
 
 async def get(pool: asyncpg.Pool, job_id: UUID) -> Job | None:
@@ -371,7 +372,11 @@ class JobRunner:
                     job_id: UUID = row["id"]
                     task = asyncio.create_task(self._run(row), name=f"graphos-job-{job_id}")
                     self._active[job_id] = task
-                    task.add_done_callback(lambda _t, i=job_id: self._done(i))
+
+                    def _forget(_t: asyncio.Task[None], i: UUID = job_id) -> None:
+                        self._done(i)
+
+                    task.add_done_callback(_forget)
             except Exception:  # noqa: BLE001 — the loop must survive a bad cycle
                 log.exception("job loop cycle failed")
             with contextlib.suppress(TimeoutError):
@@ -432,7 +437,8 @@ class JobRunner:
                 response = await kind.run(self._pool, row["tenant"], json.loads(row["params"]))
                 result, status = response.model_dump(mode="json"), "succeeded"
         except asyncio.CancelledError:
-            asyncio.current_task().uncancel()   # so the outcome can still be recorded
+            current = cast("asyncio.Task[Any]", asyncio.current_task())
+            current.uncancel()   # so the outcome can still be recorded
             if self._stopping:
                 error = {"status": 503, "detail": "interrupted: the server was shutting down"}
             else:

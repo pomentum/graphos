@@ -45,6 +45,7 @@ from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from prometheus_client import Counter
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp
 
 log = logging.getLogger(__name__)
 
@@ -138,7 +139,7 @@ def _bearer(request: Request) -> str | None:
 class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(
         self,
-        app,                                                # noqa: ANN001
+        app: ASGIApp,
         *,
         enabled: bool = True,
         rps: int = 100,

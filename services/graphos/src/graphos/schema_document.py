@@ -22,7 +22,7 @@ import json
 from collections.abc import Iterable
 from dataclasses import replace as dc_replace
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import asyncpg
 
@@ -308,7 +308,8 @@ async def warnings(
             label = str(idx["label"])
             if not await row_estimate(conn, after.name, label):
                 continue
-            values = ", ".join(value_sql(str(p)) for p in idx["properties"])
+            props = cast("Iterable[object]", idx["properties"])
+            values = ", ".join(value_sql(str(p)) for p in props)
             if await conn.fetchval(
                 f'SELECT EXISTS (SELECT 1 FROM "{after.name}"."{label}" '
                 f"GROUP BY {values} HAVING count(*) > 1);",
@@ -320,7 +321,7 @@ async def warnings(
         for name, body in after.search_indexes.items():
             if previous.search_indexes.get(name) == body:
                 continue
-            labels = body.get("labels") or ["*"]
+            labels = cast("list[str]", body.get("labels") or ["*"])
             if "*" in labels:
                 labels = list(after.vertex_labels)
             rows = sum([await row_estimate(conn, after.name, str(lab)) or 0 for lab in labels])

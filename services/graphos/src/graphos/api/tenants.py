@@ -32,9 +32,10 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable
 from dataclasses import asdict
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import asyncpg
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
@@ -213,7 +214,7 @@ async def _dry_run(
         validate_display(spec.display, set(after.edge_labels), set(after.vertex_labels))
         async with pool.acquire() as conn:
             for name, body in spec.search_indexes.items():
-                for label in body.get("labels") or ():
+                for label in cast("Iterable[str]", body.get("labels") or ()):
                     if label != "*" and label not in after.vertex_labels:
                         raise ValueError(f"search index {name!r}: {label!r} is not a vertex label")
                 if body.get("analyzer") == "text" and not await conn.fetchval(

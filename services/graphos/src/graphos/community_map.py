@@ -22,7 +22,7 @@ from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from graphos.louvain_compute import EdgeArrays
+from graphos.graph_compute import EdgeArrays
 
 # AGE graph ids carry their label id in the top 16 bits.
 _LABEL_SHIFT = 48
@@ -32,7 +32,7 @@ _LABEL_SHIFT = 48
 class CommunitySummary:
     size: int = 0
     # label id -> members of that label
-    labels: Counter = field(default_factory=Counter)
+    labels: Counter[int] = field(default_factory=Counter)
     hub_gid: int | None = None
     hub_degree: int = 0
     internal_edges: int = 0
@@ -42,7 +42,7 @@ class CommunitySummary:
 class CommunityMapData:
     communities: dict[int, CommunitySummary]
     # (source community, target community, relationship type) -> edges
-    links: Counter
+    links: Counter[tuple[int, int, str]]
 
 
 def summarize(
@@ -67,8 +67,8 @@ def summarize(
         summary.size += 1
         summary.labels[gid >> _LABEL_SHIFT] += 1
 
-    degree: Counter = Counter()
-    links: Counter = Counter()
+    degree: Counter[int] = Counter()
+    links: Counter[tuple[int, int, str]] = Counter()
     rel_names = edges.rel_names
     for src, dst, rel in zip(edges.src, edges.dst, edges.rel, strict=True):
         degree[src] += 1

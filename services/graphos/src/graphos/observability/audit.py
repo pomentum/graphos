@@ -40,6 +40,7 @@ from collections.abc import Awaitable, Callable
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp, Message
 
 from graphos.auth import ACCESS_SCOPE_KEY, MCP_TOOL_KEY, Access
 
@@ -83,10 +84,10 @@ def _extract_tenant_from_path(path: str) -> str | None:
 
 
 class AuditMiddleware(BaseHTTPMiddleware):
-    def __init__(  # noqa: ANN204
-        self, app, *, enabled: bool = True, writes_only: bool = True,  # noqa: ANN001
+    def __init__(
+        self, app: ASGIApp, *, enabled: bool = True, writes_only: bool = True,
         data_reads: bool = False,
-    ):
+    ) -> None:
         super().__init__(app)
         self._enabled = enabled
         self._writes_only = writes_only
@@ -108,7 +109,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
         read_any = False
         receive = request.receive
 
-        async def _receive() -> dict:
+        async def _receive() -> Message:
             nonlocal read_any
             message = await receive()
             chunk = message.get("body", b"") if message.get("type") == "http.request" else b""
@@ -117,7 +118,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 read_any = True
             return message
 
-        request._receive = _receive   # type: ignore[assignment]  # starlette private API
+        request._receive = _receive   # starlette private API
 
         def args_hash() -> str:
             return digest.hexdigest()[:16] if read_any else ""
