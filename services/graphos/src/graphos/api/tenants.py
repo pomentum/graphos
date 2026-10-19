@@ -146,7 +146,7 @@ def _spec_to_info(spec: TenantSpec) -> TenantInfo:
         display=DisplaySpec.model_validate(spec.display),
         property_schema=PropertySchemaSpec.model_validate(spec.property_schema),
         deprecated=DeprecatedSpec.model_validate(spec.deprecated),
-        renames=[SchemaRename.model_validate(r) for r in spec.renames],
+        renames=[SchemaRename.model_validate({"status": "done", **r}) for r in spec.renames],
     )
 
 

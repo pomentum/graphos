@@ -168,6 +168,8 @@ async def test_a_label_is_renamed_in_place(api: httpx.AsyncClient, db_pool: asyn
     assert spec.deprecated["vertex"]["Report"]["replaced_by"] == "Document"
     assert spec.edge_endpoints == (("WROTE", "Person", "Document"),)
     assert spec.renames[-1]["kind"] == "label" and spec.renames[-1]["by"] == "olive"
+    read = await api.get(f"/v1/{NAME}/schema", headers=_as("owner"))
+    assert [(r["from"], r["status"]) for r in read.json()["renames"]] == [("Docu", "done")]
     assert await db_pool.fetchval(
         "SELECT count(*) FROM graphos_meta.node_properties WHERE tenant = $1 AND label = 'Docu';",
         NAME,

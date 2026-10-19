@@ -324,7 +324,10 @@ async def rename(  # noqa: PLR0913 -- one rename's inputs
     """
     check(spec, kind, old, new)
     tenant = spec.name
-    entry = {"kind": kind, "from": old, "to": new, "at": datetime.now(UTC).isoformat(), "by": by}
+    entry = {
+        "kind": kind, "from": old, "to": new, "at": datetime.now(UTC).isoformat(), "by": by,
+        "status": "done",
+    }
     found = RenamePlan(kind=kind, old=old, new=new)
     async with pool.acquire() as conn:
         try:
