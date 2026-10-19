@@ -202,6 +202,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `GRAPHOS_DB_HOST`, `GRAPHOS_DB_PORT`, `GRAPHOS_DB_NAME` | `graphos-db`, `5432`, `graphos` | The PostgreSQL server graphos connects to, and its database |
 | `GRAPHOS_DB_PASSWORD_FILE` | — | Database password (or `GRAPHOS_DB_PASSWORD`) |
 | `GRAPHOS_ADMIN_PASSWORD_FILE` | — | First password of the bootstrap admin `graphos`, read only while graphos has no user (default: `graphos`); must be changed at the first sign-in |
 | `GRAPHOS_LOCAL_ADMIN` | `true` | `false`: the bootstrap admin `graphos` cannot sign in (once admins sign in through SSO) |
@@ -228,6 +229,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | `GRAPHOS_AUDIT_READS` | `exports` | Reads in the audit log besides writes: `exports` (dataset and graph exports, console queries) or `data` (also every read of a tenant's data, with its query string) |
 | `GRAPHOS_RATE_LIMIT_ENABLED` | `false` | Per-user sliding-window rate limit |
 | `GRAPHOS_DB_USER` | `graphos` (compose: `graphos_app`) | Database role; compose uses an unprivileged role created at init |
+| `GRAPHOS_BIND_HOST`, `GRAPHOS_BIND_PORT` | `0.0.0.0`, `8080` | The address and port graphos-api listens on (`python -m graphos`; the image runs it so) |
 | `GRAPHOS_FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxies whose `X-Forwarded-*` headers are trusted |
 | `GRAPHOS_DB_POOL_MAX_SIZE` | `16` | asyncpg pool size per replica |
 | `GRAPHOS_RECONCILE_MAX_EDGES` | `200000` | Most edges an NDJSON `edges:reconcile` body may carry (held in memory, about 1 KB each) |
