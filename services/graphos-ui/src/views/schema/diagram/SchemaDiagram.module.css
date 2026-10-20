@@ -98,6 +98,16 @@
   opacity: 0.32;
 }
 
+/* On its way out: still drawn, outlined dashed and named in italics. */
+.box[data-deprecated] {
+  border-style: dashed;
+  border-left-style: solid;
+}
+
+.box[data-deprecated] .boxName {
+  font-style: italic;
+}
+
 .box[data-selected] {
   border-color: var(--gx-accent);
   box-shadow: 0 0 0 2px var(--gx-accent-soft);
@@ -295,6 +305,11 @@
 .caption[data-status="open"] {
   border-style: dashed;
   color: var(--gx-muted);
+}
+
+.caption[data-deprecated] {
+  border-style: dashed;
+  font-style: italic;
 }
 
 .caption:focus-visible {

@@ -4,6 +4,7 @@ import {
   buildDiagram,
   familyColours,
   focusOf,
+  isDeprecatedLine,
   freeGeometry,
   layoutKey,
   linkCaption,
@@ -248,5 +249,16 @@ describe("schema diagram", () => {
     const layout = await layoutDiagram(diagram, new ELK());
     expect(layout.routes).toEqual({});
     expect(Object.keys(layout.positions)).toHaveLength(45);
+  });
+
+  it("marks a line deprecated only when every type on it is", () => {
+    const diagram = buildDiagram(schema, map);
+    const line = diagram.links.find((l) => l.src === "File" && l.dst === "Function")!;
+    const types = line.types.map((x) => x.type);
+    expect(types.length).toBeGreaterThan(1);
+    expect(isDeprecatedLine(line, new Set(types))).toBe(true);
+    expect(isDeprecatedLine(line, new Set(types.slice(1)))).toBe(false);
+    const inherits = diagram.links.find((l) => l.kind === "inherits");
+    if (inherits) expect(isDeprecatedLine(inherits, new Set(types))).toBe(false);
   });
 });

@@ -15,6 +15,7 @@ import { createContext, useContext } from "react";
 import { useTranslation } from "react-i18next";
 import {
   freeGeometry,
+  isDeprecatedLine,
   routeMiddle,
   routePath,
   type Box,
@@ -33,6 +34,8 @@ export interface DiagramState {
   /** Drawing a relationship: dragging from a box draws a line. */
   drawing: boolean;
   colours: Map<string, string>;
+  /** The labels and relationship types marked deprecated. */
+  deprecated: { vertex: Set<string>; edge: Set<string> };
   select: (selection: Selection) => void;
 }
 
@@ -41,6 +44,7 @@ export const DiagramContext = createContext<DiagramState>({
   selection: null,
   drawing: false,
   colours: new Map(),
+  deprecated: { vertex: new Set(), edge: new Set() },
   select: () => undefined,
 });
 
@@ -78,6 +82,7 @@ export function LabelBox({ id, data }: NodeProps<LabelNode>) {
       data-faded={faded || undefined}
       data-selected={selected || undefined}
       data-target={target || undefined}
+      data-deprecated={state.deprecated.vertex.has(box.label) || undefined}
       style={colour ? { borderLeftColor: colour } : undefined}
       title={box.label}
     >
@@ -128,6 +133,7 @@ export function SchemaLine({ id, source, target, data }: EdgeProps<LineEdge>) {
   const lit = selected || (state.focus?.links.has(id) ?? false);
   const faded = state.focus !== null && !lit;
   const inherits = link.kind === "inherits";
+  const deprecated = isDeprecatedLine(link, state.deprecated.edge);
   const marker = inherits
     ? lit
       ? "gx-inherits-lit"
@@ -160,6 +166,7 @@ export function SchemaLine({ id, source, target, data }: EdgeProps<LineEdge>) {
             data-lit={lit || undefined}
             data-faded={faded || undefined}
             data-status={link.status}
+            data-deprecated={deprecated || undefined}
             style={{ transform: `translate(-50%, -50%) translate(${at.x}px, ${at.y}px)` }}
             onClick={() => state.select({ kind: "link", id })}
           >

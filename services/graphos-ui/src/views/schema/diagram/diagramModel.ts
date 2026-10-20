@@ -358,6 +358,11 @@ export type Selection = { kind: "label"; id: string } | { kind: "link"; id: stri
  * labels at their other ends; a line and its two labels. Null: nothing is
  * selected, everything is drawn as usual.
  */
+/** A relationship line whose every type is on its way out (`deprecated`: the deprecated types). */
+export function isDeprecatedLine(link: Link, deprecated: Set<string>): boolean {
+  return link.kind === "relationship" && link.types.length > 0 && link.types.every((x) => deprecated.has(x.type));
+}
+
 export function focusOf(diagram: Diagram, selection: Selection): { labels: Set<string>; links: Set<string> } | null {
   if (!selection) return null;
   if (selection.kind === "link") {
