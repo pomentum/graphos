@@ -40,6 +40,7 @@ import "@xyflow/react/dist/style.css";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { GraphMap, TenantSchema } from "../../../api/types";
+import { isDeprecated } from "../../../lib/deprecation";
 import { formatCount } from "../../../lib/time";
 import { labelStyles, styledColors } from "../../../theme/labelStyles";
 import { usePalette } from "../../../theme/usePalette";
@@ -244,12 +245,20 @@ function DiagramCanvas({
   const meta = useCallback(
     (box: Box) =>
       [
+        isDeprecated(schema, "vertex", box.label) ? t("views.schema.changes.deprecated") : null,
         box.count === null ? null : text.nodes(box.count),
         properties.size ? t("views.schema.labels.properties", { count: properties.get(box.label)?.length ?? 0 }) : null,
       ]
         .filter(Boolean)
         .join(" · "),
-    [t, text, properties],
+    [t, text, properties, schema],
+  );
+  const deprecated = useMemo(
+    () => ({
+      vertex: new Set(schema.vertex_labels.filter((label) => isDeprecated(schema, "vertex", label))),
+      edge: new Set(schema.edge_labels.filter((type) => isDeprecated(schema, "edge", type))),
+    }),
+    [schema],
   );
   const diagram = useMemo(() => buildDiagram(schema, map, { hideEmpty, text }), [schema, map, hideEmpty, text]);
   // Block colours by size, a declared colour first; a label's own declared colour on its box.
@@ -415,8 +424,8 @@ function DiagramCanvas({
   );
 
   const state = useMemo<DiagramState>(
-    () => ({ focus: focusOf(diagram, selection), selection, drawing, colours, select: setSelection }),
-    [diagram, selection, drawing, colours],
+    () => ({ focus: focusOf(diagram, selection), selection, drawing, colours, deprecated, select: setSelection }),
+    [diagram, selection, drawing, colours, deprecated],
   );
   const selectionShown =
     selection &&

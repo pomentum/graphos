@@ -6,6 +6,7 @@ import { Link as RouterLink, useNavigate } from "react-router-dom";
 import { useWorkspace } from "../../../graph/WorkspaceProvider";
 import { useAddToSchema, useRemoveEdgeEndpoint, useSchema } from "../../../data/queries";
 import { entryOf } from "../../../lib/propertySchema";
+import { DeprecatedBadge, DeprecationLines, NameActions } from "../NameChanges";
 import { EdgeProperties, SchemaProperties } from "../properties/SchemaProperties";
 
 import { formatCount } from "../../../lib/time";
@@ -27,7 +28,8 @@ export interface DiagramPanelProps {
  * children, properties, its lines in and out, and the ways to its nodes.
  * A line: the labels it joins and every relationship type on it, each with
  * how it stands against the declarations; administrators declare a pair
- * or remove a declared one here.
+ * or remove a declared one here. A label, and each type on a line, can be
+ * renamed, deprecated and, once deprecated and empty, dropped here too.
  */
 export function DiagramPanel({ diagram, selection, properties, onSelect }: DiagramPanelProps) {
   const { t } = useTranslation();
@@ -91,6 +93,7 @@ function LabelDetail({
           </Text>
         ) : null}
         <Group gap={6} mt={4}>
+          {schema.data ? <DeprecatedBadge schema={schema.data} part="vertex" name={label} /> : null}
           {box.count !== null ? (
             <Badge variant="light" size="sm" radius="sm" tt="none">
               {t("common.counts.nodes", { count: box.count, formatted: formatCount(box.count) })}
@@ -128,6 +131,14 @@ function LabelDetail({
             </Button>
           ) : null}
         </Group>
+        {schema.data ? (
+          <>
+            <Group gap={2} mt={6}>
+              <NameActions schema={schema.data} part="vertex" name={label} rows={box.count} carried={props} />
+            </Group>
+            <DeprecationLines schema={schema.data} part="vertex" name={label} />
+          </>
+        ) : null}
       </div>
 
       {children.length ? (
@@ -201,15 +212,24 @@ function LinkDetail({ diagram, id, onSelect }: { diagram: Diagram; id: string; o
       </Group>
       <Section title={t("views.schema.diagram.panel.types")}>
         {link.types.map((type) => (
-          <TypeRow key={type.type} link={link} type={type} />
+          <TypeRow key={type.type} link={link} type={type} rows={edgesOf(diagram, type.type)} />
         ))}
       </Section>
     </Stack>
   );
 }
 
-/** One relationship type on a line: its edges, its status, and (for maintainers) declare or remove. */
-function TypeRow({ link, type }: { link: Link; type: LinkType }) {
+/** A relationship type's edges on every line of the diagram; null while any count is estimated. */
+function edgesOf(diagram: Diagram, type: string): number | null {
+  const counts = diagram.links.flatMap((l) => l.types.filter((x) => x.type === type));
+  return counts.some((x) => x.estimated) ? null : counts.reduce((sum, x) => sum + x.count, 0);
+}
+
+/**
+ * One relationship type on a line: its edges, its status, (for maintainers)
+ * declare or remove, and rename, deprecate or drop the type itself.
+ */
+function TypeRow({ link, type, rows }: { link: Link; type: LinkType; rows: number | null }) {
   const { t } = useTranslation();
   const { canMaintain } = useTenantSession();
   const schema = useSchema();
@@ -231,6 +251,7 @@ function TypeRow({ link, type }: { link: Link; type: LinkType }) {
         <Text size="sm" className={classes.grow} truncate>
           {type.type}
         </Text>
+        {schema.data ? <DeprecatedBadge schema={schema.data} part="edge" name={type.type} /> : null}
         <Text size="xs" c="dimmed">
           {type.count === 0
             ? t("views.schema.diagram.noEdgesYet")
@@ -280,6 +301,7 @@ function TypeRow({ link, type }: { link: Link; type: LinkType }) {
           {description}
         </Text>
       ) : null}
+      {schema.data ? <DeprecationLines schema={schema.data} part="edge" name={type.type} /> : null}
       <Button
         size="compact-xs"
         variant="subtle"
@@ -298,6 +320,7 @@ function TypeRow({ link, type }: { link: Link; type: LinkType }) {
               carried={carried}
               compact
               showDescription={false}
+              actions={<NameActions schema={schema.data!} part="edge" name={type.type} rows={rows} carried={carried} />}
             />
           )}
         </EdgeProperties>

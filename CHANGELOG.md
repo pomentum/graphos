@@ -52,7 +52,8 @@ deprecated, and a deprecated label or type dropped once it is empty.
   its properties, after the dry run's report), Deprecate (with what replaces it and a note, or
   taken back) and, once deprecated and empty, Drop. Rows show a "deprecated" mark; a Renames
   section lists the history, a running property rename with its progress and a failed one with
-  Resume.
+  Resume. On the diagram, deprecated labels and lines are outlined dashed, and the side panel of a
+  label or of each type on a line has the same Rename, Deprecate and Drop.
 
 ### Changed
 

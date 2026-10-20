@@ -667,7 +667,8 @@ In the Python client: `rename_label`, `rename_edge_type`, `rename_property` (wai
 `wait_for_job(result.job_id)`), `drop_label`, and `register_tenant(deprecated=…)`. In the web UI,
 an open label or relationship type on the Schema page has Rename (with the dry run first),
 Deprecate and, once deprecated and empty, Drop; a Renames section shows the history and a running
-property rename's progress.
+property rename's progress. On the diagram, a deprecated label's box (and a line whose types are
+all deprecated) is outlined dashed, and the side panel of a label or a line has the same actions.
 
 ---
 
