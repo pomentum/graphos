@@ -4,7 +4,7 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.13.2 — 2026-10-20
 
 Schema evolution (ADR-0009): labels, relationship types and properties can be renamed and
 deprecated, and a deprecated label or type dropped once it is empty.
@@ -57,8 +57,14 @@ deprecated, and a deprecated label or type dropped once it is empty.
 
 ### Changed
 
-- **Schema files are version 3 when they carry `deprecated`.** This version reads 1 to 3; 0.13.x
-  refuses version 3. The rename history is not in the file: it belongs to the tenant.
+- **Schema files are version 3 when they carry `deprecated`.** This version reads 1 to 3; 0.13.1
+  and earlier refuse version 3. The rename history is not in the file: it belongs to the tenant.
+
+### Upgrading
+
+Nothing to do. At start the API adds a `progress` column and a unique index (one property rename
+per tenant) to `graphos_meta.jobs`; both are quick and idempotent. During a rolling upgrade, a
+0.13.1 replica does not know the `rename_property` job kind, so only an admin can cancel one there.
 
 ## 0.13.1 — 2026-10-19
 
