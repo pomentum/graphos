@@ -179,7 +179,7 @@ def test_a_renamed_label_is_renamed_everywhere_the_spec_names_it() -> None:
     assert after.deprecated["vertex"]["Servce"]["replaced_by"] == "System"
     assert after.renames[-1] == entry
     assert set(schema_rename.spec_parts_named(spec, "label", "Service")) == {
-        "property_indexes", "search_indexes", "resolve_rules", "display",
+        "property_indexes", "search_indexes", "resolve_rules", "display", "deprecated",
     }
 
 
