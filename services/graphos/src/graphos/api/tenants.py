@@ -39,15 +39,17 @@ from typing import Annotated, Any, cast
 
 import asyncpg
 from fastapi import APIRouter, HTTPException, Path, Query, Request, status
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
 from graphos import (
     by_entry,
     declared,
     lifecycle,
+    renames,
     schema_breaking,
     schema_changes,
     schema_document,
+    schema_rename,
     sync,
 )
 from graphos.api.cache import LRU
@@ -76,11 +78,16 @@ from graphos.bootstrap import (
 from graphos.contracts.property_schema import PropertySchemaSpec
 from graphos.contracts.tenants import (
     BreakingChange,
+    DeprecatedSpec,
     DisplaySpec,
     GeneratedColumnSpec,
     PropertyIndexSpec,
     RegisterDryRunResponse,
     RegisterResponse,
+    SchemaDropResponse,
+    SchemaRename,
+    SchemaRenameRequest,
+    SchemaRenameResponse,
     TenantInfo,
     TenantList,
     TenantSpecBody,
@@ -106,7 +113,7 @@ _SCHEMA_DOCUMENT = {
             "description": "What the file is; a registration checks it and ignores it.",
             "properties": {
                 "format": {"type": "string", "enum": [schema_document.FORMAT]},
-                "version": {"type": "integer", "enum": [1, 2]},
+                "version": {"type": "integer", "enum": [1, 2, 3]},
                 "graphos": {"type": "string", "description": "The exporting graphos version."},
                 "tenant": {"type": "string"},
                 "exported_at": {"type": "string", "format": "date-time"},
@@ -138,6 +145,8 @@ def _spec_to_info(spec: TenantSpec) -> TenantInfo:
         search_indexes=dict(spec.search_indexes),
         display=DisplaySpec.model_validate(spec.display),
         property_schema=PropertySchemaSpec.model_validate(spec.property_schema),
+        deprecated=DeprecatedSpec.model_validate(spec.deprecated),
+        renames=[SchemaRename.model_validate({"status": "done", **r}) for r in spec.renames],
     )
 
 
@@ -171,6 +180,32 @@ def _display(body: TenantSpecBody) -> tuple[dict[str, Any], by_entry.Removed]:
     return by_entry.split(body.display, lambda e: e.model_dump(exclude_none=True))
 
 
+def _deprecated(body: TenantSpecBody) -> tuple[dict[str, Any], by_entry.Removed]:
+    """The deprecations a registration declares, and those it removes."""
+    return by_entry.split(
+        body.deprecated, lambda e: e.model_dump(exclude_none=True, exclude_defaults=True),
+    )
+
+
+def _validate_deprecated(
+    deprecated: dict[str, Any], *, vertex_labels: set[str], edge_labels: set[str],
+) -> None:
+    """Deprecations name the tenant's labels and types, and what replaces a label
+    or type is one of them too."""
+    for part, known, kind in (
+        ("vertex", vertex_labels, "vertex label"), ("edge", edge_labels, "edge label"),
+    ):
+        for name, entry in (deprecated.get(part) or {}).items():
+            if name not in known:
+                raise ValueError(f"deprecated: {name!r} is not a {kind} of the tenant")
+            replacement = entry.get("replaced_by")
+            if replacement is not None and replacement not in known:
+                raise ValueError(
+                    f"deprecated: {name!r} is replaced by {replacement!r}, "
+                    f"not a {kind} of the tenant"
+                )
+
+
 def _validate_declared(
     body: TenantSpecBody, known: TenantSpec | None, vertex_labels: set[str],
 ) -> None:
@@ -202,12 +237,13 @@ async def _dry_run(
     *, replace: bool, endpoints_stated: bool, meta_removed: tuple[str, ...] = (),
     display_removed: tuple[tuple[str, str], ...] = (),
     schema_removed: tuple[tuple[str, str], ...] = (),
+    deprecated_removed: tuple[tuple[str, str], ...] = (),
 ) -> RegisterDryRunResponse:
     """What registering ``spec`` would change, checked as bootstrap would."""
     after = schema_document.merged(
         previous, spec, replace=replace, endpoints_stated=endpoints_stated,
         meta_removed=meta_removed, display_removed=display_removed,
-        schema_removed=schema_removed,
+        schema_removed=schema_removed, deprecated_removed=deprecated_removed,
     )
     try:
         _validate_label_hierarchy(spec.label_hierarchy, spec.vertex_labels)
@@ -441,6 +477,11 @@ async def register(
     known = registered_tenants().get(body.name)
     display, display_removed = _display(body)
     property_schema, schema_removed = _property_schema(body)
+    deprecated, deprecated_removed = _deprecated(body)
+    if known is not None:
+        # A name renamed away is not created again by an old client registering it.
+        for name in (*body.vertex_labels, *edge_label_names):
+            renames.refuse_renamed(known, name)
     try:
         vertex_labels = {*body.vertex_labels, *(known.vertex_labels if known else ())}
         edge_labels = {*edge_label_names, *(known.edge_labels if known else ())}
@@ -463,6 +504,11 @@ async def register(
             ),
             replace=force_shrink,
         )
+        _validate_deprecated(
+            deprecated,
+            vertex_labels=set(body.vertex_labels) if force_shrink else vertex_labels,
+            edge_labels=set(edge_label_names) if force_shrink else edge_labels,
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc),
@@ -482,6 +528,7 @@ async def register(
         search_indexes={k: v.model_dump() for k, v in body.search_indexes.items()},
         display=display,
         property_schema=property_schema,
+        deprecated=deprecated,
         edge_endpoints=edge_endpoints,
         strict_endpoints=body.strict_endpoints,
     )
@@ -504,7 +551,7 @@ async def register(
             pool, known, spec, replace=force_shrink,
             endpoints_stated="edge_endpoints" in body.model_fields_set,
             meta_removed=meta_removed, display_removed=display_removed,
-            schema_removed=schema_removed,
+            schema_removed=schema_removed, deprecated_removed=deprecated_removed,
         )
         return result.model_copy(update={"exists": previous is not None, "restores": restores})
     if restores:
@@ -538,7 +585,7 @@ async def register(
     else:
         await persist_spec(
             pool, spec, meta_removed=meta_removed, display_removed=display_removed,
-            schema_removed=schema_removed,
+            schema_removed=schema_removed, deprecated_removed=deprecated_removed,
         )
     # Persisting merges with the stored spec (unless force_shrink); keep the
     # merged result in memory so a partial re-registration never hides labels
@@ -591,6 +638,157 @@ async def register(
         strict_endpoints=bool(spec.strict_endpoints),
         n_property_definitions=definitions_count(spec.property_schema),
         property_mode=spec.property_schema.get("mode", "off"),
+    )
+
+
+@router.post(
+    "/{name}/schema:rename",
+    summary="Rename a vertex label, an edge type or a property",
+    response_model=SchemaRenameResponse, response_model_by_alias=True,
+    description=(
+        "`owner` on the tenant (it changes what every consumer of the tenant sees).\n\n"
+        "**A vertex label or edge type** is renamed in place, in one transaction: its rows, "
+        "their ids and the edges between them stay as they are, and everything graphos keeps "
+        "that names it (property definitions, display, declared pairs, indexes, resolve "
+        "rules, label hierarchy, deprecations) is renamed with it. Afterwards a write or a "
+        "read naming the old name answers 409 saying where it went, and registering it again "
+        "is refused; Cypher naming it returns nothing, so the answer lists the saved queries "
+        "that name it (not rewritten). One `schema` change record.\n\n"
+        "**A property** (`on`: its vertex label, with the labels below it, or edge type) is "
+        "renamed by a background job (202, `Location: /v1/jobs/{id}`, progress on the job): "
+        "rows are rewritten in batches (each row a new revision, one `patch` record per "
+        "batch); meanwhile writes naming the old name carry a warning, afterwards they are "
+        "refused. Its definitions, property and search indexes and styles follow. Refused "
+        "when rows have both names, or a generated column, a resolve rule or a search index "
+        "over other labels uses it. A failed or cancelled rename resumes when asked again.\n\n"
+        "With `dry_run=true`, what it would change, writing nothing."
+    ),
+    responses={
+        202: {"model": SchemaRenameResponse,
+              "description": "A property rename: queued as a job (`job_id`, `Location`)."},
+        400: {"description": "Not a label, type or property the tenant can rename this way: "
+                             "the new name is taken or invalid, the names are the same, or "
+                             "something still uses the property (see the description)."},
+        404: {"description": "The tenant is not registered."},
+        409: {"description": "A job runs on the tenant (a property rename: another one), a "
+                             "reconcile holds the edge type, or its tables stay in use (5 s)."},
+    },
+)
+async def rename_schema_name(
+    name: TenantName,
+    body: SchemaRenameRequest,
+    request: Request,
+    principal: OwnerPrincipal,
+    dry_run: Annotated[
+        bool, Query(description="Answer what the rename would change, writing nothing."),
+    ] = False,
+) -> SchemaRenameResponse | JSONResponse:
+    require_level(principal, name, Level.OWNER)
+    spec = registered_tenants().get(name)
+    if spec is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"tenant '{name}' is not registered",
+        )
+    pool = request.app.state.pool
+    if body.kind == "property":
+        return await _rename_property(request, name, spec, body, dry_run=dry_run,
+                                      by=principal.consumer)
+    try:
+        if dry_run:
+            done = await schema_rename.plan(pool, spec, body.kind, body.from_, body.to)
+        else:
+            done = await schema_rename.rename(
+                pool, spec, body.kind, body.from_, body.to, by=principal.consumer,
+                vertex_graphid_indexes=request.app.state.settings.vertex_graphid_indexes,
+            )
+    except schema_rename.RenameError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except lifecycle.TenantBusyError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return SchemaRenameResponse(
+        tenant=name, kind=body.kind, from_=body.from_, to=body.to, dry_run=dry_run,
+        spec_parts=done.spec_parts, indexes=[list(pair) for pair in done.indexes],
+        endpoints=done.endpoints, rows=done.rows, saved_queries=done.saved_queries,
+    )
+
+
+async def _rename_property(
+    request: Request, name: str, spec: TenantSpec, body: SchemaRenameRequest,
+    *, dry_run: bool, by: str | None,
+) -> SchemaRenameResponse | JSONResponse:
+    """A property rename: its plan, or its job queued (202)."""
+    on = cast("str", body.on)
+    pool = request.app.state.pool
+    try:
+        found = await schema_rename.plan_property(pool, spec, on, body.from_, body.to)
+        if dry_run:
+            return SchemaRenameResponse(
+                tenant=name, kind="property", from_=body.from_, to=body.to, on=on,
+                dry_run=True, spec_parts=found.spec_parts, rows=found.rows,
+                saved_queries=found.saved_queries, warnings=found.warnings,
+            )
+        job_id = await schema_rename.start_property(pool, name, on, body.from_, body.to, by=by)
+    except schema_rename.RenameError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except lifecycle.TenantBusyError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    runner = getattr(request.app.state, "job_runner", None)
+    if runner is not None:
+        runner.notify()
+    answer = SchemaRenameResponse(
+        tenant=name, kind="property", from_=body.from_, to=body.to, on=on,
+        spec_parts=found.spec_parts, rows=found.rows, saved_queries=found.saved_queries,
+        job_id=job_id, warnings=found.warnings,
+    )
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content=answer.model_dump(mode="json", by_alias=True),
+        headers={"Location": f"/v1/jobs/{job_id}", "Retry-After": "2"},
+    )
+
+
+@router.delete(
+    "/{name}/labels/{label}",
+    summary="Drop a deprecated vertex label or edge type that has no rows",
+    response_model=SchemaDropResponse,
+    description=(
+        "`owner` on the tenant. Drops a vertex label or edge type marked deprecated, only when "
+        "it has no rows: its table and indexes, and everything graphos keeps that names it "
+        "(property definitions, display, declared pairs, property indexes, generated columns, "
+        "search indexes over it alone, its resolve rule), in one transaction; one `schema` "
+        "change record. Refused while a label inherits from it, a resolve rule requires it as "
+        "a destination, or a deprecation names it as the replacement. The answer lists the "
+        "saved queries that name it (not rewritten)."
+    ),
+    responses={
+        400: {"description": "Not a label or type of the tenant, not deprecated, it has rows, "
+                             "or something still needs it (see the description)."},
+        404: {"description": "The tenant is not registered."},
+        409: {"description": "A job runs on the tenant, a reconcile holds the edge type, or "
+                             "its tables stay in use (5 s)."},
+    },
+)
+async def drop_schema_label(
+    name: TenantName,
+    label: Annotated[str, Path(description="The vertex label or edge type.")],
+    request: Request,
+    principal: OwnerPrincipal,
+) -> SchemaDropResponse:
+    require_level(principal, name, Level.OWNER)
+    spec = registered_tenants().get(name)
+    if spec is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"tenant '{name}' is not registered",
+        )
+    try:
+        saved = await schema_rename.drop_label(request.app.state.pool, name, label)
+    except schema_rename.RenameError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except lifecycle.TenantBusyError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return SchemaDropResponse(
+        tenant=name, kind="label" if label in spec.vertex_labels else "edge_type", name=label,
+        saved_queries=saved,
     )
 
 

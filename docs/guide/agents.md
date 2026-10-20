@@ -121,7 +121,7 @@ as the caller, so it answers exactly what the route does (§ references are to [
 | Tool | What it reads | Route |
 |---|---|---|
 | `list_tenants` | the tenants the caller may read, with its level | `GET /v1/me` |
-| `get_schema` | labels, counts, properties and their real values, label pairs, search indexes, saved queries, as compact text (`format: json` for the structured form) | `GET /v1/{t}/schema/summary?format=text` |
+| `get_schema` | labels, counts, properties and their real values, label pairs, search indexes, saved queries, deprecated names with what replaces them and the latest renames, as compact text (`format: json` for the structured form) | `GET /v1/{t}/schema/summary?format=text` |
 | `get_graph_map` | every label with its node count, every label pair per edge type with its count | `GET …/graph/map` |
 | `get_property_definitions` | the declared property definitions and their modes | `GET …/graph/properties` |
 | `get_graph_stats` | counts per label, and whether metrics and communities are current | `GET …/graph/stats` |

@@ -22,7 +22,14 @@ from graphos import preferences
 from graphos.auth import ReadPrincipal, Tenant
 from graphos.bootstrap import registered_tenants
 from graphos.contracts.property_schema import PropertySchemaSpec
-from graphos.contracts.tenants import DisplaySpec, EdgeEndpointSpec, MeResponse, TenantSchema
+from graphos.contracts.tenants import (
+    DeprecatedSpec,
+    DisplaySpec,
+    EdgeEndpointSpec,
+    MeResponse,
+    SchemaRename,
+    TenantSchema,
+)
 
 log = logging.getLogger(__name__)
 
@@ -140,6 +147,8 @@ async def tenant_schema(tenant: Tenant, principal: ReadPrincipal) -> TenantSchem
         strict_endpoints=bool(spec.strict_endpoints),
         display=DisplaySpec.model_validate(spec.display),
         property_schema=PropertySchemaSpec.model_validate(spec.property_schema),
+        deprecated=DeprecatedSpec.model_validate(spec.deprecated),
+        renames=[SchemaRename.model_validate({"status": "done", **r}) for r in spec.renames],
     )
 
 

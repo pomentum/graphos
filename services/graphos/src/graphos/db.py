@@ -307,6 +307,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_graph_job
     WHERE kind IN ('recompute_communities', 'compute_metrics')
       AND status IN ('queued', 'running');
 
+-- How much of a long job is done (graphos.jobs.report_progress): {done, total}.
+ALTER TABLE graphos_meta.jobs ADD COLUMN IF NOT EXISTS progress jsonb;
+
+-- At most one property rename queued or running per tenant (graphos.schema_rename).
+CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_rename
+    ON graphos_meta.jobs (tenant)
+    WHERE kind = 'rename_property' AND status IN ('queued', 'running');
+
 -- The change feed (``graphos.changes``): one row per write, inserted in the
 -- write's own transaction.  A record's position is (txid, seq); readers see
 -- only rows of transactions older than every one still running, so no

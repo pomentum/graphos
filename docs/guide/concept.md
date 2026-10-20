@@ -154,8 +154,18 @@ existing one; §2.5.3) carries the tenant spec:
   `strict_endpoints` (the label pairs each edge type joins, and whether edge
   writes outside them are refused), `display` (label styles for the web UI)
   and `property_schema` (property definitions and how writes are held to
-  them: `off`, `warn` or `strict`, §4); see
+  them: `off`, `warn` or `strict`, §4), and `deprecated` (names on their
+  way out, merged by entry as `display` is); see
   [features.md §2](features.md#2-tenant-model).
+- Names change outside registration (ADR-0009, `schema_rename.py`): a label
+  or edge type is renamed in place, in one transaction under the tenant's
+  lock (AGE's `ag_label` row, the table, its sequence and the `id` default,
+  graphos's indexes, every `graphos_meta` row naming it, the spec), so its
+  rows, ids, edges and inheritance stay; a property is renamed by a
+  `rename_property` job (§2.6). The spec keeps every rename in `renames`,
+  and a name renamed away answers 409 with where it went, on writes and on
+  registration. A deprecated label or type with no rows is dropped with
+  `DELETE /v1/tenants/{name}/labels/{label}`.
 - `?dry_run=true` checks the spec as a registration would and answers what it
   would change and cost, and what would stop working (`breaking`,
   `schema_breaking.py`: compared on the compiled property rules, so `*` and the
@@ -419,11 +429,13 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `GET /v1/tenants/{name}/spec` | The whole schema as a registration body (the schema file) | `maintain` |
 | `GET /v1/me` | The caller: user, kind, `admin`, `must_change`, its tenants, its level on each, `create_tenants` patterns, its web UI preferences | signed in |
 | `PATCH /v1/me/preferences` | Change one's web UI preferences (`theme`, `last_tenant`) | signed in |
-| `GET /v1/{tenant}/schema/summary[?format=text]` | The schema as a model needs it: labels with counts and properties (declared type, rows, distinct values, the values when few), label pairs per edge type, search indexes, saved queries; cached per tenant | tenant |
+| `GET /v1/{tenant}/schema/summary[?format=text]` | The schema as a model needs it: labels with counts and properties (declared type, rows, distinct values, the values when few), label pairs per edge type, search indexes, saved queries, deprecated names and the latest renames; cached per tenant | tenant |
 | `/oauth/authorize`, `/oauth/login`, `/oauth/token`, `/oauth/register`, `/oauth/revoke`, `/.well-known/oauth-authorization-server` | Without single sign-on, graphos signs people in for MCP clients: registration (public clients, loopback callbacks), a sign-in page, single-use codes, graphos sessions as refresh tokens (`graphos.oauth`, ADR-0008) | none (the page takes a password) |
 | `/mcp` (MCP, on unless `GRAPHOS_MCP=false`) | Read tools for agents over Streamable HTTP, each running the REST route it wraps as the caller (an in-process token lent for the call), audited with the tool's name; the same tokens as the REST API ([agents.md](agents.md), ADR-0008) | per tool |
-| `GET /v1/{tenant}/schema` | Labels, label hierarchy, search indexes, rule-derived edge labels, declared edge endpoints and `strict_endpoints`, `display` and `property_schema` as declared (no DDL, rules or `meta`) | tenant |
+| `GET /v1/{tenant}/schema` | Labels, label hierarchy, search indexes, rule-derived edge labels, declared edge endpoints and `strict_endpoints`, `display`, `property_schema` and `deprecated` as declared, and the renames (no DDL, rules or `meta`) | tenant |
 | `DELETE /v1/tenants/{name}/edge_endpoints` | Remove one declared pair | `maintain` |
+| `POST /v1/tenants/{name}/schema:rename[?dry_run=true]` | Rename a label or edge type in place, or a property by a job (202); a dry run answers what it would change | `owner` |
+| `DELETE /v1/tenants/{name}/labels/{label}` | Drop a deprecated label or edge type that has no rows | `owner` |
 | `DELETE /v1/tenants/{name}[?drop_data=true]` | Unregister, keeping the data; or delete with the data (see below) | `owner` (an orphan: admin) |
 | `POST /v1/tenants/{name}/restore` | Register an unregistered tenant again, as it was | `owner` |
 | **Sign-in, users and grants** (§2.5.3) | | |
@@ -972,7 +984,8 @@ then inserts a row into `graphos_meta.jobs` and answers 202 with the job and
   at once; otherwise the runner looks every `GRAPHOS_JOB_POLL_S` (5 s).
 - **Same code as the synchronous call.** The kinds are declared in `app.py`
   (`recompute_communities`, `compute_metrics`, `resolve_edges`,
-  `check_properties`, `vacuum`): each calls the endpoint's own `run_*` function, so a job's `result` is
+  `check_properties`, `vacuum`, and `rename_property`, which only runs as a
+  job and reports `progress`): each calls the endpoint's own `run_*` function, so a job's `result` is
   exactly the synchronous response body, and a failure stores the HTTP status
   and detail the synchronous call would have returned (`{"status", "detail"}`;
   unexpected errors store 500 and a generic detail, the traceback goes to the
@@ -998,6 +1011,11 @@ then inserts a row into `graphos_meta.jobs` and answers 202 with the job and
   partial unique index on `graphos_meta.jobs (tenant) WHERE kind IN
   ('recompute_communities', 'compute_metrics') AND status IN ('queued', 'running')`;
   a per-tenant advisory lock, shared by both, still guards the synchronous path.
+- **One property rename per tenant**: the same kind of index on `kind =
+  'rename_property'` (`jobs_one_active_rename`); the job row is inserted in
+  the transaction that marks the rename running, so it never starts first.
+  A label or edge type rename, and a drop, are refused while any job is
+  queued or running on the tenant.
 - **Retention:** finished jobs are deleted after `GRAPHOS_JOB_RETENTION_H`
   (168 h).
 

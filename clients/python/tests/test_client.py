@@ -24,6 +24,7 @@ from graphos_client import (
     EdgeUpsert,
     GraphosClient,
     GraphosError,
+    Job,
     NodeRef,
     NodesUpsertResponse,
     NodeUpsert,
@@ -1455,3 +1456,90 @@ async def test_query_parameters_reach_the_server() -> None:
     assert catalogue.params.get_list("property") == ["tags", "name"]
     assert catalogue.params["refresh"] == "true"
     assert (snapshot.params["mode"], snapshot.params["properties"]) == ("empty", "report")
+
+
+@pytest.mark.asyncio
+async def test_renames_and_drops_build_their_requests() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.method == "DELETE":
+            return httpx.Response(200, json={"tenant": "demo", "kind": "label", "name": "Old",
+                                             "saved_queries": ["q"]})
+        body = json.loads(request.content)
+        answer = {"tenant": "demo", "kind": body["kind"], "from": body["from"],
+                  "to": body["to"], "on": body.get("on"),
+                  "dry_run": "dry_run" in request.url.params, "rows": 3}
+        if body["kind"] == "property":
+            return httpx.Response(202, json={**answer, "job_id": "j1"})
+        return httpx.Response(200, json={**answer, "indexes": [["Docu_x", "Document_x"]]})
+
+    cli = GraphosClient(base_url="http://x", tenant="demo", transport=_mock_transport(handler))
+    plan = await cli.rename_label("Docu", "Document", dry_run=True)
+    assert plan.dry_run and plan.from_ == "Docu" and plan.indexes == [["Docu_x", "Document_x"]]
+    done = await cli.rename_edge_type("WROTE", "AUTHORED")
+    assert done.kind == "edge_type" and not done.dry_run
+    queued = await cli.rename_property("Person", "mail", "email")
+    assert queued.job_id == "j1" and queued.on == "Person"
+    dropped = await cli.drop_label("Old")
+    assert dropped.saved_queries == ["q"]
+    assert [(r.method, r.url.path) for r in seen] == [
+        ("POST", "/v1/tenants/demo/schema:rename"),
+        ("POST", "/v1/tenants/demo/schema:rename"),
+        ("POST", "/v1/tenants/demo/schema:rename"),
+        ("DELETE", "/v1/tenants/demo/labels/Old"),
+    ]
+    assert json.loads(seen[2].content) == {"kind": "property", "on": "Person",
+                                           "from": "mail", "to": "email"}
+    await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_a_rename_is_never_retried() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(503, json={"detail": "down"})
+
+    cli = GraphosClient(base_url="http://x", tenant="demo", transport=_mock_transport(handler),
+                        retries=3, retry_backoff_s=0)
+    with pytest.raises(GraphosError):
+        await cli.rename_label("A", "B")
+    assert len(seen) == 1
+    await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_deprecated_is_registered_and_read_back() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.method == "POST":
+            return httpx.Response(200, json={"tenant": "demo"})
+        return httpx.Response(200, json={
+            "name": "demo", "vertex_labels": ["Document"],
+            "deprecated": {"vertex": {"Document": {"properties": {"mail": {}}}}},
+            "renames": [{"kind": "label", "from": "Docu", "to": "Document",
+                         "at": "2026-10-19T10:00:00Z", "status": "done"}],
+        })
+
+    cli = GraphosClient(base_url="http://x", tenant="demo", transport=_mock_transport(handler))
+    await cli.register_tenant(vertex_labels=["Document"], deprecated={
+        "vertex": {"Document": {"properties": {"mail": {"replaced_by": "email"}}}},
+    })
+    assert json.loads(seen[0].content)["deprecated"] == {
+        "vertex": {"Document": {"properties": {"mail": {"replaced_by": "email"}}}},
+    }
+    info = await cli.get_tenant()
+    assert info.renames[0].from_ == "Docu" and info.renames[0].to == "Document"
+    assert "mail" in info.deprecated["vertex"]["Document"]["properties"]
+    await cli.close()
+
+
+def test_a_job_carries_its_progress() -> None:
+    job = Job.model_validate(_job("running", kind="rename_property",
+                                  progress={"done": 500, "total": 1200}))
+    assert job.progress is not None and job.progress.done == 500

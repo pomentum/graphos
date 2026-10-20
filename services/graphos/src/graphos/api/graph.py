@@ -49,7 +49,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 
-from graphos import lookup, properties, reserved, writes
+from graphos import lookup, properties, renames, reserved, writes
 from graphos import search as search_index
 from graphos.api.jobs import (
     ACCEPTED_RESPONSE,
@@ -203,7 +203,9 @@ def _check_tenant(name: str, principal) -> None:    # type: ignore[no-untyped-de
 
 
 def _check_vertex_label(tenant: str, label: str | None) -> None:
-    if label is not None and label not in registered_tenants()[tenant].vertex_labels:
+    spec = registered_tenants()[tenant]
+    if label is not None and label not in spec.vertex_labels:
+        renames.refuse_renamed(spec, label)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"vertex label '{label}' is not registered for tenant '{tenant}'",
@@ -571,6 +573,8 @@ async def upsert_nodes(
     grouped = _group_by_label(body.nodes)
     unknown = sorted(set(grouped) - allowed_labels)
     if unknown:
+        for label in unknown:
+            renames.refuse_renamed(spec, label)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
@@ -889,6 +893,8 @@ async def upsert_edges(
         if et not in allowed_e:
             unknown_e.add(et)
     if unknown_v or unknown_e:
+        for name in (*sorted(unknown_e), *sorted(unknown_v)):
+            renames.refuse_renamed(spec, name)
         msg = []
         if unknown_v:
             msg.append(f"vertex labels {sorted(unknown_v)} not registered")
@@ -984,7 +990,9 @@ _EDGE_RESPONSES: dict[int | str, dict[str, Any]] = {
 
 
 def _check_edge_ref(tenant: str, edge_type: str, ref: _EdgeRef) -> None:
-    if edge_type not in registered_tenants()[tenant].edge_labels:
+    spec = registered_tenants()[tenant]
+    if edge_type not in spec.edge_labels:
+        renames.refuse_renamed(spec, edge_type)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"edge type '{edge_type}' is not registered for tenant '{tenant}'",

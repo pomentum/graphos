@@ -1,0 +1,1001 @@
+"""Renaming a vertex label or an edge type in place (ADR-0009 §2).
+
+AGE has no function for it.  A label is a row of ``ag_catalog.ag_label``
+(its ``name`` and ``seq_name``), a table, a sequence and an ``id`` column
+whose default names the label; renaming those four in one transaction keeps
+the table's OID, so its rows, their graph ids, the edges pointing at them,
+inheritance (the label hierarchy), triggers and constraints all stay as they
+are, and every connection sees the new name at once (tested on AGE 1.8).
+
+Around it, in the same transaction and under the lock tenant bootstrap
+takes: the indexes graphos named after the label, everything in
+``graphos_meta`` that names it (the spec, declared pairs, the property
+catalogue, the community map), the ``renames`` history, one ``schema``
+change record, and ``NOTIFY`` so every replica reloads.  The indexes whose
+name could not follow (hashed long names) are built again afterwards under
+the new name by the usual idempotent ensures, and the leftovers dropped.
+
+Saved queries are reported, never rewritten: Cypher that names an unknown
+label returns nothing instead of failing.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
+from typing import Any
+
+import asyncpg
+from pydantic import BaseModel
+
+from graphos import changes, declared, jobs, reserved, search, writes
+from graphos.bootstrap import (
+    TENANTS_CHANNEL,
+    TenantSpec,
+    _spec_to_jsonable,
+    bootstrap_tenant,
+    ensure_search_indexes,
+    load_spec,
+    remember,
+    spec_from_json,
+)
+from graphos.contracts.tenants import SchemaRenameResponse
+from graphos.lifecycle import DROP_LOCK_TIMEOUT, TenantBusyError
+from graphos.resolver.indexer import ensure_resolve_rule_indexes
+
+log = logging.getLogger(__name__)
+
+_NAME = re.compile(r"^[A-Z][A-Za-z0-9_]{0,62}$")
+
+
+class RenameError(ValueError):
+    """A rename that cannot be done as asked (answered 400)."""
+
+
+@dataclass
+class RenamePlan:
+    """What renaming would change."""
+
+    kind: str
+    old: str
+    new: str
+    spec_parts: list[str] = field(default_factory=list)
+    indexes: list[tuple[str, str]] = field(default_factory=list)
+    endpoints: int = 0
+    rows: int | None = None
+    saved_queries: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+# ── The spec, renamed ──────────────────────────────────────────────────────
+
+
+def _swap(values: Iterable[str], old: str, new: str) -> tuple[str, ...]:
+    return tuple(new if v == old else v for v in values)
+
+
+def _rekey(entries: Mapping[str, Any], old: str, new: str) -> dict[str, Any]:
+    return {(new if k == old else k): v for k, v in entries.items()}
+
+
+def _part_rekeyed(value: Mapping[str, Any], part: str, old: str, new: str) -> dict[str, Any]:
+    """A by-entry spec key (``display``, ``property_schema``, ``deprecated``) with
+    ``part``'s entry ``old`` renamed."""
+    out = dict(value)
+    if part in out:
+        out[part] = _rekey(out[part], old, new)
+    return out
+
+
+def _replacements_renamed(deprecated: Mapping[str, Any], old: str, new: str) -> dict[str, Any]:
+    """Deprecations whose ``replaced_by`` named ``old`` now name ``new``."""
+    out: dict[str, Any] = {}
+    for part, entries in deprecated.items():
+        out[part] = {
+            name: {**entry, "replaced_by": new} if entry.get("replaced_by") == old else entry
+            for name, entry in entries.items()
+        }
+    return out
+
+
+def _strs(value: object) -> list[str]:
+    return [str(v) for v in value] if isinstance(value, list) else []
+
+
+def renamed_spec(
+    spec: TenantSpec, kind: str, old: str, new: str, entry: dict[str, Any],
+) -> TenantSpec:
+    """``spec`` with the vertex label (``kind="label"``) or edge type ``old`` named
+    ``new`` everywhere, and ``entry`` added to its renames."""
+    part = "vertex" if kind == "label" else "edge"
+    spec = replace(
+        spec,
+        display=_part_rekeyed(spec.display, part, old, new),
+        property_schema=_part_rekeyed(spec.property_schema, part, old, new),
+        deprecated=_replacements_renamed(
+            _part_rekeyed(spec.deprecated, part, old, new), old, new,
+        ),
+        renames=(*spec.renames, entry),
+    )
+    if kind != "label":
+        return replace(
+            spec,
+            edge_labels=_swap(spec.edge_labels, old, new),
+            resolve_rules=tuple(
+                (new if t == old else t, dict(rule)) for t, rule in spec.resolve_rules
+            ),
+            edge_endpoints=tuple(
+                (new if t == old else t, s, d) for t, s, d in spec.edge_endpoints
+            ),
+        )
+    rules: list[tuple[str, dict[str, object]]] = []
+    for edge_type, rule in spec.resolve_rules:
+        allowed = rule.get("require_dst_label")
+        rules.append((
+            edge_type,
+            {**rule, "require_dst_label": list(_swap(_strs(allowed), old, new))}
+            if isinstance(allowed, list) else dict(rule),
+        ))
+    return replace(
+        spec,
+        vertex_labels=_swap(spec.vertex_labels, old, new),
+        label_hierarchy=tuple(
+            (new if c == old else c, new if p == old else p) for c, p in spec.label_hierarchy
+        ),
+        property_indexes=tuple(
+            {**x, "label": new} if x.get("label") == old else dict(x)
+            for x in spec.property_indexes
+        ),
+        generated_columns=tuple(
+            {**x, "label": new} if x.get("label") == old else dict(x)
+            for x in spec.generated_columns
+        ),
+        search_indexes={
+            name: {**body, "labels": list(_swap(_strs(body.get("labels")), old, new))}
+            if isinstance(body.get("labels"), list) else dict(body)
+            for name, body in spec.search_indexes.items()
+        },
+        resolve_rules=tuple(rules),
+        edge_endpoints=tuple(
+            (t, new if s == old else s, new if d == old else d) for t, s, d in spec.edge_endpoints
+        ),
+    )
+
+
+def spec_parts_named(spec: TenantSpec, kind: str, old: str) -> list[str]:
+    """The spec's parts that name ``old`` (what a dry run reports)."""
+    part = "vertex" if kind == "label" else "edge"
+    found: list[str] = []
+    if kind == "label":
+        if any(old in pair for pair in spec.label_hierarchy):
+            found.append("label_hierarchy")
+        if any(x.get("label") == old for x in spec.property_indexes):
+            found.append("property_indexes")
+        if any(x.get("label") == old for x in spec.generated_columns):
+            found.append("generated_columns")
+        if any(old in _strs(b.get("labels")) for b in spec.search_indexes.values()):
+            found.append("search_indexes")
+        if any(old in _strs(r.get("require_dst_label")) for _, r in spec.resolve_rules):
+            found.append("resolve_rules")
+    elif any(t == old for t, _ in spec.resolve_rules):
+        found.append("resolve_rules")
+    for key in ("display", "property_schema", "deprecated"):
+        if old in (getattr(spec, key).get(part) or {}):
+            found.append(key)
+    replacing = (spec.deprecated.get(part) or {}).values()
+    if "deprecated" not in found and any(e.get("replaced_by") == old for e in replacing):
+        found.append("deprecated")
+    return found
+
+
+# ── Saved queries that name it ─────────────────────────────────────────────
+
+
+def mentions(query: str, name: str) -> bool:
+    """Whether Cypher text names the label or type ``name`` (``:Name``, ``:`Name```)."""
+    pattern = rf":\s*`?{re.escape(name)}`?(?![A-Za-z0-9_])"
+    return re.search(pattern, query) is not None
+
+
+async def saved_queries_naming(conn: asyncpg.Connection, tenant: str, name: str) -> list[str]:
+    rows = await conn.fetch(
+        "SELECT name, definition->>'query' AS query FROM graphos_meta.saved_queries "
+        "WHERE tenant = $1 ORDER BY name;",
+        tenant,
+    )
+    return [r["name"] for r in rows if r["query"] and mentions(r["query"], name)]
+
+
+# ── Checks ─────────────────────────────────────────────────────────────────
+
+
+def check(spec: TenantSpec, kind: str, old: str, new: str) -> None:
+    """Refuse a rename that cannot be done (:class:`RenameError`)."""
+    names = spec.vertex_labels if kind == "label" else spec.edge_labels
+    what = "vertex label" if kind == "label" else "edge type"
+    if old not in names:
+        raise RenameError(f"{old!r} is not a {what} of tenant '{spec.name}'")
+    if not _NAME.fullmatch(new):
+        raise RenameError(f"{new!r} must match {_NAME.pattern}")
+    if new == old:
+        raise RenameError("the new name is the old one")
+    if new in spec.vertex_labels or new in spec.edge_labels:
+        raise RenameError(f"{new!r} is already a label or edge type of the tenant")
+
+
+# ── Indexes ────────────────────────────────────────────────────────────────
+
+
+async def _indexes_on(conn: asyncpg.Connection, tenant: str, table: str) -> list[str]:
+    rows = await conn.fetch(
+        """
+        SELECT i.relname AS name
+        FROM pg_index x
+        JOIN pg_class i ON i.oid = x.indexrelid
+        JOIN pg_class t ON t.oid = x.indrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = $1 AND t.relname = $2
+        ORDER BY 1;
+        """,
+        tenant, table,
+    )
+    return [r["name"] for r in rows]
+
+
+def _index_renames(names: Iterable[str], old: str, new: str) -> list[tuple[str, str]]:
+    """The indexes graphos named after the label (``<Label>_…``, the resolver's
+    ``idx_<Label>_…``), each with its name under the new label."""
+    out: list[tuple[str, str]] = []
+    for name in names:
+        for prefix in (f"{old}_", f"idx_{old}_"):
+            if name.startswith(prefix):
+                renamed = prefix.replace(old, new, 1) + name[len(prefix):]
+                if len(renamed) <= 63:  # noqa: PLR2004 -- Postgres identifier limit
+                    out.append((name, renamed))
+                break
+    return out
+
+
+async def _drop_duplicate_indexes(conn: asyncpg.Connection, tenant: str, table: str) -> int:
+    """Drop the indexes another index on the table already is, name aside (what
+    rebuilding a hashed name under the new label leaves behind)."""
+    rows = await conn.fetch(
+        """
+        SELECT i.relname AS name,
+               regexp_replace(
+                   pg_get_indexdef(x.indexrelid), '^CREATE (?:UNIQUE )?INDEX \\S+ ', ''
+               ) AS body,
+               x.indisunique AS is_unique
+        FROM pg_index x
+        JOIN pg_class i ON i.oid = x.indexrelid
+        JOIN pg_class t ON t.oid = x.indrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = $1 AND t.relname = $2 AND NOT x.indisprimary
+        ORDER BY i.relname;
+        """,
+        tenant, table,
+    )
+    seen: dict[tuple[str, bool], str] = {}
+    dropped = 0
+    for r in rows:
+        key = (r["body"], r["is_unique"])
+        if key in seen:
+            await conn.execute(f'DROP INDEX IF EXISTS "{tenant}"."{r["name"]}";')
+            dropped += 1
+        else:
+            seen[key] = r["name"]
+    return dropped
+
+
+# ── The rename ─────────────────────────────────────────────────────────────
+
+
+async def plan(pool: asyncpg.Pool, spec: TenantSpec, kind: str, old: str, new: str) -> RenamePlan:
+    """What renaming would change, writing nothing (a dry run)."""
+    check(spec, kind, old, new)
+    async with pool.acquire() as conn:
+        indexes = _index_renames(await _indexes_on(conn, spec.name, old), old, new)
+        endpoints = await conn.fetchval(
+            "SELECT count(*) FROM graphos_meta.edge_endpoints WHERE tenant = $1 AND "
+            + ("(src_label = $2 OR dst_label = $2)" if kind == "label" else "edge_type = $2")
+            + ";",
+            spec.name, old,
+        )
+        rows = await conn.fetchval(f'SELECT count(*) FROM ONLY "{spec.name}"."{old}";')
+        saved = await saved_queries_naming(conn, spec.name, old)
+    return RenamePlan(
+        kind=kind, old=old, new=new, spec_parts=spec_parts_named(spec, kind, old),
+        indexes=indexes, endpoints=int(endpoints), rows=int(rows), saved_queries=saved,
+    )
+
+
+async def rename(  # noqa: PLR0913 -- one rename's inputs
+    pool: asyncpg.Pool, spec: TenantSpec, kind: str, old: str, new: str,
+    *, by: str | None, vertex_graphid_indexes: bool = False,
+) -> RenamePlan:
+    """Rename the vertex label or edge type ``old`` to ``new`` in place, in one
+    transaction (ADR-0009 §2).
+
+    Raises:
+        RenameError: the rename cannot be done as asked.
+        TenantBusyError: a job is queued or running on the tenant, a reconcile
+            holds the edge type, or the tables stay in use for
+            :data:`graphos.lifecycle.DROP_LOCK_TIMEOUT`.
+    """
+    check(spec, kind, old, new)
+    tenant = spec.name
+    entry = {
+        "kind": kind, "from": old, "to": new, "at": datetime.now(UTC).isoformat(), "by": by,
+        "status": "done",
+    }
+    found = RenamePlan(kind=kind, old=old, new=new)
+    async with pool.acquire() as conn:
+        try:
+            async with conn.transaction():
+                await conn.execute(f"SET LOCAL lock_timeout = '{DROP_LOCK_TIMEOUT}';")
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0));", tenant,
+                )
+                # The stored spec, as it is now (another replica may have changed it).
+                stored = spec_from_json(await conn.fetchval(
+                    "SELECT spec::text FROM graphos_meta.tenants WHERE name = $1 FOR UPDATE;",
+                    tenant,
+                ))
+                check(stored, kind, old, new)
+                after = renamed_spec(stored, kind, old, new, entry)
+                found.spec_parts = spec_parts_named(stored, kind, old)
+                await _refuse_busy(conn, tenant, kind, old)
+                found.indexes = await _rename_in_age(conn, tenant, old, new)
+                found.endpoints = await _rename_in_meta(conn, after, kind, old, new)
+                found.saved_queries = await saved_queries_naming(conn, tenant, old)
+                await changes.record(
+                    conn, tenant=tenant, op="schema", kind="tenant", count=1,
+                    detail={"renamed": {"kind": kind, "from": old, "to": new}},
+                )
+                await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, tenant)
+        except asyncpg.LockNotAvailableError as exc:
+            raise TenantBusyError(
+                f"tenant '{tenant}' is in use (an export, an import or a long query holds its "
+                "tables); try again when it ends"
+            ) from exc
+    loaded = await load_spec(pool, tenant) or after
+    remember(loaded)
+    await _ensure_after(pool, loaded, new, vertex_graphid_indexes=vertex_graphid_indexes)
+    log.info("schema rename", extra={"tenant": tenant, "kind": kind, "from": old, "to": new})
+    return found
+
+
+async def _refuse_busy(conn: asyncpg.Connection, tenant: str, kind: str, old: str) -> None:
+    active = await conn.fetchval(
+        "SELECT count(*) FROM graphos_meta.jobs "
+        "WHERE tenant = $1 AND status IN ('queued', 'running');",
+        tenant,
+    )
+    if active:
+        raise TenantBusyError(
+            f"{active} job(s) queued or running on tenant '{tenant}': "
+            "cancel them or let them finish first"
+        )
+    if kind == "edge_type" and not await conn.fetchval(
+        "SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0));",
+        f"graphos.reconcile:{tenant}:{old}",
+    ):
+        raise TenantBusyError(f"a reconcile of {old!r} is running; try again when it ends")
+
+
+async def _rename_in_age(
+    conn: asyncpg.Connection, tenant: str, old: str, new: str,
+) -> list[tuple[str, str]]:
+    """AGE's catalogue, the table, its sequence, the ``id`` default and graphos's indexes."""
+    seq_old, seq_new = f"{old}_id_seq", f"{new}_id_seq"
+    updated = await conn.execute(
+        """
+        UPDATE ag_catalog.ag_label SET name = $3, seq_name = $4
+        WHERE graph = (SELECT graphid FROM ag_catalog.ag_graph WHERE name = $1) AND name = $2;
+        """,
+        tenant, old, new, seq_new,
+    )
+    if updated != "UPDATE 1":
+        raise RenameError(f"{old!r} is not a label of the graph '{tenant}'")
+    await conn.execute(f'ALTER TABLE "{tenant}"."{old}" RENAME TO "{new}";')
+    await conn.execute(f'ALTER SEQUENCE "{tenant}"."{seq_old}" RENAME TO "{seq_new}";')
+    await conn.execute(
+        f'ALTER TABLE "{tenant}"."{new}" ALTER COLUMN id SET DEFAULT '
+        f"ag_catalog._graphid(ag_catalog._label_id('{tenant}'::name, '{new}'::name)::integer, "
+        f"nextval('\"{tenant}\".\"{seq_new}\"'::regclass));"
+    )
+    renamed = _index_renames(await _indexes_on(conn, tenant, new), old, new)
+    for before, after in renamed:
+        await conn.execute(f'ALTER INDEX "{tenant}"."{before}" RENAME TO "{after}";')
+    return renamed
+
+
+async def _rename_in_meta(
+    conn: asyncpg.Connection, after: TenantSpec, kind: str, old: str, new: str,
+) -> int:
+    """The spec and every ``graphos_meta`` row naming the label or type; the
+    declared pairs renamed."""
+    tenant = after.name
+    await conn.execute(
+        "UPDATE graphos_meta.tenants SET spec = $2::jsonb, updated_at = now() WHERE name = $1;",
+        tenant, json.dumps(_spec_to_jsonable(after)),
+    )
+    if kind == "label":
+        moved = await conn.execute(
+            """
+            UPDATE graphos_meta.edge_endpoints
+            SET src_label = CASE WHEN src_label = $2 THEN $3 ELSE src_label END,
+                dst_label = CASE WHEN dst_label = $2 THEN $3 ELSE dst_label END
+            WHERE tenant = $1 AND (src_label = $2 OR dst_label = $2);
+            """,
+            tenant, old, new,
+        )
+        await conn.execute(
+            "UPDATE graphos_meta.node_properties SET label = $3 WHERE tenant = $1 AND label = $2;",
+            tenant, old, new,
+        )
+        await conn.execute(
+            """
+            UPDATE graphos_meta.community_map
+            SET labels = (labels - $2::text) || jsonb_build_object($3::text, labels -> $2::text)
+            WHERE tenant = $1 AND labels ? $2::text;
+            """,
+            tenant, old, new,
+        )
+    else:
+        moved = await conn.execute(
+            "UPDATE graphos_meta.edge_endpoints SET edge_type = $3 "
+            "WHERE tenant = $1 AND edge_type = $2;",
+            tenant, old, new,
+        )
+        await conn.execute(
+            "UPDATE graphos_meta.community_links SET type = $3 WHERE tenant = $1 AND type = $2;",
+            tenant, old, new,
+        )
+    return int(moved.split()[-1])
+
+
+async def _ensure_after(
+    pool: asyncpg.Pool, spec: TenantSpec, new: str, *, vertex_graphid_indexes: bool,
+) -> None:
+    """Indexes under the new name that a rename could not carry over (hashed long
+    names) are built again, and the copies they replace dropped.  Best effort:
+    the rename is done; a failure here leaves an index to build at the next
+    registration."""
+    try:
+        await bootstrap_tenant(pool, spec, vertex_graphid_indexes=vertex_graphid_indexes)
+        if spec.search_indexes:
+            await ensure_search_indexes(pool, spec)
+        await ensure_resolve_rule_indexes(pool, tenant=spec.name, spec=spec)
+        async with pool.acquire() as conn:
+            dropped = await _drop_duplicate_indexes(conn, spec.name, new)
+        if dropped:
+            log.info("schema rename: duplicate indexes dropped",
+                     extra={"tenant": spec.name, "label": new, "dropped": dropped})
+    except Exception:  # noqa: BLE001 -- never fail a done rename over an index
+        log.exception("schema rename: rebuilding indexes failed", extra={"tenant": spec.name})
+
+
+# ── Renaming a property (ADR-0009 §3) ──────────────────────────────────────
+#
+# A job rewrites the rows; meanwhile the spec lists the rename as ``running``
+# (writes naming the old name carry a warning), then ``done`` (they are
+# refused) once every row is rewritten, the spec's definitions, indexes and
+# styles follow, and the indexes on the old name are replaced.  A failed or
+# cancelled job leaves it ``failed``: asking for the same rename again resumes.
+
+
+def below(spec: TenantSpec, label: str) -> list[str]:
+    """``label`` and every label below it in the hierarchy, parents first."""
+    children: dict[str, list[str]] = {}
+    for child, parent in spec.label_hierarchy:
+        children.setdefault(parent, []).append(child)
+    out, todo = [label], [label]
+    while todo:
+        for child in sorted(children.get(todo.pop(0), [])):
+            if child not in out:
+                out.append(child)
+                todo.append(child)
+    return out
+
+
+def _part_of(spec: TenantSpec, on: str) -> str:
+    if on in spec.vertex_labels:
+        return "vertex"
+    if on in spec.edge_labels:
+        return "edge"
+    raise RenameError(f"{on!r} is not a vertex label or edge type of tenant '{spec.name}'")
+
+
+def _names_in(value: object, name: str) -> bool:
+    """Whether a resolve rule names the property ``name`` (as a value, in a list, or as a key)."""
+    if isinstance(value, str):
+        return value == name
+    if isinstance(value, list):
+        return any(_names_in(v, name) for v in value)
+    if isinstance(value, dict):
+        return name in value or any(_names_in(v, name) for v in value.values())
+    return False
+
+
+def _search_bodies(spec: TenantSpec) -> dict[str, search.SearchIndex]:
+    return {name: search.SearchIndex.from_spec(name, dict(body))
+            for name, body in spec.search_indexes.items()}
+
+
+def check_property(spec: TenantSpec, on: str, old: str, new: str) -> list[str]:
+    """Refuse a property rename that cannot be done (:class:`RenameError`); the
+    labels (or the edge type) it rewrites."""
+    part = _part_of(spec, on)
+    if old == new:
+        raise RenameError("the new name is the old one")
+    for name in (old, new):
+        if name == "id" or reserved.is_reserved(name):
+            raise RenameError(f"{name!r} cannot be renamed: graphos needs it")
+    tables = below(spec, on) if part == "vertex" else [on]
+    for col in spec.generated_columns:
+        if col.get("label") in tables and col.get("property") == old:
+            raise RenameError(
+                f"generated column {col['label']}.{col['column']} is computed from {old!r}: "
+                "drop it first (register without it, force_shrink), rename, declare it again"
+            )
+    rules = sorted({t for t, rule in spec.resolve_rules if _names_in(rule, old)})
+    if rules:
+        raise RenameError(
+            f"the resolve rules of {', '.join(rules)} name {old!r}: change them first"
+        )
+    for name, index in _search_bodies(spec).items():
+        if old in index.properties and not set(index.labels) <= set(tables):
+            raise RenameError(
+                f"search index {name!r} covers {old!r} on other labels too: change it first"
+            )
+    return tables
+
+
+def renamed_property_spec(
+    spec: TenantSpec, on: str, tables: list[str], old: str, new: str,
+) -> TenantSpec:
+    """``spec`` with the property ``old`` named ``new`` wherever it is declared on
+    ``tables`` (definitions, property and search indexes, styles), its deprecation
+    there dropped (the name is gone), and its rename marked done."""
+    part = "vertex" if on in spec.vertex_labels else "edge"
+
+    def entries(value: Mapping[str, Any], fix: Any) -> dict[str, Any]:
+        out = dict(value)
+        if part in out:
+            out[part] = {
+                name: fix(dict(entry)) if name in tables else entry
+                for name, entry in out[part].items()
+            }
+        return out
+
+    def definitions(entry: dict[str, Any]) -> dict[str, Any]:
+        props = entry.get("properties")
+        if isinstance(props, dict) and old in props:
+            entry["properties"] = {(new if k == old else k): v for k, v in props.items()}
+        return entry
+
+    def styles(entry: dict[str, Any]) -> dict[str, Any]:
+        return {
+            k: (new if k in ("caption", "size_by") and v == old else v) for k, v in entry.items()
+        }
+
+    def deprecations(entry: dict[str, Any]) -> dict[str, Any]:
+        props = dict(entry.get("properties") or {})
+        props.pop(old, None)
+        return {**entry, "properties": props} if props else {
+            k: v for k, v in entry.items() if k != "properties"
+        }
+
+    deprecated = entries(spec.deprecated, deprecations)
+    if part in deprecated:
+        deprecated[part] = {n: e for n, e in deprecated[part].items() if e}
+        if not deprecated[part]:
+            deprecated.pop(part)
+    return replace(
+        spec,
+        property_schema=entries(spec.property_schema, definitions),
+        display=entries(spec.display, styles),
+        deprecated=deprecated,
+        property_indexes=tuple(
+            {**x, "properties": list(_swap(_strs(x.get("properties")), old, new))}
+            if x.get("label") in tables else dict(x)
+            for x in spec.property_indexes
+        ),
+        search_indexes={
+            name: {**dict(body), "properties": list(_swap(index.properties, old, new))}
+            if old in index.properties and set(index.labels) <= set(tables) else dict(body)
+            for (name, body), index in zip(
+                spec.search_indexes.items(), _search_bodies(spec).values(), strict=True,
+            )
+        },
+        renames=tuple(
+            {**r, "status": "done"}
+            if r.get("kind") == "property" and r.get("on") == on and r.get("from") == old
+            and r.get("to") == new else r
+            for r in spec.renames
+        ),
+    )
+
+
+async def _count(conn: asyncpg.Connection, tenant: str, on: str, *keys: str) -> int:
+    """Rows of ``on`` (and the labels below it) that have every key in ``keys``."""
+    where = " AND ".join(f"(properties::text)::jsonb ? ${i + 1}::text" for i in range(len(keys)))
+    return int(await conn.fetchval(f'SELECT count(*) FROM "{tenant}"."{on}" WHERE {where};', *keys))
+
+
+def property_mentions(query: str, name: str) -> bool:
+    """Whether Cypher text reads or writes the property ``name`` (``.name``)."""
+    return re.search(rf"\.\s*`?{re.escape(name)}`?(?![A-Za-z0-9_])", query) is not None
+
+
+async def plan_property(
+    pool: asyncpg.Pool, spec: TenantSpec, on: str, old: str, new: str,
+) -> RenamePlan:
+    """What renaming the property would do, writing nothing (a dry run).  Rows that
+    have both names are refused (:class:`RenameError`): resolve them first."""
+    tables = check_property(spec, on, old, new)
+    async with pool.acquire() as conn:
+        rows = await _count(conn, spec.name, on, old)
+        both = await _count(conn, spec.name, on, old, new)
+        queries = await conn.fetch(
+            "SELECT name, definition->>'query' AS query FROM graphos_meta.saved_queries "
+            "WHERE tenant = $1 ORDER BY name;",
+            spec.name,
+        )
+    if both:
+        raise RenameError(
+            f"{both} row(s) of {on!r} have both {old!r} and {new!r}: "
+            "keep one value on each first"
+        )
+    after = renamed_property_spec(spec, on, tables, old, new)
+    parts = [
+        key for key in ("property_schema", "display", "deprecated", "property_indexes",
+                        "search_indexes")
+        if getattr(after, key) != getattr(spec, key)
+    ]
+    warnings = [
+        f"search without an index matches 'name' by default, with graphos's own trigram index "
+        f"on it: afterwards ask it for property={new!r}, or declare a search index on {new!r}"
+    ] if old == "name" and on in spec.vertex_labels else []
+    return RenamePlan(
+        kind="property", old=old, new=new, spec_parts=parts, rows=rows,
+        saved_queries=[q["name"] for q in queries
+                       if q["query"] and property_mentions(q["query"], old)],
+        warnings=warnings,
+    )
+
+
+async def start_property(  # noqa: PLR0913 -- one rename's inputs
+    pool: asyncpg.Pool, tenant: str, on: str, old: str, new: str, *, by: str | None,
+) -> str:
+    """Queue the ``rename_property`` job and mark the rename running (a new entry,
+    or the failed one resumed), in one transaction under the tenant's lock, so the
+    job cannot start before its entry exists.  Writes naming ``old`` now carry a
+    warning.  Returns the job's id.
+
+    Raises:
+        RenameError: the rename cannot be done as asked.
+        TenantBusyError: a property rename is already queued or running.
+    """
+    try:
+        async with pool.acquire() as conn, conn.transaction():
+            job_id = await _start_property(conn, tenant, on, old, new, by=by)
+    except asyncpg.UniqueViolationError as exc:
+        raise TenantBusyError(
+            f"a property rename is already queued or running on tenant '{tenant}'"
+        ) from exc
+    except asyncpg.LockNotAvailableError as exc:
+        raise TenantBusyError(f"tenant '{tenant}' is in use; try again") from exc
+    loaded = await load_spec(pool, tenant)
+    if loaded is not None:
+        remember(loaded)
+    return job_id
+
+
+async def _start_property(  # noqa: PLR0913 -- one rename's inputs
+    conn: asyncpg.Connection, tenant: str, on: str, old: str, new: str, *, by: str | None,
+) -> str:
+    await conn.execute(f"SET LOCAL lock_timeout = '{DROP_LOCK_TIMEOUT}';")
+    await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0));", tenant)
+    stored = spec_from_json(await conn.fetchval(
+        "SELECT spec::text FROM graphos_meta.tenants WHERE name = $1 FOR UPDATE;", tenant,
+    ))
+    check_property(stored, on, old, new)
+    if await _count(conn, tenant, on, old, new):
+        raise RenameError(f"rows of {on!r} have both {old!r} and {new!r}")
+    job_id = str(await conn.fetchval(
+        "INSERT INTO graphos_meta.jobs (kind, tenant, params, consumer) "
+        "VALUES ('rename_property', $1, $2::jsonb, $3) RETURNING id;",
+        tenant, json.dumps({"on": on, "from": old, "to": new}), by,
+    ))
+    entries = list(stored.renames)
+    again = [i for i, r in enumerate(entries)
+             if r.get("kind") == "property" and r.get("on") == on
+             and r.get("from") == old and r.get("to") == new and r.get("status") != "done"]
+    if again:
+        entries[again[-1]] = {**entries[again[-1]], "status": "running", "job_id": job_id}
+    else:
+        entries.append({
+            "kind": "property", "from": old, "to": new, "on": on,
+            "at": datetime.now(UTC).isoformat(), "by": by, "status": "running",
+            "job_id": job_id,
+        })
+    await conn.execute(
+        "UPDATE graphos_meta.tenants SET spec = $2::jsonb, updated_at = now() WHERE name = $1;",
+        tenant, json.dumps(_spec_to_jsonable(replace(stored, renames=tuple(entries)))),
+    )
+    await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, tenant)
+    return job_id
+
+
+async def _mark(pool: asyncpg.Pool, tenant: str, on: str, old: str, new: str, status: str) -> None:
+    """Set a running property rename's status (``failed`` when its job stopped). Best effort."""
+    try:
+        async with pool.acquire() as conn, conn.transaction():
+            stored = spec_from_json(await conn.fetchval(
+                "SELECT spec::text FROM graphos_meta.tenants WHERE name = $1 FOR UPDATE;", tenant,
+            ))
+            entries = tuple(
+                {**r, "status": status}
+                if r.get("kind") == "property" and r.get("on") == on and r.get("from") == old
+                and r.get("to") == new and r.get("status") == "running" else r
+                for r in stored.renames
+            )
+            await conn.execute(
+                "UPDATE graphos_meta.tenants SET spec = $2::jsonb, updated_at = now() "
+                "WHERE name = $1;",
+                tenant, json.dumps(_spec_to_jsonable(replace(stored, renames=entries))),
+            )
+            await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, tenant)
+        loaded = await load_spec(pool, tenant)
+        if loaded is not None:
+            remember(loaded)
+    except Exception:  # noqa: BLE001 -- the job's own outcome is recorded anyway
+        log.exception("property rename: marking it failed did not work", extra={"tenant": tenant})
+
+
+async def run_property_job(
+    pool: asyncpg.Pool, tenant: str | None, params: dict[str, Any],
+) -> BaseModel:
+    """The ``rename_property`` job: rewrite every row, then finish the rename."""
+    assert tenant is not None  # noqa: S101 -- submitted with its tenant
+    on, old, new = str(params["on"]), str(params["from"]), str(params["to"])
+    try:
+        spec = await load_spec(pool, tenant)
+        if spec is None:
+            raise RenameError(f"tenant '{tenant}' is not registered")
+        tables = check_property(spec, on, old, new)
+        kind = "node" if on in spec.vertex_labels else "edge"
+        async with pool.acquire() as conn:
+            total = await _count(conn, tenant, on, old)
+        done = 0
+        await jobs.report_progress(pool, done, total)
+        # Until a whole pass finds nothing: a write may still name the old name meanwhile.
+        while True:
+            found = 0
+            for table in tables:
+                while n := await writes.rename_property_batch(
+                    pool, tenant=tenant, table=table, kind=kind, on=on, old=old, new=new,
+                ):
+                    found += n
+                    done += n
+                    await jobs.report_progress(pool, done, max(total, done))
+            if not found:
+                break
+        await finish_property(pool, tenant, on, old, new, tables)
+    except BaseException:
+        await _mark(pool, tenant, on, old, new, "failed")
+        raise
+    return SchemaRenameResponse(
+        tenant=tenant, kind="property", from_=old, to=new, on=on, rows=done,
+    )
+
+
+async def finish_property(  # noqa: PLR0913 -- one rename's inputs
+    pool: asyncpg.Pool, tenant: str, on: str, old: str, new: str, tables: list[str],
+) -> None:
+    """Every row is rewritten: the spec follows (definitions, indexes, styles, the
+    rename done), the property catalogue loses the old name, one ``schema`` record,
+    then the indexes on the new name are built and those on the old dropped."""
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0));", tenant)
+        stored = spec_from_json(await conn.fetchval(
+            "SELECT spec::text FROM graphos_meta.tenants WHERE name = $1 FOR UPDATE;", tenant,
+        ))
+        before = stored
+        after = renamed_property_spec(stored, on, tables, old, new)
+        await conn.execute(
+            "UPDATE graphos_meta.tenants SET spec = $2::jsonb, updated_at = now() WHERE name = $1;",
+            tenant, json.dumps(_spec_to_jsonable(after)),
+        )
+        await conn.execute(
+            "DELETE FROM graphos_meta.node_properties "
+            "WHERE tenant = $1 AND label = ANY($2::text[]) AND property = $3;",
+            tenant, tables, old,
+        )
+        await changes.record(
+            conn, tenant=tenant, op="schema", kind="tenant", count=1,
+            detail={"renamed": {"kind": "property", "on": on, "from": old, "to": new}},
+        )
+        await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, tenant)
+    loaded = await load_spec(pool, tenant) or after
+    remember(loaded)
+    await _replace_property_indexes(pool, before, loaded, tables, old)
+
+
+async def _replace_property_indexes(
+    pool: asyncpg.Pool, before: TenantSpec, after: TenantSpec, tables: list[str], old: str,
+) -> None:
+    """Build the indexes the renamed spec declares, then drop those it no longer does.
+    Best effort: the rename is done; a failure leaves an index to build at the next
+    registration, or an unused one."""
+    try:
+        await bootstrap_tenant(pool, after)
+        if after.search_indexes:
+            await ensure_search_indexes(pool, after)
+        stale: set[str] = set()
+        for x in before.property_indexes:
+            if x.get("label") in tables and old in _strs(x.get("properties")):
+                stale.add(declared.index_name(dict(x)))
+        for index in _search_bodies(before).values():
+            if old in index.properties:
+                for table in tables:
+                    if index.covers(table):
+                        stale.update(
+                            search.index_name(table, old, kind)
+                            for kind, _ in search.index_definitions(
+                                old, index.analyzer, index.language,
+                            )
+                        )
+        stale -= {declared.index_name(dict(x)) for x in after.property_indexes}
+        async with pool.acquire() as conn:
+            for name in sorted(stale):
+                await conn.execute(f'DROP INDEX IF EXISTS "{after.name}"."{name}";')
+    except Exception:  # noqa: BLE001 -- never fail a done rename over an index
+        log.exception("property rename: replacing indexes failed", extra={"tenant": after.name})
+
+
+# ── Dropping an empty deprecated label or edge type (ADR-0009 §1) ──────────
+
+
+def check_drop(spec: TenantSpec, name: str) -> str:
+    """Refuse dropping ``name`` (:class:`RenameError`) unless it is a deprecated label or
+    type nothing still needs; its part (``vertex`` or ``edge``)."""
+    if name in spec.vertex_labels:
+        part = "vertex"
+    elif name in spec.edge_labels:
+        part = "edge"
+    else:
+        raise RenameError(f"{name!r} is not a vertex label or edge type of tenant '{spec.name}'")
+    if not ((spec.deprecated.get(part) or {}).get(name) or {}).get("deprecated"):
+        raise RenameError(f"{name!r} is not deprecated: deprecate it first")
+    children = sorted(c for c, p in spec.label_hierarchy if p == name)
+    if children:
+        raise RenameError(f"{', '.join(children)} inherit from {name!r}: drop or move them first")
+    needing = sorted(t for t, rule in spec.resolve_rules
+                     if name in _strs(rule.get("require_dst_label")))
+    if needing:
+        raise RenameError(f"the resolve rules of {', '.join(needing)} require {name!r}")
+    replacing = sorted(
+        other for p in ("vertex", "edge") for other, entry in (spec.deprecated.get(p) or {}).items()
+        if entry.get("replaced_by") == name
+    )
+    if replacing:
+        raise RenameError(f"{', '.join(replacing)} name {name!r} as their replacement")
+    return part
+
+
+def dropped_spec(spec: TenantSpec, part: str, name: str) -> TenantSpec:
+    """``spec`` without the label or type ``name`` and everything that named it."""
+
+    def without(value: Mapping[str, Any]) -> dict[str, Any]:
+        out = {p: {n: e for n, e in entries.items() if not (p == part and n == name)}
+               for p, entries in value.items() if isinstance(entries, dict)}
+        rest = {k: v for k, v in value.items() if not isinstance(v, dict)}
+        return {**rest, **{p: e for p, e in out.items() if e}}
+
+    if part == "edge":
+        return replace(
+            spec,
+            edge_labels=tuple(t for t in spec.edge_labels if t != name),
+            resolve_rules=tuple((t, dict(r)) for t, r in spec.resolve_rules if t != name),
+            edge_endpoints=tuple(p for p in spec.edge_endpoints if p[0] != name),
+            display=without(spec.display), property_schema=without(spec.property_schema),
+            deprecated=without(spec.deprecated),
+        )
+    search_indexes: dict[str, dict[str, object]] = {}
+    for index_name, body in spec.search_indexes.items():
+        labels = _strs(body.get("labels"))
+        if labels == [name]:
+            continue
+        search_indexes[index_name] = (
+            {**body, "labels": [lab for lab in labels if lab != name]} if name in labels
+            else dict(body)
+        )
+    return replace(
+        spec,
+        vertex_labels=tuple(lab for lab in spec.vertex_labels if lab != name),
+        label_hierarchy=tuple((c, p) for c, p in spec.label_hierarchy if name not in (c, p)),
+        property_indexes=tuple(dict(x) for x in spec.property_indexes if x.get("label") != name),
+        generated_columns=tuple(
+            dict(x) for x in spec.generated_columns if x.get("label") != name
+        ),
+        search_indexes=search_indexes,
+        edge_endpoints=tuple(p for p in spec.edge_endpoints if name not in (p[1], p[2])),
+        display=without(spec.display), property_schema=without(spec.property_schema),
+        deprecated=without(spec.deprecated),
+    )
+
+
+async def drop_label(pool: asyncpg.Pool, tenant: str, name: str) -> list[str]:
+    """Drop the deprecated label or edge type ``name`` when it has no rows: its AGE
+    label (table, sequence, indexes), and everything graphos keeps that names it,
+    in one transaction under the tenant's lock; one ``schema`` record.  Returns
+    the saved queries that name it (not rewritten).
+
+    Raises:
+        RenameError: it is not a deprecated label or type nothing needs, or it has rows.
+        TenantBusyError: a job runs on the tenant, or its tables stay in use.
+    """
+    try:
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute(f"SET LOCAL lock_timeout = '{DROP_LOCK_TIMEOUT}';")
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0));", tenant)
+            stored = spec_from_json(await conn.fetchval(
+                "SELECT spec::text FROM graphos_meta.tenants WHERE name = $1 FOR UPDATE;", tenant,
+            ))
+            stored = replace(stored, edge_endpoints=tuple(
+                (r["edge_type"], r["src_label"], r["dst_label"]) for r in await conn.fetch(
+                    "SELECT edge_type, src_label, dst_label FROM graphos_meta.edge_endpoints "
+                    "WHERE tenant = $1;", tenant,
+                )
+            ))
+            part = check_drop(stored, name)
+            await _refuse_busy(conn, tenant, "edge_type" if part == "edge" else "label", name)
+            rows = await conn.fetchval(f'SELECT count(*) FROM "{tenant}"."{name}";')
+            if rows:
+                raise RenameError(f"{name!r} has {rows} row(s): delete them first")
+            after = dropped_spec(stored, part, name)
+            saved = await saved_queries_naming(conn, tenant, name)
+            await conn.execute("SELECT ag_catalog.drop_label($1::name, $2::name);", tenant, name)
+            await conn.execute(
+                "UPDATE graphos_meta.tenants SET spec = $2::jsonb, updated_at = now() "
+                "WHERE name = $1;",
+                tenant, json.dumps(_spec_to_jsonable(after)),
+            )
+            if part == "vertex":
+                await conn.execute(
+                    "DELETE FROM graphos_meta.edge_endpoints "
+                    "WHERE tenant = $1 AND (src_label = $2 OR dst_label = $2);",
+                    tenant, name,
+                )
+                await conn.execute(
+                    "DELETE FROM graphos_meta.node_properties WHERE tenant = $1 AND label = $2;",
+                    tenant, name,
+                )
+            else:
+                await conn.execute(
+                    "DELETE FROM graphos_meta.edge_endpoints WHERE tenant = $1 AND edge_type = $2;",
+                    tenant, name,
+                )
+            await changes.record(
+                conn, tenant=tenant, op="schema", kind="tenant", count=1,
+                detail={"dropped": {"kind": "label" if part == "vertex" else "edge_type",
+                                    "name": name}},
+            )
+            await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, tenant)
+    except asyncpg.LockNotAvailableError as exc:
+        raise TenantBusyError(
+            f"tenant '{tenant}' is in use (an export, an import or a long query holds its "
+            "tables); try again when it ends"
+        ) from exc
+    loaded = await load_spec(pool, tenant)
+    if loaded is not None:
+        remember(loaded)
+    log.info("schema drop", extra={"tenant": tenant, "label": name})
+    return saved

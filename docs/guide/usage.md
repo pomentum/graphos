@@ -318,6 +318,7 @@ owner), `maintain` on it (or a matching `create_tenants`) to re-register one. Th
 | `strict_endpoints` | bool, optional | refuse edge writes outside the declared pairs; omitted: unchanged (off for a new tenant) |
 | `display` | `{vertex: {label: {color, caption, size_by, icon} \| null}, edge: {type: {color, caption} \| null}}` | how the web UI draws each label and edge type; see *Label styles* below |
 | `property_schema` | `{mode, vertex: {label or *: entry \| null}, edge: {type or *: entry \| null}}` | the properties each label and edge type carries, and how strictly writes are held to them; see *Property schema* below |
+| `deprecated` | `{vertex: {label: entry \| null}, edge: {type: entry \| null}}` | labels, edge types and properties on their way out, with what replaces them; see *Changing a schema* below |
 
 **Merge vs replace.** By default, re-registering merges the incoming spec into the stored one.
 Labels, indexes, generated columns, the hierarchy and rules are unioned, and `meta` keys are
@@ -504,7 +505,8 @@ node count, parent and properties (the declared type, `required` and enum; the r
 property, its distinct values and, when there are at most 20, every value with its count and
 JSON type: a string as it is, any other value as JSON, a long one cut and ending with `…`), the
 label pairs per edge type with their counts, the search indexes, the saved queries with their
-parameters, and the `graphos_*` names graphos computes itself. Lists are capped (40 labels, 25
+parameters, the `graphos_*` names graphos computes itself, the deprecated names with what replaces
+them (`deprecated`) and the latest 20 renames (`renames`, newest first). Lists are capped (40 labels, 25
 properties a label, 60 label pairs) and say how many there were; labels above 50,000 nodes are read
 on a sample (`estimated`). `text` holds the same as compact text, and `?format=text` answers it
 alone. It is kept per tenant for five minutes and dropped when the schema changes.
@@ -520,13 +522,14 @@ Use label, type, property names and values exactly as written here; look a prope
 ```
 
 **Export and import a schema.** `GET /v1/tenants/{name}/spec` answers the tenant's whole schema as
-a file (`<name>.schema.json`, format `graphos.schema`, version 1, or 2 when it carries a
-`property_schema`). The file **is a registration
+a file (`<name>.schema.json`, format `graphos.schema`, version 1, 2 when it carries a
+`property_schema`, 3 when it carries `deprecated`). The file **is a registration
 body**: posting it to `POST /v1/tenants` registers that schema, and changing `name` imports it into
 another tenant (created when new, with `create_tenants`). It is lossless: labels, edge labels with
 their resolve rules (one `{name, resolve_rule}` entry per rule), `label_hierarchy`,
 `edge_endpoints`, `strict_endpoints`, search and property indexes, generated columns, `meta`,
-`display` and `property_schema`. It holds no data, grants or computed values. Lists are sorted and
+`display`, `property_schema` and `deprecated`. It holds no data, grants, computed values or rename
+history. Lists are sorted and
 keys in a fixed order, so two exports of the same schema differ only in `_export.exported_at`, and
 a diff in git shows only what changed.
 
@@ -596,6 +599,75 @@ To free the name, delete the tenant with its data (`?drop_data=true`).
 A graph unregistered before 0.8.2 kept no registration: it is listed as an `orphan` (admins only).
 An admin registers it again with its schema, or deletes it with its data; anyone else is refused
 (409) when registering its name.
+
+### Changing a schema: deprecate, rename, drop
+
+Registration only adds; these three change or remove names, so consumers can follow.
+
+**Deprecate** (`maintain`, a registration): `deprecated` marks a label, an edge type or some of
+their properties as on their way out, with what replaces them and why. An entry given again
+replaces the stored one; `null` removes it.
+
+```json
+{"name": "acme", "deprecated": {
+  "vertex": {"Docu": {"deprecated": true, "replaced_by": "Document", "note": "until 2027"},
+             "Person": {"properties": {"mail": {"replaced_by": "email"}}}},
+  "edge": {"CITES": {"deprecated": true}}}}
+```
+
+Writes naming a deprecated name still succeed, whatever the property schema's mode, and carry a
+warning (`property_warnings`, rule `deprecated`, e.g. `"Person.mail:deprecated": 2`). The schema
+(`GET /v1/{tenant}/schema`), the schema summary and MCP's `get_schema` show what is deprecated and
+what replaces it; the web UI marks it on the Schema page.
+
+**Rename** (`owner`): `POST /v1/tenants/{name}/schema:rename` with `{"kind": "label" |
+"edge_type", "from": …, "to": …}`, or `{"kind": "property", "on": <label or type>, "from": …,
+"to": …}`. `?dry_run=true` answers what it would change, writing nothing: the parts of the schema
+that name it, graphos's indexes renamed with it (`[old, new]`), declared pairs, rows, and the saved
+queries whose Cypher names it.
+
+- A **label or edge type** is renamed in place, in one transaction: its rows keep their ids and
+  edges, the label hierarchy and everything graphos keeps that names it follow (definitions,
+  styles, declared pairs, property, search and resolver indexes, resolve rules, deprecations that
+  name it as the replacement, the community map). Afterwards a write naming the old name answers
+  409 with where it went (`'Docu' was renamed to 'Document' on 2026-10-19: use the new name`),
+  and registering the old name again is refused the same way. Cypher naming the old label
+  returns nothing rather than failing, so update the saved queries the answer lists: they are
+  not rewritten. It waits at most 5 s for the tables (409 while an export or a long query holds
+  them) and is refused while a job runs on the tenant.
+- A **property** (on a vertex label, with the labels below it, or on an edge type) is renamed by a
+  background job: 202, `Location: /v1/jobs/{id}`, with `progress` (`done`, `total`) on the job.
+  Rows are rewritten in batches, each row a new revision, one `patch` change record per batch.
+  While it runs, writes naming the old name carry a warning; once it is done they are refused
+  (rule `renamed`, in any mode). Its definitions, deprecation, property and search indexes and
+  styles follow at the end. Refused when rows carry both names, or a generated column, a resolve
+  rule or a search index over other labels uses the property. A failed or cancelled rename resumes
+  when asked again. Renaming `name` on a vertex label answers a warning: search without an index
+  matches `name` by default, so ask it for the new property afterwards, or declare a search index.
+
+Every rename is kept in the tenant's `renames` (oldest first: kind, from, to, on, when, who,
+status), served by `GET /v1/{tenant}/schema` and `GET /v1/tenants/{name}`.
+
+```bash
+curl -s -X POST "$G/v1/tenants/acme/schema:rename?dry_run=true" -H "$AUTH" \
+  -H 'content-type: application/json' -d '{"kind": "label", "from": "Docu", "to": "Document"}'
+# → {"kind":"label","from":"Docu","to":"Document","dry_run":true,"spec_parts":["display",…],
+#    "indexes":[["Docu_properties_gin","Document_properties_gin"],…],"endpoints":1,"rows":120,
+#    "saved_queries":["docs"]}
+```
+
+**Drop** (`owner`): `DELETE /v1/tenants/{name}/labels/{label}` drops a deprecated label or edge
+type **only when it has no rows**: its table and indexes, and everything graphos keeps that names
+it, in one transaction. Refused (400) while a label inherits from it, a resolve rule requires it
+as a destination, or a deprecation names it as the replacement. A deprecated property is removed
+from the definitions by declaring the entry without it; its values stay on the rows until written
+away.
+
+In the Python client: `rename_label`, `rename_edge_type`, `rename_property` (wait with
+`wait_for_job(result.job_id)`), `drop_label`, and `register_tenant(deprecated=…)`. In the web UI,
+an open label or relationship type on the Schema page has Rename (with the dry run first),
+Deprecate and, once deprecated and empty, Drop; a Renames section shows the history and a running
+property rename's progress.
 
 ---
 

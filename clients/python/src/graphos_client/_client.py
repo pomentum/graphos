@@ -66,6 +66,8 @@ from graphos_client._models import (
     RecomputeCommunitiesResponse,
     ReconcileEdge,
     SampleSubgraphResponse,
+    SchemaDropResult,
+    SchemaRenameResult,
     SchemaSummaryResponse,
     SearchResponse,
     TenantInfo,
@@ -382,6 +384,7 @@ class GraphosClient:
         strict_endpoints: bool | None = None,
         display: Mapping[str, Mapping[str, Mapping[str, Any] | None]] | None = None,
         property_schema: Mapping[str, Any] | None = None,
+        deprecated: Mapping[str, Mapping[str, Mapping[str, Any] | None]] | None = None,
         force_shrink: bool = False,
         dry_run: bool = False,
     ) -> dict[str, Any]:
@@ -433,6 +436,13 @@ class GraphosClient:
         ``off`` (stored, nothing checked), ``warn`` or ``strict``; an entry given
         again replaces the stored one, ``None`` removes it.
 
+        ``deprecated`` marks labels, edge types and properties on their way out:
+        ``{"vertex": {"Docu": {"deprecated": True, "replaced_by": "Document",
+        "note": "until 2027"}, "Person": {"properties": {"mail": {"replaced_by":
+        "email"}}}}, "edge": {...}}``.  Writes naming them carry a warning
+        (``property_warnings``); an entry given again replaces the stored one,
+        ``None`` removes it.  See :meth:`rename_label` and :meth:`drop_label`.
+
         ``edge_labels`` entries are names or ``{"name": ..., "resolve_rule": {...}}``
         dicts (rule-based edges).  ``label_hierarchy`` maps ``{child_label: parent_label}``;
         graphos wires postgres table inheritance so writes under the
@@ -462,6 +472,8 @@ class GraphosClient:
             body["display"] = {part: dict(entries) for part, entries in display.items()}
         if property_schema:
             body["property_schema"] = dict(property_schema)
+        if deprecated:
+            body["deprecated"] = {part: dict(entries) for part, entries in deprecated.items()}
         return await self._register(body, force_shrink=force_shrink, dry_run=dry_run)
 
     async def _register(
@@ -538,6 +550,59 @@ class GraphosClient:
             params={"type": edge_type, "src": src_label, "dst": dst_label},
         )
         return resp.json()
+
+    async def rename_label(
+        self, old: str, new: str, *, dry_run: bool = False, name: str | None = None,
+    ) -> SchemaRenameResult:
+        """Rename the vertex label ``old`` to ``new`` in place (owner): its rows,
+        ids and edges stay, everything graphos keeps that names it follows, and
+        the old name answers 409 saying where it went.  Saved queries naming it
+        are listed, not rewritten.  ``dry_run`` answers what it would change."""
+        return await self._rename(
+            {"kind": "label", "from": old, "to": new}, dry_run=dry_run, name=name,
+        )
+
+    async def rename_edge_type(
+        self, old: str, new: str, *, dry_run: bool = False, name: str | None = None,
+    ) -> SchemaRenameResult:
+        """Rename the edge type ``old`` to ``new`` in place (owner), as
+        :meth:`rename_label` does a label."""
+        return await self._rename(
+            {"kind": "edge_type", "from": old, "to": new}, dry_run=dry_run, name=name,
+        )
+
+    async def rename_property(  # noqa: PLR0913 — one rename's parts
+        self, on: str, old: str, new: str, *, dry_run: bool = False, name: str | None = None,
+    ) -> SchemaRenameResult:
+        """Rename the property ``old`` to ``new`` on the vertex label (and the
+        labels below it) or edge type ``on`` (owner).  The rows are rewritten by
+        a background job: wait for it with ``wait_for_job(result.job_id)``
+        (``progress`` on the job); meanwhile writes naming ``old`` carry a
+        warning, afterwards they are refused.  A failed or cancelled rename
+        resumes when asked again."""
+        return await self._rename(
+            {"kind": "property", "on": on, "from": old, "to": new}, dry_run=dry_run, name=name,
+        )
+
+    async def _rename(
+        self, body: dict[str, str], *, dry_run: bool, name: str | None,
+    ) -> SchemaRenameResult:
+        resp = await self._request(
+            "POST", f"/v1/tenants/{name or self._tenant}/schema:rename",
+            params={"dry_run": "true"} if dry_run else None, json_body=body,
+            idempotent=dry_run,
+        )
+        return SchemaRenameResult.model_validate(resp.json())
+
+    async def drop_label(self, label: str, *, name: str | None = None) -> SchemaDropResult:
+        """Drop a deprecated vertex label or edge type that has no rows (owner),
+        with its indexes and everything graphos keeps that names it.  Refused
+        (400) when it is not deprecated, has rows, or something still needs it."""
+        resp = await self._request(
+            "DELETE", f"/v1/tenants/{name or self._tenant}/labels/{quote(label, safe='')}",
+            idempotent=False,
+        )
+        return SchemaDropResult.model_validate(resp.json())
 
     async def unregister_tenant(
         self, name: str | None = None, *, drop_data: bool = False,
@@ -1661,8 +1726,9 @@ class GraphosClient:
     async def schema_summary(self) -> SchemaSummaryResponse:
         """The tenant's schema as a model needs it before querying: labels with
         counts and properties (declared type, rows, distinct values, the values
-        when few), label pairs per edge type, search indexes, saved queries;
-        ``.text`` is the compact form for a prompt."""
+        when few), label pairs per edge type, search indexes, saved queries,
+        deprecated names and the latest renames; ``.text`` is the compact form for
+        a prompt."""
         resp = await self._request("GET", f"/v1/{self._tenant}/schema/summary")
         return SchemaSummaryResponse.model_validate(resp.json())
 

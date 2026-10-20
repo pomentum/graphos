@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ── Nodes / Edges (write) ───────────────────────────────────────────────────
 
@@ -47,6 +47,55 @@ class EdgeUpsert(BaseModel):
 # ── Tenant ──────────────────────────────────────────────────────────────────
 
 
+class SchemaRename(BaseModel):
+    """One rename of a tenant's schema (ADR-0009): ``from_`` is gone, use ``to``.
+
+    ``kind`` is ``label``, ``edge_type`` or ``property`` (``on``: its label or
+    type); a property rename is ``running`` until its job has rewritten every
+    row, ``failed`` when it stopped (rename again to resume)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    kind: str
+    from_: str = Field(..., alias="from")
+    to: str
+    on: str | None = None
+    at: datetime | None = None
+    by: str | None = None
+    status: str = "done"
+    job_id: str | None = None
+
+
+class SchemaRenameResult(BaseModel):
+    """What :meth:`GraphosClient.rename_label` and friends changed, or with
+    ``dry_run`` would change.  A property rename runs as a job: ``job_id``."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    tenant: str
+    kind: str
+    from_: str = Field(..., alias="from")
+    to: str
+    on: str | None = None
+    dry_run: bool = False
+    spec_parts: list[str] = Field(default_factory=list)
+    indexes: list[list[str]] = Field(default_factory=list)   # [old, new] index names
+    endpoints: int = 0
+    rows: int | None = None
+    saved_queries: list[str] = Field(default_factory=list)   # name the old name: not rewritten
+    job_id: str | None = None
+    warnings: list[str] = Field(default_factory=list)   # what else to change afterwards
+
+
+class SchemaDropResult(BaseModel):
+    """A deprecated label or edge type dropped (:meth:`GraphosClient.drop_label`)."""
+
+    tenant: str
+    kind: str                                  # label | edge_type
+    name: str
+    saved_queries: list[str] = Field(default_factory=list)
+
+
 class TenantInfo(BaseModel):
     name: str
     vertex_labels: list[str] = Field(default_factory=list)
@@ -63,6 +112,10 @@ class TenantInfo(BaseModel):
     display: dict[str, dict[str, dict[str, Any]]] = Field(default_factory=dict)
     # ``{"mode", "vertex": {label: entry}, "edge": {type: entry}}``; empty from an older server.
     property_schema: dict[str, Any] = Field(default_factory=dict)
+    # ``{"vertex": {label: {deprecated, replaced_by, note, properties}}, "edge": ...}``
+    # and the renames, oldest first; empty from a server before 0.14.0.
+    deprecated: dict[str, dict[str, dict[str, Any]]] = Field(default_factory=dict)
+    renames: list[SchemaRename] = Field(default_factory=list)
 
 
 class Me(BaseModel):
@@ -133,6 +186,9 @@ class TenantSchemaInfo(BaseModel):
     display: dict[str, dict[str, dict[str, Any]]] = Field(default_factory=dict)
     # Declared properties per label and edge type, and the mode; empty from an older server.
     property_schema: dict[str, Any] = Field(default_factory=dict)
+    # What is deprecated and the renames, oldest first; empty from a server before 0.14.0.
+    deprecated: dict[str, dict[str, dict[str, Any]]] = Field(default_factory=dict)
+    renames: list[SchemaRename] = Field(default_factory=list)
 
 
 # ── Reads ───────────────────────────────────────────────────────────────────
@@ -611,6 +667,13 @@ class JobError(BaseModel):
     detail: str
 
 
+class JobProgress(BaseModel):
+    """How much of a long job is done (a property rename reports it)."""
+
+    done: int
+    total: int | None = None
+
+
 class Job(BaseModel):
     """A background job (``submit_*`` methods, ``GET /v1/jobs/{id}``)."""
 
@@ -624,6 +687,7 @@ class Job(BaseModel):
     consumer: str | None = None
     cancel_requested: bool = False
     sync: bool = False     # run by a synchronous call (its caller waits); listed while running
+    progress: JobProgress | None = None
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -785,6 +849,16 @@ class SummarySavedQuery(BaseModel):
     params: dict[str, str] = Field(default_factory=dict)
 
 
+class SummaryDeprecated(BaseModel):
+    """A label, edge type or property on its way out (``on``: a property's label or type)."""
+
+    kind: str
+    name: str
+    on: str | None = None
+    replaced_by: str | None = None
+    note: str | None = None
+
+
 class SchemaSummaryResponse(BaseModel):
     """``GET /v1/{tenant}/schema/summary``: the schema as a model needs it."""
 
@@ -796,6 +870,8 @@ class SchemaSummaryResponse(BaseModel):
     search_indexes: list[SummarySearchIndex] = Field(default_factory=list)
     saved_queries: list[SummarySavedQuery] = Field(default_factory=list)
     computed: list[str] = Field(default_factory=list)
+    deprecated: list[SummaryDeprecated] = Field(default_factory=list)
+    renames: list[SchemaRename] = Field(default_factory=list)   # the latest, newest first
     estimated: bool
     text: str
     cached: bool

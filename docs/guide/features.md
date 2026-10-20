@@ -36,8 +36,17 @@ pattern (who then owns it), registers each one with `POST /v1/tenants`:
 `property_indexes`, `generated_columns`, `label_hierarchy` (child → parent
 label inheritance), `search_indexes` (§4), `edge_endpoints` and
 `strict_endpoints` (§10), free-form `meta`, `display` (how the web UI draws
-each label and relationship type) and `property_schema` (the properties each
-carries).
+each label and relationship type), `property_schema` (the properties each
+carries) and `deprecated` (what is on its way out).
+
+- **Renaming and deprecating.** A label, an edge type or a property is
+  marked deprecated with what replaces it: writes naming it carry a warning,
+  and the schema, its summary and MCP's `get_schema` say what to use
+  instead. An owner renames a label or edge type in place, in one
+  transaction (rows, ids, edges and everything that names it follow), or a
+  property by a background job with progress; a dry run says first what
+  follows and which saved queries name it. A name renamed away answers 409
+  with where it went. A deprecated label or type with no rows is dropped.
 
 - **Label styles.** `display` declares, per vertex label, a colour, an icon
   (from a fixed list), a caption property and a size property, and per edge

@@ -31,6 +31,7 @@ import contextlib
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, TypeVar, cast
 from uuid import UUID
@@ -45,6 +46,10 @@ from graphos.contracts.jobs import Job
 log = logging.getLogger(__name__)
 
 JobFn = Callable[[asyncpg.Pool, str | None, dict[str, Any]], Awaitable[BaseModel]]
+
+# The job the current task runs (set by the runner and run_tracked), for
+# report_progress.
+CURRENT_JOB: ContextVar[UUID | None] = ContextVar("graphos_current_job", default=None)
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
 
@@ -78,14 +83,14 @@ class JobConflictError(Exception):
 
 _COLUMNS = (
     "id, kind, tenant, status, params::text AS params, result::text AS result, "
-    "error::text AS error, consumer, cancel_requested, sync, created_at, started_at, "
-    "finished_at"
+    "error::text AS error, progress::text AS progress, consumer, cancel_requested, sync, "
+    "created_at, started_at, finished_at"
 )
 
 
 def _to_job(row: asyncpg.Record) -> Job:
     data = dict(row)
-    for key in ("params", "result", "error"):
+    for key in ("params", "result", "error", "progress"):
         data[key] = json.loads(data[key]) if data[key] is not None else None
     data["params"] = data["params"] or {}
     return Job.model_validate(data)
@@ -220,6 +225,7 @@ async def run_tracked(  # noqa: PLR0913 — the job's fields and how to run it
     task = asyncio.current_task()
     if task is not None:
         _TRACKED[job_id] = task
+    CURRENT_JOB.set(job_id)
     beat = asyncio.create_task(_beat(pool, job_id, task, heartbeat_s))
     status: str = "failed"
     result: dict[str, Any] | None = None
@@ -275,6 +281,20 @@ async def _finish(
         json.dumps(result) if result is not None else None,
         json.dumps(error) if error is not None else None,
     )
+
+
+async def report_progress(pool: asyncpg.Pool, done: int, total: int | None) -> None:
+    """Record how much of the current job is done (no-op outside a job). Best effort."""
+    job_id = CURRENT_JOB.get()
+    if job_id is None:
+        return
+    try:
+        await pool.execute(
+            "UPDATE graphos_meta.jobs SET progress = $2::jsonb WHERE id = $1;",
+            job_id, json.dumps({"done": done, "total": total}),
+        )
+    except Exception:  # noqa: BLE001 -- progress never fails the job
+        log.warning("job progress not recorded", extra={"job_id": str(job_id)})
 
 
 async def _beat(
@@ -424,6 +444,7 @@ class JobRunner:
         # Change records of the job's writes name who submitted it.  This
         # task's own context: set here, it is seen by everything it awaits.
         ACTOR.set(Actor(consumer=row["consumer"], trace_id=f"job:{job_id}"))
+        CURRENT_JOB.set(job_id)
         heartbeat = asyncio.create_task(
             _beat(self._pool, job_id, asyncio.current_task(), self._heartbeat_s),
         )

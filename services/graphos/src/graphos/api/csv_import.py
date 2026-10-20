@@ -29,7 +29,7 @@ from typing import Annotated, Any, Literal, cast
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import ValidationError
 
-from graphos import csv_rows
+from graphos import csv_rows, renames
 from graphos.api.bulk import PASSED_THROUGH, EdgeWriter, NodeWriter, _Writer, stream_error
 from graphos.api.graph import UNIQUE_VIOLATION_RESPONSE, _check_tenant, _check_vertex_label
 from graphos.auth import Tenant, WritePrincipal
@@ -259,6 +259,7 @@ async def import_edges_csv(  # noqa: PLR0913 — FastAPI route parameters
     _check_vertex_label(tenant, dst_label)
     spec = registered_tenants()[tenant]
     if type not in spec.edge_labels:
+        renames.refuse_renamed(spec, type)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"edge type '{type}' is not registered for tenant '{tenant}'",

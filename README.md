@@ -21,7 +21,7 @@ The picture above is the map; each line below links to the section that covers i
 
 **Build**
 
-- **Tenants and schema:** each tenant is its own AGE graph with its own labels; no built-in labels or property names; optional property rules, `warn` or `strict` ([usage](docs/guide/usage.md#3-tenant-registration)).
+- **Tenants and schema:** each tenant is its own AGE graph with its own labels; no built-in labels or property names; optional property rules, `warn` or `strict`; labels, relationship types and properties renamed in place or deprecated, with what replaces them ([usage](docs/guide/usage.md#3-tenant-registration)).
 - **Fast, idempotent writes:** batches, NDJSON bulk and snapshot import as COPY-staged upserts, 37–156× faster than per-row Cypher `MERGE` in our measurements ([usage](docs/guide/usage.md#4-writing-data), [AGE notes](docs/guide/apache-age.md)).
 - **Load a CSV file:** send the file itself; graphos maps its columns to properties, merges rows that repeat an id, checks every row (a dry run writes nothing) and writes them as bulk loads do ([usage](docs/guide/usage.md#csv-import)).
 - **Edit in place, safely:** patch or delete one node or edge, or delete up to 1,000 nodes in one transaction; `If-Match` turns a concurrent edit into a `412` instead of a lost update ([usage](docs/guide/usage.md#4-writing-data)).

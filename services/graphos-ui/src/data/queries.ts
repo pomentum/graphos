@@ -12,6 +12,7 @@ import type {
   Properties,
   SchemaAddition,
   SchemaDocument,
+  SchemaRenameRequest,
 } from "../api/types";
 import { CATEGORY_OPS, type ActivityCategory } from "../lib/changes";
 import { saveFile } from "../lib/download";
@@ -50,6 +51,7 @@ export const keys = {
   metricsJob: (tenant: string) => ["metricsJob", tenant] as const,
   propertyDefinitions: (tenant: string) => ["propertyDefinitions", tenant] as const,
   propertyCheckJob: (tenant: string) => ["propertyCheckJob", tenant] as const,
+  job: (id: string) => ["job", id] as const,
   activeJobs: (tenant: string) => ["activeJobs", tenant] as const,
   recentJobs: (tenant: string) => ["recentJobs", tenant] as const,
   history: (tenant: string, category: ActivityCategory | "all") => ["history", tenant, category] as const,
@@ -523,6 +525,64 @@ export function useImportSchema() {
         client.invalidateQueries({ queryKey: ["map", tenant] }),
         client.invalidateQueries({ queryKey: keys.catalogue(tenant) }),
       ]),
+  });
+}
+
+/** One job, followed every few seconds while it runs (a property rename's progress). */
+export function useJob(id: string | null | undefined) {
+  const { api } = useTenantSession();
+  return useQuery({
+    queryKey: keys.job(id ?? ""),
+    queryFn: () => api.job(id!),
+    enabled: Boolean(id),
+    refetchInterval: (query) => (isActiveJob(query.state.data) ? JOB_POLL_MS : false),
+  });
+}
+
+/** After a rename, a deprecation or a drop: what names labels, types and properties is read again. */
+export function useRefreshSchema() {
+  const { tenant } = useTenantSession();
+  const client = useQueryClient();
+  return () =>
+    Promise.all([
+      client.invalidateQueries({ queryKey: keys.schema(tenant) }),
+      client.invalidateQueries({ queryKey: ["map", tenant] }),
+      client.invalidateQueries({ queryKey: keys.catalogue(tenant) }),
+      client.invalidateQueries({ queryKey: keys.propertyDefinitions(tenant) }),
+      client.invalidateQueries({ queryKey: keys.activeJobs(tenant) }),
+    ]);
+}
+
+/** Renames a label, a relationship type or a property (owner); a property's rows are rewritten by a job. */
+export function useRenameSchema() {
+  const { api } = useTenantSession();
+  const refresh = useRefreshSchema();
+  return useMutation({
+    meta: { errorTitle: "errors.notRenamed" },
+    mutationFn: (request: SchemaRenameRequest) => api.renameSchema(request, false),
+    onSuccess: () => refresh(),
+  });
+}
+
+/** Marks a label, a type or some of its properties deprecated, or no longer (maintain). */
+export function useDeprecate() {
+  const { api } = useTenantSession();
+  const refresh = useRefreshSchema();
+  return useMutation({
+    meta: { success: "notices.deprecationSaved", errorTitle: "errors.deprecationNotSaved" },
+    mutationFn: (deprecated: NonNullable<SchemaAddition["deprecated"]>) => api.addToSchema({ deprecated }),
+    onSuccess: () => refresh(),
+  });
+}
+
+/** Drops a deprecated label or type that has no rows (owner). */
+export function useDropLabel() {
+  const { api } = useTenantSession();
+  const refresh = useRefreshSchema();
+  return useMutation({
+    meta: { success: "notices.labelDropped", errorTitle: "errors.labelNotDropped" },
+    mutationFn: (name: string) => api.dropLabel(name),
+    onSuccess: () => refresh(),
   });
 }
 

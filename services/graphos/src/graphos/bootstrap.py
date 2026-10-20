@@ -104,6 +104,11 @@ class TenantSpec:
     # mode writes are checked in: ``{"mode": …, "vertex": {label: entry},
     # "edge": {type: entry}}``, entries without nulls (graphos.properties).
     property_schema: dict[str, Any] = field(default_factory=dict)
+    # What is on its way out, per vertex label and edge type (``graphos.renames``):
+    # ``{"vertex": {label: {deprecated, replaced_by, note, properties}}, "edge": …}``.
+    deprecated: dict[str, dict[str, dict[str, object]]] = field(default_factory=dict)
+    # Every rename, oldest first (``graphos.renames``); kept by every registration.
+    renames: tuple[dict[str, object], ...] = ()
     edge_endpoints: tuple[tuple[str, str, str], ...] = ()
     strict_endpoints: bool | None = None
 
@@ -830,6 +835,11 @@ def _spec_from_jsonable(payload: dict[str, object]) -> TenantSpec:
         ),
         display=display_of(payload.get("display")),
         property_schema=property_schema_of(payload.get("property_schema")),
+        deprecated=by_entry.parse(payload.get("deprecated")),
+        renames=tuple(
+            dict(x) for x in cast("list[dict[str, object]]", payload.get("renames") or [])
+            if isinstance(x, dict)
+        ),
     )
 
 
@@ -931,9 +941,10 @@ async def remove_edge_endpoint(
     return result == "DELETE 1"
 
 
-# The by-entry merges of ``persist_spec`` (parameters $4-$7: the removed entries).
+# The by-entry merges of ``persist_spec`` (parameters $4-$9: the removed entries).
 _DISPLAY_MERGE = by_entry.sql("display", "$4", "$5")
 _PROPERTY_SCHEMA_MERGE = by_entry.sql("property_schema", "$6", "$7")
+_DEPRECATED_MERGE = by_entry.sql("deprecated", "$8", "$9")
 
 
 async def persist_spec(
@@ -944,6 +955,7 @@ async def persist_spec(
     meta_removed: tuple[str, ...] = (),
     display_removed: tuple[tuple[str, str], ...] = (),
     schema_removed: tuple[tuple[str, str], ...] = (),
+    deprecated_removed: tuple[tuple[str, str], ...] = (),
 ) -> None:
     """Upsert the tenant spec into graphos_meta.tenants.
 
@@ -954,9 +966,10 @@ async def persist_spec(
     set-union of existing and incoming; ``meta`` is merged dict-wise
     (incoming keys overwrite existing keys for the same name), and the keys in
     ``meta_removed`` (sent as ``null``) are removed; ``display`` and
-    ``property_schema`` are merged by entry, the ``(part, name)`` entries in
-    ``display_removed`` / ``schema_removed`` removed, and the property mode
-    replaced only when the request states one.
+    ``property_schema`` and ``deprecated`` are merged by entry, the ``(part,
+    name)`` entries in ``display_removed`` / ``schema_removed`` /
+    ``deprecated_removed`` removed, and the property mode replaced only when
+    the request states one.  ``renames`` stays as stored: only a rename writes it.
 
     Why: a blind ``DO UPDATE SET spec = EXCLUDED.spec`` would let any
     caller (even a bare ``{"name": ...}`` registration) shrink a tenant
@@ -1046,13 +1059,18 @@ async def persist_spec(
                         'mode', COALESCE(
                             EXCLUDED.spec #> '{property_schema,mode}',
                             graphos_meta.tenants.spec #> '{property_schema,mode}'),
-                        """ + _PROPERTY_SCHEMA_MERGE + """))
+                        """ + _PROPERTY_SCHEMA_MERGE + """)),
+                    'deprecated', jsonb_strip_nulls(jsonb_build_object(
+                        """ + _DEPRECATED_MERGE + """)),
+                    'renames', COALESCE(graphos_meta.tenants.spec->'renames', '[]'::jsonb)
                 ),
                 updated_at = now();
             """,
             spec.name, payload, list(meta_removed),
             by_entry.names(display_removed, "vertex"), by_entry.names(display_removed, "edge"),
             by_entry.names(schema_removed, "vertex"), by_entry.names(schema_removed, "edge"),
+            by_entry.names(deprecated_removed, "vertex"),
+            by_entry.names(deprecated_removed, "edge"),
         )
         await _supersede_kept(conn, spec.name)
         await _persist_endpoints(conn, spec, replace=replace_endpoints)
@@ -1068,7 +1086,8 @@ async def persist_spec_replace(
     ``POST /v1/tenants`` — used when an operator intentionally wants
     to remove labels from a tenant (e.g. deprecation).  Normal
     consumers should always go through :func:`persist_spec` so that
-    a partial / bare registration cannot demote the schema.
+    a partial / bare registration cannot demote the schema.  The
+    ``renames`` history is kept: a replacement does not rewrite the past.
     """
     payload = json.dumps(_spec_to_jsonable(spec))
     async with pool.acquire() as conn, conn.transaction():
@@ -1077,7 +1096,9 @@ async def persist_spec_replace(
             INSERT INTO graphos_meta.tenants (name, spec)
             VALUES ($1, $2::jsonb)
             ON CONFLICT (name)
-            DO UPDATE SET spec = EXCLUDED.spec, updated_at = now();
+            DO UPDATE SET spec = EXCLUDED.spec || jsonb_build_object(
+                'renames', COALESCE(graphos_meta.tenants.spec->'renames', '[]'::jsonb)),
+                updated_at = now();
             """,
             spec.name, payload,
         )

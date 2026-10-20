@@ -21,6 +21,9 @@ import type {
   SchemaAddition,
   SchemaDocument,
   SchemaDryRun,
+  SchemaDropResult,
+  SchemaRenameRequest,
+  SchemaRenameResult,
   HubsResponse,
   InducedEdgesResponse,
   EdgesUpsertResponse,
@@ -559,6 +562,25 @@ export class GraphosApi {
       result = await this.http.post<unknown>("/v1/tenants", { name, edge_endpoints: byType(chunk) });
     }
     return result;
+  }
+
+  /**
+   * Renames a label, a relationship type or a property (owner); `dryRun`
+   * answers what it would change. A property is renamed by a job (`job_id`).
+   */
+  async renameSchema(request: SchemaRenameRequest, dryRun: boolean): Promise<SchemaRenameResult> {
+    return (
+      await this.http.request<SchemaRenameResult>("POST", `/v1/tenants/${enc(this.tenant)}/schema:rename`, {
+        body: request,
+        query: dryRun ? { dry_run: true } : undefined,
+      })
+    ).data;
+  }
+
+  /** Drops a deprecated label or relationship type that has no rows (owner). */
+  async dropLabel(name: string): Promise<SchemaDropResult> {
+    return (await this.http.request<SchemaDropResult>("DELETE", `/v1/tenants/${enc(this.tenant)}/labels/${enc(name)}`))
+      .data;
   }
 
   /** Removes one declared label pair of an edge type (admin); no data is touched. */

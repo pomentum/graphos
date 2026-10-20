@@ -8,6 +8,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from graphos import reserved
 from graphos.contracts.property_schema import PropertySchemaSpec
 
 # Tenant name = AGE graph name = postgres schema name. AGE preserves
@@ -540,6 +541,193 @@ class DisplaySpec(BaseModel):
         return v
 
 
+class DeprecatedProperty(BaseModel):
+    """A property on its way out: writes naming it carry a warning, whatever the mode."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    replaced_by: str | None = Field(None, description="The property to write instead.")
+    note: str | None = Field(
+        None, max_length=500, description="Why, for people reading the schema.",
+    )
+
+    @field_validator("replaced_by")
+    @classmethod
+    def _replacement(cls, v: str | None) -> str | None:
+        return v if v is None else _property_name(v)
+
+
+class DeprecatedEntry(BaseModel):
+    """What is deprecated on one vertex label or edge type: the label or type itself,
+    some of its properties, or both."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    deprecated: bool = Field(
+        False, description="The label or type itself: writes to it carry a warning.",
+    )
+    replaced_by: str | None = Field(
+        None, description="The label or type to use instead (needs `deprecated`).",
+    )
+    note: str | None = Field(
+        None, max_length=500, description="Why, for people reading the schema.",
+    )
+    properties: dict[str, DeprecatedProperty] = Field(
+        default_factory=dict, description="Its deprecated properties, by name.",
+    )
+
+    @field_validator("replaced_by")
+    @classmethod
+    def _replacement(cls, v: str | None) -> str | None:
+        if v is not None and not _LABEL_PATTERN.fullmatch(v):
+            raise ValueError(f"replaced_by {v!r} must match {_LABEL_PATTERN.pattern}")
+        return v
+
+    @field_validator("properties")
+    @classmethod
+    def _property_names(cls, v: dict[str, Any]) -> dict[str, Any]:
+        for name in v:
+            _property_name(name)
+            if name == "id" or reserved.is_reserved(name):
+                raise ValueError(f"{name!r} cannot be deprecated: graphos needs it")
+        return v
+
+    @model_validator(mode="after")
+    def _something(self) -> DeprecatedEntry:
+        if not self.deprecated and not self.properties:
+            raise ValueError("an entry deprecates the label or type, some properties, or both")
+        if self.replaced_by is not None and not self.deprecated:
+            raise ValueError("replaced_by names what replaces the label or type: set deprecated")
+        return self
+
+
+class DeprecatedSpec(BaseModel):
+    """Per vertex label and edge type, what is deprecated: writes naming it succeed
+    with a warning (`property_warnings`, rule `deprecated`), whatever the property
+    schema's mode."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vertex: dict[str, DeprecatedEntry | None] = Field(
+        default_factory=dict,
+        description="By vertex label; `null` removes a label's entry on a registration.",
+    )
+    edge: dict[str, DeprecatedEntry | None] = Field(
+        default_factory=dict,
+        description="By edge type; `null` removes a type's entry on a registration.",
+    )
+
+    @field_validator("vertex", "edge")
+    @classmethod
+    def _names(cls, v: dict[str, Any]) -> dict[str, Any]:
+        for name in v:
+            if not _LABEL_PATTERN.fullmatch(name):
+                raise ValueError(f"deprecated entry {name!r} must match {_LABEL_PATTERN.pattern}")
+        return v
+
+
+class SchemaRename(BaseModel):
+    """One rename of the tenant's schema (`POST /v1/tenants/{name}/schema:rename`)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    kind: Literal["label", "edge_type", "property"] = Field(..., description="What was renamed.")
+    from_: str = Field(..., alias="from", description="The old name.")
+    to: str = Field(..., description="The new name.")
+    on: str | None = Field(
+        None, description="For a property: the vertex label or edge type it was renamed on.",
+    )
+    at: datetime = Field(..., description="When (UTC).")
+    by: str | None = Field(None, description="Who.")
+    status: Literal["done", "running", "failed"] = Field(
+        "done",
+        description=(
+            "A property rename runs as a job: `running` until every row is rewritten, `failed` "
+            "when it stopped (run the rename again to resume)."
+        ),
+    )
+    job_id: str | None = Field(None, description="The job of a property rename.")
+
+
+class SchemaRenameRequest(BaseModel):
+    """Body for `POST /v1/tenants/{name}/schema:rename`."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    kind: Literal["label", "edge_type", "property"] = Field(
+        ..., description="What to rename: a vertex label, an edge type, or a property.",
+    )
+    from_: str = Field(..., alias="from", description="The current name.")
+    to: str = Field(..., description="The new name.")
+    on: str | None = Field(
+        None,
+        description=(
+            "For a property: the vertex label or edge type it is renamed on (and the labels "
+            "below a vertex label in the hierarchy)."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _on(self) -> SchemaRenameRequest:
+        if (self.kind == "property") != (self.on is not None):
+            raise ValueError("`on` names the label or type of a property rename, and only then")
+        if self.kind == "property":
+            _property_name(self.from_)
+            _property_name(self.to)
+        return self
+
+
+class SchemaRenameResponse(BaseModel):
+    """What a rename changed, or with `dry_run` would change."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    tenant: str = Field(..., description="The tenant.")
+    kind: Literal["label", "edge_type", "property"] = Field(..., description="What was renamed.")
+    from_: str = Field(..., alias="from", description="The old name.")
+    to: str = Field(..., description="The new name.")
+    on: str | None = Field(None, description="For a property: the label or type it is on.")
+    dry_run: bool = Field(False, description="Nothing was changed: this is what would be.")
+    spec_parts: list[str] = Field(
+        default_factory=list,
+        description="The parts of the schema that name it (all renamed with it).",
+    )
+    indexes: list[list[str]] = Field(
+        default_factory=list, description="graphos's indexes renamed with it, `[old, new]`.",
+    )
+    endpoints: int = Field(0, description="Declared label pairs renamed with it.")
+    rows: int | None = Field(
+        None,
+        description=(
+            "Rows of the label or type (not rewritten by a label or type rename); for a "
+            "property, the rows to rewrite."
+        ),
+    )
+    saved_queries: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Saved queries whose Cypher names the old label or type: not rewritten. Cypher "
+            "naming an unknown label returns nothing, so update them."
+        ),
+    )
+    job_id: str | None = Field(None, description="A property rename's job.")
+    warnings: list[str] = Field(
+        default_factory=list, description="What else to change afterwards (a property rename).",
+    )
+
+
+class SchemaDropResponse(BaseModel):
+    """A deprecated label or edge type dropped."""
+
+    tenant: str = Field(..., description="The tenant.")
+    kind: Literal["label", "edge_type"] = Field(..., description="What was dropped.")
+    name: str = Field(..., description="The dropped label or edge type.")
+    saved_queries: list[str] = Field(
+        default_factory=list,
+        description="Saved queries whose Cypher names it: not rewritten, so update them.",
+    )
+
+
 class TenantSpecBody(BaseModel):
     """Body for POST /v1/tenants.
 
@@ -643,6 +831,15 @@ class TenantSpecBody(BaseModel):
             "pattern, …; `*` for every one) and how writes are held to them: `mode` `off` (the "
             "default: stored and shown, nothing checked), `warn` or `strict`. An entry declared "
             "again replaces the stored one; `null` removes it; `mode` omitted stays as it is."
+        ),
+    )
+    deprecated: DeprecatedSpec = Field(
+        default_factory=DeprecatedSpec,
+        description=(
+            "Labels, edge types and properties on their way out, with what replaces them: "
+            "writes naming them carry a warning, whatever the mode. An entry declared again "
+            "replaces the stored one; `null` removes it. An empty deprecated label or type is "
+            "dropped with `DELETE /v1/tenants/{name}/labels/{label}`."
         ),
     )
 
@@ -827,6 +1024,12 @@ class TenantInfo(BaseModel):
         default_factory=PropertySchemaSpec,
         description="Its property schema, as declared.",
     )
+    deprecated: DeprecatedSpec = Field(
+        default_factory=DeprecatedSpec, description="What is deprecated, and what replaces it.",
+    )
+    renames: list[SchemaRename] = Field(
+        default_factory=list, description="Its renames, oldest first.",
+    )
 
 
 class MeResponse(BaseModel):
@@ -906,6 +1109,12 @@ class TenantSchema(BaseModel):
             "The declared properties of each label and edge type, their descriptions, and the "
             "mode writes are checked in (`off` when none is registered)."
         ),
+    )
+    deprecated: DeprecatedSpec = Field(
+        default_factory=DeprecatedSpec, description="What is deprecated, and what replaces it.",
+    )
+    renames: list[SchemaRename] = Field(
+        default_factory=list, description="Its renames, oldest first.",
     )
 
 

@@ -20,14 +20,21 @@ class JobError(BaseModel):
     detail: str = Field(..., description="The error's detail message.")
 
 
+class JobProgress(BaseModel):
+    """How much of a long job is done (a property rename reports it)."""
+
+    done: int = Field(..., description="Items done so far (rows rewritten).")
+    total: int | None = Field(None, description="Items to do, when known.")
+
+
 class Job(BaseModel):
     """A long operation run in the background, or a synchronous call being tracked."""
 
     id: UUID = Field(..., description="The job's id, as in `Location: /v1/jobs/{id}`.")
     kind: str = Field(
         ..., description=(
-            "`recompute_communities`, `compute_metrics`, `resolve_edges`, `check_properties` "
-            "or `vacuum`."
+            "`recompute_communities`, `compute_metrics`, `resolve_edges`, `check_properties`, "
+            "`rename_property` or `vacuum`."
         ),
     )
     tenant: str | None = Field(
@@ -49,6 +56,9 @@ class Job(BaseModel):
     )
     error: JobError | None = Field(
         None, description="On failure: why; null otherwise.",
+    )
+    progress: JobProgress | None = Field(
+        None, description="How much is done, for a kind that reports it; null otherwise.",
     )
     consumer: str | None = Field(default=None, description="Who submitted it (token consumer).")
     cancel_requested: bool = Field(

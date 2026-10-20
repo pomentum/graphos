@@ -14,9 +14,9 @@ import httpx
 import pytest
 import pytest_asyncio
 
-from graphos import writes
+from graphos import schema_rename, writes
 from graphos.app import create_app
-from graphos.bootstrap import TenantSpec, forget, register_tenant
+from graphos.bootstrap import TenantSpec, forget, register_tenant, registered_tenants
 from graphos.config import Settings
 
 from .conftest import requires_db
@@ -28,7 +28,11 @@ async def _fresh(pool: asyncpg.Pool) -> None:
     async with pool.acquire() as conn:
         if await conn.fetchval("SELECT 1 FROM ag_catalog.ag_graph WHERE name = $1;", TENANT):
             await conn.execute(f"SELECT drop_graph('{TENANT}', true);")
-        await conn.execute("DELETE FROM graphos_meta.tenants WHERE name = $1;", TENANT)
+        for table, column in (
+            ("tenants", "name"), ("edge_endpoints", "tenant"), ("changes", "tenant"),
+            ("change_horizon", "tenant"), ("node_properties", "tenant"),
+        ):
+            await conn.execute(f"DELETE FROM graphos_meta.{table} WHERE {column} = $1;", TENANT)
     forget(TENANT)
 
 
@@ -82,3 +86,37 @@ async def test_the_summary_lists_what_the_data_holds_and_is_cached(
     text = await api.get("/schema/summary", params={"format": "text"})
     assert text.headers["content-type"].startswith("text/plain")
     assert text.text == body["text"]
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_the_summary_names_what_is_deprecated_and_what_was_renamed(
+    api: httpx.AsyncClient, db_pool: asyncpg.Pool,
+) -> None:
+    await register_tenant(db_pool, TenantSpec(
+        name=TENANT, vertex_labels=("Person", "Doc"), edge_labels=("AUTHORED",),
+        deprecated={"vertex": {
+            "Doc": {"deprecated": True, "replaced_by": "Person", "note": "until 2027"},
+            "Person": {"properties": {"status": {"replaced_by": "state"}}},
+        }},
+    ))
+    body = (await api.get("/schema/summary")).json()
+    assert body["deprecated"] == [
+        {"kind": "label", "name": "Doc", "on": None, "replaced_by": "Person",
+         "note": "until 2027"},
+        {"kind": "property", "name": "status", "on": "Person", "replaced_by": "state",
+         "note": None},
+    ]
+    assert body["renames"] == []
+    assert ("Deprecated (still readable; do not use in new writes): label Doc, use Person "
+            "(until 2027); property Person.status, use state") in body["text"]
+    await schema_rename.rename(
+        db_pool, registered_tenants()[TENANT], "edge_type", "AUTHORED", "WROTE", by="olive",
+    )
+    after = (await api.get("/schema/summary")).json()
+    assert after["cached"] is False
+    assert [(r["kind"], r["from"], r["to"], r["status"]) for r in after["renames"]] == [
+        ("edge_type", "AUTHORED", "WROTE", "done"),
+    ]
+    assert "Renamed (the old names are gone): edge type AUTHORED -> WROTE (" in after["text"]
+    assert [x["type"] for x in after["links"]] == ["WROTE"]
