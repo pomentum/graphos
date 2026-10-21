@@ -18,6 +18,10 @@ under one version.
 
 ### Fixed
 
+- **The web UI keeps the algorithm the groups were last computed with.** After a Leiden run on a
+  tenant whose default is Louvain, Overview showed "Tenant's (Louvain)" chosen again, so Compute
+  again ran Louvain from scratch. Until another is picked, the choice is now what the last
+  recompute ran, after a reload too.
 - **A full database disk says so.** A computation, write or read that ran the database out of disk
   failed with "internal error; see the server log", in the API, a job's record and the web UI
   alike. graphos now answers `507` ("the database server is out of disk space; free space on the

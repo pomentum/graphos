@@ -19,7 +19,9 @@ import { useComputeMetrics } from "./useComputeMetrics";
  * found and, for whoever maintains the tenant, a button to run it. Groups are
  * offered only where the server has the Louvain extra; the algorithm is the
  * tenant's unless another is chosen, and the choice is offered only by a
- * server that has more than one (0.14.0 on). The metrics run over chosen
+ * server that has more than one (0.14.0 on). Until one is picked, the choice
+ * is what the last recompute ran, so Compute again repeats it (and Leiden
+ * goes on from its groups) after a reload too. The metrics run over chosen
  * relationship types, or all of them: PageRank over dependencies says what
  * everything relies on, over every relationship what is most connected. One
  * runs at a time per tenant, so both wait while either is running.
@@ -37,7 +39,7 @@ export function GraphAlgorithms() {
   const schema = useSchema().data;
   const edgeLabels = schema?.edge_labels ?? [];
   const groupsJob = useGroupsJob();
-  const [choice, setChoice] = useState<"default" | CommunityAlgorithm>("default");
+  const [picked, setPicked] = useState<"default" | CommunityAlgorithm | null>(null);
   const [fromScratch, setFromScratch] = useState(false);
 
   const offer = groupsOffer(canMaintain, info.data?.features.louvain);
@@ -45,9 +47,10 @@ export function GraphAlgorithms() {
   const computed = map.data?.available ? map.data : null;
   const algorithms = communityAlgorithms(info.data?.features);
   const tenantDefault: CommunityAlgorithm = schema?.community_algorithm ?? "louvain";
+  const lastRun = groupsRun(groupsJob.data);
+  const choice = picked ?? (lastRun && lastRun.algorithm !== tenantDefault ? lastRun.algorithm : "default");
   const chosen = choice === "default" ? tenantDefault : choice;
   const algorithmName = (a: CommunityAlgorithm) => t(`views.overview.algorithms.algorithmNames.${a}`);
-  const lastRun = groupsRun(groupsJob.data);
 
   const groupsStatus = groups.running
     ? t("views.overview.algorithms.running")
@@ -94,7 +97,7 @@ export function GraphAlgorithms() {
                     size="xs"
                     aria-label={t("views.overview.algorithms.algorithm")}
                     value={choice}
-                    onChange={(value) => setChoice(value as "default" | CommunityAlgorithm)}
+                    onChange={(value) => setPicked(value as "default" | CommunityAlgorithm)}
                     data={[
                       {
                         value: "default",
