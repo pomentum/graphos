@@ -497,8 +497,10 @@ reports each phase's duration (`edge_stream_ms`, `writeback_ms`, …).
    vertices whose id actually changed, via a COPY-staged UPDATE against
    the inheritance parent `"<tenant>"._ag_label_vertex` (Postgres routes
    each row to its child label table). Then `end_community_id` and
-   `start_community_id` are back-filled on every edge label table, in UPDATEs
-   of 50,000 vertices each.
+   `start_community_id` are back-filled on every edge label table, both in
+   the same UPDATE (one per range of start ids, 50,000 vertices wide), so an
+   edge whose two ends both moved is written once, not once per end: half
+   the row versions, WAL and index entries.
 
 For comparison, a per-row `cypher() SET` writeback manages ~42 nodes/s
 (215 s for 9k vertices).

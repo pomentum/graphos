@@ -6,6 +6,16 @@ under one version.
 
 ## Unreleased
 
+### Changed
+
+- **A community recompute writes each edge once.** Both of an edge's community columns
+  (`start_community_id`, `end_community_id`) are now set by the same UPDATE; they were set one
+  end at a time, so an edge whose two ends both moved was written twice, each time as a whole new
+  row with new index entries and WAL. A recompute in which most communities change (Louvain, or
+  Leiden from scratch) now writes about half the edge row versions, so the edge tables need about
+  half the extra space and WAL while it runs. Unchanged rows are still skipped, and an end in no
+  community still keeps its value.
+
 ### Fixed
 
 - **A full database disk says so.** A computation, write or read that ran the database out of disk

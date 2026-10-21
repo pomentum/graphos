@@ -1306,6 +1306,20 @@ async def rename_property_batch(  # noqa: PLR0913 -- one batch's inputs
 EDGE_COMMUNITY_CHUNK = 50_000
 
 
+def _start_id_range(low: int | None, high: int | None) -> tuple[str, list[int]]:
+    """The edges whose start id is in ``[low, high)`` (an open end when None),
+    as a condition on ``e`` and its parameters."""
+    conds: list[str] = []
+    args: list[int] = []
+    if low is not None:
+        args.append(low)
+        conds.append(f"e.start_id >= (${len(args)}::bigint::text)::graphid")
+    if high is not None:
+        args.append(high)
+        conds.append(f"e.start_id < (${len(args)}::bigint::text)::graphid")
+    return " AND ".join(conds) or "TRUE", args
+
+
 async def set_edge_end_communities(
     pool: asyncpg.Pool,
     *,
@@ -1317,16 +1331,20 @@ async def set_edge_end_communities(
 
     The ``(graphid, community_id)`` pairs are COPYed once into a staging
     table, streamed from ``assignments`` (a generator is fine), then each
-    edge label table gets UPDATEs joined to it, per end and per chunk of
-    ``EDGE_COMMUNITY_CHUNK`` vertices: a first fill of a column on millions of
-    edges (an existing tenant after an upgrade) is then many short statements,
-    each well within its time limit, rather than one per label.  ``IS
-    DISTINCT FROM`` skips rows whose value is unchanged, so later runs write
-    only what moved.  Unlike the other writes, each UPDATE commits on its own,
-    so a failure keeps what was written.
+    edge label table gets one UPDATE per range of start ids (``EDGE_COMMUNITY_CHUNK``
+    staged vertices wide) that sets both columns of each edge from the staging
+    table, joined once per end: every edge is written at most once, where a
+    statement per end wrote an edge whose two ends both moved twice (two row
+    versions, twice the WAL and index entries).  A first fill on millions of
+    edges (an existing tenant after an upgrade) is many short statements, each
+    well within its time limit.  An end that is not staged (a vertex in no
+    community) keeps its column as it was, and rows whose values are
+    unchanged are skipped, so later runs write only what moved.  Unlike the
+    other writes, each UPDATE commits on its own, so a failure keeps what was
+    written.
 
     Returns:
-        Edge rows updated across all labels.
+        Edge rows updated across all labels (each at most once).
     """
     total = 0
     with _db_errors(
@@ -1351,7 +1369,9 @@ async def set_edge_end_communities(
                     "WHERE (rn - 1) % $1 = 0 ORDER BY gid;",
                     EDGE_COMMUNITY_CHUNK,
                 )]
-                chunks = list(zip(starts, [*starts[1:], None], strict=True))
+                # Ranges of the edges' start ids, open at both ends, so every edge
+                # falls in exactly one, whichever of its ends has a community.
+                chunks = list(zip([None, *starts[1:]], [*starts[1:], None], strict=True))
                 label_rows = await conn.fetch(
                     "SELECT c.relname "
                     "FROM pg_class c "
@@ -1366,19 +1386,30 @@ async def set_edge_end_communities(
                 )
                 for label in (str(r["relname"]) for r in label_rows):
                     await allow_long_statements(conn, 300.0)
-                    for column, end in (("end_community_id", "end_id"),
-                                        ("start_community_id", "start_id")):
-                        for low, high in chunks:
-                            updated = await conn.execute(
-                                f'UPDATE "{tenant}"."{label}" e '
-                                f"SET {column} = s.cid "
-                                f"FROM _stg_edge_communities s "
-                                f"WHERE e.{end} = (s.gid::text)::graphid "
-                                f"  AND s.gid >= $1 AND ($2::bigint IS NULL OR s.gid < $2) "
-                                f"  AND e.{column} IS DISTINCT FROM s.cid;",
-                                low, high, timeout=300.0,
-                            )
-                            total += _rows_written(updated, default=0)
+                    for low, high in chunks:
+                        bounds, args = _start_id_range(low, high)
+                        updated = await conn.execute(
+                            f"WITH n AS ("
+                            f"  SELECT e.ctid AS row, ss.cid AS start_cid, se.cid AS end_cid "
+                            f'  FROM "{tenant}"."{label}" e '
+                            f"  LEFT JOIN _stg_edge_communities ss "
+                            f"    ON ss.gid = (e.start_id::text)::bigint "
+                            f"  LEFT JOIN _stg_edge_communities se "
+                            f"    ON se.gid = (e.end_id::text)::bigint "
+                            f"  WHERE {bounds} "
+                            f"    AND (ss.gid IS NOT NULL OR se.gid IS NOT NULL) "
+                            f"    AND (coalesce(ss.cid, e.start_community_id), "
+                            f"         coalesce(se.cid, e.end_community_id)) "
+                            f"        IS DISTINCT FROM (e.start_community_id, e.end_community_id)"
+                            f") "
+                            f'UPDATE "{tenant}"."{label}" e '
+                            f"SET start_community_id = "
+                            f"      coalesce(n.start_cid, e.start_community_id), "
+                            f"    end_community_id = coalesce(n.end_cid, e.end_community_id) "
+                            f"FROM n WHERE e.ctid = n.row;",
+                            *args, timeout=300.0,
+                        )
+                        total += _rows_written(updated, default=0)
                     log.info(
                         "louvain.edge_writeback_label_done",
                         extra={"tenant": tenant, "label": label, "total_updated_so_far": total},
