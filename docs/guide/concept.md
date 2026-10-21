@@ -1578,3 +1578,10 @@ Postgres instance.
    to build its in-memory graph from label tables with extra columns
    (apache/age#2583), so the console refuses them; the API's `paths` and
    `expand` do not need them, and a plain AGE copy (§6) runs them.
+12. **Analysis write-backs cost every index of the rows they change.** Metrics
+   and `community_id` live in `properties` (edge communities in indexed
+   columns), so each row a run changes gets a new entry in every index of its
+   table: on a first run over a large graph the write-back is most of the run
+   (87–89 % at 1M nodes). [ADR-0010](adrs/ADR-0010-analysis-results-outside-properties.md)
+   proposes keeping the results apart; a large write-back is followed by a
+   `VACUUM (ANALYZE)` meanwhile.
