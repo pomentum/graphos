@@ -666,6 +666,15 @@ changed):
 | synthetic, 270,000 nodes / 1.0M edges, first run | 51 s | 276 s |
 | synthetic, 810,000 nodes / 3.0M edges, first run | 152 s | 1,373 s |
 
+**Re-run after a small change** (from 0.14.0; synthetic, 250,080 nodes / 951,272 edges, 1 % more
+edges added between runs, vacuumed after each):
+
+| | 0.13.2 | 0.14.0 |
+|---|---:|---:|
+| metrics: nodes rewritten / run | 250,076 / 41 s | 19,153 / 17 s (scores moved under 1 % not written) |
+| communities: nodes rewritten / run | 190,911 / 103 s (Louvain) | 5,083 / 28 s (Leiden from the stored partition) |
+| community ids kept | 1 of 62 | 63 of 63 |
+
 Betweenness is skipped above `GRAPHOS_BETWEENNESS_MAX_NODES` (20,000). Metrics grow linearly with
 the graph; Louvain's first run is mostly its write-back (every node's `community_id` and both
 community columns of every edge), which also leaves a dead row per row written. A

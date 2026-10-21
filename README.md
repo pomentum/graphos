@@ -34,7 +34,7 @@ The picture above is the map; each line below links to the section that covers i
 **Explore**
 
 - **Graph analytics:** a map of every label and the edges between them (about a second on ten million edges), aggregates, top-K by degree ([usage](docs/guide/usage.md#6-aggregates)).
-- **Graph algorithms:** Louvain communities (optional extra), PageRank, betweenness, components and degree, run beside the API and written onto the nodes ([what each finds](docs/guide/algorithms.md)).
+- **Graph algorithms:** communities with Louvain or Leiden (optional extra), PageRank, betweenness, components and degree, run beside the API and written onto the nodes; re-runs write only what changed ([what each finds](docs/guide/algorithms.md)).
 - **Cypher console:** read-only Cypher on one tenant, write clauses refused, with a timeout, a row cap and saved queries ([usage](docs/guide/usage.md#cypher-console)).
 - **AI agents (MCP):** `/mcp` serves graphos's reads to agents as tools and resources, with the caller's grants and a schema summary made for models; MCP clients sign people in themselves ([agents guide](docs/guide/agents.md)).
 - **Web UI (optional):** explore, inspect and edit, work on many nodes at once, import a CSV file, query, extend the schema, follow changes live and export what is on screen ([below](#web-ui)).
@@ -160,7 +160,7 @@ every field.
 
 ### Louvain is an optional extra
 
-Community detection uses [python-igraph](https://python.igraph.org/), which is GPL-2.0-or-later, so it is kept out of the default install:
+Community detection uses [python-igraph](https://python.igraph.org/), which is GPL-2.0-or-later, so it is kept out of the default install. The extra gives both algorithms, Louvain (the default) and Leiden:
 
 | Install | Louvain |
 |---|---|
