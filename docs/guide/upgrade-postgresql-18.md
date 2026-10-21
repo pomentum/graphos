@@ -216,6 +216,13 @@ vacuumdb -h NEW -U graphos -d graphos --analyze-only --jobs 4
 # 4. Point graphos-api at NEW (GRAPHOS_DB_HOST ...) and start it.
 ```
 
+**AGE's catalogue.** The first part of step 3 points each graph in AGE's catalogue at its
+schema's new OID; without it Cypher on the restored graphs fails ("graph with oid N does not
+exist"). graphos-api also does it at start, as its own database role (in one statement, so the
+catalogue's foreign key holds without being dropped), and logs the graphs it repaired; the SQL
+above is for a database read by anything else first, or a role that may not update AGE's
+catalogue.
+
 **Restore serially.** Do not pass `-j` / `--jobs` to `pg_restore`: AGE's catalogue tables
 `ag_graph` and `ag_label` are then restored in parallel, `ag_label` can load first, and the restore
 fails (`COPY failed for table "ag_label"` … `violates foreign key constraint "fk_graph_oid"`, and

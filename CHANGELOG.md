@@ -25,6 +25,17 @@ under one version.
   a `VACUUM (ANALYZE)` of the tables it wrote (best-effort, logged), so the next run reuses the
   space instead of growing the tables.
 
+### Fixed
+
+- **A restored database works without the manual catalogue fix.** A `pg_dump` restored into another
+  database gives each tenant's schema a new OID, while AGE's catalogue keeps the old one, so Cypher
+  on those graphs failed ("graph with oid N does not exist") until the catalogue fix of the
+  upgrade guide was run by hand. graphos-api now points AGE's catalogue at the schemas at start, as
+  its own database role (both catalogue tables in one statement, so their foreign key holds), and
+  logs the graphs it repaired; a role that may not update the catalogue gets an error naming the
+  manual fix. **Docs:** installation §8 has a *Backup and restore* section: what to keep, a dump
+  while graphos runs, a serial restore, the grant to give again, statistics, and how to check.
+
 ## 0.13.2 — 2026-10-20
 
 Schema evolution (ADR-0009): labels, relationship types and properties can be renamed and

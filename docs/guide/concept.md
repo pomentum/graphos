@@ -1570,10 +1570,13 @@ Postgres instance.
    tenant's feed until it commits.
 10. **Backups** are operator-owned: `pg_dump` / `pg_basebackup` or a snapshot of
    the `graphos_data_pg18` volume (`graphos_data` on PostgreSQL 16). A
-   restore needs AGE's catalogue pointed at the restored schemas' new OIDs
-   and fresh planner statistics; restoring an AGE 1.6 dump into AGE 1.8
-   also needs AGE 1.8's cache-invalidation trigger on the label tables
-   ([upgrade-postgresql-18.md](upgrade-postgresql-18.md#a-database-you-run-yourself)).
+   restore needs AGE's catalogue pointed at the restored schemas' new OIDs,
+   which graphos-api does at start (`db.repair_age_catalogue`), and fresh
+   planner statistics, which it does not; restoring an AGE 1.6 dump into AGE
+   1.8 also needs AGE 1.8's cache-invalidation trigger on the label tables,
+   which graphos-api adds at start to the tenants it serves
+   ([installation §8](installation.md#backup-and-restore),
+   [upgrade-postgresql-18.md](upgrade-postgresql-18.md#a-database-you-run-yourself)).
 11. **No variable-length Cypher patterns** on graphos's tables: AGE refuses
    to build its in-memory graph from label tables with extra columns
    (apache/age#2583), so the console refuses them; the API's `paths` and
