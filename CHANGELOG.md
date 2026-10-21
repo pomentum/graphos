@@ -48,7 +48,7 @@ up to 75 s.
 - **A metrics re-run rewrites the scores that moved, not all of them.** A few new edges shift every
   node's PageRank a little, and scores were stored to six significant digits, so a re-run after
   any change rewrote the whole tenant: on 250,000 nodes with 1 % more edges, 250,076 nodes and
-  41 s, as long as a first run. A PageRank or betweenness score is now rewritten only when it moved
+  40 s, as long as a first run. A PageRank or betweenness score is now rewritten only when it moved
   by more than `GRAPHOS_METRICS_MIN_CHANGE` (new, 1 % of the stored value by default; `0` writes
   every change): there, 19,153 nodes (7.7 %: the degrees that changed and the 4.7 % of scores
   that moved more) in 17 s, and the 100 highest-ranked nodes stay the same. A large change still

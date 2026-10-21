@@ -21,7 +21,7 @@ graph of 250,000 nodes and 950,000 edges, with 1 % and 10 % new edges added betw
 | Re-run | Nothing changed | +1 % edges | +10 % edges |
 |---|---:|---:|---:|
 | metrics: nodes rewritten | 0 | 250,076 (100 %) | 250,079 (100 %) |
-| metrics: run (write-back) | 10 s (5 s) | 41 s (35 s) | 46 s (40 s) |
+| metrics: run (write-back) | 10 s (5 s) | 40 s (35 s) | 46 s (40 s) |
 | communities: nodes rewritten | 0 | 190,911 (76 %) | 190,891 (76 %) |
 | communities: run (write-back) | 24 s (11 s) | 103 s (91 s) | 131 s (108 s) |
 

@@ -673,7 +673,7 @@ edges added between runs, vacuumed after each):
 
 | | 0.13.2 | 0.14.0 |
 |---|---:|---:|
-| metrics: nodes rewritten / run | 250,076 / 41 s | 19,153 / 17 s (scores moved under 1 % not written) |
+| metrics: nodes rewritten / run | 250,076 / 40 s | 19,153 / 17 s (scores moved under 1 % not written) |
 | communities: nodes rewritten / run | 190,911 / 103 s (Louvain) | 5,083 / 28 s (Leiden from the stored partition) |
 | community ids kept | 1 of 62 | 63 of 63 |
 
