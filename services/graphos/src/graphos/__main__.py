@@ -37,6 +37,9 @@ def serve() -> None:
         # proxy's address when running behind one.
         proxy_headers=True,
         forwarded_allow_ips=settings.forwarded_allow_ips,
+        # Longer than a proxy's idle timeout, so the proxy closes first
+        # (GRAPHOS_KEEP_ALIVE_S; see config.py).
+        timeout_keep_alive=settings.keep_alive_s,
         # A change-feed stream never ends by itself: without a limit, a
         # graceful stop would wait on every open stream until the container
         # is killed.  After this many seconds open requests are cancelled;

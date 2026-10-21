@@ -70,6 +70,12 @@ class Settings(BaseSettings):
     bind_host: str = "0.0.0.0"
     bind_port: int = 8080
     forwarded_allow_ips: str = "127.0.0.1"
+    # Seconds an idle client connection is kept open. A proxy that reuses
+    # its connections to graphos (nginx's upstream keepalive, a cloud load
+    # balancer) must close an idle one before graphos does, or it may send a
+    # request just as graphos closes it and answer 502: so longer than the
+    # common proxy idle timeouts (60 s). uvicorn's own default is 5 s.
+    keep_alive_s: int = Field(default=75, ge=1)
 
     # ── Logging ──────────────────────────────────────────────────────────
     log_level: str = "INFO"

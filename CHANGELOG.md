@@ -27,6 +27,13 @@ under one version.
 
 ### Fixed
 
+- **Occasional 502s behind a proxy.** graphos-api closed idle connections after uvicorn's 5 s, so a
+  proxy keeping its connections to graphos longer (nginx's upstream keepalive keeps them 60 s)
+  sometimes sent a request on one just as graphos closed it, and answered 502: 12 of 1,310 reads
+  behind nginx, against none with nginx closing first. Idle connections now stay open 75 s, longer
+  than the common proxy timeouts, and `GRAPHOS_KEEP_ALIVE_S` (new) sets it. **Docs:** usage's
+  *Several replicas* says to keep the balancer's idle timeout shorter, and what happens to the
+  requests and jobs of a replica that stops.
 - **A restored database works without the manual catalogue fix.** A `pg_dump` restored into another
   database gives each tenant's schema a new OID, while AGE's catalogue keeps the old one, so Cypher
   on those graphs failed ("graph with oid N does not exist") until the catalogue fix of the

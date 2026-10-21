@@ -244,7 +244,9 @@ the communities. Then open the UI, pick `demo`, and use *Explore → Graph → C
 - **TLS in front.** Both ports bind to `127.0.0.1`. Put a reverse proxy with TLS in front of the
   UI (and of the API, if programs outside the host call it), and list it in
   `GRAPHOS_FORWARDED_ALLOW_IPS` so graphos sees the real client address (for sign-in throttling,
-  rate limits and the audit log).
+  rate limits and the audit log). Keep the proxy's idle timeout towards graphos shorter than
+  `GRAPHOS_KEEP_ALIVE_S` (75 s), or it may reuse a connection graphos has just closed and answer
+  502.
 - **The admin password.** Change it at once, or start with `GRAPHOS_ADMIN_PASSWORD_FILE`. Create a
   named admin for each administrator, and with SSO set `GRAPHOS_LOCAL_ADMIN=false`.
 - **Never `GRAPHOS_AUTH_DISABLED=true`.** It makes every request an anonymous admin, for local
