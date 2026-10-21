@@ -98,9 +98,9 @@ Leiden from the stored partition after a switch-over run):
 | Recompute | Louvain (0.13.2) | Leiden |
 |---|---:|---:|
 | nothing changed: nodes rewritten | 0 | 8,005 (3.2 %; the partition still settling) |
-| +1 % edges: nodes / edges rewritten | 190,911 / ≈1.6M | 5,083 / 46,406 |
+| +1 % edges: nodes / edges rewritten | 190,911 / 1,415,795 | 5,083 / 46,406 |
 | +1 % edges: run | 103 s | 28 s |
-| +10 % edges: nodes / edges rewritten | 190,891 / ≈1.6M | 7,076 / 226,797 |
+| +10 % edges: nodes / edges rewritten | 190,891 / 1,586,721 | 7,076 / 226,797 |
 | +10 % edges: run | 131 s | 43 s |
 | ids kept after +1 % | 1 of 62 | 63 of 63 |
 | modularity | ≈0.42 | 0.437 → 0.442 over the runs |
