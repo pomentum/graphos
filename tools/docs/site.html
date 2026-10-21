@@ -86,7 +86,7 @@
     <div><dt>Storage</dt><dd>PostgreSQL 18 with Apache AGE 1.8; each tenant is its own AGE graph</dd></div>
     <div><dt>API</dt><dd>Typed HTTP (FastAPI), JSON and NDJSON; the contract at <code>/openapi.json</code></dd></div>
     <div><dt>Access</dt><dd>Users and service accounts, 15-minute tokens, OpenID Connect sign-on, a level per tenant</dd></div>
-    <div><dt>Algorithms</dt><dd>Louvain (optional extra), PageRank, betweenness, components, degree</dd></div>
+    <div><dt>Algorithms</dt><dd>Louvain and Leiden (optional extra), PageRank, betweenness, components, degree</dd></div>
     <div><dt>Clients</dt><dd>An async, typed Python client; an optional web UI; plain HTTP</dd></div>
     <div><dt>Images</dt><dd><code>ghcr.io/pomentum/graphos-api</code> and <code>graphos-ui</code>, amd64 and arm64</dd></div>
     <div><dt>Licence</dt><dd>Apache-2.0</dd></div>
@@ -131,7 +131,7 @@
   <figure class="fig pic">
     <img class="pic-light" src="images/communities-light.svg" alt="{{ alt_communities }}">
     <img class="pic-dark" src="images/communities-dark.svg" alt="{{ alt_communities }}">
-    <figcaption><span class="fig-n">Fig 03</span><span>Communities, computed beside the data: Louvain in its own process, ids kept stable from run to run, written back with COPY (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/algorithms.md">what each algorithm finds</a>).</span></figcaption>
+    <figcaption><span class="fig-n">Fig 03</span><span>Communities, computed beside the data: Louvain or Leiden in its own process, ids kept stable from run to run, written back with COPY (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/algorithms.md">what each algorithm finds</a>).</span></figcaption>
   </figure>
 
   <h2 id="ui"><span class="sec" aria-hidden="true"><span class="num">06 · Web UI</span></span>Explore, edit, query</h2>

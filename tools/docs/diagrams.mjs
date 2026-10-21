@@ -180,7 +180,7 @@ ${layers.map(([a, b], i) => {
 ${text(338, y + 18, a, { size: 13, weight: 600 })}
 ${text(338, y + 34, b, { size: 11.5, fill: t.soft })}`;
 }).join('\n')}
-${pill(324, 380, 140, 'Louvain · igraph', t.card, t.accent)}${pill(472, 380, 146, 'K/V cache · LRU', t.card, t.accent)}
+${pill(324, 380, 140, 'Louvain · Leiden', t.card, t.accent)}${pill(472, 380, 146, 'K/V cache · LRU', t.card, t.accent)}
 ${arrow('M636 215 H708', { color: t.store, w: 2.2 })}
 ${text(712, 444, 'graphos-internal', { size: 12, weight: 600, fill: t.store, mono: true })}${text(842, 444, 'no external port', { size: 12, fill: t.soft })}
 ${cylinder(840, 82, 128, 316, { ry: 22 })}
@@ -197,7 +197,7 @@ ${text(840, 384, 'pg_trgm · pg_stat_statements', { size: 12, fill: t.soft, anch
 <path d="M48 475 l12 12 M60 475 l-12 12" stroke="${t.stop}" stroke-width="2" stroke-linecap="round"/>
 ${text(72, 486, 'Consumers never receive a database connection string and never send raw Cypher or SQL.', { size: 13.5, weight: 600, fill: t.stop })}`;
   return k.svg(1000, 516, 'How graphos is deployed',
-    'Consumers such as a loader job, an application, an analytics UI and an operator call graphos-api over the graphos-net network with a short-lived bearer token from signing in. graphos-api checks the grants of the signed-in user against the tenant in the path and the level each operation needs, validates typed request contracts, builds SQL internally with checked identifiers and capped limits, runs each query under a statement timeout, and emits metrics, JSON logs and an audit trail; it also runs Louvain community detection, in a separate process, and a key/value cache. Only graphos-api reaches graphos-db, PostgreSQL 18 with Apache AGE, over an internal network with no external port. Each tenant is its own AGE graph, and graphos_meta holds registrations and the cache. Consumers never receive a connection string and never send raw Cypher or SQL.',
+    'Consumers such as a loader job, an application, an analytics UI and an operator call graphos-api over the graphos-net network with a short-lived bearer token from signing in. graphos-api checks the grants of the signed-in user against the tenant in the path and the level each operation needs, validates typed request contracts, builds SQL internally with checked identifiers and capped limits, runs each query under a statement timeout, and emits metrics, JSON logs and an audit trail; it also runs community detection (Louvain or Leiden, with igraph), in a separate process, and a key/value cache. Only graphos-api reaches graphos-db, PostgreSQL 18 with Apache AGE, over an internal network with no external port. Each tenant is its own AGE graph, and graphos_meta holds registrations and the cache. Consumers never receive a connection string and never send raw Cypher or SQL.',
     body);
 }
 
@@ -209,7 +209,7 @@ function communities(t) {
   const steps = [
     ['Edge stream', 'plain SQL,', 'integer ids only'],
     ['Build graph', 'vertices in id', 'order, weighted'],
-    ['Louvain', 'own process,', 'fixed seed'],
+    ['Louvain/Leiden', 'own process,', 'fixed seed'],
     ['Stable ids', 'Jaccard ≥ 0.5', 'vs. the last run'],
     ['Write back', 'COPY + one', 'UPDATE … FROM'],
     ['Denormalise', 'community onto', 'every edge'],
@@ -230,11 +230,11 @@ ${i < steps.length - 1 ? arrow(`M${x + W + 2} 110 H${x + W + G - 3}`) : ''}`;
 ${text(30, 210, 'one run per tenant at a time (advisory lock, 409 otherwise)', { size: 13 })}
 ${text(530, 210, 'dry_run previews the partition without writing', { size: 13 })}
 ${text(30, 236, 'response reports time per step and modularity', { size: 13 })}
-${text(530, 236, 'ids persist across runs as membership drifts', { size: 13 })}
+${text(530, 236, 'ids persist; Leiden starts from the last run', { size: 13 })}
 <rect x="30" y="256" width="12" height="12" rx="3" fill="${t.storeSoft}" stroke="${t.storeLine}"/>${text(48, 266, 'inside PostgreSQL', { size: 12.5, fill: t.soft })}
 <rect x="190" y="256" width="12" height="12" rx="3" fill="${t.accentSoft}" stroke="${t.accentLine}"/>${text(208, 266, 'inside graphos-api', { size: 12.5, fill: t.soft })}`;
   return k.svg(1000, 282, 'How communities are computed',
-    'A call to recompute-communities, by a user with maintain on the tenant, streams edges out of PostgreSQL as integer ids with plain SQL, builds a weighted undirected igraph with its vertices in id order, runs Louvain in a separate process with a fixed seed, and matches each new cluster to its predecessor from the last run by Jaccard overlap of at least 0.5 so community ids stay stable. Results are written back with COPY and a single UPDATE, then the community id is denormalised onto every edge so scoped traversals use an index. Only one run per tenant happens at a time, a dry run previews the partition, and the response reports time per step and modularity.',
+    'A call to recompute-communities, by a user with maintain on the tenant, streams edges out of PostgreSQL as integer ids with plain SQL, builds a weighted undirected igraph with its vertices in id order, runs Louvain, or Leiden starting from the communities the last Leiden run stored, in a separate process with a fixed seed, and matches each new cluster to its predecessor from the last run by Jaccard overlap of at least 0.5 so community ids stay stable. Results are written back with COPY and a single UPDATE, then the community id is denormalised onto every edge so scoped traversals use an index. Only one run per tenant happens at a time, a dry run previews the partition, and the response reports time per step and modularity.',
     body);
 }
 
