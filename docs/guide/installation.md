@@ -17,6 +17,7 @@ once it runs is in the [usage guide](usage.md).
 - [11. Upgrading from PostgreSQL 16](#11-upgrading-from-postgresql-16)
 - [12. Upgrading from 0.4 (static tokens)](#12-upgrading-from-04-static-tokens)
 - [13. Locked out](#13-locked-out)
+- [14. Measuring a tenant](#14-measuring-a-tenant)
 
 ## 1. What you install
 
@@ -446,3 +447,35 @@ docker compose -f docker-compose.graphos.yml exec graphos-api python -m graphos 
 It gives the admin `graphos` a new random password, printed once, which must be changed at the next
 sign-in; it restores the user if it was disabled or deleted, and ends its sessions. A locked account
 (too many failed sign-ins) opens again after `GRAPHOS_LOGIN_LOCKOUT_S`.
+
+## 14. Measuring a tenant
+
+[`scripts/bench_tenant.py`](../../scripts/bench_tenant.py) measures one tenant of a running
+graphos: how fast its reads answer for one user and for several at once, and, on request, how long
+its graph jobs take. It learns what to read from the tenant itself (its schema summary and a sample
+of its nodes), so it works on any tenant without a dataset or queries written for it. It needs the
+Python client (`pip install ./clients/python`) and a user with `read` on the tenant:
+
+```bash
+GRAPHOS_USER=<user> GRAPHOS_PASSWORD=<password>   python scripts/bench_tenant.py http://localhost:8080 <tenant>   --docker graphos-api --docker graphos-db
+```
+
+| Measures | How |
+|---|---|
+| Reads, one user | each read 30 times after 3 unrecorded ones: a node by id, a filtered scan, text search with and without hits, neighbours, expand 1–3 hops, a shortest path, the graph map, an aggregation, the top nodes by PageRank, tenant statistics |
+| Saved queries | each of the tenant's saved queries the same way; one with parameters needs their values: `--list-saved` prints a template for `--saved-params` |
+| Concurrent users | steps of 1, 5, 10 and 20 users (`--users`), 60 s each (`--step-seconds`), each user reading in a random order with `--think-ms` between reads: percentiles, errors, throughput |
+| Resources | CPU and memory of the containers named with `--docker`, during the steps |
+| Cold reads | with `--cold-cmd`, a command of yours (restart PostgreSQL and graphos-api, drop the page cache) runs before each cold read |
+| Graph jobs | with `--jobs`: the graph metrics and the community recompute (`--algorithm`), a run and a re-run each |
+
+- **It only reads,** except with `--jobs`, which writes the jobs' results onto the tenant's nodes
+  as any run of them does, and needs `maintain`. Start points are ordinary nodes (the median
+  number of neighbours in a sample), so neither a hub nor a leaf decides the figures.
+- **A read the tenant cannot answer is skipped**, and the output says why: no search index, no
+  computed PageRank, no property with 20 values or fewer.
+- **The output** (`--out`, by default `bench-<tenant>-<time>`) is `summary.md`, one CSV per table
+  and `raw.jsonl` with every measurement. It holds read names, counts and timings only, never a
+  label, property, id or value of the data, unless `--show-names`, so it can be shared as it is.
+- **Measure what you mean to:** other load on the same machine, or a cache warmed by earlier
+  runs, shows up in the figures. Run it on a quiet system, or say what else was running.
