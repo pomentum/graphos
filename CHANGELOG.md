@@ -4,7 +4,12 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.14.2 — 2026-10-21
+
+A database that runs out of disk, memory or connections is reported as such (507 or 503) instead
+of an internal error, in the API, a job's record and the web UI; a community recompute writes each
+edge once, so its edge tables need about half the extra space; the web UI keeps the algorithm the
+groups were last computed with; the Python client no longer retries a full disk.
 
 ### Changed
 
