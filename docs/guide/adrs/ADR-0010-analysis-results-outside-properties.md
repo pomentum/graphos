@@ -1,6 +1,7 @@
 # ADR-0010: Analysis results outside `properties`
 
-- **Status:** Proposed (2026-10-21)
+- **Status:** Rejected (2026-10-21): the cost of a re-run is how many rows change, not where
+  they are stored; see *Why rejected* below.
 - **Scope:**
   - where graph metrics (`graphos_*`) and `community_id` are stored on vertices, and
     `end_community_id` / `start_community_id` on edges;
@@ -11,6 +12,34 @@
 - **Related:** concept §2.3 (storage), §8 (known limitations); ADR-0001 (one writer of a row);
   [services/graphos/DEVELOPMENT.md §3](../../../services/graphos/DEVELOPMENT.md#3-data-model-invariants)
   (reserved property names, every row write bumps `graphos_rev`)
+
+## Why rejected
+
+The figures below are first runs. Re-runs were measured before deciding: on the same setup, a
+graph of 250,000 nodes and 950,000 edges, with 1 % and 10 % new edges added between runs.
+
+| Re-run | Nothing changed | +1 % edges | +10 % edges |
+|---|---:|---:|---:|
+| metrics: nodes rewritten | 0 | 250,076 (100 %) | 250,079 (100 %) |
+| metrics: run (write-back) | 10 s (5 s) | 41 s (35 s) | 46 s (40 s) |
+| communities: nodes rewritten | 0 | 190,911 (76 %) | 190,891 (76 %) |
+| communities: run (write-back) | 24 s (11 s) | 103 s (91 s) | 131 s (108 s) |
+
+An unchanged graph costs little, but a 1 % change rewrites most of the graph again, because the
+values themselves change on most nodes:
+
+- **PageRank** moves by a little on almost every node when edges are added (94 % by more than
+  0.1 %), and is stored to six significant digits, so every one of them is written; only 4.7 %
+  move by more than 1 %.
+- **Communities** are recomputed from scratch, and Louvain lands on another partition: after a
+  1 % change only 37 % of nodes stay with their best-matching community, as after a change of
+  seed on the same graph (35 %). The ids cannot be carried over, so most nodes get a new one.
+
+A side table would make each of those rewrites cheaper but would still rewrite most of the graph,
+and it would take the results out of reach of Cypher. The cost is the churn, so the churn is what
+to reduce, with the results left where they are: a relative tolerance below which a metric is
+not rewritten (`GRAPHOS_METRICS_MIN_CHANGE`), and communities computed from the previous
+partition (ADR-0011).
 
 ## Context
 

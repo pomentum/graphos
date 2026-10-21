@@ -1585,6 +1585,9 @@ Postgres instance.
    and `community_id` live in `properties` (edge communities in indexed
    columns), so each row a run changes gets a new entry in every index of its
    table: on a first run over a large graph the write-back is most of the run
-   (87–89 % at 1M nodes). [ADR-0010](adrs/ADR-0010-analysis-results-outside-properties.md)
-   proposes keeping the results apart; a large write-back is followed by a
-   `VACUUM (ANALYZE)` meanwhile.
+   (87–89 % at 1M nodes), and a re-run after a small change rewrites most
+   rows again when the values move on most nodes. Small PageRank and
+   betweenness moves are not written (`GRAPHOS_METRICS_MIN_CHANGE`); a large
+   write-back is followed by a `VACUUM (ANALYZE)`. Moving the results out of
+   `properties` was considered and rejected
+   ([ADR-0010](adrs/ADR-0010-analysis-results-outside-properties.md)).
