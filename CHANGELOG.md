@@ -4,7 +4,13 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.14.0 — 2026-10-21
+
+Re-runs after a small change of the graph rewrite a few percent of it instead of nearly all of
+it: graph metrics skip scores that barely moved, and communities can be computed with Leiden from
+the stored partition (ADR-0011; Louvain stays the default). Also: path searches past a highly
+connected node, graph computations held to some of the CPUs, vacuum after large write-backs,
+restored databases repaired at start, and no more 502s behind a proxy's keep-alive.
 
 ### Added
 
