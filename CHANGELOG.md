@@ -14,6 +14,10 @@ under one version.
   was cheap to grow. Now a level over the cap stops only its own end, and the other end goes on
   alone, a whole level at a time, so the answer stays exact; `truncated` means both ends were
   stopped.
+- **Graph computations leave CPU for reads.** Betweenness (rustworkx) ran on every core of the host;
+  on a large graph that was minutes with no CPU left for the API's requests and job heartbeats. A
+  metrics or Louvain computation now uses at most `GRAPHOS_COMPUTE_THREADS` threads (new; `0`, the
+  default, is half the CPUs the process may use, at least one).
 
 ## 0.13.2 — 2026-10-20
 

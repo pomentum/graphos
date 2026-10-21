@@ -1748,6 +1748,7 @@ listed here.
 | `RATE_LIMIT_ENABLED` / `RATE_LIMIT_RPS` / `RATE_LIMIT_WINDOW_S` | false / 100 / 1.0 |
 | `JOB_CONCURRENCY`, `JOB_POLL_S`, `JOB_HEARTBEAT_S`, `JOB_RETENTION_H` | 1, 5, 10, 168: jobs run at once per replica; how often an idle replica looks for jobs queued elsewhere; a running job's heartbeat (one silent for three heartbeats is marked failed); how long finished jobs are kept |
 | `BETWEENNESS_MAX_NODES` | 20000 (§8, *Graph metrics*) |
+| `COMPUTE_THREADS` | 0: half the CPUs the process may use, at least one; the threads a metrics or Louvain computation may use (betweenness is the one that uses many) |
 | `REGISTRY_SYNC_S`, `CACHE_MAX_AGE_S`, `SHUTDOWN_GRACE_S` | 30, 30, 5 (*Several replicas*, §7, §10) |
 | `CHANGES_RETENTION_H`, `CHANGES_POLL_S`, `CHANGES_HEARTBEAT_S` | 168, 1, 15 (§10) |
 | `REQUIRE_IF_MATCH` | false (§4) |

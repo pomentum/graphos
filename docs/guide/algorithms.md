@@ -154,7 +154,9 @@ quiet single point of failure.
 **Cost.** Exact betweenness is the expensive one, roughly the number of nodes times the number of
 edges. It is not in the default set, and it is skipped (with a warning in the response) when more
 nodes take part than `GRAPHOS_BETWEENNESS_MAX_NODES` (20,000): scope it with `rel_types` or
-`node_filter`.
+`node_filter`. It is computed on several threads, `GRAPHOS_COMPUTE_THREADS` of them (by default
+half the CPUs, so reads keep the rest): with the limit raised, 250,000 nodes and 950,000 edges
+took 451 s of computing, on about 14 cores.
 
 ### Components
 

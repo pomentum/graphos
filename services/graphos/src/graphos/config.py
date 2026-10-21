@@ -84,6 +84,10 @@ class Settings(BaseSettings):
     # Exact betweenness costs O(nodes x edges): above this many nodes taking
     # part, a metrics run skips it (and says so).
     betweenness_max_nodes: int = 20_000
+    # Threads a whole-graph computation may use (rustworkx runs betweenness
+    # on every core it may): 0 keeps half the CPUs this process may use (at
+    # least one), so reads and job heartbeats still get CPU while it runs.
+    compute_threads: int = Field(default=0, ge=0)
 
     # ── Rate limiting ────────────────────────────────────────────────────
     # Per-token sliding window. Off by default for tests / dev; on in

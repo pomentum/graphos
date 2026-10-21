@@ -16,6 +16,13 @@ Why a child process per run:
 
 One computation at a time per API process, whatever its kind, bounds memory
 to one in-memory graph (the API container is sized for that).
+
+The child may use only ``GRAPHOS_COMPUTE_THREADS`` threads (:func:`configure`;
+half the CPUs by default): rustworkx runs betweenness on a thread per core,
+which on a large graph took every core of the host for minutes, leaving the
+API process (its requests, job heartbeats) to compete for CPU.  The limit is
+rayon's ``RAYON_NUM_THREADS``, set in the child before the computation starts;
+rayon reads it when it starts its threads, at the first parallel call.
 """
 
 from __future__ import annotations
@@ -24,6 +31,7 @@ import array
 import asyncio
 import contextlib
 import multiprocessing
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from multiprocessing.connection import Connection
@@ -46,7 +54,28 @@ class EdgeArrays:
         return len(self.src)
 
 
-def _child(conn: Connection, target: Callable[..., Any]) -> None:
+_threads = 0   # 0: half the CPUs this process may use (default_threads)
+
+
+def configure(*, threads: int) -> None:
+    """Threads a computation's child may use (``GRAPHOS_COMPUTE_THREADS``; 0 = half the CPUs)."""
+    global _threads  # noqa: PLW0603 — a setting, set once at startup
+    _threads = threads
+
+
+def default_threads() -> int:
+    """Half the CPUs this process may use, at least one."""
+    cpus = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
+    return max(1, (cpus or 1) // 2)
+
+
+def threads() -> int:
+    """Threads the next computation's child may use."""
+    return _threads or default_threads()
+
+
+def _child(conn: Connection, target: Callable[..., Any], threads: int) -> None:
+    os.environ["RAYON_NUM_THREADS"] = str(threads)
     try:
         edges, options = conn.recv()
         conn.send(("ok", target(edges, **options)))
@@ -84,7 +113,7 @@ async def run_in_child(
     async with _one_at_a_time:
         ctx = multiprocessing.get_context("spawn")
         conn, child_conn = ctx.Pipe()
-        proc = ctx.Process(target=_child, args=(child_conn, target), daemon=True)
+        proc = ctx.Process(target=_child, args=(child_conn, target, threads()), daemon=True)
         _running = proc
         # Starting a spawn child and sending it the edges both block until
         # the new interpreter reads them: keep both off the event loop.  The
