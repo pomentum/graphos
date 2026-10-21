@@ -281,7 +281,7 @@ reported in the response.
   or from several `seeds`.
   - Options: `direction` (`out|in|both`), `rel_types`, `max_hops` (default 2,
     max 5), `limit` (max 1000).
-  - `communities` restricts the walk to nodes in the listed Louvain
+  - `communities` restricts the walk to nodes in the listed
     communities, in every direction, via the communities of each edge's ends
     denormalised onto it (`end_community_id`, `start_community_id`).
   - Returns each reached node (external id in `end_id`) with its hop count
@@ -371,8 +371,8 @@ What each algorithm (communities and the graph metrics below) finds and what it 
 > start). Without it, `recompute-communities` answers 501 and
 > `GET /v1/info` reports `features.louvain: false`.
 
-`POST /v1/{tenant}/recompute-communities` (`maintain`) runs Louvain in a separate
-worker process, so the API keeps serving meanwhile, and answers when done, or
+`POST /v1/{tenant}/recompute-communities` (`maintain`) runs Louvain or Leiden in a
+separate worker process, so the API keeps serving meanwhile, and answers when done, or
 at once as a background job with `Prefer: respond-async`. It is single-flight
 per tenant via a Postgres advisory lock (concurrent calls get 409).
 
@@ -380,7 +380,7 @@ per tenant via a Postgres advisory lock (concurrent calls get 409).
 flowchart LR
     A["Edge stream<br/>SQL, graphids only"]
     B["Weighted undirected<br/>igraph"]
-    C["community_multilevel<br/>(fixed seed)"]
+    C["Louvain from scratch, or Leiden<br/>from the stored partition (fixed seed)"]
     D["Drop small communities,<br/>relabel by size"]
     E["Match vs prior ids<br/>(Jaccard ≥ 0.5)"]
     F["COPY + UPDATE<br/>changed community_id"]
@@ -396,7 +396,8 @@ flowchart LR
   from the stored partition when the last run was Leiden over the same scope,
   weights and resolution, so a small change of the graph keeps nearly every
   node's community and id. The request's `algorithm` chooses, else the
-  tenant's `community_algorithm` (`louvain` unless set).
+  tenant's `community_algorithm` (`louvain` unless set). How they differ, with
+  measurements: [algorithms](algorithms.md#louvain-and-leiden-compared).
 - **Stable ids:** each new community inherits the integer id of its
   best-overlapping predecessor when Jaccard ≥ 0.5; otherwise it gets a fresh
   id. Only changed vertices are written.
@@ -582,7 +583,7 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
 - Every write is recorded in the same transaction: upserts per batch with the
   ids written, merges and patches with the new revision, deletes with the
   ids and the edges removed with them, and one summary for a rule
-  resolution, a Louvain write-back or a graph-metrics write-back. Schema
+  resolution, a community write-back or a graph-metrics write-back. Schema
   changes are recorded too (`op: schema`: what a registration added or
   removed, a declared pair removed, unregistering); a re-registration that
   changes nothing records nothing. Records say what changed and who changed
@@ -684,7 +685,7 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
 - **Timeouts:** every statement runs under a server-side `statement_timeout`
   (`GRAPHOS_STATEMENT_TIMEOUT_S`, default 60 s); it is the only per-statement
   limit (no client-side command timeout). Tenant bootstrap and the startup
-  reload (1800 s), Louvain stages, graph metrics, `edges:resolve`, the
+  reload (1800 s), community recompute stages, graph metrics, `edges:resolve`, the
   dataset export (900 s) and vacuum raise it for their own statements; the
   Cypher console has its own (`GRAPHOS_CYPHER_TIMEOUT_S`, 30 s). A timeout,
   on a read or a write (including `:bulk`

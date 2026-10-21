@@ -99,7 +99,7 @@ class CommunityHub(BaseModel):
 
 
 class CommunityNode(BaseModel):
-    """One community as the last Louvain recompute stored it."""
+    """One community as the last community recompute stored it."""
 
     community_id: int = Field(..., description="The `community_id` written on its members.")
     size: int = Field(..., description="Its members.")
@@ -122,7 +122,7 @@ class CommunityLink(BaseModel):
 
 
 class CommunityMapResponse(BaseModel):
-    """The communities of the last Louvain recompute and the edges between them."""
+    """The communities of the last community recompute and the edges between them."""
 
     tenant: str = Field(..., description="The tenant.")
     available: bool = Field(..., description="False until a recompute has stored a map.")

@@ -186,7 +186,7 @@ Community detection uses python-igraph, which is GPL-2.0-or-later, so it is an o
 gives both community algorithms, Louvain and Leiden ([algorithms](algorithms.md)); the extra keeps
 its name:
 
-| How you run graphos | Louvain |
+| How you run graphos | Louvain and Leiden |
 |---|---|
 | this compose file, built locally | included (leave it out with `GRAPHOS_EXTRAS= docker compose ...`) |
 | the published image | not included; add `-f docker-compose.louvain.yml`, which installs it into the container on first start (PyPI must be reachable then): [example below](#louvain-with-the-published-images) |
@@ -236,7 +236,7 @@ export GRAPHOS_URL=http://127.0.0.1:8080 GRAPHOS_USER=graphos GRAPHOS_PASSWORD=<
 python clients/python/examples/08_demo_ecosystem.py
 ```
 
-It registers the tenant `demo`, loads it, computes the graph metrics and, with the Louvain extra,
+It registers the tenant `demo`, loads it, computes the graph metrics and, with the `louvain` extra,
 the communities. Then open the UI, pick `demo`, and use *Explore → Graph → Colours → By group*.
 
 ![The Explore view of the demo tenant, coloured by community](../images/ui-explore-graph-dark.png)
@@ -398,7 +398,7 @@ lists every one; the README the most common). Those for sign-in, besides the OID
   and refuses to start on an older database ([upgrade](upgrade-postgresql-18.md)), loaded with
   `shared_preload_libraries=age,pg_stat_statements`, and a database role for itself: the compose
   file and `services/graphos/deploy/db-init/` show the set-up to copy. The published API image has
-  no Louvain; with the compose file, run the published images and add Louvain as in
+  no community detection; with the compose file, run the published images and add it as in
   [§6](#louvain-with-the-published-images).
 - **Without containers.** `pip install "./services/graphos[louvain]"`, point `GRAPHOS_DB_*` at the
   database, and run `python -m graphos` (see [services/graphos](../../services/graphos/README.md)).

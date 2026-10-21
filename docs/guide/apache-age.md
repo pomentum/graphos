@@ -478,7 +478,7 @@ MVCC and GIN page-lock overhead.
 
 ---
 
-## 9. Community detection (Louvain)
+## 9. Community detection (Louvain, Leiden)
 
 `POST /v1/{tenant}/recompute-communities` (`maintain` on the tenant; needs the optional
 `louvain` extra, otherwise 501) runs in three phases. The response
@@ -487,10 +487,12 @@ reports each phase's duration (`edge_stream_ms`, `writeback_ms`, …).
 1. **Edge stream** → one SQL scan of `"<tenant>"._ag_label_edge`
    returning `(start_id, end_id, rel_type)` as raw graphids (no agtype
    decoding of the `id` property). Runs with a 10-minute statement budget.
-2. **igraph Louvain** → community assignments, in-process, with a fixed
-   seed. New clusters inherit the id of their best-overlapping previous
-   cluster (Jaccard ≥ 0.5), so a rerun on an unchanged graph produces
-   identical ids.
+2. **igraph Louvain, or Leiden from the stored partition** → community
+   assignments, in a child process, with a fixed seed. New clusters inherit
+   the id of their best-overlapping previous cluster (Jaccard ≥ 0.5), so a
+   Louvain rerun on an unchanged graph produces identical ids, and a Leiden
+   rerun after a small change keeps nearly all of them
+   ([compared](algorithms.md#louvain-and-leiden-compared)).
 3. **Writeback** → `community_id` on each vertex, written only for
    vertices whose id actually changed, via a COPY-staged UPDATE against
    the inheritance parent `"<tenant>"._ag_label_vertex` (Postgres routes

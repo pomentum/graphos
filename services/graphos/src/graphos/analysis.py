@@ -1,7 +1,7 @@
 """What Louvain and graph metrics share: one heavy job per tenant, the edge
 stream, and stable ids across runs.
 
-* :func:`tenant_lock`: one whole-graph job (a Louvain recompute or a metrics
+* :func:`tenant_lock`: one whole-graph job (a community recompute or a metrics
   run) per tenant at a time. Both rewrite every node; run together they would
   fight over the same rows and hold the full edge list twice.
 * :func:`stream_edges`: every (source graphid, target graphid, type) of the

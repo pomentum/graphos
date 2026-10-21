@@ -60,7 +60,7 @@ MIN_COMMUNITY_SIZE_DEFAULT = 3
 
 @dataclass(frozen=True, slots=True)
 class LouvainResult:
-    """Outcome of one Louvain recompute."""
+    """Outcome of one community recompute (Louvain or Leiden)."""
 
     n_nodes: int
     n_edges_scanned: int

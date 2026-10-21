@@ -52,7 +52,7 @@ class RecomputeCommunitiesRequest(BaseModel):
         description=(
             "Property-keyed predicates that BOTH endpoints of every edge "
             "must satisfy. Scalar value → `=` match; list → `IN`. Example: "
-            "`{\"project_id\": \"<sid>\"}` runs Louvain over a single "
+            "`{\"project_id\": \"<sid>\"}` computes communities over a single "
             "consumer-defined subgraph (the per-tenant scoped-recompute "
             "pattern). Multi-value: `{\"project_id\": [\"<sid_a>\", \"<sid_b>\"]}`."
         ),
@@ -61,7 +61,7 @@ class RecomputeCommunitiesRequest(BaseModel):
         default=DEFAULT_LOUVAIN_RESOLUTION,
         gt=0.0,
         le=10.0,
-        description="Louvain resolution. Higher = more, smaller communities.",
+        description="Resolution (Louvain and Leiden). Higher = more, smaller communities.",
     )
     min_community_size: int = Field(
         default=DEFAULT_LOUVAIN_MIN_COMMUNITY_SIZE,
@@ -88,7 +88,7 @@ class RecomputeCommunitiesRequest(BaseModel):
 
 
 class RecomputeCommunitiesResponse(BaseModel):
-    """What a Louvain recompute found and how long each phase took."""
+    """What a community recompute found and how long each phase took."""
 
     tenant: str = Field(..., description="The tenant.")
     n_nodes: int = Field(..., description="Nodes clustered: the ends of the edges read.")
@@ -108,8 +108,8 @@ class RecomputeCommunitiesResponse(BaseModel):
     n_singletons: int = Field(
         ...,
         description=(
-            "Groups Louvain found that are smaller than `min_community_size`; their nodes get "
-            "no `community_id`. A count of groups, not of nodes."
+            "Groups the algorithm found that are smaller than `min_community_size`; their "
+            "nodes get no `community_id`. A count of groups, not of nodes."
         ),
     )
     largest_community_size: int = Field(

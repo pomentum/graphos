@@ -14,7 +14,7 @@ class CommunityRow(BaseModel):
     """One community in a /communities response."""
 
     community_id: int = Field(
-        ..., description="The `community_id` the last Louvain recompute wrote on the members.",
+        ..., description="The `community_id` the last community recompute wrote on the members.",
     )
     size: int = Field(..., description="Nodes with this `community_id`.")
     sample_labels: list[str] = Field(
@@ -31,7 +31,7 @@ class CommunityRow(BaseModel):
 
 
 class CommunitiesResponse(BaseModel):
-    """Communities from the last Louvain recompute, largest first."""
+    """Communities from the last community recompute, largest first."""
 
     tenant: str = Field(..., description="The tenant.")
     min_size: int = Field(
@@ -54,7 +54,7 @@ class CommunitiesResponse(BaseModel):
 
 
 class CommunitySummary(BaseModel):
-    """Totals over the last Louvain recompute, and its largest communities."""
+    """Totals over the last community recompute, and its largest communities."""
 
     tenant: str = Field(..., description="The tenant.")
     n_communities: int = Field(..., description="Distinct `community_id` values on the nodes.")
@@ -137,9 +137,9 @@ class TenantStatsResponse(BaseModel):
     analyses: dict[str, AnalysisFreshness] = Field(
         default_factory=dict,
         description=(
-            "For `metrics` (`graph/metrics:compute`) and `communities` (Louvain) that have "
-            "written results: when, and how much the graph changed since. Absent until a run "
-            "writes."
+            "For `metrics` (`graph/metrics:compute`) and `communities` (Louvain or Leiden) "
+            "that have written results: when, and how much the graph changed since. Absent "
+            "until a run writes."
         ),
     )
     elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
@@ -149,7 +149,7 @@ class TenantStatsResponse(BaseModel):
 #
 # Closes a client-side N+1: without it a caller fires one ``/search`` per
 # node (20-50 sequential HTTP round-trips per query).  This endpoint resolves
-# a list of external ids to their Louvain community_ids in one round-trip via
+# a list of external ids to their community_ids in one round-trip via
 # the per-label ``<Label>_id_unique`` btrees.
 
 
@@ -171,7 +171,7 @@ class CommunityIdsResponse(BaseModel):
         ...,
         description=("Number of ids that found a community_id. "
                      "Missing ids — either unknown to graphos or unclustered "
-                     "by Louvain — are simply absent from `community_by_id`."),
+                     "by the last recompute — are simply absent from `community_by_id`."),
     )
     community_by_id: dict[str, int] = Field(
         default_factory=dict,

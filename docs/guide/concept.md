@@ -108,8 +108,8 @@ On every start `graphos-api` also runs idempotent DDL for its internal tables
 property record (`node_properties`, `node_properties_complete`), background
 `jobs`, the change feed (`changes`, `change_horizon`), the community map
 (`community_map`, `community_links`, `community_map_runs`, written by each
-Louvain recompute), the last written run of each analysis with its change-feed position
-(`analysis_runs`), identity (`users`, `grants`, `sessions`, `signing_keys`,
+community recompute), the last written run of each analysis with its change-feed position,
+scope and parameters (`analysis_runs`), identity (`users`, `grants`, `sessions`, `signing_keys`,
 `oidc_pending`, and `oauth_clients` and `oauth_codes` for MCP clients' sign-in),
 `user_preferences` and the console's `saved_queries`, so
 an existing volume picks up new internal tables without re-initialisation.
@@ -267,7 +267,7 @@ Consequences:
   re-bootstrapped at startup (§2.2), a tenant created before these unique
   indexes existed gets them on the next restart.
 - `end_community_id` and `start_community_id` (the communities of an edge's
-  two ends) are filled by Louvain (§5) and read by community-scoped `/expand`:
+  two ends) are filled by the community recompute (§5) and read by community-scoped `/expand`:
   a hop that walks an edge forwards checks its end, one that walks it backwards
   its start, so the walk reaches only nodes in the listed communities. Edges
   written after the last recompute have `NULL` there and are invisible to
@@ -323,7 +323,7 @@ root. Read that file for exact values; its shape:
 | Ports | `expose: 5432` (no host port) | `127.0.0.1:8080:8080` |
 | Secrets | `services/graphos/deploy/secrets/` bind-mounted (directory) at `/run/graphos/secrets` | same directory |
 | Healthcheck | `pg_isready -U graphos -d graphos` | Python `urllib` GET of `/healthz` |
-| Memory | `mem_limit: 2g`, `mem_reservation: 512m`, `shm_size: 1g` | `mem_limit: 2g` (headroom for Louvain) |
+| Memory | `mem_limit: 2g`, `mem_reservation: 512m`, `shm_size: 1g` | `mem_limit: 2g` (headroom for the community recompute) |
 | DB role | superuser `graphos` (init scripts only) | `graphos_app` (§2.2) |
 
 `graphos-db` runs with `shared_preload_libraries=age,pg_stat_statements`,
@@ -469,7 +469,7 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `GET …/graph/stats` | Exact per-label row counts (a parent includes its children) and bytes; totals count each node and edge once; when metrics and communities were computed and the rows written since (`analyses`) | tenant |
 | `GET …/graph/map?exact=` | Labels with their own node counts, and edge counts per (source label, type, target label); large edge tables sampled and flagged `estimated` unless `exact` | tenant |
 | `GET …/graph/map/hubs?label=&limit=` | A label's best-connected nodes; limit default 40, ≤200 | tenant |
-| `GET …/graph/communities?min_size=&include_members=&limit=` | Communities from the last Louvain write | tenant |
+| `GET …/graph/communities?min_size=&include_members=&limit=` | Communities from the last community recompute | tenant |
 | `GET …/graph/community-summary?top=` | Counts, largest/smallest size, top-N communities | tenant |
 | `GET …/graph/communities/map?limit=` | The community map stored by the last recompute: sizes, members per label, hubs, internal edges, edges between communities; limit default 150, ≤1000 | tenant |
 | `POST …/graph/community-ids` `{ids}` | External id → `community_id`; ≤500 ids, `truncated` flag | tenant |
@@ -494,7 +494,7 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `DELETE …/graph/nodes?property_key=&property_value=` | Delete every node with that property value, and their edges | tenant |
 | `POST …/graph/nodes:delete` `{nodes: [{label, id}]}` | Delete up to 1,000 nodes and their edges, in one transaction | tenant |
 | **Computations** | | |
-| `POST /v1/{tenant}/recompute-communities` | Louvain (§5); 501 without the extra | `maintain` |
+| `POST /v1/{tenant}/recompute-communities` | Louvain or Leiden (§5); 501 without the extra | `maintain` |
 | `POST …/graph/metrics:compute` | Degree, PageRank, weakly connected components and betweenness, stored on the nodes as `graphos_*` properties | `maintain` |
 | `POST …/graph/properties:check` | Check the stored rows against the property schema as if every rule applied; writes nothing | `maintain` |
 | **Cypher console** (§3.1; on unless `GRAPHOS_CYPHER=false`, 404 while off) | | |
@@ -563,7 +563,7 @@ Error shapes:
 | 401 | Missing, invalid or expired bearer token; failed sign-in | `{"detail": "..."}` |
 | 403 | No access to the tenant, a level below what the operation needs, admin required, or a password to change first | `{"detail": "..."}` |
 | 404 | Tenant not registered, node or cache key not found, Cypher console off | `{"detail": "..."}` |
-| 409 | A whole-graph job (Louvain, graph metrics) already running for the tenant; an id in several labels without `label`; a duplicate on a declared unique index; `mode=empty` into a tenant with nodes | `{"detail": "..."}`; the unique-index conflict as `application/problem+json` |
+| 409 | A whole-graph job (community recompute, graph metrics) already running for the tenant; an id in several labels without `label`; a duplicate on a declared unique index; `mode=empty` into a tenant with nodes | `{"detail": "..."}`; the unique-index conflict as `application/problem+json` |
 | 410 | Change-feed cursor older than the retention | `{"detail": "..."}` |
 | 412 | `If-Match` does not match the row's ETag | `{"detail": "..."}` |
 | 413 | `snapshot-import` over 50,000,000 lines, or past `GRAPHOS_IMPORT_MAX_BYTES` after decompression; a CSV file past `GRAPHOS_CSV_MAX_BYTES` | `{"detail": "..."}` |
@@ -732,8 +732,8 @@ the default):
 | Operation | Limit |
 |---|---|
 | Tenant bootstrap, internal schema setup, startup reload of stored tenants | 1800 s (`DDL_TIMEOUT_S`) |
-| Louvain edge stream / vertex writeback | 600 s each |
-| Louvain edge `end_community_id` / `start_community_id` update | 300 s per statement (a chunk of 50,000 vertices per edge label) |
+| Community edge stream / vertex writeback | 600 s each |
+| Community edge `end_community_id` / `start_community_id` update | 300 s per statement (a chunk of 50,000 vertices per edge label) |
 | Graph metrics: edge stream, reading the stored values, each write-back batch | 600 s |
 | `edges:resolve` INSERT | 1800 s per edge type |
 | Dataset export (`GET …/graph/snapshot`) | 900 s |
@@ -824,7 +824,7 @@ from the database on every use, so it needs no syncing):
   throttle. Users and grants follow the registry's pattern: `NOTIFY` on
   change, reload on reconnect, and a periodic reload (60 s).
 
-Background jobs, the Louvain lock, revisions and the change feed coordinate
+Background jobs, the community recompute's lock, revisions and the change feed coordinate
 through the database (§2.6, §4.1).
 
 - DB unreachable: `/readyz` returns 503 with only
@@ -1130,7 +1130,7 @@ closed, not reused. Every console query is in the audit log (§2.5.6).
 | Graph metrics edge stream and write-back | SQL (`COPY` + `UPDATE … FROM`) |
 | `edges:resolve` | SQL: one `INSERT … SELECT … ON CONFLICT (start_id, end_id) DO NOTHING` per edge type; `mode: reconcile`: the rules' edges staged, then a delete of marked edges not staged and an insert, in one transaction |
 | `edges:reconcile` | SQL: binary `COPY` of the set into a temp table, ids resolved, then one `DELETE` (the scope's edges not in the set), one `UPDATE` (kept edges whose properties change) and one `INSERT` (new edges), in one transaction under an advisory lock per edge type |
-| Louvain edge stream and writeback | SQL (`COPY` + `UPDATE … FROM`) |
+| Community edge stream and writeback | SQL (`COPY` + `UPDATE … FROM`) |
 | Registration DDL, `/v1/db/*`, advisory locks | SQL |
 
 `neighbors` and `expand` resolve the seed id(s) to graphids, then query
@@ -1234,7 +1234,7 @@ nested objects merge. A node's `id` cannot be patched.
 
 **Revisions.** Every label table has `graphos_rev` (bootstrap step 1), and
 every write in `graphos.writes` sets it: inserts take the default 1, and
-updates, including the upserts' `ON CONFLICT DO UPDATE` and the Louvain
+updates, including the upserts' `ON CONFLICT DO UPDATE` and the community
 write-back, add 1. The revision counts writes, not changes. One node or edge
 is returned with `ETag: "<graphid>.<rev>"` (the graphid part keeps a row
 deleted and recreated from matching an old ETag). `If-Match` on its `PATCH`,
@@ -1287,7 +1287,7 @@ primary key `(tenant, txid, seq)` serves the read.
 
 The cost is latency: a record is visible once every write transaction that
 started before it has ended. That is server-wide (transaction ids are), so a
-long write transaction in any tenant (the Louvain write-back is the longest
+long write transaction in any tenant (the community write-back is the longest
 graphos makes) holds every feed until it commits. Read-only transactions do
 not count; they have no txid.
 
@@ -1345,7 +1345,7 @@ powers-of-ten test fails against the old form.
 
 ## 5. Community detection (Louvain, Leiden)
 
-> **Optional extra.** Louvain needs python-igraph (GPL-2.0-or-later),
+> **Optional extra.** Louvain and Leiden need python-igraph (GPL-2.0-or-later),
 > installed with `pip install "graphos[louvain]"`, an image built with
 > `--build-arg GRAPHOS_EXTRAS=louvain`, or, with no rebuild, the
 > `docker-compose.louvain.yml` overlay (graphos-api downloads it on first
@@ -1360,7 +1360,7 @@ concurrent call gets 409.
 
 The edges are read through a server-side cursor into compact arrays (two
 graphids and a type code per edge, about 20 bytes). Building the igraph graph
-and running Louvain happen in a child process started for each recompute
+and running Louvain or Leiden happen in a child process started for each recompute
 (`multiprocessing`, `spawn`; `graphos/louvain_compute.py`, which imports only
 igraph, so it starts in well under a second). The edges go to it over a pipe
 and the partition comes back the same way; starting it and sending the data
@@ -1392,7 +1392,7 @@ Request:
 | `rel_types` | all | Edge types to include |
 | `rel_weights` | 1.0 each | Weight per edge type |
 | `node_filter` | none | `{property: value or [values]}`; both endpoints must match |
-| `resolution` | 1.0 | Louvain resolution, (0, 10] |
+| `resolution` | 1.0 | Resolution (Louvain and Leiden), (0, 10] |
 | `min_community_size` | 3 | Smaller communities are dropped (members unassigned) |
 | `dry_run` | false | Compute and report; write nothing |
 | `algorithm` | the tenant's | `louvain` or `leiden` (below) |
@@ -1422,7 +1422,7 @@ it as it is), else `louvain`. The response says which ran and whether it started
 flowchart LR
     A["Edge stream<br/>SQL on _ag_label_edge<br/>graphids only"]
     B["Undirected weighted igraph<br/>self-loops dropped,<br/>parallel edges summed"]
-    C["community_multilevel<br/>fixed RNG seed"]
+    C["community_multilevel, or<br/>community_leiden from the stored<br/>partition; fixed RNG seed"]
     D["Drop small communities,<br/>relabel by size"]
     E["Match vs prior<br/>community_id (Jaccard ≥ 0.5)"]
     F["COPY delta + UPDATE<br/>vertex community_id"]
@@ -1549,8 +1549,8 @@ What drives memory:
   The 1 GiB `/dev/shm` is there because large `GROUP BY` / hash-aggregate
   queries allocate shared-memory segments that can exceed the 64 MiB Docker
   default.
-- **graphos-api:** Louvain holds the full edge list as Python tuples plus the
-  igraph graph; this is what the `graphos-api` limit is for. 2 GiB covers
+- **graphos-api:** a community recompute holds the edge list (compact arrays,
+  about 20 bytes an edge) and, in its child process, the igraph graph; this is what the `graphos-api` limit is for. 2 GiB covers
   roughly 3 M edges; raise it to 4g for 6 M+. Other endpoints are
   bounded by their `limit` caps and the 10 MiB `nodes:scan` / `edges:scan`
   payload cap.
@@ -1575,7 +1575,7 @@ Postgres instance.
    before 0.13 need one `adopt_unmarked` run. `reconcile` becomes the
    default in a later release.
 5. **Community freshness.** `end_community_id`, `start_community_id` and
-   `community_id` change only when Louvain writes; new edges are invisible to community-scoped `expand`
+   `community_id` change only when a community recompute writes; new edges are invisible to community-scoped `expand`
    until then, and unassigned vertices keep old ids. `GET …/graph/stats` says how many rows were
    written since the last run (`analyses.communities`, and `analyses.metrics` for the `graphos_*`
    metrics), so a consumer knows when to recompute.
@@ -1590,7 +1590,7 @@ Postgres instance.
    would leave NULL in them, so all rows are written through SQL, §4).
    Re-test on upgrade.
 9. **Change-feed latency follows the longest write transaction** on the
-   database server (§4.1); a Louvain write-back on a large graph holds every
+   database server (§4.1); a community write-back on a large graph holds every
    tenant's feed until it commits.
 10. **Backups** are operator-owned: `pg_dump` / `pg_basebackup` or a snapshot of
    the `graphos_data_pg18` volume (`graphos_data` on PostgreSQL 16). A
