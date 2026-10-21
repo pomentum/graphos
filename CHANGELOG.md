@@ -4,6 +4,27 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Changed
+
+- **Shortest paths past a highly connected node.** `POST /v1/{tenant}/graph/paths` stopped with
+  `truncated` as soon as one level of the search touched more than 100,000 edges, even when only
+  one end was a hub (a node with hundreds of thousands of edges, say) and the other end
+  was cheap to grow. Now a level over the cap stops only its own end, and the other end goes on
+  alone, a whole level at a time, so the answer stays exact; `truncated` means both ends were
+  stopped.
+- **Graph computations leave CPU for reads.** Betweenness (rustworkx) ran on every core of the host;
+  on a large graph that was minutes with no CPU left for the API's requests and job heartbeats. A
+  metrics or Louvain computation now uses at most `GRAPHOS_COMPUTE_THREADS` threads (new; `0`, the
+  default, is half the CPUs the process may use, at least one).
+- **Tables vacuumed after a large write-back.** A metrics run or community recompute rewrites a row
+  per node (and, for communities, per edge) it changes, leaving as many dead rows; on a fresh
+  tenant of 1.2M rows the first metrics and communities run left the database 2.7 times its
+  loaded size until autovacuum came round. A write-back of 10,000 rows or more is now followed by
+  a `VACUUM (ANALYZE)` of the tables it wrote (best-effort, logged), so the next run reuses the
+  space instead of growing the tables.
+
 ## 0.13.2 — 2026-10-20
 
 Schema evolution (ADR-0009): labels, relationship types and properties can be renamed and

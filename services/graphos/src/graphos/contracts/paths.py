@@ -11,7 +11,8 @@ from graphos.contracts.graph import _NODE_ID_MAX_LEN, validate_label_optional
 DEFAULT_PATH_HOPS = 4
 MAX_PATH_HOPS = 8
 MAX_PATHS = 100
-# Edges one level of the search may touch before it stops (``truncated``).
+# Edges one level of the search may touch before that end of it stops
+# (both ends stopped: ``truncated``).
 MAX_PATH_LEVEL_EDGES = 100_000
 
 
@@ -104,8 +105,8 @@ class PathsResponse(BaseModel):
     truncated: bool = Field(
         ...,
         description=(
-            f"A level of the search touched more than {MAX_PATH_LEVEL_EDGES:,} edges and the "
-            "search stopped: a path may exist.  Narrow `rel_types` or `direction`."
+            f"Both ends of the search reached a level of more than {MAX_PATH_LEVEL_EDGES:,} "
+            "edges and it stopped: a path may exist.  Narrow `rel_types` or `direction`."
         ),
     )
     visited: int = Field(..., description="Vertices the search reached.")

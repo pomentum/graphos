@@ -8,6 +8,13 @@ stream, and stable ids across runs.
   tenant, into compact :class:`~graphos.graph_compute.EdgeArrays`.
 * :func:`greene_match`: carries group ids (communities, components) over from
   the previous run, so an unchanged graph keeps its ids.
+* :func:`vacuum_after_writeback`: a write-back rewrites a row per node (or
+  edge) changed, leaving as many dead rows; a ``VACUUM (ANALYZE)`` of the
+  tables written then makes that space reusable at once, so the next run
+  fills it instead of growing the tables (a first metrics and Louvain run on
+  a fresh tenant otherwise left it about 2.7 times its loaded size until
+  autovacuum came round).  It does not give the space back to the system
+  (``VACUUM FULL`` would, under an exclusive lock).
 * :func:`record_run` / :func:`freshness`: when each analysis last wrote its
   results and how much was written since (``graphos_meta.analysis_runs``).
   The position is taken before the run reads, so a write that raced the run
@@ -20,6 +27,8 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
+import time
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -31,6 +40,8 @@ from graphos import changes
 from graphos.contracts.graph import _validate_prop_key
 from graphos.db import allow_long_statements
 from graphos.graph_compute import EdgeArrays
+
+log = logging.getLogger(__name__)
 
 # Jaccard threshold for inheriting a prior id.  Greene 2010 proposes 0.3;
 # we choose the stricter 0.5 — a new group must share at least half of (its
@@ -342,6 +353,55 @@ class Freshness:
     scope: dict[str, Any] | None
     rows_written_since: int | None    # None: the records since were pruned
     at_least: bool                    # the count stopped at its cap
+
+
+# A write-back of fewer rows than this leaves too little to clean up for a
+# VACUUM to be worth its time; autovacuum handles it.
+VACUUM_AFTER_ROWS = 10_000
+_VACUUM_TIMEOUT_S = 1800.0
+
+
+async def vacuum_after_writeback(
+    pool: asyncpg.Pool, tenant: str, kind: str, rows_written: int,
+) -> None:
+    """``VACUUM (ANALYZE)`` the tenant's vertex (``kind="vertex"``) or edge
+    (``"edge"``) label tables after a write-back of ``rows_written`` rows.
+
+    Best-effort: the results are written already, so a failure is logged,
+    never raised.  VACUUM cannot run in a transaction: one statement per
+    table, each on its own.
+    """
+    if rows_written < VACUUM_AFTER_ROWS:
+        return
+    started = time.perf_counter()
+    try:
+        async with pool.acquire() as conn:
+            labels = [str(r["relname"]) for r in await conn.fetch(
+                "SELECT c.relname FROM pg_class c "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "JOIN pg_inherits i ON i.inhrelid = c.oid "
+                "JOIN pg_class p ON p.oid = i.inhparent "
+                "WHERE n.nspname = $1 AND p.relname = $2 AND c.relkind = 'r' "
+                "ORDER BY c.relname",
+                tenant, f"_ag_label_{kind}",
+            )]
+            await allow_long_statements(conn, _VACUUM_TIMEOUT_S)
+            for label in labels:
+                await conn.execute(
+                    f'VACUUM (ANALYZE) "{tenant}"."{label}"', timeout=_VACUUM_TIMEOUT_S,
+                )
+    except (asyncpg.PostgresError, OSError, TimeoutError) as exc:
+        log.warning(
+            "vacuum after write-back failed",
+            extra={"tenant": tenant, "kind": kind, "error": f"{type(exc).__name__}: {exc}"},
+        )
+        return
+    log.info(
+        "vacuum after write-back",
+        extra={"tenant": tenant, "kind": kind, "tables": len(labels),
+               "rows_written": rows_written,
+               "elapsed_ms": int((time.perf_counter() - started) * 1000)},
+    )
 
 
 async def record_run(

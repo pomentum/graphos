@@ -117,9 +117,37 @@ async def test_same_node_and_no_path() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_level_over_the_cap_stops_the_search() -> None:
+async def test_a_hub_at_one_end_blocks_only_that_side() -> None:
+    # 1 fans out to 50 (over the cap of 10): the search grows from 99 alone.
     star = [(1000 + i, "R", 1, 10 + i) for i in range(50)] + [(2000, "R", 30, 99)]
     result = await _search(1, 99, edges=star, max_edges=10)
+    assert (result.hops, result.truncated) == (2, False)
+    assert _as_set(result) == {((1, 30, 99), (1020, 2000))}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("src", "dst", "max_hops"), [(1, 99, 4), (1, 202, 5), (1, 77, 5)])
+async def test_a_blocked_side_still_gives_the_exact_answer(
+    src: int, dst: int, max_hops: int,
+) -> None:
+    # A hub at the start, two routes of different length to 202, and 77 unreachable.
+    edges = [(1000 + i, "R", 1, 10 + i) for i in range(50)] + [
+        (2000, "R", 30, 99), (2001, "R", 40, 200), (2002, "R", 200, 202),
+        (2003, "R", 99, 201), (2004, "R", 201, 300), (2005, "R", 300, 202),
+    ]
+    result = await _search(src, dst, edges=edges, max_hops=max_hops, max_edges=10)
+    hops, expected = _reference(edges, src, dst, "out", max_hops)
+    assert (result.hops, _as_set(result), result.truncated) == (hops, expected, False)
+
+
+@pytest.mark.asyncio
+async def test_hubs_at_both_ends_stop_the_search() -> None:
+    hubs = (
+        [(1000 + i, "R", 1, 10 + i) for i in range(50)]
+        + [(2000 + i, "R", 100 + i, 99) for i in range(50)]
+        + [(3000, "R", 30, 130)]
+    )
+    result = await _search(1, 99, edges=hubs, max_edges=10)
     assert (result.hops, result.paths, result.truncated) == (None, [], True)
 
 

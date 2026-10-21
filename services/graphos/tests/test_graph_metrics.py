@@ -162,6 +162,30 @@ async def test_writes_in_batches_still_one_run(
         assert not any(k.startswith("graphos_") for k in (await _node(api, node_id))["properties"])
 
 
+async def _vacuums(pool: asyncpg.Pool) -> int:
+    async with pool.acquire() as conn:
+        return int(await conn.fetchval(
+            "SELECT vacuum_count FROM pg_stat_user_tables WHERE schemaname = $1 AND relname = $2",
+            TENANT, "Function",
+        ) or 0)
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_large_write_back_is_vacuumed_and_a_small_one_is_not(
+    api: httpx.AsyncClient, db_pool: asyncpg.Pool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(analysis, "VACUUM_AFTER_ROWS", 5)
+    before = await _vacuums(db_pool)
+    assert (await _compute(api, metrics=["degree"]))["n_changed"] == 8
+    assert await _vacuums(db_pool) == before + 1
+    # Two nodes change (a new edge between them): below the threshold, no vacuum.
+    resp = await api.post(f"/v1/{TENANT}/graph/edges", json={"edges": [_edge("c3", "alone")]})
+    assert resp.status_code == HTTPStatus.OK, resp.text
+    assert (await _compute(api, metrics=["degree"]))["n_changed"] == 2
+    assert await _vacuums(db_pool) == before + 1
+
+
 @requires_db
 @pytest.mark.asyncio
 async def test_a_node_that_loses_its_edges_loses_its_values(api: httpx.AsyncClient) -> None:

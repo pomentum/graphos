@@ -1762,7 +1762,8 @@ class GraphosClient:
         ``direction``: ``out`` follows edges the way they point, ``in``
         against it, ``both`` either way.  Up to ``limit`` paths, all of the
         shortest length within ``max_hops``; ``hops`` is None when there is
-        none, and ``truncated`` when the search hit its edge cap.
+        none, and ``truncated`` when both ends of the search hit its edge cap
+        (one end hitting it only leaves the other to carry on).
         """
         body: dict[str, Any] = {
             "src": src, "dst": dst, "direction": direction,

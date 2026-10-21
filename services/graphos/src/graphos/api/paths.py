@@ -49,7 +49,9 @@ _GIDS = "ARRAY(SELECT x::graphid FROM unnest($1::text[]) AS x)"
         "Bidirectional breadth-first search, one batched SQL statement per level.  "
         "Returns up to `limit` paths, all of the shortest length found within "
         "`max_hops`; `hops` is null when there is none.  A level that would touch "
-        f"more than {MAX_PATH_LEVEL_EDGES:,} edges stops the search (`truncated`)."
+        f"more than {MAX_PATH_LEVEL_EDGES:,} edges stops its own end of the search, and "
+        "the other end goes on alone; when both ends are stopped the search ends "
+        "(`truncated`)."
     ),
     responses={
         400: {"description": (

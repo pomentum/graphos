@@ -77,6 +77,7 @@ from graphos.contracts.louvain import RecomputeCommunitiesRequest
 from graphos.contracts.property_schema import PropertiesCheckRequest
 from graphos.contracts.tenants import ResolveEdgesRequest
 from graphos.db import create_pool, ensure_internal_schema, fetch_db_version, unsupported_database
+from graphos.graph_compute import configure as configure_compute
 from graphos.graph_compute import terminate_running
 from graphos.graph_metrics import configure as configure_metrics
 from graphos.jobs import JobKind, JobRunner
@@ -322,6 +323,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.lent_tokens = LentTokens()
     configure_metrics(betweenness_max_nodes=settings.betweenness_max_nodes)
+    configure_compute(threads=settings.compute_threads)
 
     async def _statement_timeout(request: Request, exc: Exception) -> JSONResponse:
         # Postgres cancelled the statement at ``statement_timeout`` (or the

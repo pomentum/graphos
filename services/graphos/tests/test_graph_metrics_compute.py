@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pytest
 
@@ -100,3 +102,24 @@ async def test_a_failure_in_the_child_is_raised() -> None:
             {"metrics": ["pagerank"], "damping": 2.0, "betweenness_max_nodes": 100},
             what="graph metrics",
         )
+
+
+def _rayon_threads(edges: EdgeArrays) -> str | None:
+    """Run in the child: the thread limit rayon will read."""
+    return os.environ.get("RAYON_NUM_THREADS")
+
+
+@pytest.mark.asyncio
+async def test_the_child_is_held_to_the_configured_threads() -> None:
+    try:
+        graph_compute.configure(threads=3)
+        assert await graph_compute.run_in_child(_rayon_threads, EdgeArrays(), {}, what="t") == "3"
+        graph_compute.configure(threads=0)
+        half = str(graph_compute.default_threads())
+        assert await graph_compute.run_in_child(_rayon_threads, EdgeArrays(), {}, what="t") == half
+    finally:
+        graph_compute.configure(threads=0)
+
+
+def test_the_default_is_half_the_cpus_and_at_least_one() -> None:
+    assert 1 <= graph_compute.default_threads() <= max(1, (os.cpu_count() or 1) // 2)

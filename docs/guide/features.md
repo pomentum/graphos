@@ -274,7 +274,8 @@ reported in the response.
   nodes, up to `limit` (≤100) and `max_hops` (≤8), by a bidirectional
   breadth-first search that issues one batched SQL statement per level.
   `direction` (`out|in|both`) and `rel_types` narrow it; a level touching
-  more than 100,000 edges stops it with `truncated`. AGE's own
+  more than 100,000 edges stops that end, the other end goes on alone, and
+  only both ends stopped give `truncated`. AGE's own
   `shortestPath` is not used.
 - **Expand** (`GET …/graph/expand`): breadth-first traversal from `node_id`,
   or from several `seeds`.
@@ -416,7 +417,10 @@ dependency) in a child process, and stores them on the nodes as
 `graphos_degree` / `graphos_in_degree` / `graphos_out_degree`,
 `graphos_pagerank`, `graphos_component` and `graphos_betweenness` (exact; skipped
 above `GRAPHOS_BETWEENNESS_MAX_NODES`). Only changed values are written, so an
-unchanged graph is not rewritten; component ids are kept across runs. One
+unchanged graph is not rewritten; component ids are kept across runs. A run
+that writes 10,000 rows or more (metrics, or a community recompute's node and
+edge write-backs) is followed by a `VACUUM (ANALYZE)` of the tables it wrote,
+so the next run reuses the space instead of growing them. One
 whole-graph job per tenant: metrics and community recompute exclude each other.
 `graphos_*` and `community_id` are reserved: writes using them are refused (400).
 
