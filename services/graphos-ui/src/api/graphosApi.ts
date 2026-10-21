@@ -1,5 +1,6 @@
 import type { HttpClient, Tagged } from "./http";
 import type {
+  CommunityAlgorithm,
   AuthConfig,
   CsvImportQuery,
   CsvImportResult,
@@ -347,11 +348,17 @@ export class GraphosApi {
     ).data;
   }
 
-  /** Starts recomputing the groups as a background job (`maintain`); follow it with `jobs`. */
-  async recomputeGroups(): Promise<Job> {
+  /**
+   * Starts recomputing the groups as a background job (`maintain`); follow it with `jobs`.
+   * Without an algorithm the tenant's own runs; `fromScratch` makes Leiden ignore the stored groups.
+   */
+  async recomputeGroups(options: { algorithm?: CommunityAlgorithm; fromScratch?: boolean } = {}): Promise<Job> {
     return (
       await this.http.request<Job>("POST", `/v1/${enc(this.tenant)}/recompute-communities`, {
-        body: {},
+        body: {
+          ...(options.algorithm ? { algorithm: options.algorithm } : {}),
+          ...(options.fromScratch ? { from_scratch: true } : {}),
+        },
         headers: { Prefer: "respond-async" },
       })
     ).data;

@@ -386,7 +386,7 @@
         "shownLabel": "How many groups to show",
         "shownOption_one": "Largest {{count}}",
         "shownOption_other": "Largest {{count}}",
-        "notInstalled": "Computing groups needs Louvain, an optional part this graphos server does not have. An administrator can add it (installation guide, Louvain)."
+        "notInstalled": "Computing groups needs the Louvain extra (Louvain and Leiden), an optional part this graphos server does not have. An administrator can add it (installation guide, Louvain)."
       },
       "map": {
         "bubbleLabel": "{{label}} · {{formatted}}",
@@ -440,13 +440,13 @@
         "label": "What this view shows",
         "howToRead": "How to read it",
         "groups": {
-          "title": "Groups (Louvain communities)",
-          "what": "Louvain splits the graph into groups of nodes more connected to each other than to the rest: the parts the graph falls into, found from its relationships alone.",
+          "title": "Groups (communities)",
+          "what": "Louvain or Leiden splits the graph into groups of nodes more connected to each other than to the rest: the parts the graph falls into, found from its relationships alone.",
           "read": [
             "Each bubble is a group, sized by its members and named after its best-connected member.",
             "A line joins two groups with relationships between them; thicker means more.",
             "Click a group to see what it is made of and what it connects to; double-click to open its best-connected member in Graph.",
-            "The groups are those of the last recompute (Overview); ids stay the same from run to run."
+            "The groups are those of the last recompute (Overview), by Louvain or Leiden; ids stay the same from run to run."
           ]
         },
         "graphos_pagerank": {
@@ -587,8 +587,18 @@
       "algorithms": {
         "title": "Graph algorithms",
         "hint": "Computed by graphos over the whole graph and stored on the nodes, where Explore, Browse and the API use them. They run only when started: run them again after a large load.",
-        "groups": "Groups (Louvain)",
-        "groupsWhat": "Communities: nodes more connected to each other than to the rest of the graph.",
+        "groups": "Groups (Louvain or Leiden)",
+        "groupsWhat": "Communities: nodes more connected to each other than to the rest of the graph. Louvain starts from scratch every run; Leiden starts from the stored groups, so after a small change they and their ids stay put.",
+        "algorithm": "Algorithm",
+        "algorithmDefault": "Tenant's ({{algorithm}})",
+        "algorithmNames": {
+          "louvain": "Louvain",
+          "leiden": "Leiden"
+        },
+        "tenantDefault": "The tenant runs {{algorithm}} unless another is chosen.",
+        "fromScratch": "From scratch",
+        "ranFromScratch": "{{algorithm}}, from scratch",
+        "ranFromStored": "{{algorithm}}, from the stored groups",
         "groupsStatus_one": "{{count}} group · modularity {{modularity}} · {{when}}",
         "groupsStatus_other": "{{count}} groups · modularity {{modularity}} · {{when}}",
         "metrics": "Metrics",
@@ -607,7 +617,7 @@
         "lastFailed": "The last run failed: {{detail}}",
         "compute": "Compute",
         "computeAgain": "Compute again",
-        "louvainMissing": "Needs Louvain, an optional part this server does not have (installation guide, Louvain).",
+        "louvainMissing": "Needs the Louvain extra (Louvain and Leiden), an optional part this server does not have (installation guide, Louvain).",
         "oneAtATime": "One whole-graph computation runs at a time on a tenant; the other waits until it ends.",
         "metricsDone": "Graph metrics computed",
         "metricsFailed": "Computing the graph metrics failed",
@@ -1254,7 +1264,7 @@
       "more_other": "and {{count}} more on the canvas"
     },
     "canvasLegend": {
-      "groupsHint": "Communities found by clustering the graph (Louvain)",
+      "groupsHint": "Communities found by clustering the graph (Louvain or Leiden)",
       "groupsHeading": "Groups: communities by clustering",
       "groupTitle": "{{title}}, group {{category}} ({{detail}})",
       "group": "Group {{category}}",

@@ -1,11 +1,11 @@
-import { Button, Checkbox, Group, MultiSelect, Stack, Text, Title } from "@mantine/core";
+import { Button, Checkbox, Group, MultiSelect, SegmentedControl, Stack, Text, Title } from "@mantine/core";
 import type { TFunction } from "i18next";
 import { IconRefresh } from "@tabler/icons-react";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import type { Job } from "../../api/types";
-import { useCommunityMap, useMetricsJob, useSchema, useServiceInfo } from "../../data/queries";
-import { groupsOffer } from "../../lib/features";
+import type { CommunityAlgorithm, Job } from "../../api/types";
+import { useCommunityMap, useGroupsJob, useMetricsJob, useSchema, useServiceInfo } from "../../data/queries";
+import { communityAlgorithms, groupsOffer, groupsRun } from "../../lib/features";
 import { DEFAULT_METRICS, METRICS } from "../../lib/metrics";
 import { relativeTime } from "../../lib/time";
 import { useTenantSession } from "../../session/SessionProvider";
@@ -15,9 +15,11 @@ import { useComputeMetrics } from "./useComputeMetrics";
 
 /**
  * The whole-graph computations of a tenant in one place: the groups (Louvain
- * communities) and the graph metrics, each with what its last run found and,
- * for whoever maintains the tenant, a button to run it. Groups are offered
- * only where the server has the Louvain extra. The metrics run over chosen
+ * or Leiden communities) and the graph metrics, each with what its last run
+ * found and, for whoever maintains the tenant, a button to run it. Groups are
+ * offered only where the server has the Louvain extra; the algorithm is the
+ * tenant's unless another is chosen, and the choice is offered only by a
+ * server that has more than one (0.14.0 on). The metrics run over chosen
  * relationship types, or all of them: PageRank over dependencies says what
  * everything relies on, over every relationship what is most connected. One
  * runs at a time per tenant, so both wait while either is running.
@@ -32,20 +34,38 @@ export function GraphAlgorithms() {
   const metrics = useComputeMetrics();
   const [betweenness, setBetweenness] = useState(false);
   const [relTypes, setRelTypes] = useState<string[]>([]);
-  const edgeLabels = useSchema().data?.edge_labels ?? [];
+  const schema = useSchema().data;
+  const edgeLabels = schema?.edge_labels ?? [];
+  const groupsJob = useGroupsJob();
+  const [choice, setChoice] = useState<"default" | CommunityAlgorithm>("default");
+  const [fromScratch, setFromScratch] = useState(false);
 
   const offer = groupsOffer(canMaintain, info.data?.features.louvain);
   const busy = groups.running || metrics.running;
   const computed = map.data?.available ? map.data : null;
+  const algorithms = communityAlgorithms(info.data?.features);
+  const tenantDefault: CommunityAlgorithm = schema?.community_algorithm ?? "louvain";
+  const chosen = choice === "default" ? tenantDefault : choice;
+  const algorithmName = (a: CommunityAlgorithm) => t(`views.overview.algorithms.algorithmNames.${a}`);
+  const lastRun = groupsRun(groupsJob.data);
 
   const groupsStatus = groups.running
     ? t("views.overview.algorithms.running")
     : computed
-      ? t("views.overview.algorithms.groupsStatus", {
-          count: computed.n_communities,
-          modularity: computed.modularity?.toFixed(2) ?? "–",
-          when: computed.computed_at ? relativeTime(computed.computed_at) : "",
-        })
+      ? [
+          t("views.overview.algorithms.groupsStatus", {
+            count: computed.n_communities,
+            modularity: computed.modularity?.toFixed(2) ?? "–",
+            when: computed.computed_at ? relativeTime(computed.computed_at) : "",
+          }),
+          ...(lastRun
+            ? [
+                lastRun.fromScratch
+                  ? t("views.overview.algorithms.ranFromScratch", { algorithm: algorithmName(lastRun.algorithm) })
+                  : t("views.overview.algorithms.ranFromStored", { algorithm: algorithmName(lastRun.algorithm) }),
+              ]
+            : []),
+        ].join(" · ")
       : t("views.overview.algorithms.notComputed");
 
   return (
@@ -61,18 +81,57 @@ export function GraphAlgorithms() {
           name={t("views.overview.algorithms.groups")}
           what={t("views.overview.algorithms.groupsWhat")}
           status={groupsStatus}
+          note={
+            schema?.community_algorithm
+              ? t("views.overview.algorithms.tenantDefault", { algorithm: algorithmName(tenantDefault) })
+              : undefined
+          }
           action={
             offer === "allowed" ? (
-              <Button
-                size="xs"
-                variant="default"
-                leftSection={<IconRefresh size={14} />}
-                loading={groups.running}
-                disabled={busy && !groups.running}
-                onClick={() => void groups.recompute()}
-              >
-                {computed ? t("views.overview.algorithms.computeAgain") : t("views.overview.algorithms.compute")}
-              </Button>
+              <Stack gap={8} align="flex-end">
+                {algorithms.length > 1 ? (
+                  <SegmentedControl
+                    size="xs"
+                    aria-label={t("views.overview.algorithms.algorithm")}
+                    value={choice}
+                    onChange={(value) => setChoice(value as "default" | CommunityAlgorithm)}
+                    data={[
+                      {
+                        value: "default",
+                        label: t("views.overview.algorithms.algorithmDefault", {
+                          algorithm: algorithmName(tenantDefault),
+                        }),
+                      },
+                      ...algorithms.map((a) => ({ value: a, label: algorithmName(a) })),
+                    ]}
+                  />
+                ) : null}
+                <Group gap="sm" wrap="nowrap">
+                  {chosen === "leiden" ? (
+                    <Checkbox
+                      size="xs"
+                      label={t("views.overview.algorithms.fromScratch")}
+                      checked={fromScratch}
+                      onChange={(e) => setFromScratch(e.currentTarget.checked)}
+                    />
+                  ) : null}
+                  <Button
+                    size="xs"
+                    variant="default"
+                    leftSection={<IconRefresh size={14} />}
+                    loading={groups.running}
+                    disabled={busy && !groups.running}
+                    onClick={() =>
+                      void groups.recompute({
+                        algorithm: choice === "default" ? undefined : choice,
+                        fromScratch: chosen === "leiden" && fromScratch,
+                      })
+                    }
+                  >
+                    {computed ? t("views.overview.algorithms.computeAgain") : t("views.overview.algorithms.compute")}
+                  </Button>
+                </Group>
+              </Stack>
             ) : offer === "notInstalled" ? (
               <Text size="xs" c="dimmed" maw={260}>
                 {t("views.overview.algorithms.louvainMissing")}
@@ -132,7 +191,19 @@ export function GraphAlgorithms() {
   );
 }
 
-function Algorithm({ name, what, status, action }: { name: string; what: string; status: string; action: ReactNode }) {
+function Algorithm({
+  name,
+  what,
+  status,
+  note,
+  action,
+}: {
+  name: string;
+  what: string;
+  status: string;
+  note?: string;
+  action: ReactNode;
+}) {
   return (
     <Group justify="space-between" align="center" wrap="wrap" gap="sm" className={classes.algorithm}>
       <div>
@@ -145,6 +216,11 @@ function Algorithm({ name, what, status, action }: { name: string; what: string;
         <Text size="xs" mt={4}>
           {status}
         </Text>
+        {note ? (
+          <Text size="xs" c="dimmed">
+            {note}
+          </Text>
+        ) : null}
       </div>
       {action}
     </Group>
