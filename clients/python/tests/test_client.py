@@ -24,6 +24,7 @@ from graphos_client import (
     EdgeUpsert,
     GraphosClient,
     GraphosError,
+    GraphosNotReady,
     Job,
     NodeRef,
     NodesUpsertResponse,
@@ -367,6 +368,23 @@ async def test_never_retries_long_operations_or_timeouts() -> None:
     with pytest.raises(GraphosError):
         await cli.search("x")
     assert len(calls) == 1          # a statement timeout is not retried
+    await cli.close()
+
+    cli, calls = _counting_client(507)
+    with pytest.raises(GraphosError) as caught:
+        await cli.search("x")
+    assert len(calls) == 1          # nor a database out of disk space
+    assert caught.value.status_code == 507
+    await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_a_database_short_of_memory_is_retried_then_not_ready() -> None:
+    cli, calls = _counting_client(503)
+    with pytest.raises(GraphosNotReady) as caught:
+        await cli.search("x")
+    assert len(calls) == 3          # first try + 2 retries: it may pass
+    assert caught.value.detail == "boom"
     await cli.close()
 
 

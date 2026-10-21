@@ -144,6 +144,11 @@ def _by_type(pairs: list[tuple[str, Any]]) -> dict[str, list[Any]]:
     return out
 
 
+# 5xx answers a retry cannot change: a statement timeout (504) would time out
+# again, a database out of disk space (507) would fail again.
+_NOT_RETRIED = frozenset({httpx.codes.GATEWAY_TIMEOUT, httpx.codes.INSUFFICIENT_STORAGE})
+
+
 class GraphosClient:
     """Async HTTP client for the graphos service.
 
@@ -257,7 +262,9 @@ class GraphosClient:
         """Send a request with retry on transient failures.
 
         Retries network errors and 5xx responses (except 504, a statement
-        timeout that would only time out again) when ``idempotent`` is true.
+        timeout that would only time out again, and 507, a database out of
+        disk space that a retry would only fill again) when ``idempotent`` is
+        true.
         Long-running operations pass ``idempotent=False`` so a failure is
         never re-run automatically.  4xx errors surface immediately as
         ``GraphosError``.
@@ -315,7 +322,7 @@ class GraphosClient:
                 return resp
             if (
                 resp.status_code >= httpx.codes.INTERNAL_SERVER_ERROR
-                and resp.status_code != httpx.codes.GATEWAY_TIMEOUT
+                and resp.status_code not in _NOT_RETRIED
                 and idempotent
                 and attempt <= self._retries
             ):

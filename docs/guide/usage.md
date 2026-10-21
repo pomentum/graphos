@@ -115,7 +115,7 @@ and sends no token otherwise. `PasswordAuth` signs in before the first request, 
 again at 80% of the token's lifetime, and once more on a `401` (then sends the request again; safe
 for writes, since graphos checks the token before doing anything). Errors raise `GraphosError` (`.status_code`, `.detail`); a
 503 raises its subclass `GraphosNotReady`. The client retries network errors and 5xx responses other
-than 504, but never a read/write timeout, nor the long or one-off calls: `edges:resolve`,
+than 504 and 507 (a full database disk), but never a read/write timeout, nor the long or one-off calls: `edges:resolve`,
 `recompute-communities`, `metrics:compute`, `snapshot-import`, vacuum, Cypher queries, a restore,
 a delete with `drop_data`, job submissions and cancels. Every method is listed in the
 [client's README](../../clients/python/README.md#what-the-client-covers). Without a wrapper (use
