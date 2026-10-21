@@ -113,7 +113,7 @@ class TenantInfo(BaseModel):
     # ``{"mode", "vertex": {label: entry}, "edge": {type: entry}}``; empty from an older server.
     property_schema: dict[str, Any] = Field(default_factory=dict)
     # ``{"vertex": {label: {deprecated, replaced_by, note, properties}}, "edge": ...}``
-    # and the renames, oldest first; empty from a server before 0.14.0.
+    # and the renames, oldest first; empty from a server before 0.13.2.
     deprecated: dict[str, dict[str, dict[str, Any]]] = Field(default_factory=dict)
     renames: list[SchemaRename] = Field(default_factory=list)
     # The algorithm a community recompute uses when its request names none
@@ -191,7 +191,7 @@ class TenantSchemaInfo(BaseModel):
     display: dict[str, dict[str, dict[str, Any]]] = Field(default_factory=dict)
     # Declared properties per label and edge type, and the mode; empty from an older server.
     property_schema: dict[str, Any] = Field(default_factory=dict)
-    # What is deprecated and the renames, oldest first; empty from a server before 0.14.0.
+    # What is deprecated and the renames, oldest first; empty from a server before 0.13.2.
     deprecated: dict[str, dict[str, dict[str, Any]]] = Field(default_factory=dict)
     renames: list[SchemaRename] = Field(default_factory=list)
 
