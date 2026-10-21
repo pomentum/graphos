@@ -61,6 +61,7 @@ from typing import Any, cast
 
 import asyncpg
 
+from graphos import resources
 from graphos.config import Settings
 from graphos.db import _on_acquire, _on_connect
 
@@ -542,6 +543,11 @@ class Console:
         except asyncpg.ReadOnlySQLTransactionError as exc:
             raise ConsoleError(400, "the console only reads: write through the API") from exc
         except asyncpg.PostgresError as exc:
+            found = resources.shortage(exc)
+            if found is not None:
+                log.error("cypher console: database short of a resource sqlstate=%s: %s",
+                          found.sqlstate, str(exc)[:300])
+                raise ConsoleError(found.status, found.detail) from exc
             raise ConsoleError(400, str(exc)) from exc
         finally:
             done.set()

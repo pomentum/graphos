@@ -4,6 +4,19 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Fixed
+
+- **A full database disk says so.** A computation, write or read that ran the database out of disk
+  failed with "internal error; see the server log", in the API, a job's record and the web UI
+  alike. graphos now answers `507` ("the database server is out of disk space; free space on the
+  database server, then retry"), and `503` when the database is out of memory or connections or
+  at a configured limit (SQLSTATE class 53), as `application/problem+json` and on a job's record.
+  The edge aggregation and the Cypher console, which passed on the database's own message (it
+  names the server's files), give the same answer; the full message stays in the server log.
+  **Docs:** usage §12 (Limits and errors), concept §2.5.2.
+
 ## 0.14.1 — 2026-10-21
 
 The web UI computes the groups with Louvain or Leiden and says which ran; a new script measures
