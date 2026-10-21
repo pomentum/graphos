@@ -1,6 +1,6 @@
 # ADR-0011: Communities computed from the previous partition (Leiden)
 
-- **Status:** Proposed (2026-10-21)
+- **Status:** Accepted (2026-10-21)
 - **Scope:**
   - the community computation (`louvain_compute.py`): Louvain from scratch today;
   - the recompute's request (`POST /v1/{tenant}/recompute-communities`) and its docs;
@@ -92,6 +92,19 @@ settled (Leiden from the previous partition, run until it no longer improves):
 The first runs from the previous partition still raise modularity (0.433, 0.435, 0.436), then
 it settles; a change then moves only the nodes it concerns.
 
+Then measured on the server, built from this decision, on the same graph (one run each step,
+Leiden from the stored partition after a switch-over run):
+
+| Recompute | Louvain (0.13.2) | Leiden |
+|---|---:|---:|
+| nothing changed: nodes rewritten | 0 | 8,005 (3.2 %; the partition still settling) |
+| +1 % edges: nodes / edges rewritten | 190,911 / ≈1.6M | 5,083 / 46,406 |
+| +1 % edges: run | 103 s | 28 s |
+| +10 % edges: nodes / edges rewritten | 190,891 / ≈1.6M | 7,076 / 226,797 |
+| +10 % edges: run | 131 s | 43 s |
+| ids kept after +1 % | 1 of 62 | 63 of 63 |
+| modularity | ≈0.42 | 0.437 → 0.442 over the runs |
+
 ## Consequences
 
 - A recompute after a small change rewrites a few percent of the nodes and the edges at their
@@ -115,14 +128,25 @@ it settles; a change then moves only the nodes it concerns.
 - Switching algorithm between runs starts from scratch for Leiden (the stored partition came from
   the other one) and changes the ids no more than a Louvain run does today.
 
+## Decided
+
+- **Iterations:** two per Leiden run (`LEIDEN_ITERATIONS`, igraph's default): 96 % of nodes kept
+  against 97.5 % with no cap, at the same modularity, and a long series of runs improves the
+  partition step by step instead of reshaping it.
+- **The default:** `"louvain"`, so the change breaks nothing. Whether to make `"leiden"` the
+  default later is a decision for a later release, once callers have used it.
+- **Per tenant:** `community_algorithm` in the registration, never empty (`"louvain"` for a new
+  tenant and for one registered before this).
+
 ## Open questions
 
-- Should a run from the previous partition be capped (`n_iterations=2`: 96 % kept, the same
-  modularity here) so a long series of runs cannot drift?
-- **The default, decided:** `"louvain"`, so the change breaks nothing. Whether to make
-  `"leiden"` the default later is a decision for a later release, once callers have used it.
 - Measured on synthetic data only; a graph with clearer communities moves less from scratch, so
   the gain there may be smaller.
+- On an unchanged graph Leiden still moves a few percent of the nodes while its partition
+  settles (Louvain none). A run could be skipped when nothing was written since the last one
+  with the same parameters; not done here.
+- The web UI recomputes with the tenant's algorithm but still names only Louvain in its texts;
+  naming both, and offering the choice there, is follow-up work (with the screenshots it changes).
 
 ## Acceptance
 

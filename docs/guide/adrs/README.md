@@ -94,4 +94,4 @@ What has to be true for the decision to count as carried out (tests, docs).
 | [ADR-0008](ADR-0008-mcp-uses-the-api-tokens.md) | `/mcp` takes the tokens the REST API takes, signs its clients in, and is on by default | Accepted (2026-10-19) |
 | [ADR-0009](ADR-0009-rename-and-deprecate.md) | Renaming and deprecating labels, edge types and properties | Accepted (2026-10-19) |
 | [ADR-0010](ADR-0010-analysis-results-outside-properties.md) | Analysis results outside `properties` | Rejected (2026-10-21): the churn, not the storage, is the cost |
-| [ADR-0011](ADR-0011-communities-from-the-previous-partition.md) | Communities computed from the previous partition (Leiden) | Proposed (2026-10-21) |
+| [ADR-0011](ADR-0011-communities-from-the-previous-partition.md) | Communities computed from the previous partition (Leiden) | Accepted (2026-10-21) |
