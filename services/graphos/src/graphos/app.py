@@ -76,7 +76,13 @@ from graphos.contracts.graph_metrics import ComputeMetricsRequest
 from graphos.contracts.louvain import RecomputeCommunitiesRequest
 from graphos.contracts.property_schema import PropertiesCheckRequest
 from graphos.contracts.tenants import ResolveEdgesRequest
-from graphos.db import create_pool, ensure_internal_schema, fetch_db_version, unsupported_database
+from graphos.db import (
+    create_pool,
+    ensure_internal_schema,
+    fetch_db_version,
+    repair_age_catalogue,
+    unsupported_database,
+)
 from graphos.graph_compute import configure as configure_compute
 from graphos.graph_compute import terminate_running
 from graphos.graph_metrics import configure as configure_metrics
@@ -209,8 +215,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await pool.close()
         raise RuntimeError(refused)
 
-    # 3. graphos-internal schema (idempotent) + restore registered tenants
+    # 3. AGE's catalogue after a restore (graphos.db.repair_age_catalogue),
+    #    graphos-internal schema (idempotent) + restore registered tenants
     #    from the previous boot.
+    await repair_age_catalogue(pool)
     await ensure_internal_schema(pool)
     restored = await load_registered_tenants(pool)
 

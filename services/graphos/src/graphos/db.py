@@ -131,6 +131,63 @@ def unsupported_database(postgres_version: str, age_version: str | None) -> str 
     return None
 
 
+# AGE identifies a graph by the OID of its schema: create_graph sets
+# ag_graph.graphid to namespace::oid, and ag_label.graph points at it. A
+# pg_dump restored into another database gives every schema a new OID but
+# restores the catalogue rows as they were, so graphid keeps the old one and
+# Cypher fails ("graph with oid N does not exist") while plain SQL works.
+# Moving both tables in one statement keeps fk_graph_oid satisfied (a NO
+# ACTION key is checked at the end of the statement), so the role graphos-api
+# runs as, which may update AGE's catalogue but does not own it, can do it.
+_AGE_CATALOGUE_REPAIR_SQL = """
+WITH moved AS (
+  SELECT graphid AS old_id, namespace::oid AS new_id
+    FROM ag_catalog.ag_graph WHERE graphid <> namespace::oid
+), graphs AS (
+  UPDATE ag_catalog.ag_graph g SET graphid = m.new_id
+    FROM moved m WHERE g.graphid = m.old_id
+  RETURNING g.name
+), labels AS (
+  UPDATE ag_catalog.ag_label l SET graph = m.new_id
+    FROM moved m WHERE l.graph = m.old_id
+)
+SELECT name FROM graphs ORDER BY name;
+"""
+
+
+async def repair_age_catalogue(pool: asyncpg.Pool) -> list[str]:
+    """Point AGE's catalogue at each graph's schema where a restore left it
+    on the old OID; the graphs repaired.
+
+    Runs at start-up, before any tenant is loaded. A role that may not update
+    the catalogue gets a logged error naming the manual fix
+    (docs/guide/upgrade-postgresql-18.md) and graphos starts anyway: its SQL
+    reads and writes do not need the catalogue's ids, only the Cypher console
+    does.
+    """
+    async with pool.acquire() as conn:
+        try:
+            names = [str(r["name"]) for r in await conn.fetch(_AGE_CATALOGUE_REPAIR_SQL)]
+        except asyncpg.PostgresError as exc:
+            stale = await conn.fetchval(
+                "SELECT count(*) FROM ag_catalog.ag_graph WHERE graphid <> namespace::oid;"
+            )
+            log.error(
+                "AGE catalogue points at old schema OIDs (a restored database) and could "
+                "not be repaired; Cypher on these graphs fails until the catalogue fix in "
+                "docs/guide/upgrade-postgresql-18.md is run",
+                extra={"graphs": stale, "error": f"{type(exc).__name__}: {exc}"},
+            )
+            return []
+    if names:
+        log.warning(
+            "AGE catalogue repaired: graphs pointed at their schemas' new OIDs (a restored "
+            "database)",
+            extra={"graphs": names},
+        )
+    return names
+
+
 async def fetch_db_version(pool: asyncpg.Pool) -> dict[str, Any]:
     """The PostgreSQL and AGE versions, for /v1/info and the start-up check."""
     async with pool.acquire() as conn:

@@ -1644,6 +1644,15 @@ stay per replica: the rate limit (each allows the configured rate) and the sign-
 and grants are kept in step through `NOTIFY` (and re-read every minute), so a change made on one
 replica applies on all.
 
+- **The load balancer's idle timeout** must be shorter than graphos's keep-alive,
+  `GRAPHOS_KEEP_ALIVE_S` (75 s): a balancer that keeps idle connections to graphos open longer may
+  send a request on one just as graphos closes it, and answer 502. With nginx's 60 s default and
+  graphos's keep-alive at uvicorn's 5 s, 12 of 1,310 reads got a 502 behind nginx, against none
+  with the balancer closing first.
+- **A replica that stops** loses the requests it was answering (a load on it fails and can be sent
+  again: loads are idempotent), and the jobs it was running are marked failed after three missed
+  heartbeats (`GRAPHOS_JOB_HEARTBEAT_S`, 10 s each), not taken over: send them again.
+
 ### Background jobs
 
 Community recompute, graph metrics, `edges:resolve`, `properties:check` and vacuum can take minutes on a large graph. Send them with
@@ -1743,6 +1752,7 @@ listed here.
 | `IMPORT_MAX_BYTES` | 17179869184 (16 GiB): the most `snapshot-import` reads from one body, after decompression (§4) |
 | `BIND_HOST` / `BIND_PORT` | `0.0.0.0` / 8080 |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1`: comma-separated addresses whose `X-Forwarded-*` headers are trusted; set it to your reverse proxy |
+| `KEEP_ALIVE_S` | 75: seconds an idle client connection stays open; keep it longer than your proxy's or load balancer's idle timeout (*Several replicas*) |
 | `LOG_LEVEL` / `LOG_JSON` | `INFO` / true |
 | `AUDIT_ENABLED` / `AUDIT_ENDPOINTS_ONLY_WRITES` / `AUDIT_READS` | true / true / `exports` (or `data`; see *Audit log*) |
 | `RATE_LIMIT_ENABLED` / `RATE_LIMIT_RPS` / `RATE_LIMIT_WINDOW_S` | false / 100 / 1.0 |

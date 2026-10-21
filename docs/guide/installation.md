@@ -244,7 +244,9 @@ the communities. Then open the UI, pick `demo`, and use *Explore → Graph → C
 - **TLS in front.** Both ports bind to `127.0.0.1`. Put a reverse proxy with TLS in front of the
   UI (and of the API, if programs outside the host call it), and list it in
   `GRAPHOS_FORWARDED_ALLOW_IPS` so graphos sees the real client address (for sign-in throttling,
-  rate limits and the audit log).
+  rate limits and the audit log). Keep the proxy's idle timeout towards graphos shorter than
+  `GRAPHOS_KEEP_ALIVE_S` (75 s), or it may reuse a connection graphos has just closed and answer
+  502.
 - **The admin password.** Change it at once, or start with `GRAPHOS_ADMIN_PASSWORD_FILE`. Create a
   named admin for each administrator, and with SSO set `GRAPHOS_LOCAL_ADMIN=false`.
 - **Never `GRAPHOS_AUTH_DISABLED=true`.** It makes every request an anonymous admin, for local
@@ -289,12 +291,51 @@ the communities. Then open the UI, pick `demo`, and use *Explore → Graph → C
   `127.0.0.1` are always allowed. It matters most for the endpoints that need no sign-in, and
   for a local instance with `GRAPHOS_AUTH_DISABLED=true`.
 - **Sizing and backups.** Raise the database's memory settings for large graphs
-  ([tuning](apache-age.md)); back up the `graphos_data_pg18` volume or the database with the tools
-  you use for any PostgreSQL (`pg_dump -Fc` and a restore are what the
-  [upgrade](upgrade-postgresql-18.md) itself runs, then AGE's catalogue fix; from an AGE 1.6 dump,
-  also AGE 1.8's cache trigger).
+  ([tuning](apache-age.md)); back up the database, and the master key apart from it
+  ([Backup and restore](#backup-and-restore)).
 - **Several replicas** of graphos-api can share one database behind a load balancer
   ([usage §11](usage.md#several-replicas)).
+
+### Backup and restore
+
+**What to keep.** The database (`graphos`), and the master key (`master_key.txt`, or what
+`GRAPHOS_MASTER_KEY_FILE` names) kept apart from it: a dump holds the signing keys and sessions
+only sealed with that key. graphos keeps nothing else of its own on disk.
+
+**Backing up.** Any PostgreSQL backup works: a snapshot of the `graphos_data_pg18` volume taken
+with the database stopped, `pg_basebackup`, or a logical dump while graphos runs (one consistent
+snapshot):
+
+```bash
+docker compose -f docker-compose.graphos.yml exec -T graphos-db   pg_dump -U graphos -d graphos -Fc > graphos-$(date +%F).dump
+```
+
+**Restoring a dump.** Into an empty database, then start graphos-api on it:
+
+```bash
+docker compose -f docker-compose.graphos.yml stop graphos-api
+docker compose -f docker-compose.graphos.yml exec -T graphos-db createdb -U graphos graphos_restored
+docker compose -f docker-compose.graphos.yml exec -T graphos-db   pg_restore -U graphos -d graphos_restored --exit-on-error < graphos-2026-10-21.dump   # serial: no -j
+docker compose -f docker-compose.graphos.yml exec -T graphos-db   psql -U graphos -d graphos_restored -c "GRANT CONNECT, CREATE ON DATABASE graphos_restored TO graphos_app;"
+docker compose -f docker-compose.graphos.yml exec -T graphos-db   vacuumdb -U graphos -d graphos_restored --analyze-only
+```
+
+The dump carries the app role's grants on its schemas and tables; the database-level grant is
+the one to give again. Then set `GRAPHOS_DB_NAME=graphos_restored` and start graphos-api (or
+restore into a new `graphos` the same way, after dropping the old one).
+
+- **Restore serially.** With `-j`, `pg_restore` can load AGE's label catalogue before its graph
+  catalogue and fail on their foreign key
+  ([upgrade guide](upgrade-postgresql-18.md#a-database-you-run-yourself)).
+- **AGE's catalogue.** A restore gives every tenant's schema a new OID while AGE's catalogue keeps
+  the old one, and Cypher on those graphs fails ("graph with oid N does not exist") until they
+  match again. graphos-api repairs this at start and logs which graphs it repaired; a role that
+  may not update AGE's catalogue gets an error naming the
+  [manual fix](upgrade-postgresql-18.md#a-database-you-run-yourself) instead.
+- **Planner statistics** are not in a dump: the `vacuumdb --analyze-only` above gathers them, or
+  the first queries are slow until autovacuum does.
+- **Checking.** `GET /v1/tenants` lists the tenants, and each tenant's
+  `GET /v1/{tenant}/graph/stats` its node and edge counts, to compare with the source.
 
 ### Direct SQL readers
 

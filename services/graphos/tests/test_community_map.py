@@ -13,7 +13,7 @@ import asyncpg
 import httpx
 import pytest
 
-from graphos import community_map, louvain, writes
+from graphos import analysis, community_map, louvain, writes
 from graphos import louvain_compute as lc
 from graphos.app import create_app
 from graphos.bootstrap import TenantSpec, register_tenant
@@ -55,10 +55,8 @@ def test_summary_counts_sizes_labels_hubs_and_links() -> None:
     assert data.links == {(7, 8, "CALLS"): 1, (7, 8, "USES"): 1, (8, 7, "CALLS"): 1}
 
 
-@requires_db
-@pytest.mark.asyncio
-@pytest.mark.skipif(lc.ig is None, reason="louvain extra not installed")
-async def test_recompute_stores_a_map_that_the_endpoint_serves(db_pool: asyncpg.Pool) -> None:
+async def _two_cliques(db_pool: asyncpg.Pool) -> None:
+    """Two cliques of six joined by one edge, in a fresh tenant."""
     await register_tenant(db_pool, TenantSpec(
         name=TENANT, vertex_labels=("Function",), edge_labels=("CALLS",),
     ))
@@ -80,6 +78,12 @@ async def test_recompute_stores_a_map_that_the_endpoint_serves(db_pool: asyncpg.
         edge_type="CALLS", rows=rows,
     )
 
+
+@requires_db
+@pytest.mark.asyncio
+@pytest.mark.skipif(lc.ig is None, reason="louvain extra not installed")
+async def test_recompute_stores_a_map_that_the_endpoint_serves(db_pool: asyncpg.Pool) -> None:
+    await _two_cliques(db_pool)
     app = create_app(Settings(db_password="placeholder", auth_disabled=True))
     app.state.pool = db_pool
     transport = httpx.ASGITransport(app=app)
@@ -103,3 +107,26 @@ async def test_recompute_stores_a_map_that_the_endpoint_serves(db_pool: asyncpg.
     assert {c["hub"]["id"] for c in body["communities"]} == {"p0", "q0"}
     links = [(link["count"], link["types"]) for link in body["links"]]
     assert links == [(1, [{"type": "CALLS", "count": 1}])]
+
+
+async def _vacuums(db_pool: asyncpg.Pool, table: str) -> int:
+    async with db_pool.acquire() as conn:
+        return int(await conn.fetchval(
+            "SELECT vacuum_count FROM pg_stat_user_tables WHERE schemaname = $1 AND relname = $2",
+            TENANT, table,
+        ) or 0)
+
+
+@requires_db
+@pytest.mark.asyncio
+@pytest.mark.skipif(lc.ig is None, reason="louvain extra not installed")
+async def test_a_recompute_vacuums_the_node_and_edge_tables_it_wrote(
+    db_pool: asyncpg.Pool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _two_cliques(db_pool)
+    monkeypatch.setattr(analysis, "VACUUM_AFTER_ROWS", 5)
+    before = {t: await _vacuums(db_pool, t) for t in ("Function", "CALLS")}
+    await louvain.recompute_communities(db_pool, tenant=TENANT, min_community_size=2)
+    assert {t: await _vacuums(db_pool, t) - n for t, n in before.items()} == {
+        "Function": 1, "CALLS": 1,
+    }

@@ -235,6 +235,6 @@ docker network connect "$INTERNAL_NET" "$container"
 
 docker exec "$container" sh -c "
     cd /work && \
-    pip install -q -e '.[dev]' && \
+    pip install -q -e '.[dev,louvain]' && \
     pytest -v ${PYTEST_ARGS[*]}
 "

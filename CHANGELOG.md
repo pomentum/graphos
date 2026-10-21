@@ -25,6 +25,24 @@ under one version.
   a `VACUUM (ANALYZE)` of the tables it wrote (best-effort, logged), so the next run reuses the
   space instead of growing the tables.
 
+### Fixed
+
+- **Occasional 502s behind a proxy.** graphos-api closed idle connections after uvicorn's 5 s, so a
+  proxy keeping its connections to graphos longer (nginx's upstream keepalive keeps them 60 s)
+  sometimes sent a request on one just as graphos closed it, and answered 502: 12 of 1,310 reads
+  behind nginx, against none with nginx closing first. Idle connections now stay open 75 s, longer
+  than the common proxy timeouts, and `GRAPHOS_KEEP_ALIVE_S` (new) sets it. **Docs:** usage's
+  *Several replicas* says to keep the balancer's idle timeout shorter, and what happens to the
+  requests and jobs of a replica that stops.
+- **A restored database works without the manual catalogue fix.** A `pg_dump` restored into another
+  database gives each tenant's schema a new OID, while AGE's catalogue keeps the old one, so Cypher
+  on those graphs failed ("graph with oid N does not exist") until the catalogue fix of the
+  upgrade guide was run by hand. graphos-api now points AGE's catalogue at the schemas at start, as
+  its own database role (both catalogue tables in one statement, so their foreign key holds), and
+  logs the graphs it repaired; a role that may not update the catalogue gets an error naming the
+  manual fix. **Docs:** installation §8 has a *Backup and restore* section: what to keep, a dump
+  while graphos runs, a serial restore, the grant to give again, statistics, and how to check.
+
 ## 0.13.2 — 2026-10-20
 
 Schema evolution (ADR-0009): labels, relationship types and properties can be renamed and
