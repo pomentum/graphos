@@ -10,7 +10,8 @@ Re-runs after a small change of the graph rewrite a few percent of it instead of
 it: graph metrics skip scores that barely moved, and communities can be computed with Leiden from
 the stored partition (ADR-0011; Louvain stays the default). Also: path searches past a highly
 connected node, graph computations held to some of the CPUs, vacuum after large write-backs,
-restored databases repaired at start, and no more 502s behind a proxy's keep-alive.
+restored databases repaired at start, and no more 502s behind a proxy that keeps idle connections
+up to 75 s.
 
 ### Added
 
@@ -40,10 +41,10 @@ restored databases repaired at start, and no more 502s behind a proxy's keep-ali
   was cheap to grow. Now a level over the cap stops only its own end, and the other end goes on
   alone, a whole level at a time, so the answer stays exact; `truncated` means both ends were
   stopped.
-- **Graph computations leave CPU for reads.** Betweenness (rustworkx) ran on every core of the host;
-  on a large graph that was minutes with no CPU left for the API's requests and job heartbeats. A
-  metrics or Louvain computation now uses at most `GRAPHOS_COMPUTE_THREADS` threads (new; `0`, the
-  default, is half the CPUs the process may use, at least one).
+- **Graph computations leave CPU for reads.** Betweenness (rustworkx) took as many cores as it
+  could get; on a large graph that was minutes with no CPU left for the API's requests and job
+  heartbeats. A metrics or community computation now uses at most `GRAPHOS_COMPUTE_THREADS` threads
+  (new; `0`, the default, is half the CPUs the process may use, at least one).
 - **A metrics re-run rewrites the scores that moved, not all of them.** A few new edges shift every
   node's PageRank a little, and scores were stored to six significant digits, so a re-run after
   any change rewrote the whole tenant: on 250,000 nodes with 1 % more edges, 250,076 nodes and

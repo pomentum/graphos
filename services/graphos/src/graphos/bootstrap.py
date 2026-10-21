@@ -673,7 +673,7 @@ async def bootstrap_tenant(
                 # Denormalised end-vertex community for Louvain-scoped BFS.
                 # The /expand BFS supports a ``communities=...`` query
                 # param that bounds the traversal to vertices in a given
-                # Louvain partition.  Naively this requires a per-hop semi-
+                # community partition.  Naively this requires a per-hop semi-
                 # join against ``_ag_label_vertex`` (expensive per call)
                 # or a per-hop array-parameter hash build (catalog churn
                 # at high QPS).  Both shift cost onto the read path on a

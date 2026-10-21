@@ -1243,11 +1243,11 @@ class GraphosClient:
         graphos runs a single BFS over the combined frontier in one
         request -- ~N× faster than N single-seed calls.
 
-        ``communities`` (optional): list of Louvain ``community_id``
+        ``communities`` (optional): list of ``community_id``
         values rendered as strings.  When provided, graphos restricts
         the BFS frontier to vertices whose ``community_id`` is in this
-        set — tight-radius traversal bounded to the seed's Louvain
-        partition(s).  Empty / unset = no scope (full BFS).
+        set — tight-radius traversal bounded to the seed's
+        communities.  Empty / unset = no scope (full BFS).
         """
         if seeds is None and node_id is None:
             raise ValueError("expand requires node_id or seeds")
@@ -1454,7 +1454,7 @@ class GraphosClient:
         )
         return DeleteByPropertyResponse.model_validate(resp.json())
 
-    # ── Louvain ────────────────────────────────────────────────────────────
+    # ── Communities ────────────────────────────────────────────────────────
 
     # ── Community reads + tenant stats ─────────────────────────────────────
 
@@ -1493,7 +1493,7 @@ class GraphosClient:
         wall-clock budget.
 
         Returns a partial map: ids that graphos does not know, or
-        which Louvain did not cluster, are absent from
+        which the last recompute did not cluster, are absent from
         ``community_by_id``.  Callers should treat missing entries as
         "no community" rather than as an error.
         """
@@ -1953,7 +1953,7 @@ class GraphosClient:
         )
         return GraphologyExport.model_validate(resp.json())
 
-    # ── Louvain recompute ─────────────────────────────────────────────────
+    # ── Community recompute ───────────────────────────────────────────────
 
     async def recompute_communities(
         self,

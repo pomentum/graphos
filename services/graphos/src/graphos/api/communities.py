@@ -1,4 +1,4 @@
-"""Read endpoints over Louvain output + tenant stats.
+"""Read endpoints over the community recompute's output + tenant stats.
 
 Three endpoints, one router:
 
@@ -163,7 +163,7 @@ async def _communities_with_labels(
     "/communities",
     response_model=CommunitiesResponse,
     tags=["communities"],
-    summary="List communities + sizes from the last Louvain assignment",
+    summary="List communities + sizes from the last community recompute",
     description=(
         "Reads `community_id` written by the most recent recompute. "
         "Filter out tiny communities via `min_size`.  Use ``limit`` to "
@@ -245,7 +245,7 @@ async def list_communities(
     "/community-summary",
     response_model=CommunitySummary,
     tags=["communities"],
-    summary="Aggregate stats over the last Louvain output",
+    summary="Aggregate stats over the last community recompute",
     description=(
         "Over the `community_id` written by the most recent recompute: the number of "
         "communities, the assigned and unassigned node counts, the largest and smallest "

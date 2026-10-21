@@ -21,7 +21,8 @@ router = APIRouter(tags=["info"])
     description=(
         "Needs no token. The graphos, PostgreSQL and Apache AGE versions, the number of "
         "registered tenants (not their names), and which optional features this server has: "
-        "`louvain`, `metrics`, `cypher` (the Cypher console)."
+        "`louvain` (community detection), `community_algorithms` (those it runs: "
+        "`louvain`, `leiden`), `metrics`, `cypher` (the Cypher console)."
     ),
 )
 async def info(request: Request) -> dict[str, Any]:

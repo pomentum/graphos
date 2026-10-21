@@ -40,7 +40,7 @@
 <text x="30" y="210" font-size="13" font-weight="400" fill="#131A22">one run per tenant at a time (advisory lock, 409 otherwise)</text>
 <text x="530" y="210" font-size="13" font-weight="400" fill="#131A22">dry_run previews the partition without writing</text>
 <text x="30" y="236" font-size="13" font-weight="400" fill="#131A22">response reports time per step and modularity</text>
-<text x="530" y="236" font-size="13" font-weight="400" fill="#131A22">ids persist; Leiden starts from the last run</text>
+<text x="530" y="236" font-size="13" font-weight="400" fill="#131A22">ids persist; Leiden can start from the last run</text>
 <rect x="30" y="256" width="12" height="12" rx="3" fill="#ECE8F8" stroke="#B8ACE3"/><text x="48" y="266" font-size="12.5" font-weight="400" fill="#4A5563">inside PostgreSQL</text>
 <rect x="190" y="256" width="12" height="12" rx="3" fill="#E3EBFB" stroke="#9DB7EC"/><text x="208" y="266" font-size="12.5" font-weight="400" fill="#4A5563">inside graphos-api</text>
 </svg>

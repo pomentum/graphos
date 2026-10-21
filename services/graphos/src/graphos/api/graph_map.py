@@ -286,7 +286,7 @@ LABELS_PER_COMMUNITY = 5
     tags=["communities"],
     summary="The communities and the edges between them",
     description=(
-        "The communities of the last Louvain recompute, largest first: each "
+        "The communities of the last community recompute, largest first: each "
         "with its size, its members per label, its best-connected member "
         "and its internal edge count, plus the edges between them per "
         "relationship type. Stored by the recompute from the edges it "

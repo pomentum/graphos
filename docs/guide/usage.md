@@ -1534,7 +1534,7 @@ Read access is enough for all four. A record:
 | edge delete | `delete` with the pair |
 | `edges:resolve` | one `resolve` summary per edge type, `count` edges, no ids: re-read the type; with `mode: reconcile`, a `delete` record of the removed edges and an `upsert` one of the adopted, each with `detail.reconcile: "resolve"` |
 | `edges:reconcile` | one `upsert` (added and changed) and one `delete` (removed) record, `detail.reconcile` `node` or `type`; ids up to 10,000 |
-| Louvain write-back | one `communities` summary, `count` nodes, no ids |
+| Community write-back | one `communities` summary, `count` nodes, no ids |
 | graph metrics write-back | one `metrics` summary, `count` nodes whose values changed, no ids |
 | schema change (registration that changes something, declared pair removed, unregister, restore) | `op: schema`, `kind: tenant`: `detail.added` / `detail.removed` per part (`vertex_labels`, `edge_labels`, `edge_endpoints`, `label_hierarchy`, `search_indexes`, `resolve_rules` by edge type, `property_indexes` as `Document(lang)` / `User(email) unique`, `generated_columns` as `Document.lang (text, from lang)`, `meta` by key, `display` and `property_schema` by entry as `vertex:Person` / `edge:AUTHORED`; records from before 0.6.0 hold `indexes` and `generated_columns` by count), `detail.changed` (`meta` keys whose text changed, `display` and `property_schema` entries declared again differently), `detail.strict_endpoints` and `detail.property_mode` as `[before, after]`, `detail.registered` / `detail.unregistered` / `detail.restored`. A re-registration that changes nothing records nothing |
 
@@ -1547,7 +1547,7 @@ New ops may be added; a consumer should treat an op it does not know as informat
 every write transaction that started before it has finished, so a slow write delays the records
 after it rather than being overtaken. The delay is the length of the longest write transaction
 running anywhere on the database server at that moment, usually milliseconds; a long write-back
-(Louvain on a large graph) holds the feed of every tenant until it ends, and loses nothing.
+(a community recompute on a large graph) holds the feed of every tenant until it ends, and loses nothing.
 Delivery is at least once: a client that resumes from an older cursor sees records again. Feed
 order is transaction *start* order, so two records of the same node can show the later revision
 first; re-read the item, or compare `rev`.
@@ -1598,7 +1598,7 @@ async with GraphosClient(base_url=G, token=TOKEN, tenant="acme") as g:
 |---|---|---|
 | `GET /healthz` | none | process alive: `{"status": "ok"}`, no database access |
 | `GET /readyz` | none | database round-trip: `{"status": "ready", "registered_tenants": <count>}`, or 503 with `{"status": "not_ready", "reason"}` only (`lifespan_not_complete` while starting, `db_unreachable` on a database failure; the error goes to the server log) |
-| `GET /v1/info` | none | `version`, `postgres_version`, `age_version`, `tenants` (a count), `features` (`louvain`, `metrics`, `cypher`) |
+| `GET /v1/info` | none | `version`, `postgres_version`, `age_version`, `tenants` (a count), `features` (`louvain`, `community_algorithms`, `metrics`, `cypher`) |
 | `GET /metrics` | none | Prometheus exposition; restrict it at the proxy if you expose it |
 | `GET /v1/db/stats` | admin | PostgreSQL and AGE versions, database size, plus per-table live/dead tuples, sizes and vacuum times (top 200 tables) |
 | `GET /v1/db/slow-queries?limit=25` | admin | `pg_stat_statements` top list (`limit` up to 200); `available: false` when the extension is missing |
@@ -1743,7 +1743,7 @@ the pool sets no client-side command timeout. When it fires, the response is **5
 Writes behave the same way: `/nodes`, `/edges`, `:bulk` and `snapshot-import` also answer 504.
 Narrow the request and retry. Long operations raise the limit for their own statements: tenant
 registration, internal schema setup and the startup reload of stored tenants (1800 s),
-`edges:resolve` (1800 s), Louvain stages (600 s, and 300 s per edge label), vacuum (3600 s) and
+`edges:resolve` (1800 s), community recompute stages (600 s, and 300 s per edge label), vacuum (3600 s) and
 the dataset export (900 s per statement; it reads through cursors, each fetch a short statement).
 
 **Rate limiting.** Off by default. Set `GRAPHOS_RATE_LIMIT_ENABLED=true` to allow each signed-in
@@ -1776,7 +1776,7 @@ listed here.
 | `JOB_CONCURRENCY`, `JOB_POLL_S`, `JOB_HEARTBEAT_S`, `JOB_RETENTION_H` | 1, 5, 10, 168: jobs run at once per replica; how often an idle replica looks for jobs queued elsewhere; a running job's heartbeat (one silent for three heartbeats is marked failed); how long finished jobs are kept |
 | `BETWEENNESS_MAX_NODES` | 20000 (§8, *Graph metrics*) |
 | `METRICS_MIN_CHANGE` | 0.01: a PageRank or betweenness score is rewritten only when it moved by more than this share of the stored value; 0 writes every change (§8, *Graph metrics*) |
-| `COMPUTE_THREADS` | 0: half the CPUs the process may use, at least one; the threads a metrics or Louvain computation may use (betweenness is the one that uses many) |
+| `COMPUTE_THREADS` | 0: half the CPUs the process may use, at least one; the threads a metrics or community computation may use (betweenness is the one that uses many) |
 | `REGISTRY_SYNC_S`, `CACHE_MAX_AGE_S`, `SHUTDOWN_GRACE_S` | 30, 30, 5 (*Several replicas*, §7, §10) |
 | `CHANGES_RETENTION_H`, `CHANGES_POLL_S`, `CHANGES_HEARTBEAT_S` | 168, 1, 15 (§10) |
 | `REQUIRE_IF_MATCH` | false (§4) |

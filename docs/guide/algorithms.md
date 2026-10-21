@@ -36,7 +36,9 @@ shows a node's group and metrics.
   "what does everything rely on", over `CITES` "what is most cited".
 - **Stable results.** The same edges give the same results whatever order their rows are stored
   in. Community and component ids carry over between runs, and only values that changed are
-  written, so re-running on an unchanged graph changes nothing (no revisions, no change records).
+  written, so re-running the metrics or Louvain on an unchanged graph changes nothing (no
+  revisions, no change records). Leiden from the stored communities still moves a few nodes while
+  its partition settles ([compared](#louvain-and-leiden-compared)).
 
 ## The demo
 
@@ -54,7 +56,7 @@ bridges (betweenness): shiplite, buildforge, gradientwise, guardium, routeflow
 communities: 6, modularity 0.741
 ```
 
-- **Louvain** recovers the six ecosystems from the edges alone; nothing in the data names them.
+- **Communities** recover the six ecosystems from the edges alone; nothing in the data names them.
 - **PageRank** puts the core libraries first, led by the logging library that every other core
   library depends on.
 - **Betweenness** picks out the packages through which one ecosystem reaches another: remove one
@@ -71,7 +73,7 @@ panel shows its `community_id` and the `graphos_*` metrics.*
 ## Communities (Louvain, Leiden)
 
 **What it finds.** A partition of the nodes into communities, groups with many relationships inside
-and few between them. Louvain maximises *modularity*, which compares the edges inside communities
+and few between them. Both algorithms maximise *modularity*, which compares the edges inside communities
 with what a random graph of the same degrees would have; values above about 0.3 mean a real
 structure, the demo scores 0.74.
 
@@ -88,29 +90,63 @@ structure, the demo scores 0.74.
   indexed columns, so each hop is an index lookup.
 - **Pictures.** Colour by community (the UI's *Colours → By group*).
 
-**How graphos runs it.** Louvain with python-igraph, an [optional extra](../../README.md#louvain-is-an-optional-extra)
-(GPL), on an undirected graph; `rel_weights` weighs each relationship type (the demo weighs a
+**How graphos runs it.** Louvain (the default) or Leiden, both from python-igraph, an
+[optional extra](../../README.md#louvain-is-an-optional-extra) (GPL), on an undirected graph; `rel_weights` weighs each relationship type (the demo weighs a
 dependency twice a maintainer link). `resolution` above 1 gives more, smaller communities; below 1,
 fewer and larger. Communities smaller than `min_community_size` (default 3) get no id. The seed is
-fixed and vertices are numbered by id, so the same edges give the same partition.
+fixed and vertices are numbered by their internal id, so the same edges give the same partition
+(a tenant imported again gets new internal ids, and with them possibly another partition).
 
-**Stable ids.** Louvain numbers its clusters arbitrarily, so a plain re-run renames every community.
-graphos matches each new cluster with the previous run's and keeps the old id when they overlap by
-a Jaccard index of at least 0.5: dashboards, caches and saved filters that hold a `community_id`
-keep working while membership drifts.
+**Stable ids.** Both algorithms number their clusters arbitrarily, so a plain re-run would rename
+every community. graphos matches each new cluster with the previous run's and keeps the old id
+when they overlap by a Jaccard index of at least 0.5: dashboards, caches and saved filters that
+hold a `community_id` keep working while membership drifts.
 
-**Louvain or Leiden.** Louvain starts from scratch every run, and on most graphs many partitions
-have almost the same modularity: after a small change it can land on a quite different one, and
-the matching above has little to keep (on 250,000 nodes, after 1 % more edges, 37 % of nodes
-stayed with their community and 24 % kept their id). Leiden, from the same python-igraph extra,
-can start from the stored partition and move only the nodes the change gives a reason to move:
-there a recompute after 1 % more edges rewrote 5,083 nodes (2 %) in 28 s instead of 190,911 in
-103 s, kept every community id, and reached a higher modularity (0.439 against 0.420). On an
-unchanged graph it still moves a few percent of the nodes while its partition settles, run by
-run; Louvain moves none. Ask for it with `"algorithm": "leiden"`, or set `"community_algorithm": "leiden"` in
-the tenant's registration so every recompute uses it; Louvain stays the default, and a run from
-scratch (`"from_scratch": true`, or a change of scope, weights or resolution) gives the same
-partition for the same edges and seed with either.
+### Louvain and Leiden compared
+
+Both look for the partition with the highest modularity, and both work in passes: move single
+nodes to the neighbouring community that raises modularity most, then merge each community into
+one node and repeat on the smaller graph. They differ in where they start and in one step.
+
+- **Louvain** ([Blondel et al., 2008](https://doi.org/10.1088/1742-5468/2008/10/P10008)) starts
+  every run with each node alone and repeats its passes until nothing improves.
+- **Leiden** ([Traag, Waltman and van Eck, 2019](https://doi.org/10.1038/s41598-019-41695-z))
+  adds a refinement step before each merge, which splits a community that is held together badly
+  or not at all. It can also start from a given partition: graphos gives it the stored one and
+  lets it make two passes (`LEIDEN_ITERATIONS`) per run.
+
+| | Louvain | Leiden |
+|---|---|---|
+| Starts from | scratch, every run | the stored communities, when the last run was Leiden over the same scope, weights and resolution; otherwise scratch |
+| Same edges, same result | yes: an unchanged graph rewrites nothing | from scratch, yes; from the stored communities, a few percent of the nodes still move each run while the partition settles |
+| After a small change | can land on a quite different partition: most nodes and ids change | moves only the nodes the change gives a reason to move |
+| Connected communities | not guaranteed: a community can be badly connected, even in pieces | each community is connected after every pass |
+| Modularity | high | as high or higher |
+| Use it when | you recompute rarely, want a run that depends only on the edges, or compare with earlier Louvain results | you recompute often and want communities, and the ids that name them, to stay put |
+
+Measured on a synthetic graph of 250,080 nodes and 951,272 edges, one recompute per step:
+
+| | Louvain | Leiden |
+|---|---|---|
+| Re-run, nothing changed: nodes rewritten / run | 0 / 24 s | 8,005 / 31 s |
+| Re-run after 1 % more edges: nodes rewritten / run | 190,911 / 103 s | 5,083 / 28 s |
+| Re-run after 10 % more edges: nodes rewritten / run | 190,891 / 131 s | 7,076 / 43 s |
+| Community ids kept after 1 % more edges | 1 of 62 | 63 of 63 |
+| Modularity after 1 % more edges | 0.420 | 0.439 |
+
+Most of a run's time is writing back what moved, so Leiden's re-runs are faster because they move
+less. It is the start, not the algorithm, that keeps the communities: measured apart from the
+server on the same graph, after 1 % more edges, 37 % of the nodes stayed together with Louvain from scratch (a
+change of seed gives about as many), 34 % with Leiden from scratch (in 3.8 s instead of Louvain's
+16.7 s), and 97.5 % with Leiden from the previous partition. The matching of stable ids applies
+to both, but after a Louvain run it has little to keep: 24 % of the nodes kept their id.
+
+**Choosing.** Louvain is the default for every tenant. Ask for Leiden with `"algorithm": "leiden"`
+in a recompute, or set `"community_algorithm": "leiden"` in the tenant's registration so every
+recompute without an algorithm uses it. `"from_scratch": true` makes Leiden ignore the stored
+communities. The first Leiden run after a Louvain one starts from scratch, and so does one over
+another scope, other weights or another resolution. The response says which algorithm ran and
+whether it started from scratch.
 
 ```bash
 curl -s -X POST "$G/v1/demo/recompute-communities" -H "Authorization: Bearer $TOKEN" \
@@ -168,8 +204,9 @@ quiet single point of failure.
 edges. It is not in the default set, and it is skipped (with a warning in the response) when more
 nodes take part than `GRAPHOS_BETWEENNESS_MAX_NODES` (20,000): scope it with `rel_types` or
 `node_filter`. It is computed on several threads, `GRAPHOS_COMPUTE_THREADS` of them (by default
-half the CPUs, so reads keep the rest): with the limit raised, 250,000 nodes and 950,000 edges
-took 451 s of computing, on about 14 cores.
+half the CPUs, so reads keep the rest). With `GRAPHOS_BETWEENNESS_MAX_NODES` raised, 250,000 nodes
+and 950,000 edges took 451 s of computing, on about 14 cores: measured before that thread limit,
+when betweenness used as many cores as it could get.
 
 ### Components
 

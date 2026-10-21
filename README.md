@@ -162,7 +162,7 @@ every field.
 
 Community detection uses [python-igraph](https://python.igraph.org/), which is GPL-2.0-or-later, so it is kept out of the default install. The extra gives both algorithms, Louvain (the default) and Leiden:
 
-| Install | Louvain |
+| Install | Louvain and Leiden |
 |---|---|
 | `pip install ./services/graphos` / default image | no; `recompute-communities` answers `501` |
 | `pip install "./services/graphos[louvain]"` | yes |
@@ -238,7 +238,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | `GRAPHOS_JOB_RETENTION_H` | `168` | Hours finished jobs are kept |
 | `GRAPHOS_BETWEENNESS_MAX_NODES` | `20000` | Betweenness is skipped when more nodes take part (it is the costly metric) |
 | `GRAPHOS_METRICS_MIN_CHANGE` | `0.01` | A PageRank or betweenness score is rewritten only when it moved more than this share |
-| `GRAPHOS_COMPUTE_THREADS` | `0` | Threads a metrics or Louvain run may use; `0` is half the CPUs, so reads keep some |
+| `GRAPHOS_COMPUTE_THREADS` | `0` | Threads a metrics or community run may use; `0` is half the CPUs, so reads keep some |
 | `GRAPHOS_VERTEX_GRAPHID_INDEXES` | `false` | Also index the graphid of every vertex table: faster endpoint resolution, 20–30% slower bulk vertex writes |
 | `GRAPHOS_DB_JIT` | `false` | PostgreSQL JIT for graphos's connections |
 | `GRAPHOS_REQUIRE_IF_MATCH` | `false` | Writes to one node or edge must send `If-Match` (428 without it) |
@@ -257,7 +257,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | [Reading graphos's data without graphos](docs/guide/without-graphos.md) | The table layout, reading it with SQL or Cypher, taking it out, loading an export into plain AGE |
 | [Upgrading the database](docs/guide/upgrade-postgresql-18.md) | Moving from PostgreSQL 16 / AGE 1.6 (no longer supported) to PostgreSQL 18 / AGE 1.8 with `docker compose up` |
 | [Single sign-on](docs/guide/sso.md) | Registering graphos at an OpenID Connect provider, a Keycloak example, troubleshooting |
-| [Graph algorithms](docs/guide/algorithms.md) | What Louvain, PageRank, betweenness, components and degree find, and what they are for |
+| [Graph algorithms](docs/guide/algorithms.md) | What the communities (Louvain, Leiden), PageRank, betweenness, components and degree find, what they are for, and how Louvain and Leiden differ |
 | [Usage guide](docs/guide/usage.md) | Practical integration patterns |
 | [Connecting an agent (MCP)](docs/guide/agents.md) | Where `/mcp` is, getting a token, configuring a client, the tools and resources, security |
 | [Feature survey](docs/guide/features.md) | Every capability, briefly |

@@ -1869,7 +1869,7 @@ async def expand(
             "Community-id scope.  When set, the walk only reaches nodes "
             "whose ``community_id`` (from the last community recompute) is "
             "in this list, in every direction: bounded to the seed's "
-            "Louvain partition(s).  Edges added since the last recompute "
+            "communities.  Edges added since the last recompute "
             "are not followed by a scoped walk.  Empty / unset = no scope."
         )),
     ] = None,

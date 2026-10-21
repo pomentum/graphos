@@ -230,7 +230,7 @@ ${i < steps.length - 1 ? arrow(`M${x + W + 2} 110 H${x + W + G - 3}`) : ''}`;
 ${text(30, 210, 'one run per tenant at a time (advisory lock, 409 otherwise)', { size: 13 })}
 ${text(530, 210, 'dry_run previews the partition without writing', { size: 13 })}
 ${text(30, 236, 'response reports time per step and modularity', { size: 13 })}
-${text(530, 236, 'ids persist; Leiden starts from the last run', { size: 13 })}
+${text(530, 236, 'ids persist; Leiden can start from the last run', { size: 13 })}
 <rect x="30" y="256" width="12" height="12" rx="3" fill="${t.storeSoft}" stroke="${t.storeLine}"/>${text(48, 266, 'inside PostgreSQL', { size: 12.5, fill: t.soft })}
 <rect x="190" y="256" width="12" height="12" rx="3" fill="${t.accentSoft}" stroke="${t.accentLine}"/>${text(208, 266, 'inside graphos-api', { size: 12.5, fill: t.soft })}`;
   return k.svg(1000, 282, 'How communities are computed',
