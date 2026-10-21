@@ -1,10 +1,11 @@
-"""Louvain computation: compact edge columns in, plain partition out.
+"""Community computation (Louvain, Leiden): compact edge columns in, plain partition out.
 
 Needs the optional ``louvain`` extra (python-igraph); skipped without it.
 """
 
 from __future__ import annotations
 
+import array
 import asyncio
 import random
 import time
@@ -126,3 +127,62 @@ async def test_cancelling_during_start_leaves_no_child() -> None:
             await task
         assert multiprocessing.active_children() == [], delay
         assert lc._running is None
+
+
+def _groups(assignments: dict[int, int]) -> list[list[int]]:
+    out: dict[int, list[int]] = {}
+    for gid, community in assignments.items():
+        out.setdefault(community, []).append(gid)
+    return sorted(sorted(g) for g in out.values())
+
+
+def _start(assignments: dict[int, int]) -> tuple[array.array[int], array.array[int]]:
+    gids = array.array("q", assignments)
+    return gids, array.array("q", (assignments[g] for g in gids))
+
+
+def test_louvain_is_the_default_and_unchanged() -> None:
+    edges = _edges(_clustered(600, 4), ["LINK", "BRIDGE"])
+    default = lc.compute(edges, **OPTIONS)
+    named = lc.compute(edges, **OPTIONS, algorithm="louvain")
+    assert default == named and default.from_scratch
+
+
+def test_leiden_finds_the_two_cliques_from_scratch() -> None:
+    out = lc.compute(_two_cliques(), **OPTIONS, algorithm="leiden")
+    assert out.from_scratch
+    assert _groups(out.assignments) == [[100, 101, 102, 103, 104], [200, 201, 202, 203, 204]]
+
+
+def test_leiden_from_the_stored_partition_keeps_it_after_a_small_change() -> None:
+    rows = _clustered(2000, 4)
+    first = lc.compute(_edges(rows, ["LINK", "BRIDGE"]), **OPTIONS, algorithm="leiden")
+    settled = lc.compute(_edges(rows, ["LINK", "BRIDGE"]), **OPTIONS, algorithm="leiden",
+                         start=_start(first.assignments))
+    assert not settled.from_scratch
+    rng = random.Random(7)
+    changed = rows + [(10_000 + rng.randrange(2000), 10_000 + rng.randrange(2000), 0)
+                      for _ in range(len(rows) // 100)]                  # 1 % more edges
+    again = lc.compute(_edges(changed, ["LINK", "BRIDGE"]), **OPTIONS, algorithm="leiden",
+                       start=_start(settled.assignments))
+    match = _mapped(settled.assignments, again.assignments)
+    kept = sum(1 for g, c in settled.assignments.items() if again.assignments.get(g) == match[c])
+    assert kept / len(settled.assignments) > 0.9           # nodes still with their community
+
+
+def _mapped(old: dict[int, int], new: dict[int, int]) -> dict[int, int]:
+    """Each old community's best-matching new one, by members in common."""
+    counts: dict[tuple[int, int], int] = {}
+    for g, o in old.items():
+        if g in new:
+            counts[(o, new[g])] = counts.get((o, new[g]), 0) + 1
+    best: dict[int, tuple[int, int]] = {}
+    for (o, n), k in counts.items():
+        if k > best.get(o, (-1, 0))[1]:
+            best[o] = (n, k)
+    return {o: n for o, (n, _) in best.items()}
+
+
+def test_the_starting_membership_numbers_from_zero_and_puts_new_vertices_alone() -> None:
+    start = (array.array("q", [10, 20, 30]), array.array("q", [7, 7, 42]))
+    assert lc.initial_membership([10, 20, 30, 40, 50], start) == [0, 0, 1, 2, 3]

@@ -111,7 +111,25 @@ class TenantSpec:
     renames: tuple[dict[str, object], ...] = ()
     edge_endpoints: tuple[tuple[str, str, str], ...] = ()
     strict_endpoints: bool | None = None
+    # The community algorithm a recompute uses when its request names none
+    # (ADR-0011): "louvain" or "leiden". Always set once stored ("louvain" by
+    # default); ``None`` on an incoming spec: leave as stored.
+    community_algorithm: str | None = None
 
+
+DEFAULT_COMMUNITY_ALGORITHM = "louvain"
+
+# The stored spec's community algorithm: the one sent, else the one stored,
+# else the default; never null (``$2`` is the incoming spec).
+_COMMUNITY_ALGORITHM_SQL = (
+    "COALESCE(NULLIF($2::jsonb->'community_algorithm', 'null'::jsonb), "
+    "graphos_meta.tenants.spec->'community_algorithm', '\"louvain\"'::jsonb)"
+)
+# A new tenant's spec, with its community algorithm set.
+_NEW_SPEC_SQL = (
+    "jsonb_set($2::jsonb, '{community_algorithm}', "
+    "COALESCE(NULLIF($2::jsonb->'community_algorithm', 'null'::jsonb), '\"louvain\"'::jsonb))"
+)
 
 # Spec fields stored in their own tables rather than in ``tenants.spec``.
 _KEPT_APART = ("edge_endpoints", "strict_endpoints")
@@ -840,6 +858,7 @@ def _spec_from_jsonable(payload: dict[str, object]) -> TenantSpec:
             dict(x) for x in cast("list[dict[str, object]]", payload.get("renames") or [])
             if isinstance(x, dict)
         ),
+        community_algorithm=str(payload.get("community_algorithm") or DEFAULT_COMMUNITY_ALGORITHM),
     )
 
 
@@ -988,7 +1007,7 @@ async def persist_spec(
         await conn.execute(
             """
             INSERT INTO graphos_meta.tenants (name, spec)
-            VALUES ($1, $2::jsonb)
+            VALUES ($1, """ + _NEW_SPEC_SQL + """)
             ON CONFLICT (name)
             DO UPDATE SET
                 spec = jsonb_build_object(
@@ -1062,7 +1081,8 @@ async def persist_spec(
                         """ + _PROPERTY_SCHEMA_MERGE + """)),
                     'deprecated', jsonb_strip_nulls(jsonb_build_object(
                         """ + _DEPRECATED_MERGE + """)),
-                    'renames', COALESCE(graphos_meta.tenants.spec->'renames', '[]'::jsonb)
+                    'renames', COALESCE(graphos_meta.tenants.spec->'renames', '[]'::jsonb),
+                    'community_algorithm', """ + _COMMUNITY_ALGORITHM_SQL + """
                 ),
                 updated_at = now();
             """,
@@ -1094,10 +1114,11 @@ async def persist_spec_replace(
         await conn.execute(
             """
             INSERT INTO graphos_meta.tenants (name, spec)
-            VALUES ($1, $2::jsonb)
+            VALUES ($1, """ + _NEW_SPEC_SQL + """)
             ON CONFLICT (name)
             DO UPDATE SET spec = EXCLUDED.spec || jsonb_build_object(
-                'renames', COALESCE(graphos_meta.tenants.spec->'renames', '[]'::jsonb)),
+                'renames', COALESCE(graphos_meta.tenants.spec->'renames', '[]'::jsonb),
+                'community_algorithm', """ + _COMMUNITY_ALGORITHM_SQL + """),
                 updated_at = now();
             """,
             spec.name, payload,

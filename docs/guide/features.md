@@ -390,7 +390,13 @@ flowchart LR
 
 - **Inputs:** `rel_types`, `rel_weights`, `node_filter` (property predicates
   both endpoints must satisfy), `resolution`, `min_community_size` (default 3),
-  `dry_run`. A dry run stops after relabelling and writes nothing.
+  `dry_run`, `algorithm`, `from_scratch`. A dry run stops after relabelling and
+  writes nothing.
+- **Louvain or Leiden:** Louvain (the default) runs from scratch; Leiden starts
+  from the stored partition when the last run was Leiden over the same scope,
+  weights and resolution, so a small change of the graph keeps nearly every
+  node's community and id. The request's `algorithm` chooses, else the
+  tenant's `community_algorithm` (`louvain` unless set).
 - **Stable ids:** each new community inherits the integer id of its
   best-overlapping predecessor when Jaccard ≥ 0.5; otherwise it gets a fresh
   id. Only changed vertices are written.
@@ -417,7 +423,8 @@ dependency) in a child process, and stores them on the nodes as
 `graphos_degree` / `graphos_in_degree` / `graphos_out_degree`,
 `graphos_pagerank`, `graphos_component` and `graphos_betweenness` (exact; skipped
 above `GRAPHOS_BETWEENNESS_MAX_NODES`). Only changed values are written, so an
-unchanged graph is not rewritten; component ids are kept across runs. A run
+unchanged graph is not rewritten, and a score only when it moved by more than
+`GRAPHOS_METRICS_MIN_CHANGE` (1 %); component ids are kept across runs. A run
 that writes 10,000 rows or more (metrics, or a community recompute's node and
 edge write-backs) is followed by a `VACUUM (ANALYZE)` of the tables it wrote,
 so the next run reuses the space instead of growing them. One

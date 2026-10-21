@@ -20,7 +20,7 @@ from fastapi import APIRouter, Body, HTTPException, Request, status
 
 from graphos import preferences
 from graphos.auth import ReadPrincipal, Tenant
-from graphos.bootstrap import registered_tenants
+from graphos.bootstrap import DEFAULT_COMMUNITY_ALGORITHM, registered_tenants
 from graphos.contracts.property_schema import PropertySchemaSpec
 from graphos.contracts.tenants import (
     DeprecatedSpec,
@@ -145,6 +145,7 @@ async def tenant_schema(tenant: Tenant, principal: ReadPrincipal) -> TenantSchem
         rule_edge_labels=list(dict.fromkeys(edge for edge, _ in spec.resolve_rules)),
         edge_endpoints=_endpoints_by_type(spec.edge_endpoints),
         strict_endpoints=bool(spec.strict_endpoints),
+        community_algorithm=spec.community_algorithm or DEFAULT_COMMUNITY_ALGORITHM,
         display=DisplaySpec.model_validate(spec.display),
         property_schema=PropertySchemaSpec.model_validate(spec.property_schema),
         deprecated=DeprecatedSpec.model_validate(spec.deprecated),

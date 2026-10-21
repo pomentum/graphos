@@ -404,24 +404,43 @@ async def vacuum_after_writeback(
     )
 
 
-async def record_run(
+async def record_run(  # noqa: PLR0913 — a run's parts
     pool: asyncpg.Pool, tenant: str, kind: str, started_at: changes.Cursor,
-    scope: Mapping[str, Any] | None = None,
+    scope: Mapping[str, Any] | None = None, params: Mapping[str, Any] | None = None,
 ) -> None:
     """Remember that ``kind`` (``metrics`` or ``communities``) wrote its results,
-    computed from data as of the feed position ``started_at``."""
+    computed from data as of the feed position ``started_at``, over ``scope``
+    and with ``params`` (how it computed)."""
     async with pool.acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO graphos_meta.analysis_runs (tenant, kind, computed_at, txid, seq, scope)
-            VALUES ($1, $2, now(), $3::text::xid8, $4, $5::jsonb)
+            INSERT INTO graphos_meta.analysis_runs
+                (tenant, kind, computed_at, txid, seq, scope, params)
+            VALUES ($1, $2, now(), $3::text::xid8, $4, $5::jsonb, $6::jsonb)
             ON CONFLICT (tenant, kind) DO UPDATE
               SET computed_at = now(), txid = EXCLUDED.txid, seq = EXCLUDED.seq,
-                  scope = EXCLUDED.scope
+                  scope = EXCLUDED.scope, params = EXCLUDED.params
             """,
             tenant, kind, str(started_at.txid), started_at.seq,
             json.dumps(dict(scope)) if scope else None,
+            json.dumps(dict(params)) if params else None,
         )
+
+
+async def last_run(
+    pool: asyncpg.Pool, tenant: str, kind: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None] | None:
+    """The ``(scope, params)`` of ``kind``'s last run on ``tenant``; None if none."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT scope::text AS scope, params::text AS params "
+            "FROM graphos_meta.analysis_runs WHERE tenant = $1 AND kind = $2;",
+            tenant, kind,
+        )
+    if row is None:
+        return None
+    return (json.loads(row["scope"]) if row["scope"] else None,
+            json.loads(row["params"]) if row["params"] else None)
 
 
 async def freshness(conn: asyncpg.Connection, tenant: str) -> dict[str, Freshness]:

@@ -1,6 +1,8 @@
-"""Pydantic contracts for the Louvain admin endpoint."""
+"""Pydantic contracts for the community recompute endpoint."""
 
 from __future__ import annotations
+
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -9,12 +11,30 @@ from graphos.contracts.graph import _validate_prop_key
 DEFAULT_LOUVAIN_RESOLUTION = 1.0
 DEFAULT_LOUVAIN_MIN_COMMUNITY_SIZE = 3
 
+# Louvain from scratch, or Leiden from the stored partition (ADR-0011).
+CommunityAlgorithm = Literal["louvain", "leiden"]
+
 # Each value may be a scalar (=, exact match) or a list (IN).
 NodeFilterValue = str | int | float | bool | list[str | int | float | bool]
 
 
 class RecomputeCommunitiesRequest(BaseModel):
-    """A Louvain community recompute over the tenant's edges (`POST …/recompute-communities`)."""
+    """A community recompute over the tenant's edges (`POST …/recompute-communities`)."""
+
+    algorithm: CommunityAlgorithm | None = Field(
+        default=None,
+        description=(
+            "`louvain`: from scratch, the same graph and seed giving the same partition. "
+            "`leiden`: from the stored partition when the last run was Leiden over the same "
+            "scope, weights and resolution, so a small change of the graph moves few nodes and "
+            "their community ids stay; otherwise from scratch. Omitted: the tenant's "
+            "`community_algorithm` (`louvain` unless set)."
+        ),
+    )
+    from_scratch: bool = Field(
+        default=False,
+        description="Leiden only: start from scratch even when a stored partition could be used.",
+    )
 
     rel_types: list[str] | None = Field(
         default=None,
@@ -99,9 +119,20 @@ class RecomputeCommunitiesResponse(BaseModel):
         ..., description="The partition's weighted modularity; 0 when no edge was read.",
     )
     edge_stream_ms: int = Field(..., description="Time reading the edges, in milliseconds.")
-    igraph_ms: int = Field(..., description="Time running Louvain, in milliseconds.")
+    igraph_ms: int = Field(
+        ..., description="Time running the algorithm (Louvain or Leiden), in milliseconds.",
+    )
     writeback_ms: int = Field(
         ..., description="Time writing `community_id` and the community map, in milliseconds.",
     )
     elapsed_ms: int = Field(..., description="Total time, in milliseconds.")
     dry_run: bool = Field(..., description="Nothing was written: the request's `dry_run`.")
+    algorithm: CommunityAlgorithm = Field(
+        "louvain", description="The algorithm that ran: the request's, else the tenant's.",
+    )
+    from_scratch: bool = Field(
+        True,
+        description=(
+            "The run started from scratch; false when Leiden started from the stored partition."
+        ),
+    )

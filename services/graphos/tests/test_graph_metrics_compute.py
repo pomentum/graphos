@@ -7,7 +7,7 @@ import os
 import numpy as np
 import pytest
 
-from graphos import graph_compute
+from graphos import graph_compute, graph_metrics
 from graphos import graph_metrics_compute as mc
 from graphos.graph_compute import EdgeArrays
 
@@ -123,3 +123,26 @@ async def test_the_child_is_held_to_the_configured_threads() -> None:
 
 def test_the_default_is_half_the_cpus_and_at_least_one() -> None:
     assert 1 <= graph_compute.default_threads() <= max(1, (os.cpu_count() or 1) // 2)
+
+
+def test_a_score_is_written_only_when_it_moved_by_more_than_the_tolerance() -> None:
+    old = np.array([1.0, 1.0, np.nan, 0.0, 0.0, 2.0])
+    new = np.array([1.005, 1.02, 0.5, 0.0, 0.1, 1.97])
+    assert graph_metrics._changed(new, old, 0.01).tolist() == [
+        False, True, True, False, True, True,
+    ]
+    # 0: every change is written, as are exact values (degrees, components) whatever it is.
+    assert graph_metrics._changed(new, old, 0.0).tolist() == [True, True, True, False, True, True]
+    counts = np.array([3, 4, 5]), np.array([3.0, 5.0, np.nan])
+    assert graph_metrics._changed(*counts, 0.5).tolist() == [False, True, True]
+
+
+def test_a_node_whose_score_barely_moved_is_not_rewritten() -> None:
+    gids = np.array([10, 20, 30])
+    old = {"graphos_pagerank": np.array([0.1, 0.1, 0.1]),
+           "graphos_degree": np.array([2.0, 2.0, 2.0])}
+    new = {"graphos_pagerank": np.array([0.1004, 0.2, 0.1004]),
+           "graphos_degree": np.array([2, 2, 3])}
+    patches = dict(graph_metrics._patches(gids, new, old, 0.01))
+    assert patches == {20: '{"graphos_pagerank": 0.2}', 30: '{"graphos_degree": 3}'}
+    assert len(graph_metrics._patches(gids, new, old, 0.0)) == 3

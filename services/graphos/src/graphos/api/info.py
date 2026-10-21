@@ -10,6 +10,7 @@ from graphos import __version__
 from graphos.bootstrap import registered_tenants
 from graphos.db import fetch_db_version
 from graphos.louvain import LOUVAIN_AVAILABLE
+from graphos.louvain_compute import ALGORITHMS
 
 router = APIRouter(tags=["info"])
 
@@ -36,6 +37,8 @@ async def info(request: Request) -> dict[str, Any]:
         "tenants": len(registered_tenants()),
         "features": {
             "louvain": LOUVAIN_AVAILABLE,
+            # Community algorithms this build runs (both come with the louvain extra).
+            "community_algorithms": list(ALGORITHMS) if LOUVAIN_AVAILABLE else [],
             "metrics": True,
             "cypher": getattr(request.app.state, "console", None) is not None,
         },

@@ -6,6 +6,26 @@ under one version.
 
 ## Unreleased
 
+### Added
+
+- **Leiden, for community ids that stay put** (ADR-0011). `POST /v1/{tenant}/recompute-communities`
+  takes `"algorithm": "louvain" | "leiden"` and `"from_scratch"`. Louvain from scratch lands on
+  another partition after any small change: on 250,000 nodes with 1 % more edges, a recompute
+  rewrote 76 % of the nodes (190,911) in 103 s and kept 1 community id of 62. Leiden starts from
+  the stored partition when the last run was Leiden over the same scope, weights and resolution,
+  and moves only what the change calls for: after the same 1 % change it rewrote 5,083 nodes
+  (2 %) and 46,406 edges in 28 s, kept every community id, and its modularity was higher (0.439
+  against 0.420). After 10 % more edges: 7,076 nodes in 43 s, against 190,891 in 131 s. On an
+  unchanged graph Leiden still moves a few percent of the nodes while its partition settles
+  (Louvain moves none). A tenant's registration sets its default,
+  `"community_algorithm"` (`louvain` for a new tenant, never empty; omitted: unchanged), shown by
+  `GET /v1/tenants/{name}` and `GET /v1/{tenant}/schema`; the response says which algorithm ran
+  and whether it started from scratch, and `GET /v1/info` lists `features.community_algorithms`.
+  Non-breaking: Louvain stays the default and a request or registration that names neither
+  behaves as before. Leiden is python-igraph's, in the same optional `louvain` extra (GPL): no
+  new dependency. The client's `recompute_communities` and `register_tenant` take the new fields.
+  A schema export names `community_algorithm` only when it is `leiden` (then version 4).
+
 ### Changed
 
 - **Shortest paths past a highly connected node.** `POST /v1/{tenant}/graph/paths` stopped with
@@ -18,6 +38,15 @@ under one version.
   on a large graph that was minutes with no CPU left for the API's requests and job heartbeats. A
   metrics or Louvain computation now uses at most `GRAPHOS_COMPUTE_THREADS` threads (new; `0`, the
   default, is half the CPUs the process may use, at least one).
+- **A metrics re-run rewrites the scores that moved, not all of them.** A few new edges shift every
+  node's PageRank a little, and scores were stored to six significant digits, so a re-run after
+  any change rewrote the whole tenant: on 250,000 nodes with 1 % more edges, 250,076 nodes and
+  41 s, as long as a first run. A PageRank or betweenness score is now rewritten only when it moved
+  by more than `GRAPHOS_METRICS_MIN_CHANGE` (new, 1 % of the stored value by default; `0` writes
+  every change): there, 19,153 nodes (7.7 %: the degrees that changed and the 4.7 % of scores
+  that moved more) in 17 s, and the 100 highest-ranked nodes stay the same. A large change still
+  rewrites most nodes (10 % more edges: 249,868), as most scores then move by more than 1 %.
+  Degrees and component ids are exact, as before.
 - **Tables vacuumed after a large write-back.** A metrics run or community recompute rewrites a row
   per node (and, for communities, per edge) it changes, leaving as many dead rows; on a fresh
   tenant of 1.2M rows the first metrics and communities run left the database 2.7 times its

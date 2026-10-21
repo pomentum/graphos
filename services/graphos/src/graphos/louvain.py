@@ -6,8 +6,15 @@ modularity optimisation) in a child process (:mod:`graphos.louvain_compute`),
 and the assignments are written back to vertex properties with COPY + one
 ``UPDATE ... FROM``.
 
+Two algorithms (ADR-0011): Louvain from scratch, the default, and Leiden,
+which starts from the stored partition when the stored one came from Leiden
+over the same scope, weights and resolution (:func:`_leiden_start`), so a
+small change of the graph moves few nodes and their ids stay. The request
+names the algorithm, else the tenant's ``community_algorithm``.
+
 Determinism: the same edge set and seed give the same partition, whatever
-order the rows are stored or read in.  Communities are relabelled by
+order the rows are stored or read in; for Leiden from the stored partition,
+the same edge set, seed and stored partition.  Communities are relabelled by
 descending size, and Greene matching carries ids over from the previous run,
 so ids stay stable across runs, which makes diff-based monitoring (how many
 nodes changed community) cheap.
@@ -31,6 +38,7 @@ from typing import Any
 import asyncpg
 
 from graphos import analysis, changes, community_map, graph_compute, louvain_compute, writes
+from graphos.db import allow_long_statements
 
 # python-igraph is an optional extra (``pip install "graphos[louvain]"``)
 # because it is GPL-licensed; the rest of graphos is Apache-2.0 and must
@@ -64,6 +72,8 @@ class LouvainResult:
     edge_stream_ms: int
     igraph_ms: int
     writeback_ms: int
+    algorithm: str = "louvain"
+    from_scratch: bool = True
 
 
 
@@ -261,6 +271,39 @@ def _scope(
     return {k: v for k, v in scope.items() if v} or None
 
 
+def _params(
+    algorithm: str, resolution: float, rel_weights: Mapping[str, float] | None,
+) -> dict[str, Any]:
+    """How a run computed, recorded with it (``analysis_runs.params``)."""
+    return {"algorithm": algorithm, "resolution": resolution,
+            "rel_weights": dict(rel_weights) if rel_weights else None}
+
+
+async def _leiden_start(
+    pool: asyncpg.Pool, tenant: str, scope: dict[str, Any] | None, params: dict[str, Any],
+) -> tuple[array.array[int], array.array[int]] | None:
+    """The stored partition, as ``(graphids, community ids)``, when the last
+    run that wrote it was Leiden over the same scope, weights and resolution;
+    None otherwise (Leiden then starts from scratch)."""
+    last = await analysis.last_run(pool, tenant, "communities")
+    if last is None or last[0] != scope or last[1] != params:
+        return None
+    gids: array.array[int] = array.array("q")
+    cids: array.array[int] = array.array("q")
+    async with pool.acquire() as conn, conn.transaction():
+        await allow_long_statements(conn, 600.0)
+        sql = (
+            f"SELECT (t.id::text)::bigint AS gid, "
+            f"  ((((t.properties)::text)::jsonb) ->> 'community_id')::bigint AS cid "
+            f'FROM "{tenant}"."_ag_label_vertex" t '
+            f"WHERE ((((t.properties)::text)::jsonb) ->> 'community_id') IS NOT NULL"
+        )
+        async for row in conn.cursor(sql, prefetch=20_000):
+            gids.append(int(row["gid"]))
+            cids.append(int(row["cid"]))
+    return (gids, cids) if gids else None
+
+
 async def recompute_communities(
     pool: asyncpg.Pool,
     *,
@@ -272,8 +315,10 @@ async def recompute_communities(
     min_community_size: int = MIN_COMMUNITY_SIZE_DEFAULT,
     seed: int = LOUVAIN_SEED,
     write: bool = True,
+    algorithm: str = "louvain",
+    from_scratch: bool = False,
 ) -> LouvainResult:
-    """Full Louvain pass over the tenant graph. Optionally write back.
+    """Full community pass over the tenant graph. Optionally write back.
 
     Args:
         node_filter: if set, only edges whose BOTH endpoints match every
@@ -283,6 +328,9 @@ async def recompute_communities(
                      consumer-defined subgraph instead of the whole tenant).
         write: if False, runs the computation and returns the result
                without persisting `community_id`. Used for dry-run inspect.
+        algorithm: ``louvain`` (from scratch) or ``leiden`` (from the stored
+                   partition when :func:`_leiden_start` finds one, unless
+                   ``from_scratch``).
     """
     t0 = _t.perf_counter()
     async with pool.acquire() as conn:
@@ -292,10 +340,17 @@ async def recompute_communities(
     )
     t1 = _t.perf_counter()
 
+    scope = _scope(rel_types, node_filter)
+    params = _params(algorithm, resolution, rel_weights)
+    start = (
+        await _leiden_start(pool, tenant, scope, params)
+        if algorithm == "leiden" and not from_scratch else None
+    )
     # In a child process: see graphos.louvain_compute for why.
     result = await louvain_compute.compute_in_process(
         edges, rel_weights=rel_weights,
         resolution=resolution, seed=seed, min_community_size=min_community_size,
+        algorithm=algorithm, start=start,
     )
     assignments, sizes = result.assignments, result.sizes
     t2 = _t.perf_counter()
@@ -310,8 +365,7 @@ async def recompute_communities(
             pool, tenant, edges, assignments, final_of_raw, modularity=result.modularity,
         )
         await analysis.record_run(
-            pool, tenant, "communities", started_at,
-            scope=_scope(rel_types, node_filter),
+            pool, tenant, "communities", started_at, scope=scope, params=params,
         )
     t3 = _t.perf_counter()
 
@@ -324,6 +378,8 @@ async def recompute_communities(
             "n_communities": len(sizes),
             "n_assigned": len(assignments),
             "modularity": result.modularity,
+            "algorithm": algorithm,
+            "from_scratch": result.from_scratch,
         },
     )
 
@@ -338,4 +394,6 @@ async def recompute_communities(
         edge_stream_ms=int((t1 - t0) * 1000),
         igraph_ms=int((t2 - t1) * 1000),
         writeback_ms=int((t3 - t2) * 1000),
+        algorithm=algorithm,
+        from_scratch=result.from_scratch,
     )

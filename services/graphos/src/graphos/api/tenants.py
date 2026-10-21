@@ -61,6 +61,7 @@ from graphos.auth import (
     require_level,
 )
 from graphos.bootstrap import (
+    DEFAULT_COMMUNITY_ALGORITHM,
     TenantSpec,
     _validate_label_hierarchy,
     bootstrap_tenant,
@@ -113,7 +114,7 @@ _SCHEMA_DOCUMENT = {
             "description": "What the file is; a registration checks it and ignores it.",
             "properties": {
                 "format": {"type": "string", "enum": [schema_document.FORMAT]},
-                "version": {"type": "integer", "enum": [1, 2, 3]},
+                "version": {"type": "integer", "enum": [1, 2, 3, 4]},
                 "graphos": {"type": "string", "description": "The exporting graphos version."},
                 "tenant": {"type": "string"},
                 "exported_at": {"type": "string", "format": "date-time"},
@@ -147,6 +148,7 @@ def _spec_to_info(spec: TenantSpec) -> TenantInfo:
         property_schema=PropertySchemaSpec.model_validate(spec.property_schema),
         deprecated=DeprecatedSpec.model_validate(spec.deprecated),
         renames=[SchemaRename.model_validate({"status": "done", **r}) for r in spec.renames],
+        community_algorithm=spec.community_algorithm or DEFAULT_COMMUNITY_ALGORITHM,
     )
 
 
@@ -531,6 +533,7 @@ async def register(
         deprecated=deprecated,
         edge_endpoints=edge_endpoints,
         strict_endpoints=body.strict_endpoints,
+        community_algorithm=body.community_algorithm,
     )
 
     # ``null`` removes a key from the stored meta (a merge); replacing keeps only those sent.
@@ -636,6 +639,7 @@ async def register(
         n_resolver_indexes=n_resolver_indexes,
         n_edge_endpoints=len(spec.edge_endpoints),
         strict_endpoints=bool(spec.strict_endpoints),
+        community_algorithm=spec.community_algorithm or DEFAULT_COMMUNITY_ALGORITHM,
         n_property_definitions=definitions_count(spec.property_schema),
         property_mode=spec.property_schema.get("mode", "off"),
     )

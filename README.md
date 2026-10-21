@@ -237,6 +237,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | `GRAPHOS_JOB_CONCURRENCY` | `1` | Background jobs each replica runs at once |
 | `GRAPHOS_JOB_RETENTION_H` | `168` | Hours finished jobs are kept |
 | `GRAPHOS_BETWEENNESS_MAX_NODES` | `20000` | Betweenness is skipped when more nodes take part (it is the costly metric) |
+| `GRAPHOS_METRICS_MIN_CHANGE` | `0.01` | A PageRank or betweenness score is rewritten only when it moved more than this share |
 | `GRAPHOS_COMPUTE_THREADS` | `0` | Threads a metrics or Louvain run may use; `0` is half the CPUs, so reads keep some |
 | `GRAPHOS_VERTEX_GRAPHID_INDEXES` | `false` | Also index the graphid of every vertex table: faster endpoint resolution, 20–30% slower bulk vertex writes |
 | `GRAPHOS_DB_JIT` | `false` | PostgreSQL JIT for graphos's connections |
