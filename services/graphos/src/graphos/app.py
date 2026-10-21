@@ -22,7 +22,7 @@ from typing import Any
 import asyncpg
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -35,6 +35,7 @@ from graphos import (
     oidc,
     openapi,
     properties,
+    resources,
     schema_rename,
     vault,
 )
@@ -400,6 +401,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     app.add_exception_handler(properties.Refused, _property_refusal)
+
+    async def _unhandled(request: Request, exc: Exception) -> Response:
+        # Runs for every exception no other handler took, and Starlette raises
+        # it again afterwards, so the server log keeps the traceback. A
+        # database short of disk, memory or connections answers as such
+        # (resources); everything else stays a plain 500.
+        found = resources.shortage(exc)
+        if found is None:
+            return PlainTextResponse("Internal Server Error", status_code=500)
+        log.error("database short of a resource path=%s sqlstate=%s", request.url.path,
+                  found.sqlstate)
+        return JSONResponse(
+            status_code=found.status,
+            media_type="application/problem+json",
+            content={"type": "about:blank", "title": found.title, "status": found.status,
+                     "detail": found.detail},
+        )
+
+    app.add_exception_handler(Exception, _unhandled)
 
     # Observability middleware stack. Outermost runs first on the
     # request path, last on response — FastAPI applies them in

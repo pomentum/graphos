@@ -40,10 +40,20 @@ import asyncpg
 from fastapi import HTTPException
 from pydantic import BaseModel
 
+from graphos import resources
 from graphos.changes import ACTOR, Actor
 from graphos.contracts.jobs import Job
 
 log = logging.getLogger(__name__)
+
+
+def _unexpected(exc: BaseException) -> dict[str, Any]:
+    """A job's error for an exception nothing else handled: what the database
+    ran short of (a full disk, say), else an internal error (logged)."""
+    found = resources.shortage(exc)
+    if found is not None:
+        return {"status": found.status, "detail": found.detail}
+    return {"status": 500, "detail": "internal error; see the server log"}
 
 JobFn = Callable[[asyncpg.Pool, str | None, dict[str, Any]], Awaitable[BaseModel]]
 
@@ -253,8 +263,8 @@ async def run_tracked(  # noqa: PLR0913 — the job's fields and how to run it
     except asyncpg.exceptions.QueryCanceledError:
         error = {"status": 504, "detail": "a database statement exceeded its timeout"}
         raise
-    except Exception:
-        error = {"status": 500, "detail": "internal error; see the server log"}
+    except Exception as exc:
+        error = _unexpected(exc)
         raise
     finally:
         beat.cancel()
@@ -468,9 +478,9 @@ class JobRunner:
             error = {"status": exc.status_code, "detail": str(exc.detail)}
         except asyncpg.exceptions.QueryCanceledError:
             error = {"status": 504, "detail": "a database statement exceeded its timeout"}
-        except Exception:  # noqa: BLE001 — recorded on the job, not raised
+        except Exception as exc:  # noqa: BLE001 — recorded on the job, not raised
             log.exception("job failed", extra={"job_id": str(job_id), "kind": row["kind"]})
-            error = {"status": 500, "detail": "internal error; see the server log"}
+            error = _unexpected(exc)
         finally:
             heartbeat.cancel()
 

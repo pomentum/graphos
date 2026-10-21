@@ -49,7 +49,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 
-from graphos import lookup, properties, renames, reserved, writes
+from graphos import lookup, properties, renames, reserved, resources, writes
 from graphos import search as search_index
 from graphos.api.jobs import (
     ACCEPTED_RESPONSE,
@@ -155,8 +155,12 @@ _read_log = logging.getLogger("graphos.reads")
 def _read_failed(what: str, exc: asyncpg.exceptions.PostgresError) -> HTTPException:
     """A read the database refused: answered as an error (500), never as a
     smaller result, so a client cannot mistake a failure for fewer neighbours.
-    The database's message is logged, not sent."""
+    The database's message is logged, not sent. A database short of disk,
+    memory or connections answers as such (resources)."""
     _read_log.warning("%s failed: %s: %s", what, type(exc).__name__, str(exc)[:300])
+    found = resources.shortage(exc)
+    if found is not None:
+        return HTTPException(status_code=found.status, detail=found.detail)
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail=(
@@ -2328,6 +2332,9 @@ async def _aggregate_edge_groups(
             raise
         except asyncpg.exceptions.PostgresError as exc:
             _aggregate_log.warning("aggregate_edges failed: %s", str(exc)[:200])
+            short = resources.shortage(exc)
+            if short is not None:
+                raise HTTPException(status_code=short.status, detail=short.detail) from exc
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"aggregate failed: {exc}",

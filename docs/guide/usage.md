@@ -1828,5 +1828,6 @@ and the 422 of a `strict` property schema (with `violations` and `total`).
 | 499 | a console query cancelled by its caller |
 | 501 | Louvain extra not installed |
 | 502 | single sign-on: the identity provider could not be reached |
-| 503 | `/readyz` not ready |
+| 503 | `/readyz` not ready; the database out of memory or connections, or at a configured limit (SQLSTATE class 53, `application/problem+json`; a job records it the same way) |
 | 504 | statement timeout on a read or a write (`application/problem+json`); a console query stopped at `GRAPHOS_CYPHER_TIMEOUT_S` |
+| 507 | the database server is out of disk space (SQLSTATE 53100, `application/problem+json`); the statement that needed more was rolled back; a job records it the same way, so the web UI says so |
