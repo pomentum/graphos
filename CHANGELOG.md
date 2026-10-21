@@ -4,7 +4,7 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.14.1 — 2026-10-21
 
 The web UI computes the groups with Louvain or Leiden and says which ran; a new script measures
 any tenant of a running graphos.
