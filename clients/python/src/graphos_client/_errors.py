@@ -15,4 +15,5 @@ class GraphosError(RuntimeError):
 
 
 class GraphosNotReady(GraphosError):
-    """Raised on 503 — graphos-db unreachable or lifespan incomplete."""
+    """Raised on 503: graphos is starting or cannot reach its database, or the
+    database is out of memory or connections (retried first, as a 5xx)."""

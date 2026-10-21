@@ -18,6 +18,11 @@ under one version.
 
 ### Fixed
 
+- **The Python client no longer retries a full database disk.** It retried every 5xx but 504 on
+  idempotent calls, so a `507` was sent three more times, each failing the same way. It is now
+  raised at once; a `503` (the database out of memory or connections, too) is still retried, then
+  raised as `GraphosNotReady`. The client README names the community `algorithm` and
+  `from_scratch` options.
 - **The web UI keeps the algorithm the groups were last computed with.** After a Leiden run on a
   tenant whose default is Louvain, Overview showed "Tenant's (Louvain)" chosen again, so Compute
   again ran Louvain from scratch. Until another is picked, the choice is now what the last

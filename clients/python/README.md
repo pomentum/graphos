@@ -101,7 +101,7 @@ Runnable scripts in [`examples/`](examples/). Each reads `GRAPHOS_URL` (default 
 | [`01_quickstart.py`](examples/01_quickstart.py) | register a tenant, write nodes and edges, search / neighbours / expand |
 | [`02_bulk_load.py`](examples/02_bulk_load.py) | batched NDJSON bulk writes and a one-request snapshot import |
 | [`03_explore.py`](examples/03_explore.py) | paginated scans, scoped and induced subgraphs, aggregates, top-K, node properties, cache |
-| [`04_communities.py`](examples/04_communities.py) | Louvain communities: compute, summarise, look up |
+| [`04_communities.py`](examples/04_communities.py) | communities (Louvain, or Leiden with `algorithm="leiden"`): compute, summarise, look up |
 | [`05_tenant_pool.py`](examples/05_tenant_pool.py) | `GraphosPool` serving several tenants with one schema |
 | [`06_rule_based_edges.py`](examples/06_rule_based_edges.py) | declaring a property-match rule and letting the server write the edges |
 | [`07_background_jobs.py`](examples/07_background_jobs.py) | long operations as background jobs: submit, wait, the one-recompute rule, cancel |
@@ -118,7 +118,7 @@ Runnable scripts in [`examples/`](examples/). Each reads `GRAPHOS_URL` (default 
 | Writes | `upsert_nodes`, `upsert_edges`, `bulk_upsert_nodes`, `bulk_upsert_edges`, `import_csv_nodes`, `import_csv_edges`, `snapshot_import`, `upsert_node_properties`, `patch_node`, `patch_edge`, `delete_node`, `delete_nodes` (a batch, by `NodeRef`), `delete_edge`, `delete_by_property`, `reconcile_node_edges` / `reconcile_type_edges` (a scope made exactly a given set), `resolve_edges` (`mode="reconcile"`) |
 | Reads | `search`, `get_node`, `get_edge`, `check_edges` (many edges at once, by `EdgeCheckItem`), `find_paths`, `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `scan_nodes` / `scan_nodes_iter`, `scan_edges` / `scan_edges_iter`, `export_graph` |
 | Aggregates | `graph_map`, `map_hubs`, `label_top_by_edge`, `aggregate_nodes` (`missing=True` counts nodes without the property under `""`; `total` and `distinct` count nodes and values before `limit`, `None` from older servers), `aggregate_edges`, `tenant_stats` (`analyses`: when metrics and communities were computed, `stale`) |
-| Communities | `recompute_communities`, `community_map`, `list_communities`, `community_summary`, `community_ids` |
+| Communities | `recompute_communities` (`algorithm="louvain"` or `"leiden"`, the tenant's when omitted; `from_scratch=True` makes Leiden ignore the stored groups), `community_map`, `list_communities`, `community_summary`, `community_ids` |
 | Graph metrics | `compute_metrics` (degree, PageRank, components, betweenness, stored as `graphos_*` node properties) |
 | Property definitions | `property_definitions` (every label's and type's definitions and mode), `check_properties` (the stored rows against them, `maintain`; writes nothing) |
 | Rule-based edges | `resolve_edges`, `catalogue` |
@@ -131,8 +131,8 @@ Not wrapped (use HTTP, see the [usage guide](https://github.com/pomentum/graphos
 
 ## Behaviour
 
-- **Errors.** Non-2xx responses raise `GraphosError` (`status_code`, `detail`); a 503 raises `GraphosNotReady`. A statement timeout on the server is a `504` with an `application/problem+json` body.
-- **Retries.** Network errors and 5xx responses are retried with exponential backoff (`retries`, `retry_backoff_s`), except `504` timeouts, read and write timeouts, and calls that are long or should not run twice (Louvain recompute, graph metrics, rule-based edge resolution, snapshot and dataset import, vacuum, Cypher queries, restoring or deleting a tenant with its data), job submissions and cancels, which are never re-run automatically. 4xx errors are raised at once.
+- **Errors.** Non-2xx responses raise `GraphosError` (`status_code`, `detail`); a 503 raises `GraphosNotReady` (graphos starting or without its database, or the database out of memory or connections). A statement timeout on the server is a `504`, the database out of disk space a `507`, both with an `application/problem+json` body and not retried.
+- **Retries.** Network errors and 5xx responses are retried with exponential backoff (`retries`, `retry_backoff_s`), except `504` timeouts, `507` (the database out of disk space), read and write timeouts, and calls that are long or should not run twice (community recompute, graph metrics, rule-based edge resolution, snapshot and dataset import, vacuum, Cypher queries, restoring or deleting a tenant with its data), job submissions and cancels, which are never re-run automatically. 4xx errors are raised at once.
 - **One tenant per client.** The tenant is part of every data-plane URL; what a token may touch is enforced by the server.
 - **Connections.** One pooled `httpx.AsyncClient` per client; use `async with` or call `close()`. Pass `transport=` to supply your own `httpx` transport (tests, proxies).
 

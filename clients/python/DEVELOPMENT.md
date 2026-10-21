@@ -49,7 +49,8 @@ against a running stack, set `GRAPHOS_URL` (default
 - **Retries only what is safe to repeat.** Network errors and 5xx are
   retried with backoff. A call that is long or must not run twice (a
   recompute, an import, a Cypher query, a job submission, a delete with
-  data) passes `idempotent=False`. A `504` and 4xx errors are never retried.
+  data) passes `idempotent=False`. A `504`, a `507` (the database out of disk
+  space) and 4xx errors are never retried.
 - **Errors:** a non-2xx response raises `GraphosError`; a 503 raises
   `GraphosNotReady`.
 - **Every public name is exported** from `__init__.py`. The package ships
