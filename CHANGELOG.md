@@ -4,6 +4,17 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Added
+
+- **`scripts/bench_tenant.py`: measure any tenant.** Read latency for one user and under
+  concurrent users, the tenant's saved queries, cold reads after a restart command of yours,
+  container CPU and memory, and, with `--jobs`, the graph metrics and the community recompute. It
+  learns what to read from the tenant (schema summary, a sample of nodes), only reads unless
+  `--jobs`, and writes statistics only (no labels, ids or values) unless `--show-names`.
+  **Docs:** installation §14.
+
 ## 0.14.0 — 2026-10-21
 
 Re-runs after a small change of the graph rewrite a few percent of it instead of nearly all of

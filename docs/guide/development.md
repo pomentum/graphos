@@ -24,7 +24,7 @@ and [`CLAUDE.md`](../../CLAUDE.md) point here and do not repeat them.
 | `services/graphos-ui/` | The web UI: React, TypeScript, Vite, Mantine. | [UI](../../services/graphos-ui/DEVELOPMENT.md) |
 | `docker-compose.graphos.yml` | The stack: `graphos-db` (PostgreSQL 18 + AGE 1.8), `graphos-api`, `graphos-ui` (profile `ui`), and the move from PostgreSQL 16. | |
 | `docker-compose.louvain.yml` | Adds python-igraph (GPL) to a published image at start, for Louvain. | |
-| `scripts/` | `init-secrets.sh` / `.ps1`, `run-db-tests.sh`, benchmarks. | |
+| `scripts/` | `init-secrets.sh` / `.ps1`, `run-db-tests.sh`, benchmarks, `bench_tenant.py` (measures a running tenant). | [installation §14](installation.md#14-measuring-a-tenant) |
 | `tools/` | `docs/` (diagrams, UI screenshots, API docs assets, the website's page), `release/version.mjs`, `export/ndjson_to_age.py`. | |
 | `docs/` | The website's root, as GitHub Pages serves it: `index.html`, `site.css`, `site.js`, `404.html`; no guides. | [§3](#pictures-and-docs-tools) |
 | `docs/guide/` | User and design documentation, these guides; [`README.md`](README.md) is its index. | |
