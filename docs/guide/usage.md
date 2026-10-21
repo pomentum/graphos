@@ -1383,7 +1383,11 @@ Default `metrics`: `degree`, `pagerank`, `components`. `rel_types` and `node_fil
 edges, as for a community recompute; only nodes with an edge of those types take part, and a node
 that no longer does loses its values. Scores are rounded to 6 significant digits and **only values
 that changed are written**: a re-run on an unchanged graph writes nothing, bumps no revision and
-records no change; otherwise one change record summarises the run. `dry_run` computes and reports
+records no change; otherwise one change record summarises the run. A PageRank or betweenness
+score is rewritten only when it moved by more than `GRAPHOS_METRICS_MIN_CHANGE` of its stored
+value (1 %; `0` writes every change): a few new edges move every node's PageRank a little, and
+the stored scores stay within that share of the computed ones. Degrees and component ids are
+exact. `dry_run` computes and reports
 without writing. The response reports nodes, edges, `n_changed`, `n_cleared`, components and timings;
 `Prefer: respond-async` runs it as a job (`compute_metrics`).
 
@@ -1758,6 +1762,7 @@ listed here.
 | `RATE_LIMIT_ENABLED` / `RATE_LIMIT_RPS` / `RATE_LIMIT_WINDOW_S` | false / 100 / 1.0 |
 | `JOB_CONCURRENCY`, `JOB_POLL_S`, `JOB_HEARTBEAT_S`, `JOB_RETENTION_H` | 1, 5, 10, 168: jobs run at once per replica; how often an idle replica looks for jobs queued elsewhere; a running job's heartbeat (one silent for three heartbeats is marked failed); how long finished jobs are kept |
 | `BETWEENNESS_MAX_NODES` | 20000 (§8, *Graph metrics*) |
+| `METRICS_MIN_CHANGE` | 0.01: a PageRank or betweenness score is rewritten only when it moved by more than this share of the stored value; 0 writes every change (§8, *Graph metrics*) |
 | `COMPUTE_THREADS` | 0: half the CPUs the process may use, at least one; the threads a metrics or Louvain computation may use (betweenness is the one that uses many) |
 | `REGISTRY_SYNC_S`, `CACHE_MAX_AGE_S`, `SHUTDOWN_GRACE_S` | 30, 30, 5 (*Several replicas*, §7, §10) |
 | `CHANGES_RETENTION_H`, `CHANGES_POLL_S`, `CHANGES_HEARTBEAT_S` | 168, 1, 15 (§10) |

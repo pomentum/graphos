@@ -18,6 +18,14 @@ under one version.
   on a large graph that was minutes with no CPU left for the API's requests and job heartbeats. A
   metrics or Louvain computation now uses at most `GRAPHOS_COMPUTE_THREADS` threads (new; `0`, the
   default, is half the CPUs the process may use, at least one).
+- **A metrics re-run rewrites the scores that moved, not all of them.** A few new edges shift every
+  node's PageRank a little, and scores were stored to six significant digits, so a re-run after
+  any change rewrote the whole tenant: on 250,000 nodes with 1 % more edges, 250,076 nodes and
+  41 s, as long as a first run. A PageRank or betweenness score is now rewritten only when it moved
+  by more than `GRAPHOS_METRICS_MIN_CHANGE` (new, 1 % of the stored value by default; `0` writes
+  every change): there, 19,153 nodes (7.7 %: the degrees that changed and the 4.7 % of scores
+  that moved more), and the 100 highest-ranked nodes stay the same. Degrees and component ids are
+  exact, as before.
 - **Tables vacuumed after a large write-back.** A metrics run or community recompute rewrites a row
   per node (and, for communities, per edge) it changes, leaving as many dead rows; on a fresh
   tenant of 1.2M rows the first metrics and communities run left the database 2.7 times its

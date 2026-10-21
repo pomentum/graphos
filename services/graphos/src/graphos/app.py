@@ -330,7 +330,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     openapi.install(app)
     app.state.settings = settings
     app.state.lent_tokens = LentTokens()
-    configure_metrics(betweenness_max_nodes=settings.betweenness_max_nodes)
+    configure_metrics(
+        betweenness_max_nodes=settings.betweenness_max_nodes,
+        min_change=settings.metrics_min_change,
+    )
     configure_compute(threads=settings.compute_threads)
 
     async def _statement_timeout(request: Request, exc: Exception) -> JSONResponse:

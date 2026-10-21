@@ -272,6 +272,10 @@ transaction (all or nothing); a first run of degree, PageRank and components too
 nodes and 1 million edges, and 152 s on 810,000 nodes and 3 million edges
 ([measurements](apache-age.md#12-measured-on-postgresql-18--age-18)), most of it updating the
 nodes' indexes. A later run on an unchanged graph reads the edges, computes, compares and writes
-nothing. A community recompute on the same graph reads the edges once more
+nothing. After a change it writes the degrees that changed and the scores that moved by more than
+`GRAPHOS_METRICS_MIN_CHANGE` (1 %): on 250,000 nodes, 1 % more edges moved 94 % of the PageRank
+scores by more than 0.1 % but only 4.7 % by more than 1 %, so a re-run rewrites 7.7 % of the
+nodes (those and the changed degrees) instead of all of them, and the 100 highest-ranked nodes
+stay the same. A community recompute on the same graph reads the edges once more
 and writes only the nodes whose community changed. Both hold the edges as compact integer arrays,
 so memory grows with the number of edges, not with their properties.

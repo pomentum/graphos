@@ -9,6 +9,14 @@ Only what changed is written: values are rounded in the child, compared with
 what each node carries, and the nodes that differ get one merge each in a
 single transaction (:func:`graphos.writes.set_node_metrics`), so a re-run on an
 unchanged graph writes nothing, bumps no revision and records no change.
+
+Scores (PageRank, betweenness) are written only when they moved by more than
+``GRAPHOS_METRICS_MIN_CHANGE`` of the stored value (1 % by default): a few new
+edges shift every node's PageRank a little (on 250,000 nodes, 1 % more edges
+moved 94 % of them by more than 0.1 %, and 4.7 % by more than 1 %), and
+without it a re-run after any change rewrote the whole tenant.  The values
+stored then stay within that share of the computed ones.  Counts (degrees)
+and component ids are exact and always written when they differ.
 Component ids are carried over from the previous run (:func:`analysis.greene_match`).
 Nodes that carried values but no longer take part lose them.
 
@@ -35,11 +43,15 @@ log = logging.getLogger(__name__)
 # Above this many nodes, exact betweenness (O(nodes x edges)) is skipped.
 # Set from GRAPHOS_BETWEENNESS_MAX_NODES at startup (configure).
 _betweenness_max_nodes = 20_000
+# A score that moved by less than this share of its stored value is not
+# rewritten (GRAPHOS_METRICS_MIN_CHANGE; 0 writes every change).
+_min_change = 0.01
 
 
-def configure(*, betweenness_max_nodes: int) -> None:
-    global _betweenness_max_nodes  # noqa: PLW0603 — a setting, set once at startup
+def configure(*, betweenness_max_nodes: int, min_change: float = 0.01) -> None:
+    global _betweenness_max_nodes, _min_change  # noqa: PLW0603 — settings, set once at startup
     _betweenness_max_nodes = betweenness_max_nodes
+    _min_change = min_change
 
 
 async def _current_values(
@@ -104,11 +116,23 @@ def _stable_components(
     return lookup[raw]
 
 
+def _changed(new: np.ndarray, old: np.ndarray, min_change: float) -> np.ndarray:
+    """Where a value is to be written: absent before, or different; a score
+    (float) only when it moved by more than ``min_change`` of the stored value."""
+    if new.dtype.kind != "f" or min_change <= 0:
+        return ~(old == new)
+    with np.errstate(invalid="ignore"):
+        moved = np.abs(new - old) > min_change * np.abs(old)
+    return np.isnan(old) | moved
+
+
 def _patches(
     gids: np.ndarray, new: dict[str, np.ndarray], old: dict[str, np.ndarray],
+    min_change: float = 0.0,
 ) -> list[tuple[int, str]]:
-    """``(graphid, json of the values that changed)`` for every node with a change."""
-    changed = {name: ~(old[name] == values) for name, values in new.items()}
+    """``(graphid, json of the values to write)`` for every node with one
+    (:func:`_changed`)."""
+    changed = {name: _changed(values, old[name], min_change) for name, values in new.items()}
     any_change = np.zeros(len(gids), dtype=bool)
     for mask in changed.values():
         any_change |= mask
@@ -163,7 +187,7 @@ async def run_metrics(
             new["graphos_component"], old["graphos_component"],
             result.component_sizes, old_component_sizes,
         )
-    patches = _patches(result.gids, new, old) if names else []
+    patches = _patches(result.gids, new, old, _min_change) if names else []
     written = 0
     if not body.dry_run:
         written = await writes.set_node_metrics(
