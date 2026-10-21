@@ -668,7 +668,10 @@ changed):
 
 Betweenness is skipped above `GRAPHOS_BETWEENNESS_MAX_NODES` (20,000). Metrics grow linearly with
 the graph; Louvain's first run is mostly its write-back (every node's `community_id` and both
-community columns of every edge), which also leaves dead rows behind until autovacuum.
+community columns of every edge), which also leaves a dead row per row written. A
+write-back of 10,000 rows or more is followed by a `VACUUM (ANALYZE)` of the tables written, so
+the next run reuses that space rather than growing the tables further; the files keep their size
+(only `VACUUM FULL`, with its exclusive lock, would shrink them).
 
 **Import, isolated** (the same 1.19M-row export into an empty tenant): 447 s with no load, 470–488 s
 with five concurrent readers, 507 s with the tenant's property and search indexes left out; the

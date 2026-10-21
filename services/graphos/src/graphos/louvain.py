@@ -208,18 +208,20 @@ async def _writeback_assignments(
         )
 
     await writes.set_node_communities(pool, tenant=tenant, assignments=delta)
+    await analysis.vacuum_after_writeback(pool, tenant, "vertex", len(delta))
 
     # Edge writeback consumes the FINAL (post-Greene) IDs.  A
     # generator avoids materialising the full ~390 k-tuple list
     # before COPY hands it to PG; asyncpg's ``copy_records_to_table``
     # accepts any iterable.
-    await writes.set_edge_end_communities(
+    edges_written = await writes.set_edge_end_communities(
         pool,
         tenant=tenant,
         assignments=(
             (gid, str(final_of_raw[raw])) for gid, raw in assignments.items()
         ),
     )
+    await analysis.vacuum_after_writeback(pool, tenant, "edge", edges_written)
     return len(assignments), final_of_raw
 
 

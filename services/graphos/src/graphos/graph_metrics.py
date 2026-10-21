@@ -169,6 +169,7 @@ async def run_metrics(
         written = await writes.set_node_metrics(
             pool, tenant=tenant, patches=patches, clears=outside, names=names,
         )
+        await analysis.vacuum_after_writeback(pool, tenant, "vertex", written)
         # Recorded even when nothing changed: the values are current as of the run.
         scope = {"rel_types": body.rel_types, "node_filter": body.node_filter}
         await analysis.record_run(
