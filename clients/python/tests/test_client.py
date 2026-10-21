@@ -291,6 +291,12 @@ async def test_recompute_communities_with_node_filter() -> None:
     # No filter → field absent (so it doesn't override server defaults).
     await cli.recompute_communities()
     assert "node_filter" not in captured["body"]
+    # No algorithm named: the tenant's applies, so the body carries none.
+    assert "algorithm" not in captured["body"] and "from_scratch" not in captured["body"]
+
+    result = await cli.recompute_communities(algorithm="leiden", from_scratch=True)
+    assert (captured["body"]["algorithm"], captured["body"]["from_scratch"]) == ("leiden", True)
+    assert (result.algorithm, result.from_scratch) == ("louvain", True)   # an older server
 
     await cli.close()
 

@@ -9,6 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from graphos import reserved
+from graphos.contracts.louvain import CommunityAlgorithm
 from graphos.contracts.property_schema import PropertySchemaSpec
 
 # Tenant name = AGE graph name = postgres schema name. AGE preserves
@@ -860,6 +861,15 @@ class TenantSpecBody(BaseModel):
             "Omitted: unchanged."
         ),
     )
+    community_algorithm: CommunityAlgorithm | None = Field(
+        default=None,
+        description=(
+            "The algorithm a community recompute uses when its request names none: "
+            "`louvain` (from scratch; the default for a new tenant) or `leiden` (from the "
+            "stored partition, so community ids stay put across small changes). "
+            "Omitted: unchanged."
+        ),
+    )
 
     @field_validator("edge_endpoints")
     @classmethod
@@ -1030,6 +1040,10 @@ class TenantInfo(BaseModel):
     renames: list[SchemaRename] = Field(
         default_factory=list, description="Its renames, oldest first.",
     )
+    community_algorithm: CommunityAlgorithm = Field(
+        "louvain",
+        description="The algorithm a community recompute uses when its request names none.",
+    )
 
 
 class MeResponse(BaseModel):
@@ -1098,6 +1112,10 @@ class TenantSchema(BaseModel):
     strict_endpoints: bool = Field(
         default=False,
         description="Edge writes of a declared type outside its declared pairs are refused.",
+    )
+    community_algorithm: CommunityAlgorithm = Field(
+        default="louvain",
+        description="The algorithm a community recompute uses when its request names none.",
     )
     display: DisplaySpec = Field(
         default_factory=DisplaySpec,
@@ -1310,6 +1328,10 @@ class RegisterResponse(BaseModel):
     n_edge_endpoints: int = Field(0, description="Declared (edge type, source, target) pairs.")
     strict_endpoints: bool = Field(
         False, description="Edge writes of a declared type outside its pairs are refused.",
+    )
+    community_algorithm: CommunityAlgorithm = Field(
+        "louvain",
+        description="The algorithm a community recompute uses when its request names none.",
     )
     n_property_definitions: int = Field(0, description="Declared properties, `*` included.")
     property_mode: str = Field("off", description="How writes are held to them.")

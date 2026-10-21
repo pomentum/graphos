@@ -320,6 +320,9 @@ CREATE TABLE IF NOT EXISTS graphos_meta.analysis_runs (
     scope        jsonb,
     PRIMARY KEY (tenant, kind)
 );
+-- How the run computed (communities: algorithm, resolution, weights), so a
+-- Leiden run knows whether it may start from the stored partition (ADR-0011).
+ALTER TABLE graphos_meta.analysis_runs ADD COLUMN IF NOT EXISTS params jsonb;
 
 -- Background jobs (``graphos.jobs``): long operations a caller asked to
 -- run asynchronously.  ``tenant`` is NULL for instance-wide jobs (vacuum).

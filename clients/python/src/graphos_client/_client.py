@@ -382,6 +382,7 @@ class GraphosClient:
         search_indexes: Mapping[str, Mapping[str, Any]] | None = None,
         edge_endpoints: Mapping[str, Iterable[tuple[str, str] | Mapping[str, str]]] | None = None,
         strict_endpoints: bool | None = None,
+        community_algorithm: str | None = None,
         display: Mapping[str, Mapping[str, Mapping[str, Any] | None]] | None = None,
         property_schema: Mapping[str, Any] | None = None,
         deprecated: Mapping[str, Mapping[str, Mapping[str, Any] | None]] | None = None,
@@ -407,6 +408,11 @@ class GraphosClient:
         ``strict_endpoints=True`` makes graphos refuse writes of a declared type
         outside its pairs; ``None`` leaves the setting as it is.  See
         :meth:`remove_edge_endpoint`.
+
+        ``community_algorithm`` is the algorithm :meth:`recompute_communities`
+        uses when it names none: ``"louvain"`` (a new tenant's) or ``"leiden"``
+        (from the stored partition, so community ids stay put across small
+        changes); ``None`` leaves it as it is.
 
         ``property_indexes`` declares indexes on vertex-label properties, which
         serve ``where`` filters: ``[{"label": "Document", "properties": ["kind"]}]``,
@@ -468,6 +474,8 @@ class GraphosClient:
             }
         if strict_endpoints is not None:
             body["strict_endpoints"] = strict_endpoints
+        if community_algorithm is not None:
+            body["community_algorithm"] = community_algorithm
         if display:
             body["display"] = {part: dict(entries) for part, entries in display.items()}
         if property_schema:
@@ -1956,8 +1964,16 @@ class GraphosClient:
         resolution: float = 1.0,
         min_community_size: int = 3,
         dry_run: bool = False,
+        algorithm: str | None = None,
+        from_scratch: bool = False,
     ) -> RecomputeCommunitiesResponse:
-        """Recompute Louvain communities over the tenant subgraph.
+        """Recompute communities over the tenant subgraph.
+
+        ``algorithm``: ``"louvain"`` (from scratch) or ``"leiden"`` (from the
+        stored partition when the last run was Leiden over the same scope,
+        weights and resolution, so community ids stay put across small
+        changes; ``from_scratch=True`` starts over); ``None``: the tenant's
+        ``community_algorithm``, ``"louvain"`` unless set.
 
         ``node_filter`` scopes the recompute by property predicate — each
         value is either a scalar (``=``) or a list (``IN``). Both endpoints
@@ -1967,6 +1983,7 @@ class GraphosClient:
         body = _recompute_body(
             rel_types=rel_types, rel_weights=rel_weights, node_filter=node_filter,
             resolution=resolution, min_community_size=min_community_size, dry_run=dry_run,
+            algorithm=algorithm, from_scratch=from_scratch,
         )
         resp = await self._request(
             "POST", f"/v1/{self._tenant}/recompute-communities", json_body=body,
@@ -1983,6 +2000,8 @@ class GraphosClient:
         resolution: float = 1.0,
         min_community_size: int = 3,
         dry_run: bool = False,
+        algorithm: str | None = None,
+        from_scratch: bool = False,
     ) -> Job:
         """:meth:`recompute_communities` as a background job.  On success the
         job's ``result`` is the :class:`RecomputeCommunitiesResponse` body.
@@ -1990,6 +2009,7 @@ class GraphosClient:
         body = _recompute_body(
             rel_types=rel_types, rel_weights=rel_weights, node_filter=node_filter,
             resolution=resolution, min_community_size=min_community_size, dry_run=dry_run,
+            algorithm=algorithm, from_scratch=from_scratch,
         )
         return await self._submit(f"/v1/{self._tenant}/recompute-communities", body)
 
@@ -2187,12 +2207,18 @@ def _recompute_body(
     resolution: float,
     min_community_size: int,
     dry_run: bool,
+    algorithm: str | None = None,
+    from_scratch: bool = False,
 ) -> dict[str, Any]:
     body: dict[str, Any] = {
         "resolution": resolution,
         "min_community_size": min_community_size,
         "dry_run": dry_run,
     }
+    if algorithm is not None:
+        body["algorithm"] = algorithm
+    if from_scratch:
+        body["from_scratch"] = True
     if rel_types:
         body["rel_types"] = rel_types
     if rel_weights:

@@ -3,6 +3,7 @@ registration body, and what a registration would leave (no database)."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -83,7 +84,7 @@ def test_the_same_schema_gives_the_same_document() -> None:
 @pytest.mark.parametrize(
     ("header", "needle"),
     [
-        ({"format": "graphos.schema", "version": 4, "graphos": "9.0.0"}, "version 4"),
+        ({"format": "graphos.schema", "version": 5, "graphos": "9.0.0"}, "version 5"),
         ({"format": "something.else", "version": 1}, "something.else"),
         ({"version": "1"}, "positive integer"),
         ("graphos.schema", "object"),
@@ -151,7 +152,7 @@ def test_replace_keeps_declared_pairs_unless_stated() -> None:
 
 def test_a_new_tenant_is_the_incoming_spec() -> None:
     after = schema_document.merged(None, SPEC, replace=False, endpoints_stated=True)
-    assert after == SPEC
+    assert after == replace(SPEC, community_algorithm="louvain")   # never left empty
     assert diff(None, after)["registered"] is True  # type: ignore[index]
 
 
@@ -203,3 +204,24 @@ def test_contrast_against_the_canvases() -> None:
     for color in ("#C9825B", "#5FA584", "#8D97AE"):
         assert schema_document.contrast(color, "#E3E5E9") >= 1.6
         assert schema_document.contrast(color, "#26292E") >= 1.6
+
+
+def test_the_community_algorithm_is_kept_unless_a_registration_sends_one() -> None:
+    stored = replace(SPEC, community_algorithm="leiden")
+    for shrink in (False, True):
+        kept = schema_document.merged(stored, SPEC, replace=shrink, endpoints_stated=True)
+        assert kept.community_algorithm == "leiden"
+        sent = replace(SPEC, community_algorithm="louvain")
+        assert schema_document.merged(
+            stored, sent, replace=shrink, endpoints_stated=True,
+        ).community_algorithm == "louvain"
+
+
+def test_an_export_names_the_community_algorithm_only_when_not_the_default() -> None:
+    now = datetime(2026, 10, 21, tzinfo=UTC)
+    plain = schema_document.document(replace(SPEC, community_algorithm="louvain"), now=now)
+    assert "community_algorithm" not in plain
+    leiden = schema_document.document(replace(SPEC, community_algorithm="leiden"), now=now)
+    assert leiden["community_algorithm"] == "leiden" and leiden["_export"]["version"] == 4
+    body = {k: v for k, v in leiden.items() if k != "_export"}
+    assert TenantSpecBody.model_validate(body).community_algorithm == "leiden"

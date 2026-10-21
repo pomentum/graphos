@@ -213,7 +213,7 @@ async def test_a_dry_run_refuses_what_the_import_would(api: httpx.AsyncClient) -
                                    "language": "klingon"}}}, "unknown text-search language"),
         ({"generated_columns": [{"label": "Doc", "column": "kind", "property": "kind",
                                  "type": "jsonb"}]}, "cannot change"),
-        ({"_export": {"format": "graphos.schema", "version": 4}}, "version 4"),
+        ({"_export": {"format": "graphos.schema", "version": 5}}, "version 5"),
     ):
         resp = await api.post("/v1/tenants?dry_run=true", json={"name": SOURCE, **body})
         assert resp.status_code == HTTPStatus.UNPROCESSABLE_ENTITY, (body, resp.text)

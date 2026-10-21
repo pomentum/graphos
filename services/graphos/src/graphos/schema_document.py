@@ -27,14 +27,14 @@ from typing import Any, cast
 import asyncpg
 
 from graphos import __version__, by_entry, declared
-from graphos.bootstrap import TenantSpec
+from graphos.bootstrap import DEFAULT_COMMUNITY_ALGORITHM, TenantSpec
 from graphos.search import value_sql
 
 FORMAT = "graphos.schema"
 # Version 2 when the document declares properties (``property_schema``), 3
 # when it declares deprecations: a server that does not know them refuses the
 # file rather than dropping them.
-VERSION = 3
+VERSION = 4
 
 # A search index over more rows than this is worth a warning: it is built
 # concurrently, which can take minutes.
@@ -108,6 +108,11 @@ def document(spec: TenantSpec, *, now: datetime) -> dict[str, Any]:
             part: dict(sorted(spec.deprecated[part].items()))
             for part in ("vertex", "edge") if spec.deprecated.get(part)
         }
+    if (spec.community_algorithm or DEFAULT_COMMUNITY_ALGORITHM) != DEFAULT_COMMUNITY_ALGORITHM:
+        # Only when not the default, so other exports stay as they were; a
+        # server before 4 refuses the key: say so in the version.
+        doc["_export"]["version"] = 4
+        doc["community_algorithm"] = spec.community_algorithm
     return doc
 
 
@@ -181,16 +186,23 @@ def merged(
     the ``renames`` history as stored.
     """
     if previous is None:
-        return dc_replace(incoming, strict_endpoints=bool(incoming.strict_endpoints))
+        return dc_replace(
+            incoming, strict_endpoints=bool(incoming.strict_endpoints),
+            community_algorithm=incoming.community_algorithm or DEFAULT_COMMUNITY_ALGORITHM,
+        )
     strict = (
         previous.strict_endpoints if incoming.strict_endpoints is None
         else incoming.strict_endpoints
+    )
+    algorithm = (
+        incoming.community_algorithm or previous.community_algorithm
+        or DEFAULT_COMMUNITY_ALGORITHM
     )
     if replace:
         endpoints = incoming.edge_endpoints if endpoints_stated else previous.edge_endpoints
         return dc_replace(
             incoming, edge_endpoints=endpoints, strict_endpoints=bool(strict),
-            renames=previous.renames,
+            renames=previous.renames, community_algorithm=algorithm,
         )
     return TenantSpec(
         name=previous.name,
@@ -215,6 +227,7 @@ def merged(
         renames=previous.renames,
         edge_endpoints=_union(previous.edge_endpoints, incoming.edge_endpoints),
         strict_endpoints=bool(strict),
+        community_algorithm=algorithm,
     )
 
 

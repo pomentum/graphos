@@ -316,6 +316,7 @@ owner), `maintain` on it (or a matching `create_tenants`) to re-register one. Th
 | `search_indexes` | dict name → `{labels, properties, analyzer, language}` | named search indexes for ranked search (§5, *search*); name `^[a-z][a-z0-9_]{0,39}$` |
 | `edge_endpoints` | dict edge type → list of `{src, dst}` (or `[src, dst]`) | the label pairs each relationship type may join; see *Declared endpoints* below. At most 5000 pairs per request. |
 | `strict_endpoints` | bool, optional | refuse edge writes outside the declared pairs; omitted: unchanged (off for a new tenant) |
+| `community_algorithm` | `louvain` \| `leiden`, optional | the algorithm a community recompute uses when its request names none (§8, *Communities*); omitted: unchanged (`louvain` for a new tenant, never empty) |
 | `display` | `{vertex: {label: {color, caption, size_by, icon} \| null}, edge: {type: {color, caption} \| null}}` | how the web UI draws each label and edge type; see *Label styles* below |
 | `property_schema` | `{mode, vertex: {label or *: entry \| null}, edge: {type or *: entry \| null}}` | the properties each label and edge type carries, and how strictly writes are held to them; see *Property schema* below |
 | `deprecated` | `{vertex: {label: entry \| null}, edge: {type: entry \| null}}` | labels, edge types and properties on their way out, with what replaces them; see *Changing a schema* below |
@@ -495,7 +496,7 @@ with the same `email`.
 
 Any token on a tenant, read-only included, can read its shape with `GET /v1/{tenant}/schema`:
 `{"name", "vertex_labels", "edge_labels", "label_hierarchy", "search_indexes", "rule_edge_labels",
-"edge_endpoints", "strict_endpoints", "display", "property_schema"}`. `display` and
+"edge_endpoints", "strict_endpoints", "community_algorithm", "display", "property_schema"}`. `display` and
 `property_schema` list only what was declared: a key left out of an entry is left out here too.
 It leaves out what only maintainers see (property indexes, generated columns, rule bodies, `meta`).
 
@@ -1309,7 +1310,7 @@ The Python methods are `cache_put(key, value, ttl_seconds=…)`, `cache_get(key)
 
 ---
 
-## 8. Communities (Louvain)
+## 8. Communities (Louvain, Leiden)
 
 Louvain is an optional extra because python-igraph is GPL-2.0-or-later: `pip install
 "graphos[louvain]"`, or build the image with `--build-arg GRAPHOS_EXTRAS=louvain`. The bundled compose
@@ -1336,6 +1337,18 @@ The result depends only on the edges, not on the order rows are stored in.
 | `resolution` | 1.0 | greater than 0, at most 10 |
 | `min_community_size` | 3 | at least 1; smaller communities get no id |
 | `dry_run` | false | compute without writing `community_id` |
+| `algorithm` | the tenant's `community_algorithm` (`louvain` unless set) | `louvain`: from scratch; `leiden`: from the stored partition when the last run was Leiden over the same scope, weights and resolution, else from scratch |
+| `from_scratch` | false | Leiden only: start from scratch even when the stored partition could be used |
+
+**Louvain or Leiden.** Louvain from scratch lands on another of many near-equal partitions after
+any small change of the graph, so most community ids change and are rewritten; Leiden from the
+stored partition moves only the nodes a change gives a reason to move, so ids stay put (after 1 %
+more edges on 250,000 nodes it rewrote 2 % of the nodes and kept every community id; Louvain
+rewrote 76 % and kept 1 of 62). On an unchanged graph Leiden still moves a few percent of the
+nodes while its partition settles; Louvain moves none.
+Choose Leiden where something keys on `community_id` (saved filters, colours, a cache, a ranking
+boost per community): per request, or once per tenant with `"community_algorithm": "leiden"` in
+its registration. The response's `algorithm` and `from_scratch` say what ran.
 
 ```bash
 curl -s -X POST "$G/v1/acme/recompute-communities" \

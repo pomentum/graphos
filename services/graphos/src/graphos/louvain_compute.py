@@ -1,4 +1,5 @@
-"""The Louvain computation, run in a child process per recompute.
+"""The community computation, run in a child process per recompute:
+Louvain from scratch, or Leiden from the stored partition (ADR-0011).
 
 Kept apart from :mod:`graphos.louvain` (edge streaming, write-back, stable
 ids) so the child process imports only this module and igraph: it starts
@@ -18,10 +19,19 @@ are :mod:`graphos.graph_compute`'s.
 The result depends only on the graph and the seed, not on the order the
 edges were read in: vertices are numbered by ascending graphid, and
 ``simplify`` then leaves the edges in canonical order.
+
+Leiden (``community_leiden``, modularity objective, so its partitions compare
+with Louvain's) can start from a given partition, the stored one: it then
+moves only the nodes the graph's changes give a reason to move, where Louvain
+from scratch lands on another of many partitions of almost equal modularity
+after any small change. Its result then depends on that starting partition
+too. ``LEIDEN_ITERATIONS`` caps the passes per run, so a long series of runs
+improves the partition step by step instead of reshaping it.
 """
 
 from __future__ import annotations
 
+import array
 import random
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -38,6 +48,12 @@ except ImportError:  # pragma: no cover - exercised by installs without the extr
 
 IGRAPH_AVAILABLE = ig is not None
 
+ALGORITHMS = ("louvain", "leiden")
+# Passes of Leiden per run (igraph's default). Measured from a settled
+# partition after 1 % more edges: 96 % of nodes kept against 97.5 % with no
+# cap, at the same modularity.
+LEIDEN_ITERATIONS = 2
+
 
 @dataclass(frozen=True)
 class Partition:
@@ -48,6 +64,7 @@ class Partition:
     modularity: float
     assignments: dict[int, int]   # graphid -> community id (largest community = 0)
     sizes: dict[int, int]         # community id -> size
+    from_scratch: bool = True     # False: Leiden started from the given partition
 
 
 def build_graph(edges: EdgeArrays, rel_weights: Mapping[str, float] | None) -> ig.Graph:
@@ -103,22 +120,52 @@ def assign_and_relabel(
     return assignments, sizes
 
 
-def compute(
+def initial_membership(
+    names: list[int], start: tuple[array.array[int], array.array[int]],
+) -> list[int]:
+    """Leiden's starting membership: each vertex's community in ``start``
+    (``(graphids, community ids)``), a community of its own for one without.
+    Numbered 0..k-1, as igraph wants."""
+    community_of = dict(zip(start[0], start[1], strict=True))
+    dense: dict[int, int] = {}
+    out: list[int] = []
+    for name in names:
+        cid = community_of.get(name)
+        key = cid if cid is not None else -1 - len(out)   # an unknown vertex: alone
+        out.append(dense.setdefault(key, len(dense)))
+    return out
+
+
+def compute(  # noqa: PLR0913 — the computation's parameters
     edges: EdgeArrays,
     *,
     rel_weights: Mapping[str, float] | None,
     resolution: float,
     seed: int,
     min_community_size: int,
+    algorithm: str = "louvain",
+    start: tuple[array.array[int], array.array[int]] | None = None,
 ) -> Partition:
-    """Build the graph and run Louvain (in this process)."""
+    """Build the graph and run Louvain, or Leiden from ``start`` when given
+    (``(graphids, community ids)``), in this process."""
     g = build_graph(edges, rel_weights)
     if g.vcount() == 0:
         return Partition(n_nodes=0, n_singletons=0, modularity=0.0, assignments={}, sizes={})
-    # community_multilevel takes its randomness from igraph's global RNG.
+    # Both take their randomness from igraph's global RNG.
     ig.set_random_number_generator(random.Random(seed))
     weights = g.es["weight"]
-    clusters = g.community_multilevel(weights=weights, resolution=resolution, return_levels=False)
+    from_scratch = True
+    if algorithm == "leiden":
+        membership = initial_membership(g.vs["name"], start) if start else None
+        from_scratch = membership is None
+        clusters = g.community_leiden(
+            objective_function="modularity", weights=weights, resolution=resolution,
+            n_iterations=LEIDEN_ITERATIONS, initial_membership=membership,
+        )
+    else:
+        clusters = g.community_multilevel(
+            weights=weights, resolution=resolution, return_levels=False,
+        )
     partition = [set(c) for c in clusters]
     assignments, sizes = assign_and_relabel(partition, g.vs["name"], min_community_size)
     return Partition(
@@ -127,6 +174,7 @@ def compute(
         modularity=float(g.modularity(clusters, weights=weights)),
         assignments=assignments,
         sizes=sizes,
+        from_scratch=from_scratch,
     )
 
 

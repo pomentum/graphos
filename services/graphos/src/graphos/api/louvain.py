@@ -1,4 +1,4 @@
-"""Louvain community recompute endpoint."""
+"""Community recompute endpoint: Louvain, or Leiden from the stored partition (ADR-0011)."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from graphos import analysis
 from graphos.api.graph import _check_tenant
 from graphos.api.jobs import ACCEPTED_RESPONSE, respond_async, run_sync, wants_async
 from graphos.auth import MaintainPrincipal, Tenant
+from graphos.bootstrap import DEFAULT_COMMUNITY_ALGORITHM, registered_tenants
 from graphos.contracts.louvain import (
     RecomputeCommunitiesRequest,
     RecomputeCommunitiesResponse,
@@ -34,11 +35,15 @@ BUSY_RESPONSE: dict[int | str, dict[str, Any]] = {
 @router.post(
     "/recompute-communities",
     response_model=RecomputeCommunitiesResponse,
-    summary="Recompute Louvain community partitions for the tenant",
+    summary="Recompute the tenant's communities (Louvain or Leiden)",
     description=(
         "Streams every semantic edge (optionally filtered by rel_types) into "
-        "an in-process igraph, runs Louvain modularity optimisation, and "
-        "writes `community_id` back to each vertex. One whole-graph job per "
+        "igraph in a child process, runs modularity optimisation, and writes "
+        "`community_id` back to each vertex that changed. `algorithm`: `louvain` "
+        "(from scratch) or `leiden` (from the stored partition when the last run was "
+        "Leiden over the same scope, weights and resolution, so community ids stay put "
+        "across small changes); omitted, the tenant's `community_algorithm`, `louvain` "
+        "unless set. One whole-graph job per "
         "tenant at a time: while a recompute or a graph-metrics run holds "
         "the tenant, another returns 409. Needs `maintain` on the tenant. Returns "
         "501 when the optional `louvain` extra (python-igraph) is not "
@@ -78,6 +83,11 @@ async def run_recompute(
     pool: asyncpg.Pool, tenant: str, body: RecomputeCommunitiesRequest,
 ) -> RecomputeCommunitiesResponse:
     """The recompute itself, for the endpoint and for background jobs."""
+    spec = registered_tenants().get(tenant)
+    algorithm = body.algorithm or (
+        spec.community_algorithm if spec and spec.community_algorithm
+        else DEFAULT_COMMUNITY_ALGORITHM
+    )
     # One whole-graph job per tenant at a time, Louvain or graph metrics.
     try:
         async with analysis.tenant_lock(pool, tenant):
@@ -91,6 +101,8 @@ async def run_recompute(
                 resolution=body.resolution,
                 min_community_size=body.min_community_size,
                 write=not body.dry_run,
+                algorithm=algorithm,
+                from_scratch=body.from_scratch,
             )
             elapsed_ms = int((time.perf_counter() - started) * 1000)
     except analysis.TenantBusyError:
@@ -110,6 +122,8 @@ async def run_recompute(
         writeback_ms=result.writeback_ms,
         elapsed_ms=elapsed_ms,
         dry_run=body.dry_run,
+        algorithm=result.algorithm,
+        from_scratch=result.from_scratch,
     )
 
 

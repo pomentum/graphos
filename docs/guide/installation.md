@@ -182,7 +182,9 @@ Passwords keep working next to SSO. Once admins sign in through the provider, se
 
 ## 6. Louvain communities (optional extra)
 
-Community detection uses python-igraph, which is GPL-2.0-or-later, so it is an optional extra:
+Community detection uses python-igraph, which is GPL-2.0-or-later, so it is an optional extra. It
+gives both community algorithms, Louvain and Leiden ([algorithms](algorithms.md)); the extra keeps
+its name:
 
 | How you run graphos | Louvain |
 |---|---|

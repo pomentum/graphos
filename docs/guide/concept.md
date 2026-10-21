@@ -1343,7 +1343,7 @@ was sorted as text and a page could skip records once transaction ids
 crossed a power of ten. The query now names `c.txid` throughout, and the
 powers-of-ten test fails against the old form.
 
-## 5. Community detection (Louvain)
+## 5. Community detection (Louvain, Leiden)
 
 > **Optional extra.** Louvain needs python-igraph (GPL-2.0-or-later),
 > installed with `pip install "graphos[louvain]"`, an image built with
@@ -1395,6 +1395,28 @@ Request:
 | `resolution` | 1.0 | Louvain resolution, (0, 10] |
 | `min_community_size` | 3 | Smaller communities are dropped (members unassigned) |
 | `dry_run` | false | Compute and report; write nothing |
+| `algorithm` | the tenant's | `louvain` or `leiden` (below) |
+| `from_scratch` | false | Leiden only: do not start from the stored partition |
+
+**Two algorithms** ([ADR-0011](adrs/ADR-0011-communities-from-the-previous-partition.md)), both
+python-igraph's and both in the same optional extra:
+
+- **Louvain** (`community_multilevel`), the default: from scratch every run. The same edges and
+  seed give the same partition, but a small change of the graph can give a quite different one
+  (after 1 % more edges, only 37 % of nodes stayed with their best-matching community on a
+  250,000-node graph), so most `community_id` values change and are rewritten.
+- **Leiden** (`community_leiden`, modularity objective, two iterations per run): from the stored
+  partition, when the last run that wrote it was Leiden over the same scope (`rel_types`,
+  `node_filter`), weights and resolution (`analysis_runs.params`); from scratch otherwise, or
+  with `from_scratch`. It moves only the nodes a change gives a reason to move: after the same
+  1 % change a recompute rewrote 5,083 nodes (2 %) in 28 s instead of 190,911 in 103 s, kept
+  every community id, and reached a higher modularity. Its result then depends on the stored
+  partition too, and on an unchanged graph it still moves a few percent of the nodes while the
+  partition settles.
+
+The algorithm of a run is the request's `algorithm`, else the tenant's `community_algorithm`
+(a registration setting, `louvain` unless set to `leiden`; a registration that omits it leaves
+it as it is), else `louvain`. The response says which ran and whether it started from scratch.
 
 ```mermaid
 flowchart LR
@@ -1415,8 +1437,10 @@ Steps (`louvain.py`):
    join) `node_filter`. The full result is held in `graphos-api` memory.
 2. **Graph build.** `Graph.TupleList` over graphids; weights from
    `rel_weights`; `simplify(combine_edges={"weight": "sum"})`.
-3. **Louvain.** `community_multilevel` with igraph's RNG seeded from a fixed
-   constant, so identical input gives an identical partition.
+3. **Louvain or Leiden.** `community_multilevel`, or `community_leiden` with
+   the stored partition as its starting membership (a node without a stored
+   community starts alone), with igraph's RNG seeded from a fixed constant, so
+   identical input gives an identical partition.
 4. **Filter and relabel.** Communities below `min_community_size` are dropped;
    the rest are numbered by descending size. `dry_run` stops here.
 5. **Stable ids.** Prior `community_id` values are streamed through a

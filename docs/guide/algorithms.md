@@ -3,11 +3,11 @@
 graphos computes a few whole-graph algorithms itself, next to the data, and writes the results onto
 the nodes, where every read, filter, sort and the web UI can use them. This page says what each one
 finds, what it is good for, how to run it and what it costs. The endpoints and every parameter are in
-[usage §8](usage.md#8-communities-louvain).
+[usage §8](usage.md#8-communities-louvain-leiden).
 
 | Algorithm | Writes | Finds | Use it for |
 |---|---|---|---|
-| [Louvain communities](#louvain-communities) | `community_id` | groups of nodes more connected to each other than to the rest | navigating and summarising a large graph by its parts; scoping a traversal; colouring a picture |
+| [Communities (Louvain, Leiden)](#communities-louvain-leiden) | `community_id` | groups of nodes more connected to each other than to the rest | navigating and summarising a large graph by its parts; scoping a traversal; colouring a picture |
 | [PageRank](#pagerank) | `graphos_pagerank` | how much a node is pointed at, by nodes that are themselves pointed at | what everything depends on; ranking by importance |
 | [Betweenness](#betweenness) | `graphos_betweenness` | how often a node lies on the shortest paths between others | bridges, bottlenecks, single points of failure |
 | [Components](#components) | `graphos_component` | the separate islands of the graph | data quality (orphans, loads that did not link up); splitting work |
@@ -68,7 +68,7 @@ panel shows its `community_id` and the `graphos_*` metrics.*
 
 ---
 
-## Louvain communities
+## Communities (Louvain, Leiden)
 
 **What it finds.** A partition of the nodes into communities, groups with many relationships inside
 and few between them. Louvain maximises *modularity*, which compares the edges inside communities
@@ -98,6 +98,19 @@ fixed and vertices are numbered by id, so the same edges give the same partition
 graphos matches each new cluster with the previous run's and keeps the old id when they overlap by
 a Jaccard index of at least 0.5: dashboards, caches and saved filters that hold a `community_id`
 keep working while membership drifts.
+
+**Louvain or Leiden.** Louvain starts from scratch every run, and on most graphs many partitions
+have almost the same modularity: after a small change it can land on a quite different one, and
+the matching above has little to keep (on 250,000 nodes, after 1 % more edges, 37 % of nodes
+stayed with their community and 24 % kept their id). Leiden, from the same python-igraph extra,
+can start from the stored partition and move only the nodes the change gives a reason to move:
+there a recompute after 1 % more edges rewrote 5,083 nodes (2 %) in 28 s instead of 190,911 in
+103 s, kept every community id, and reached a higher modularity (0.439 against 0.420). On an
+unchanged graph it still moves a few percent of the nodes while its partition settles, run by
+run; Louvain moves none. Ask for it with `"algorithm": "leiden"`, or set `"community_algorithm": "leiden"` in
+the tenant's registration so every recompute uses it; Louvain stays the default, and a run from
+scratch (`"from_scratch": true`, or a change of scope, weights or resolution) gives the same
+partition for the same edges and seed with either.
 
 ```bash
 curl -s -X POST "$G/v1/demo/recompute-communities" -H "Authorization: Bearer $TOKEN" \
@@ -275,7 +288,8 @@ nodes' indexes. A later run on an unchanged graph reads the edges, computes, com
 nothing. After a change it writes the degrees that changed and the scores that moved by more than
 `GRAPHOS_METRICS_MIN_CHANGE` (1 %): on 250,000 nodes, 1 % more edges moved 94 % of the PageRank
 scores by more than 0.1 % but only 4.7 % by more than 1 %, so a re-run rewrites 7.7 % of the
-nodes (those and the changed degrees) instead of all of them, and the 100 highest-ranked nodes
-stay the same. A community recompute on the same graph reads the edges once more
+nodes (those and the changed degrees) instead of all of them, in 17 s instead of 41 s, and the
+100 highest-ranked nodes stay the same. A large change still rewrites most nodes: after 10 % more
+edges most scores move by more than 1 %. A community recompute on the same graph reads the edges once more
 and writes only the nodes whose community changed. Both hold the edges as compact integer arrays,
 so memory grows with the number of edges, not with their properties.

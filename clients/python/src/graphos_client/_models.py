@@ -116,6 +116,9 @@ class TenantInfo(BaseModel):
     # and the renames, oldest first; empty from a server before 0.14.0.
     deprecated: dict[str, dict[str, dict[str, Any]]] = Field(default_factory=dict)
     renames: list[SchemaRename] = Field(default_factory=list)
+    # The algorithm a community recompute uses when its request names none
+    # (``louvain`` or ``leiden``); ``louvain`` from an older server.
+    community_algorithm: str = "louvain"
 
 
 class Me(BaseModel):
@@ -182,6 +185,8 @@ class TenantSchemaInfo(BaseModel):
     # Empty and False from a server that predates declared endpoints.
     edge_endpoints: dict[str, list[EdgeEndpoint]] = Field(default_factory=dict)
     strict_endpoints: bool = False
+    # ``louvain`` or ``leiden``; ``louvain`` from an older server.
+    community_algorithm: str = "louvain"
     # How the web UI draws labels and edge types; empty from an older server.
     display: dict[str, dict[str, dict[str, Any]]] = Field(default_factory=dict)
     # Declared properties per label and edge type, and the mode; empty from an older server.
@@ -591,6 +596,10 @@ class RecomputeCommunitiesResponse(BaseModel):
     writeback_ms: int
     elapsed_ms: int
     dry_run: bool
+    # Which algorithm ran, and whether it started from scratch (False: Leiden
+    # from the stored partition); ``louvain`` / True from an older server.
+    algorithm: str = "louvain"
+    from_scratch: bool = True
 
 
 class ComputeMetricsResponse(BaseModel):
