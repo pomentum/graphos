@@ -1455,8 +1455,10 @@ Steps (`louvain.py`):
    `{"community_id": <int>}` into `properties`. Skipped when nothing changed.
 7. **Edge denormalisation.** All assignments are copied into a temp table and
    each edge-label table gets `end_community_id` and `start_community_id` (the
-   communities of its end and start vertices) where they differ, in UPDATEs of
-   50,000 vertices each, each committed on its own. A first fill (a tenant
+   communities of its end and start vertices) where they differ, both in one
+   UPDATE per range of start ids (50,000 vertices wide), so each edge is
+   written at most once; each UPDATE commits on its own. An end in no
+   community keeps the value it had. A first fill (a tenant
    upgraded from a version without one of the columns) writes every edge, so
    that recompute takes longer; later ones write only what moved.
 
