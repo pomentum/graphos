@@ -1042,7 +1042,7 @@ class PathsResponse(BaseModel):
     direction: str
     hops: int | None    # None when no path was found
     paths: list[GraphPath]
-    truncated: bool     # the search stopped at its edge cap: a path may exist
+    truncated: bool     # both ends of the search hit its edge cap: a path may exist
     visited: int
     elapsed_ms: int
 

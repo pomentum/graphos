@@ -4,6 +4,17 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Changed
+
+- **Shortest paths past a highly connected node.** `POST /v1/{tenant}/graph/paths` stopped with
+  `truncated` as soon as one level of the search touched more than 100,000 edges, even when only
+  one end was a hub (a node with hundreds of thousands of edges, say) and the other end
+  was cheap to grow. Now a level over the cap stops only its own end, and the other end goes on
+  alone, a whole level at a time, so the answer stays exact; `truncated` means both ends were
+  stopped.
+
 ## 0.13.2 — 2026-10-20
 
 Schema evolution (ADR-0009): labels, relationship types and properties can be renamed and

@@ -7,6 +7,13 @@ call to ``expand`` (in the API, one SQL statement over the edge tables'
 n statements whatever the size of the graph; what grows is the number of
 edges a level touches, which ``max_edges`` caps.
 
+A level over the cap stops only its own side: a hub at one end (a vertex
+with more edges than the cap) blocks that end, and the other end carries on
+alone, a whole level at a time, until it meets the blocked side's visited
+vertices or runs out.  The answer is still exact, since every level added is
+complete.  The search gives up (``truncated``) only when both sides are
+blocked.
+
 Every shortest path is found, not just one: a vertex reached by several
 edges in the same level keeps all of them as parents, and the paths through
 every meeting vertex at the shortest total length are enumerated lazily, up
@@ -60,7 +67,7 @@ class Path:
 class PathSearch:
     paths: list[Path]
     hops: int | None    # length of the shortest paths; None when none found
-    truncated: bool     # a level exceeded max_edges: a path may exist
+    truncated: bool     # both sides hit max_edges: a path may exist
     visited: int
 
 
@@ -72,6 +79,7 @@ class _Side:
     depth_of: dict[int, int] = field(default_factory=dict)
     parents: dict[int, list[tuple[int, Edge]]] = field(default_factory=dict)
     frontier: set[int] = field(default_factory=set)
+    blocked: bool = False   # its next level touched more than max_edges
 
     def __post_init__(self) -> None:
         self.depth_of[self.root] = 0
@@ -101,7 +109,9 @@ async def shortest_paths(  # noqa: PLR0913 — the search's knobs
 
     ``direction`` is relative to the path: ``out`` follows edges the way
     they point, ``in`` against it, ``both`` either way.  At most ``limit``
-    paths are returned, all of the same, shortest, length.
+    paths are returned, all of the same, shortest, length.  The side with
+    the smaller frontier is grown first; a side whose next level touches
+    more than ``max_edges`` edges is blocked and the other goes on alone.
     """
     if src == dst:
         return PathSearch([Path([src], [])], hops=0, truncated=False, visited=1)
@@ -109,11 +119,16 @@ async def shortest_paths(  # noqa: PLR0913 — the search's knobs
     bwd = _Side(dst, _REVERSE[direction])
 
     while fwd.depth + bwd.depth < max_hops:
-        side, other = (fwd, bwd) if len(fwd.frontier) <= len(bwd.frontier) else (bwd, fwd)
-        steps = await expand(sorted(side.frontier), side.walk, max_edges)
+        open_sides = [s for s in (fwd, bwd) if not s.blocked]
         visited = len(fwd.depth_of) + len(bwd.depth_of)
-        if len(steps) > max_edges:
+        if not open_sides:
             return PathSearch([], hops=None, truncated=True, visited=visited)
+        side = min(open_sides, key=lambda s: len(s.frontier))   # a tie grows fwd
+        other = bwd if side is fwd else fwd
+        steps = await expand(sorted(side.frontier), side.walk, max_edges)
+        if len(steps) > max_edges:
+            side.blocked = True
+            continue
 
         side.depth += 1
         reached: dict[int, list[tuple[int, Edge]]] = {}

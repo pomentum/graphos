@@ -274,7 +274,8 @@ reported in the response.
   nodes, up to `limit` (≤100) and `max_hops` (≤8), by a bidirectional
   breadth-first search that issues one batched SQL statement per level.
   `direction` (`out|in|both`) and `rel_types` narrow it; a level touching
-  more than 100,000 edges stops it with `truncated`. AGE's own
+  more than 100,000 edges stops that end, the other end goes on alone, and
+  only both ends stopped give `truncated`. AGE's own
   `shortestPath` is not used.
 - **Expand** (`GET …/graph/expand`): breadth-first traversal from `node_id`,
   or from several `seeds`.

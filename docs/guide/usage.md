@@ -1093,7 +1093,9 @@ path of n hops costs n statements. It returns every path of the shortest length 
 path: `out` follows edges the way they point from `src` to `dst`, `in` against it, `both` either
 way (the default). Each edge on a path keeps its stored direction in `src_id` / `dst_id`, which
 can run against the path with `in` or `both`. A level that would touch more than 100,000 edges
-stops the search with `truncated: true`; narrow `rel_types` or `direction` and retry.
+stops that end of the search, and the other end goes on alone, so a highly connected node at one
+end no longer stops it and the answer stays exact. Only when both ends are stopped does the search
+end with `truncated: true` (a path may exist); narrow `rel_types` or `direction` and retry.
 
 ```bash
 curl -s -X POST "$G/v1/acme/graph/paths" -H "Authorization: Bearer $TOKEN" \
