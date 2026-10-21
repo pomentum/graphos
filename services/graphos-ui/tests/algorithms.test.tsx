@@ -1,7 +1,8 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { Me } from "../src/api/types";
+import type { Job, Me } from "../src/api/types";
+import { communityAlgorithms, groupsRun } from "../src/lib/features";
 import { isComputedProperty } from "../src/lib/properties";
 import { formatMetric, hasMetrics, largestValue, metricSize } from "../src/lib/metrics";
 import { SessionProvider } from "../src/session/SessionProvider";
@@ -54,8 +55,21 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-/** A graphos with or without the Louvain extra, recording what was sent. */
-function server({ louvain }: { louvain: boolean }) {
+/**
+ * A graphos with or without the Louvain extra, recording what was sent;
+ * `algorithms` and `tenantAlgorithm` as a 0.14.0 server reports them, `jobs` its recent jobs.
+ */
+function server({
+  louvain,
+  algorithms,
+  tenantAlgorithm,
+  jobs = [],
+}: {
+  louvain: boolean;
+  algorithms?: string[];
+  tenantAlgorithm?: string;
+  jobs?: Partial<Job>[];
+}) {
   const sent: { method: string; path: string; body: unknown; prefer: string | null }[] = [];
   const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input), "http://ui");
@@ -64,12 +78,21 @@ function server({ louvain }: { louvain: boolean }) {
     const prefer = new Headers(init?.headers).get("Prefer");
     sent.push({ method, path: url.pathname, body, prefer });
     if (url.pathname === "/api/v1/info") {
-      return json({ service: "graphos", version: "0.5.0", features: { louvain, metrics: true } });
+      const features = { louvain, metrics: true, ...(algorithms ? { community_algorithms: algorithms } : {}) };
+      return json({ service: "graphos", version: "0.14.1", features });
     }
     if (url.pathname === "/api/v1/acme/graph/communities/map") {
-      return json({ tenant: "acme", available: false, n_communities: 0, communities: [], links: [] });
+      const done = jobs.some((j) => j.kind === "recompute_communities");
+      return json({
+        tenant: "acme",
+        available: done,
+        n_communities: done ? 6 : 0,
+        modularity: done ? 0.74 : null,
+        communities: [],
+        links: [],
+      });
     }
-    if (url.pathname === "/api/v1/jobs") return json({ jobs: [] });
+    if (url.pathname === "/api/v1/jobs") return json({ jobs });
     if (url.pathname === "/api/v1/acme/schema") {
       return json({
         name: "acme",
@@ -79,7 +102,11 @@ function server({ louvain }: { louvain: boolean }) {
         search_indexes: {},
         rule_edge_labels: [],
         edge_endpoints: {},
+        ...(tenantAlgorithm ? { community_algorithm: tenantAlgorithm } : {}),
       });
+    }
+    if (url.pathname === "/api/v1/acme/recompute-communities" && method === "POST") {
+      return json({ id: "j2", kind: "recompute_communities", tenant: "acme", status: "queued" }, 202);
     }
     if (url.pathname === "/api/v1/acme/graph/metrics:compute" && method === "POST") {
       return json({ id: "j1", kind: "compute_metrics", tenant: "acme", status: "queued" }, 202);
@@ -106,7 +133,7 @@ describe("Graph algorithms", () => {
   it("without Louvain on the server, says so instead of offering the groups", async () => {
     const { fetchImpl } = server({ louvain: false });
     renderCard(me("maintain"), fetchImpl);
-    expect(await screen.findByText(/Needs Louvain/)).toBeInTheDocument();
+    expect(await screen.findByText(/Needs the Louvain extra/)).toBeInTheDocument();
     // The only Compute button left is the metrics one.
     expect(screen.getAllByRole("button", { name: "Compute" })).toHaveLength(1);
   });
@@ -138,12 +165,103 @@ describe("Graph algorithms", () => {
     });
   });
 
+  it("recomputes the groups with the tenant's algorithm unless another is chosen", async () => {
+    const { fetchImpl, sent } = server({
+      louvain: true,
+      algorithms: ["louvain", "leiden"],
+      tenantAlgorithm: "louvain",
+    });
+    renderCard(me("maintain"), fetchImpl);
+    expect(await screen.findByText("The tenant runs Louvain unless another is chosen.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Tenant's (Louvain)")).toBeChecked();
+    // Louvain always starts from scratch: no choice to make.
+    expect(screen.queryByLabelText("From scratch")).toBeNull();
+    fireEvent.click(screen.getAllByRole("button", { name: "Compute" })[0]!);
+    await waitFor(() => expect(sent.some((s) => s.path.endsWith("/recompute-communities"))).toBe(true));
+    const call = sent.find((s) => s.path.endsWith("/recompute-communities"))!;
+    expect(call.body).toEqual({});
+    expect(call.prefer).toBe("respond-async");
+  });
+
+  it("recomputes with Leiden, from scratch when asked", async () => {
+    const { fetchImpl, sent } = server({
+      louvain: true,
+      algorithms: ["louvain", "leiden"],
+      tenantAlgorithm: "louvain",
+    });
+    renderCard(me("maintain"), fetchImpl);
+    fireEvent.click(await screen.findByLabelText("Leiden"));
+    fireEvent.click(await screen.findByLabelText("From scratch"));
+    fireEvent.click(screen.getAllByRole("button", { name: "Compute" })[0]!);
+    await waitFor(() => expect(sent.some((s) => s.path.endsWith("/recompute-communities"))).toBe(true));
+    expect(sent.find((s) => s.path.endsWith("/recompute-communities"))!.body).toEqual({
+      algorithm: "leiden",
+      from_scratch: true,
+    });
+  });
+
+  it("says how the last recompute ran", async () => {
+    const job: Partial<Job> = {
+      id: "j0",
+      kind: "recompute_communities",
+      tenant: "acme",
+      status: "succeeded",
+      params: {},
+      result: { algorithm: "leiden", from_scratch: false, n_communities: 6 },
+      error: null,
+      finished_at: new Date().toISOString(),
+    };
+    const { fetchImpl } = server({
+      louvain: true,
+      algorithms: ["louvain", "leiden"],
+      tenantAlgorithm: "leiden",
+      jobs: [job],
+    });
+    renderCard(me("maintain"), fetchImpl);
+    expect(await screen.findByText(/Leiden, from the stored groups/)).toBeInTheDocument();
+    expect(screen.getByText("The tenant runs Leiden unless another is chosen.")).toBeInTheDocument();
+  });
+
+  it("offers no choice on a server with Louvain only", async () => {
+    const { fetchImpl } = server({ louvain: true });
+    renderCard(me("maintain"), fetchImpl);
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Compute" })).toHaveLength(2));
+    expect(screen.queryByLabelText("Leiden")).toBeNull();
+    expect(screen.queryByText(/unless another is chosen/)).toBeNull();
+  });
+
   it("offers nothing to run to a reader", async () => {
     const { fetchImpl } = server({ louvain: true });
     renderCard(me("read"), fetchImpl);
     expect(await screen.findByText("Graph algorithms")).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText("Not computed yet.").length).toBeGreaterThan(0));
     expect(screen.queryByRole("button", { name: /Compute/ })).toBeNull();
+  });
+});
+
+describe("community algorithm helpers", () => {
+  it("knows which algorithms the server runs", () => {
+    expect(communityAlgorithms(undefined)).toEqual([]);
+    expect(communityAlgorithms({ louvain: false, metrics: true })).toEqual([]);
+    expect(communityAlgorithms({ louvain: true, metrics: true })).toEqual(["louvain"]);
+    expect(communityAlgorithms({ louvain: true, metrics: true, community_algorithms: ["louvain", "leiden"] })).toEqual([
+      "louvain",
+      "leiden",
+    ]);
+  });
+
+  it("reads how the last recompute ran from its job, Louvain from scratch on an older server", () => {
+    const base = { id: "j", kind: "recompute_communities", status: "succeeded", params: {}, error: null } as const;
+    expect(groupsRun({ ...base, result: { algorithm: "leiden", from_scratch: false } } as unknown as Job)).toEqual({
+      algorithm: "leiden",
+      fromScratch: false,
+    });
+    expect(groupsRun({ ...base, result: { n_communities: 3 } } as unknown as Job)).toEqual({
+      algorithm: "louvain",
+      fromScratch: true,
+    });
+    expect(groupsRun({ ...base, status: "failed", result: null } as unknown as Job)).toBeNull();
+    expect(groupsRun(null)).toBeNull();
   });
 });
 

@@ -1,6 +1,7 @@
 import { notifications } from "@mantine/notifications";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
+import type { CommunityAlgorithm } from "../../api/types";
 import { isActiveJob, keys, useGroupsJob } from "../../data/queries";
 import { t } from "../../i18n";
 import { useTenantSession } from "../../session/SessionProvider";
@@ -12,7 +13,10 @@ import { useTenantSession } from "../../session/SessionProvider";
  * leaving the view, reloading, or a recompute started elsewhere are all
  * seen; when it ends the group map is read again.
  */
-export function useRecomputeGroups(): { recompute: () => Promise<void>; running: boolean } {
+export function useRecomputeGroups(): {
+  recompute: (options?: { algorithm?: CommunityAlgorithm; fromScratch?: boolean }) => Promise<void>;
+  running: boolean;
+} {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
   const job = useGroupsJob();
@@ -36,9 +40,9 @@ export function useRecomputeGroups(): { recompute: () => Promise<void>; running:
     wasRunning.current = running;
   }, [running, job.data, client, tenant]);
 
-  const recompute = async () => {
+  const recompute = async (options: { algorithm?: CommunityAlgorithm; fromScratch?: boolean } = {}) => {
     try {
-      await api.recomputeGroups();
+      await api.recomputeGroups(options);
     } catch (error) {
       notifications.show({
         color: "red",

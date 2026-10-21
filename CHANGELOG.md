@@ -6,14 +6,26 @@ under one version.
 
 ## Unreleased
 
+The web UI computes the groups with Louvain or Leiden and says which ran; a new script measures
+any tenant of a running graphos.
+
 ### Added
 
+- **Louvain or Leiden in the web UI.** Overview → *Graph algorithms* computes the groups with the
+  tenant's algorithm (as before), Louvain or Leiden, and Leiden optionally from scratch. The
+  choice appears only on a server that runs both (0.14.0 on). The groups' status says how the last
+  recompute ran ("Leiden, from the stored groups") and which algorithm the tenant runs by default.
 - **`scripts/bench_tenant.py`: measure any tenant.** Read latency for one user and under
   concurrent users, the tenant's saved queries, cold reads after a restart command of yours,
   container CPU and memory, and, with `--jobs`, the graph metrics and the community recompute. It
   learns what to read from the tenant (schema summary, a sample of nodes), only reads unless
   `--jobs`, and writes statistics only (no labels, ids or values) unless `--show-names`.
   **Docs:** installation §14.
+
+### Changed
+
+- **The web UI names both algorithms:** "Groups (Louvain or Leiden)" in Overview, the Groups
+  view's help, the canvas legend's hint, and the message on a server without the extra.
 
 ## 0.14.0 — 2026-10-21
 

@@ -73,8 +73,12 @@ export type GrantLevel = Level | "create_tenants" | "admin";
 export interface ServiceInfo {
   service: string;
   version: string;
-  features: { louvain: boolean; metrics: boolean; cypher?: boolean };
+  /** `community_algorithms`: those a recompute can run (absent before 0.14.0: Louvain only). */
+  features: { louvain: boolean; metrics: boolean; cypher?: boolean; community_algorithms?: CommunityAlgorithm[] };
 }
+
+/** How the groups are computed: Louvain from scratch, or Leiden, which can start from the stored groups. */
+export type CommunityAlgorithm = "louvain" | "leiden";
 
 /** A node in a Cypher result: its graphos id, its own label, its properties. */
 export interface CypherNode {
@@ -166,6 +170,8 @@ export interface TenantSchema {
   edge_endpoints?: Record<string, { src: string; dst: string }[]>;
   /** Writes of a declared type outside its pairs are refused. */
   strict_endpoints?: boolean;
+  /** The algorithm a recompute runs when it names none (absent before 0.14.0: Louvain). */
+  community_algorithm?: CommunityAlgorithm;
   /** How labels and edge types are drawn, as the tenant declared (absent from older servers). */
   display?: DisplaySpec;
   /** The properties labels and types carry, as declared (absent from older servers). */
