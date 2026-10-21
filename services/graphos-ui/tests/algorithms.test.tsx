@@ -222,6 +222,32 @@ describe("Graph algorithms", () => {
     expect(screen.getByText("The tenant runs Leiden unless another is chosen.")).toBeInTheDocument();
   });
 
+  it("keeps the algorithm the last recompute ran chosen, so Compute again repeats it", async () => {
+    const job: Partial<Job> = {
+      id: "j0",
+      kind: "recompute_communities",
+      tenant: "acme",
+      status: "succeeded",
+      params: {},
+      result: { algorithm: "leiden", from_scratch: true, n_communities: 6 },
+      error: null,
+      finished_at: new Date().toISOString(),
+    };
+    const { fetchImpl, sent } = server({
+      louvain: true,
+      algorithms: ["louvain", "leiden"],
+      tenantAlgorithm: "louvain",
+      jobs: [job],
+    });
+    renderCard(me("maintain"), fetchImpl);
+    expect(await screen.findByText(/Leiden, from scratch/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Leiden")).toBeChecked());
+    expect(screen.getByLabelText("Tenant's (Louvain)")).not.toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Compute again" }));
+    await waitFor(() => expect(sent.some((s) => s.path.endsWith("/recompute-communities"))).toBe(true));
+    expect(sent.find((s) => s.path.endsWith("/recompute-communities"))!.body).toEqual({ algorithm: "leiden" });
+  });
+
   it("offers no choice on a server with Louvain only", async () => {
     const { fetchImpl } = server({ louvain: true });
     renderCard(me("maintain"), fetchImpl);
