@@ -325,7 +325,7 @@ nodes' indexes. A later run on an unchanged graph reads the edges, computes, com
 nothing. After a change it writes the degrees that changed and the scores that moved by more than
 `GRAPHOS_METRICS_MIN_CHANGE` (1 %): on 250,000 nodes, 1 % more edges moved 94 % of the PageRank
 scores by more than 0.1 % but only 4.7 % by more than 1 %, so a re-run rewrites 7.7 % of the
-nodes (those and the changed degrees) instead of all of them, in 17 s instead of 41 s, and the
+nodes (those and the changed degrees) instead of all of them, in 17 s instead of 40 s, and the
 100 highest-ranked nodes stay the same. A large change still rewrites most nodes: after 10 % more
 edges most scores move by more than 1 %. A community recompute on the same graph reads the edges once more
 and writes only the nodes whose community changed. Both hold the edges as compact integer arrays,
