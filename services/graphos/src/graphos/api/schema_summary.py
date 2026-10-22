@@ -203,7 +203,10 @@ def _render(s: SchemaSummaryResponse) -> str:
             f"{q.name}({', '.join(f'{k}: {t}' for k, t in q.params.items())})"
             + (f" - {q.description}" if q.description else "") for q in s.saved_queries))
     if s.computed:
-        lines.append("Computed by graphos (read-only): " + ", ".join(s.computed))
+        lines.append("Computed by graphos (read-only): " + ", ".join(s.computed) + (
+            "; an edge's communities are its ends' community_id "
+            "(MATCH (a)-[r]->(b) RETURN a.community_id, b.community_id)"
+            if "community_id" in s.computed else ""))
     if s.deprecated:
         lines.append("Deprecated (still readable; do not use in new writes): " + "; ".join(
             _named(d.kind, d.name, d.on)

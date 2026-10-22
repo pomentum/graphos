@@ -1222,6 +1222,14 @@ curl -s -X POST "$G/v1/acme/cypher" -H "Authorization: Bearer $TOKEN" -H 'Conten
   beyond any cancel or timeout. Write the hops out (`-[:R]->()-[:R]->()`, with `OPTIONAL MATCH` for
   the further ones) or use `POST …/graph/paths`. And after any failed query the console closes its
   connection rather than reuse it.
+- **Analysis results** are properties like any other: a node's `community_id` and its metrics
+  (`graphos_degree`, `graphos_pagerank`, `graphos_component`, `graphos_betweenness`, §8), read-only.
+  An edge's communities are its ends' `community_id`: `MATCH (a)-[r]->(b) RETURN r,
+  a.community_id, b.community_id`, with `WHERE a.community_id <> b.community_id` for the edges
+  between communities. (The copies on each edge, `start_community_id` and `end_community_id`, are
+  table columns for `expand`'s community scope, not properties, so Cypher does not see them; an
+  edge added since the last recompute has them empty, while its ends already have their
+  `community_id`.)
 - **Who:** `GRAPHOS_CYPHER_LEVEL` on the tenant (`read` by default). Each run is in the audit log.
 - **AGE's dialect:** AGE implements openCypher with gaps; for example, on AGE 1.6, `ORDER BY`
   cannot name a `RETURN` alias (order by the expression). `MATCH (n:Person)` includes the nodes of child labels
