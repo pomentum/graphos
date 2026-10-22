@@ -160,7 +160,7 @@ def _read_failed(what: str, exc: asyncpg.exceptions.PostgresError) -> HTTPExcept
     _read_log.warning("%s failed: %s: %s", what, type(exc).__name__, str(exc)[:300])
     found = resources.shortage(exc)
     if found is not None:
-        return HTTPException(status_code=found.status, detail=found.detail)
+        return resources.ShortageError(found)
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail=(
@@ -598,9 +598,8 @@ async def upsert_nodes(
                 pool, tenant=tenant, label=label, rows=rows,
             )
         except CypherError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"cypher error while upserting :{label}: {exc}",
+            raise resources.write_failed(
+                exc, status.HTTP_400_BAD_REQUEST, f"cypher error while upserting :{label}: {exc}",
             ) from exc
         by_label_count[label] = n
         total += n
@@ -738,8 +737,8 @@ async def patch_node(  # noqa: PLR0913 — FastAPI route parameters
     except lookup.AmbiguousMatchError as exc:
         raise _node_ambiguous(external_id, exc) from exc
     except CypherError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"patch failed: {exc}",
+        raise resources.write_failed(
+            exc, status.HTTP_400_BAD_REQUEST, f"patch failed: {exc}",
         ) from exc
     if node is None:
         raise HTTPException(
@@ -806,8 +805,8 @@ async def upsert_node_properties(  # noqa: PLR0913 — FastAPI route parameters
     except lookup.AmbiguousMatchError as exc:
         raise _node_ambiguous(external_id, exc) from exc
     except CypherError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"property merge failed: {exc}",
+        raise resources.write_failed(
+            exc, status.HTTP_400_BAD_REQUEST, f"property merge failed: {exc}",
         ) from exc
     if node is None:
         # Node not found — distinguish from "found but unchanged" because
@@ -934,11 +933,9 @@ async def upsert_edges(
                 rows=rows,
             )
         except CypherError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"cypher error on -[{src_lbl}-{et}->{dst_lbl}]-: {exc}"
-                ),
+            raise resources.write_failed(
+                exc, status.HTTP_400_BAD_REQUEST,
+                f"cypher error on -[{src_lbl}-{et}->{dst_lbl}]-: {exc}",
             ) from exc
 
         by_type[et] = by_type.get(et, 0) + merged
@@ -1130,8 +1127,8 @@ async def patch_edge(  # noqa: PLR0913 — FastAPI route parameters
     except lookup.AmbiguousMatchError as exc:
         raise _edge_ambiguous(edge_type, exc) from exc
     except CypherError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"patch failed: {exc}",
+        raise resources.write_failed(
+            exc, status.HTTP_400_BAD_REQUEST, f"patch failed: {exc}",
         ) from exc
     if edge is None:
         raise _no_edge(tenant, edge_type, ref)
@@ -1179,8 +1176,8 @@ async def delete_edge(  # noqa: PLR0913 — FastAPI route parameters
     except lookup.AmbiguousMatchError as exc:
         raise _edge_ambiguous(edge_type, exc) from exc
     except CypherError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"delete failed: {exc}",
+        raise resources.write_failed(
+            exc, status.HTTP_400_BAD_REQUEST, f"delete failed: {exc}",
         ) from exc
     return DeleteEdgeResponse(
         tenant=tenant,
@@ -2334,7 +2331,7 @@ async def _aggregate_edge_groups(
             _aggregate_log.warning("aggregate_edges failed: %s", str(exc)[:200])
             short = resources.shortage(exc)
             if short is not None:
-                raise HTTPException(status_code=short.status, detail=short.detail) from exc
+                raise resources.ShortageError(short) from exc
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"aggregate failed: {exc}",
@@ -2731,9 +2728,8 @@ async def delete_node(  # noqa: PLR0913 — FastAPI route parameters
     except lookup.AmbiguousMatchError as exc:
         raise _node_ambiguous(external_id, exc) from exc
     except CypherError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"cypher error: {exc}",
+        raise resources.write_failed(
+            exc, status.HTTP_400_BAD_REQUEST, f"cypher error: {exc}",
         ) from exc
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -2797,9 +2793,8 @@ async def delete_nodes(
                 detail="another write held these nodes' edges; nothing was deleted, try again",
                 headers={"Retry-After": "1"},
             ) from exc
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"cypher error: {exc}",
+        raise resources.write_failed(
+            exc, status.HTTP_400_BAD_REQUEST, f"cypher error: {exc}",
         ) from exc
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -2858,9 +2853,8 @@ async def delete_by_property(
             property_value=property_value,
         )
     except CypherError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"cypher error: {exc}",
+        raise resources.write_failed(
+            exc, status.HTTP_400_BAD_REQUEST, f"cypher error: {exc}",
         ) from exc
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -4212,13 +4206,10 @@ async def run_resolve(
                         pool, tenant=tenant, compiled=compiled, timeout_s=1800.0,
                     )
             except CypherError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        f"resolve INSERT failed for edge_type "
+                raise resources.write_failed(
+                    exc, status.HTTP_400_BAD_REQUEST, f"resolve INSERT failed for edge_type "
                         f"{edge_type!r} "
-                        f"({compiled.arm_count} arms): {exc}"
-                    ),
+                        f"({compiled.arm_count} arms): {exc}",
                 ) from exc
 
         if no_label_count == len(rules) and rules:

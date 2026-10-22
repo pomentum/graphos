@@ -4,6 +4,29 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Fixed
+
+- **A full disk on a write says so too.** 0.14.2 answered a full database disk as `507` wherever
+  the error reached the app, but the write paths answer their own database errors: the bulk and
+  CSV loads, node and edge upserts and patches, deletes, edge resolution, reconcile and snapshot
+  import answered `400` with the database's own message, which names the server's files. They
+  now answer `507` (out of disk space) or `503` (out of memory or connections) like any other
+  request, as `application/problem+json` and without that message; another database error on a
+  write is still `400`. The reads that answered a shortage themselves (`neighbors`, `expand`,
+  `sample_subgraph`, edge aggregation) now give the same `application/problem+json` body.
+- **A database that restarts or is down is `503`, not `500`.** A database that cannot write its
+  write-ahead log for want of disk space stops and restarts on its own (and stays down if even
+  that cannot write); a statement running then, such as
+  `DELETE /v1/tenants/{name}?drop_data=true` sent to free space, lost its connection and
+  answered "Internal Server Error", as did every request while the database was down. A lost
+  or refused connection, or the database shutting down or restarting (SQLSTATE class 08, 57P01
+  to 57P03), is now `503` "Database unavailable" on any request and on a job's record: the
+  statement did not complete, and a retry once `/readyz` answers again can. **Docs:** usage §12,
+  concept §2.5.2, installation §8 (A full database disk: what happens, freeing space, the room
+  the write-ahead log needs).
+
 ## 0.14.2 — 2026-10-21
 
 A database that runs out of disk, memory or connections is reported as such (507 or 503) instead

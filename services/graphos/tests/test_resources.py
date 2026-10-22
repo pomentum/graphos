@@ -5,6 +5,7 @@ database's own message, which names the server's files."""
 from __future__ import annotations
 
 import contextlib
+import socket
 from http import HTTPStatus
 from typing import Any
 
@@ -12,7 +13,7 @@ import asyncpg
 import pytest
 from fastapi.testclient import TestClient
 
-from graphos import resources
+from graphos import lifecycle, resources
 from graphos.api.graph import _read_failed
 from graphos.app import create_app
 from graphos.config import Settings
@@ -71,6 +72,51 @@ def test_a_shortage_is_found_through_what_wrapped_it() -> None:
     assert found.sqlstate == "53100"
 
 
+def _lost_mid_statement() -> asyncpg.InterfaceError:
+    """What a statement raises when the server restarts under it: the closed
+    transaction's error, raised from the lost connection's."""
+    try:
+        raise asyncpg.exceptions.ConnectionDoesNotExistError(
+            "connection was closed in the middle of operation",
+        )
+    except asyncpg.PostgresError as lost:
+        try:
+            raise asyncpg.InterfaceError(
+                "cannot call Transaction.__aexit__(): the underlying connection is closed",
+            ) from lost
+        except asyncpg.InterfaceError as exc:
+            return exc
+    raise AssertionError("unreachable")
+
+
+@pytest.mark.parametrize("error", [
+    _lost_mid_statement(),
+    asyncpg.exceptions.CrashShutdownError("terminating connection because of crash"),
+    asyncpg.exceptions.AdminShutdownError("terminating connection due to shutdown"),
+    asyncpg.exceptions.CannotConnectNowError("the database system is in recovery mode"),
+    CypherError("connection failure", sqlstate="08006"),
+])
+def test_a_lost_or_restarting_database_is_503(error: BaseException) -> None:
+    found = resources.shortage(error)
+    assert found is not None
+    assert (found.status, found.title) == (HTTPStatus.SERVICE_UNAVAILABLE, "Database unavailable")
+    assert "Retry" in found.detail
+
+
+@pytest.mark.asyncio
+async def test_a_database_that_is_down_is_503_but_another_refused_connection_is_not() -> None:
+    with socket.socket() as probe:  # a port nothing listens on
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    with pytest.raises(OSError) as caught:
+        await asyncpg.connect(host="127.0.0.1", port=port, user="x", timeout=5)
+    found = resources.shortage(caught.value)
+    assert found is not None
+    assert (found.status, found.sqlstate) == (HTTPStatus.SERVICE_UNAVAILABLE, "08001")
+    # The same error from anything but the driver (an HTTP call to another service).
+    assert resources.shortage(ConnectionRefusedError("refused")) is None
+
+
 def test_anything_else_is_not_a_shortage() -> None:
     assert resources.shortage(None) is None
     assert resources.shortage(RuntimeError("boom")) is None
@@ -106,6 +152,50 @@ def test_a_request_that_fills_the_disk_answers_507_problem_json() -> None:
     resp = client.get("/bug")
     assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
     assert resp.text == "Internal Server Error"
+
+
+def test_a_write_that_fills_the_disk_answers_507_without_the_databases_message() -> None:
+    exc = resources.write_failed(
+        _wrapped(_disk_full()), HTTPStatus.BAD_REQUEST, f"cypher error: {DISK_FULL}",
+    )
+    assert isinstance(exc, resources.ShortageError)
+    assert exc.status_code == HTTPStatus.INSUFFICIENT_STORAGE
+    assert "out of disk space" in str(exc.detail)
+    assert "base/" not in str(exc.detail)
+    short = resources.write_failed(
+        CypherError("no memory", sqlstate="53200"), HTTPStatus.BAD_REQUEST, "cypher error",
+    )
+    assert short.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+    # Anything else keeps the answer the write path gave it.
+    other = resources.write_failed(
+        CypherError("bad input", sqlstate="22P02"), HTTPStatus.BAD_REQUEST, "cypher error: bad",
+    )
+    assert (other.status_code, other.detail) == (HTTPStatus.BAD_REQUEST, "cypher error: bad")
+
+
+def test_a_tenant_drop_the_database_restarts_under_answers_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Pool:
+        def acquire(self) -> contextlib.AbstractAsyncContextManager[object]:
+            return contextlib.nullcontext(object())  # type: ignore[return-value]
+
+    async def registered(_conn: object, _name: str) -> str:
+        return "registered"
+
+    async def restarted(_pool: object, _name: str) -> bool:
+        raise _lost_mid_statement()
+
+    monkeypatch.setattr(lifecycle, "tenant_state", registered)
+    monkeypatch.setattr(lifecycle, "drop_tenant_data", restarted)
+    app = create_app(Settings(db_password="placeholder", auth_disabled=True))
+    app.state.pool = Pool()
+    resp = TestClient(app, raise_server_exceptions=False).delete(
+        "/v1/tenants/acme", params={"drop_data": "true"},
+    )
+    assert resp.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+    assert resp.headers["content-type"].startswith("application/problem+json")
+    assert resp.json()["title"] == "Database unavailable"
 
 
 def test_a_job_that_fills_the_disk_records_it() -> None:

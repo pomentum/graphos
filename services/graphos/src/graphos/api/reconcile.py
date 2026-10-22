@@ -27,7 +27,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import ValidationError
 
-from graphos import lookup, properties, renames, reserved, writes
+from graphos import lookup, properties, renames, reserved, resources, writes
 from graphos.api.bulk import iter_lines
 from graphos.api.graph import _check_tenant, _check_vertex_label
 from graphos.auth import Tenant, WritePrincipal
@@ -233,8 +233,8 @@ async def reconcile_edges(  # noqa: PLR0912 — one check per rule an upsert has
             timeout_s=TYPE_SCOPE_TIMEOUT_S if scope == "type" else None,
         )
     except CypherError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"reconcile failed: {exc}",
+        raise resources.write_failed(
+            exc, status.HTTP_400_BAD_REQUEST, f"reconcile failed: {exc}",
         ) from exc
     if not dry_run:
         record_property_tally("edge", tally)

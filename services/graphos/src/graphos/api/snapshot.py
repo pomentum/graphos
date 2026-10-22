@@ -48,7 +48,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
-from graphos import dataset, properties, writes
+from graphos import dataset, properties, resources, writes
 from graphos.api.bulk import iter_lines
 from graphos.api.graph import _check_tenant
 from graphos.auth import ReadPrincipal, Tenant, WritePrincipal
@@ -311,9 +311,9 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
                     pool, tenant=tenant, label=label, rows=rows,
                 )
             except CypherError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"cypher error in node label '{label}': {exc}",
+                raise resources.write_failed(
+                    exc, status.HTTP_400_BAD_REQUEST,
+                    f"cypher error in node label '{label}': {exc}",
                 ) from exc
             nodes_upserted += n
             by_node_label[label] += n
@@ -331,11 +331,9 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
                     rows=rows,
                 )
             except CypherError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        f"cypher error on -[{src_lbl}-{et}->{dst_lbl}]-: {exc}"
-                    ),
+                raise resources.write_failed(
+                    exc, status.HTTP_400_BAD_REQUEST,
+                    f"cypher error on -[{src_lbl}-{et}->{dst_lbl}]-: {exc}",
                 ) from exc
             edges_upserted += merged
             edges_skipped += skipped

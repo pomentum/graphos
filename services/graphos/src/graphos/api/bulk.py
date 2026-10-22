@@ -39,7 +39,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import ValidationError
 
-from graphos import lookup, properties, renames, reserved, writes
+from graphos import lookup, properties, renames, reserved, resources, writes
 from graphos.api.graph import UNIQUE_VIOLATION_RESPONSE, _check_tenant
 from graphos.auth import Tenant, WritePrincipal
 from graphos.bootstrap import registered_tenants
@@ -163,9 +163,9 @@ class NodeWriter(_Writer):
             try:
                 n = await writes.upsert_nodes(self.pool, tenant=self.tenant, label=label, rows=rows)
             except CypherError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"cypher error while upserting :{label}: {exc}",
+                raise resources.write_failed(
+                    exc, status.HTTP_400_BAD_REQUEST,
+                    f"cypher error while upserting :{label}: {exc}",
                 ) from exc
         self.written += n
         self.by_name[label] += n
@@ -249,9 +249,9 @@ class EdgeWriter(_Writer):
                     edge_type=et, rows=rows,
                 )
             except CypherError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"cypher error on -[{src_lbl}-{et}->{dst_lbl}]-: {exc}",
+                raise resources.write_failed(
+                    exc, status.HTTP_400_BAD_REQUEST,
+                    f"cypher error on -[{src_lbl}-{et}->{dst_lbl}]-: {exc}",
                 ) from exc
         self.written += merged
         self.skipped += skipped
@@ -274,11 +274,11 @@ class EdgeWriter(_Writer):
 
 
 def stream_error(endpoint: str, exc: Exception) -> HTTPException:
-    """An unexpected failure part-way through a body, answered 400."""
+    """An unexpected failure part-way through a body, answered 400 (507 or
+    503 when the database ran short of a resource)."""
     log.warning("%s stream error", endpoint, exc_info=exc)
-    return HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail=f"stream error ({type(exc).__name__}); see server log",
+    return resources.write_failed(
+        exc, status.HTTP_400_BAD_REQUEST, f"stream error ({type(exc).__name__}); see server log",
     )
 
 

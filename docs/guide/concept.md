@@ -573,7 +573,7 @@ Error shapes:
 | 499 | A console query whose caller went away | `{"detail": "..."}` |
 | 500 | A read the database refused (`neighbors`, `expand`, `sample_subgraph`): never a smaller result; the error is logged | `{"detail": "..."}` |
 | 501 | Louvain extra not installed | `{"detail": "..."}` |
-| 503 / 507 | The database short of a resource (SQLSTATE class 53): 507 when out of disk space, 503 out of memory or connections. On any request, and on a job's record; the database's message, which names its files, goes to the server log only | `application/problem+json` |
+| 503 / 507 | The database short of a resource (SQLSTATE class 53): 507 when out of disk space, 503 out of memory or connections; 503 too when the connection to it was lost or refused, or it is restarting (class 08, 57P01 to 57P03). On any request, writes and loads included, and on a job's record; the database's message, which names its files, goes to the server log only | `application/problem+json` |
 | 504 | Statement timeout, on reads and writes (`/nodes`, `/edges`, `:bulk`, `snapshot-import`); a console query past `GRAPHOS_CYPHER_TIMEOUT_S` (`{"detail": "..."}`) | `application/problem+json`, below |
 
 ```json

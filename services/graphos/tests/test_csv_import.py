@@ -11,6 +11,7 @@ import json
 from http import HTTPStatus
 from typing import Any
 
+import asyncpg
 import pytest
 from fastapi.testclient import TestClient
 
@@ -19,6 +20,7 @@ from graphos.api import csv_import, graph
 from graphos.app import create_app
 from graphos.bootstrap import TenantSpec
 from graphos.config import Settings
+from graphos.cypher import CypherError
 
 NODES = "/v1/acme/graph/nodes:csv"
 EDGES = "/v1/acme/graph/edges:csv"
@@ -178,3 +180,28 @@ def test_refuses_an_undeclared_pair_when_strict(client: TestClient, written: lis
     )
     assert resp.status_code == HTTPStatus.BAD_REQUEST
     assert written == []
+
+
+DISK_FULL = 'could not extend file "base/16384/2619": No space left on device'
+
+
+@pytest.mark.parametrize(("error", "status"), [
+    (CypherError(DISK_FULL, sqlstate="53100"), HTTPStatus.INSUFFICIENT_STORAGE),
+    (asyncpg.exceptions.DiskFullError(DISK_FULL), HTTPStatus.INSUFFICIENT_STORAGE),
+    (asyncpg.exceptions.OutOfMemoryError("out of memory"), HTTPStatus.SERVICE_UNAVAILABLE),
+    (CypherError("bad input", sqlstate="22P02"), HTTPStatus.BAD_REQUEST),
+])
+def test_a_write_the_database_refuses_for_want_of_space_is_507(
+    client: TestClient, written: list, monkeypatch: pytest.MonkeyPatch,
+    error: Exception, status: int,
+) -> None:
+    async def refused(*_args: object, **_kwargs: object) -> int:
+        raise error
+
+    monkeypatch.setattr(writes, "upsert_nodes", refused)
+    resp = client.post(NODES, params={"label": "Person"}, content="id,name\na,Ann\n", headers=CSV)
+    assert resp.status_code == status, resp.text
+    assert "base/" not in resp.text
+    if status != HTTPStatus.BAD_REQUEST:
+        assert resp.headers["content-type"].startswith("application/problem+json")
+        assert resp.json()["status"] == status

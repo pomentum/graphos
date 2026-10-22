@@ -1814,7 +1814,7 @@ and the 422 of a `strict` property schema (with `violations` and `total`).
 
 | Status | When |
 |---|---|
-| 400 | unregistered label or edge type on a write, an edge outside its type's declared label pairs with `strict_endpoints`, a write that sets or removes `graphos_*` or `community_id`, a console query the console refuses (a write clause, a function that is not Cypher's, a variable-length pattern) or AGE rejects, a database error on a write, bad `where` value or `cursor`, edge type without a rule, bad cache key |
+| 400 | unregistered label or edge type on a write, an edge outside its type's declared label pairs with `strict_endpoints`, a write that sets or removes `graphos_*` or `community_id`, a console query the console refuses (a write clause, a function that is not Cypher's, a variable-length pattern) or AGE rejects, a database error on a write (one short of disk, memory or connections is 507 or 503), bad `where` value or `cursor`, edge type without a rule, bad cache key |
 | 401 | missing or malformed `Authorization` header, unknown or expired token, or a failed sign-in |
 | 403 | no access to the tenant, a level below what the operation needs (`read` / `write` / `maintain` / `owner`), the endpoint needs admin, or a password that must be changed first |
 | 404 | tenant not registered; single sign-on not configured (`/v1/auth/oidc/*`); node (`GET`, `PATCH`, `POST …/properties`), edge (`GET`, `PATCH`), unregistered edge type in the path, or cache key not found; unknown tenant on `GET`/`DELETE /v1/tenants/{name}`; unknown search `index`, unknown label on `map/hubs`; a job the caller may not see; the Cypher console off, or an unknown saved query |
@@ -1828,6 +1828,6 @@ and the 422 of a `strict` property schema (with `violations` and `total`).
 | 499 | a console query cancelled by its caller |
 | 501 | Louvain extra not installed |
 | 502 | single sign-on: the identity provider could not be reached |
-| 503 | `/readyz` not ready; the database out of memory or connections, or at a configured limit (SQLSTATE class 53, `application/problem+json`; a job records it the same way) |
+| 503 | `/readyz` not ready; the database out of memory or connections, or at a configured limit (SQLSTATE class 53); the connection to the database lost or refused, or the database shutting down or restarting ("Database unavailable", SQLSTATE class 08 and 57P01 to 57P03): the statement did not complete, retry when `/readyz` answers again. `application/problem+json`; a job records it the same way |
 | 504 | statement timeout on a read or a write (`application/problem+json`); a console query stopped at `GRAPHOS_CYPHER_TIMEOUT_S` |
-| 507 | the database server is out of disk space (SQLSTATE 53100, `application/problem+json`); the statement that needed more was rolled back; a job records it the same way, so the web UI says so |
+| 507 | the database server is out of disk space (SQLSTATE 53100, `application/problem+json`), on a read, a write (bulk and CSV loads, snapshot import included) or a job; the statement that needed more was rolled back (rows of a bulk load flushed before it stay written); a job records it the same way, so the web UI says so. Freeing the space: [installation §8](installation.md#a-full-database-disk) |
