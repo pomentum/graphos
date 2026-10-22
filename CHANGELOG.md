@@ -4,6 +4,16 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Changed
+
+- **Reading an edge's communities in Cypher.** The schema summary's text (MCP `get_schema`, and
+  `GET /v1/{tenant}/schema/summary`) now says, when the tenant has communities, that an edge's
+  communities are its ends' `community_id`. The edge's own copies (`start_community_id`,
+  `end_community_id`) are table columns for `expand`'s community scope, which Cypher does not
+  see. The JSON form is unchanged. **Docs:** usage §5 (Cypher console: analysis results).
+
 ## 0.14.3 — 2026-10-22
 
 A full database disk is `507` on writes and loads too, not `400` with the database's message; a
