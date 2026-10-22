@@ -4,7 +4,11 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.14.3 — 2026-10-22
+
+A full database disk is `507` on writes and loads too, not `400` with the database's message; a
+database that restarts or is down is `503` "Database unavailable", not an internal error; the
+installation guide says what to do when the database disk fills up.
 
 ### Fixed
 
