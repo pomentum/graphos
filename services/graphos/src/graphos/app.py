@@ -402,14 +402,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.add_exception_handler(properties.Refused, _property_refusal)
 
-    async def _unhandled(request: Request, exc: Exception) -> Response:
-        # Runs for every exception no other handler took, and Starlette raises
-        # it again afterwards, so the server log keeps the traceback. A
-        # database short of disk, memory or connections answers as such
-        # (resources); everything else stays a plain 500.
-        found = resources.shortage(exc)
-        if found is None:
-            return PlainTextResponse("Internal Server Error", status_code=500)
+    def _short_of(request: Request, found: resources.Shortage) -> JSONResponse:
         log.error("database short of a resource path=%s sqlstate=%s", request.url.path,
                   found.sqlstate)
         return JSONResponse(
@@ -418,6 +411,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content={"type": "about:blank", "title": found.title, "status": found.status,
                      "detail": found.detail},
         )
+
+    async def _shortage(request: Request, exc: Exception) -> JSONResponse:
+        # A route that answers its own database errors found a shortage.
+        assert isinstance(exc, resources.ShortageError)
+        return _short_of(request, exc.shortage)
+
+    app.add_exception_handler(resources.ShortageError, _shortage)
+
+    async def _unhandled(request: Request, exc: Exception) -> Response:
+        # Runs for every exception no other handler took, and Starlette raises
+        # it again afterwards, so the server log keeps the traceback. A
+        # database short of disk, memory or connections answers as such
+        # (resources); everything else stays a plain 500.
+        found = resources.shortage(exc)
+        if found is None:
+            return PlainTextResponse("Internal Server Error", status_code=500)
+        return _short_of(request, found)
 
     app.add_exception_handler(Exception, _unhandled)
 

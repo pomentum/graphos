@@ -100,6 +100,23 @@ def test_a_database_error_is_400(
     assert resp.json()["detail"].startswith("cypher error:")
 
 
+def test_a_full_disk_is_507_without_the_databases_message(
+    client: TestClient, calls: list[list[tuple[str, str]]], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def full(*_args: object, **_kwargs: object) -> tuple[int, int]:
+        raise CypherError(
+            'could not extend file "base/16384/2619": No space left on device',
+            sqlstate="53100", query="DELETE <label> by ids",
+        )
+
+    monkeypatch.setattr(writes, "delete_nodes_by_ref", full)
+    resp = client.post(URL, json={"nodes": [{"label": "Doc", "id": "a"}]})
+    assert resp.status_code == HTTPStatus.INSUFFICIENT_STORAGE
+    assert resp.headers["content-type"].startswith("application/problem+json")
+    assert (resp.json()["status"], resp.json()["title"]) == (507, "Database out of disk space")
+    assert "base/" not in resp.text
+
+
 def test_a_lost_lock_conflict_is_503_with_retry_after(
     client: TestClient, calls: list[list[tuple[str, str]]], monkeypatch: pytest.MonkeyPatch,
 ) -> None:

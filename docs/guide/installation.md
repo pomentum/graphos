@@ -340,6 +340,34 @@ restore into a new `graphos` the same way, after dropping the old one).
 - **Checking.** `GET /v1/tenants` lists the tenants, and each tenant's
   `GET /v1/{tenant}/graph/stats` its node and edge counts, to compare with the source.
 
+### A full database disk
+
+**What happens.** The statement that needed more space fails and is rolled back, and graphos
+answers `507` "Database out of disk space" (a job records it the same way); rows a bulk load
+flushed before it stay written. Reads still answer. When PostgreSQL cannot write its
+write-ahead log either, it stops every connection and restarts by itself within seconds:
+graphos answers `503` "Database unavailable" meanwhile, and `/readyz` too. If the restart cannot
+write its log either, the database stays down ("could not write to file "pg_wal/…": No space
+left on device" and "shutting down due to startup process failure" in its log) until space is
+freed outside it.
+
+**Freeing space.**
+
+- **While the database runs:** delete a tenant you do not need with its data
+  (`DELETE /v1/tenants/{name}?drop_data=true`, after downloading it if it matters). Its tables
+  are dropped and their files removed at once. A `503` means the database was restarting: retry
+  when `/readyz` answers. Deleting nodes does not give space back to the disk: PostgreSQL reuses
+  it for later writes to the same tables.
+- **When it does not start, or that is not enough:** grow the volume (`graphos_data_pg18`), or
+  free other files on its file system, then start graphos-db again: it recovers by itself, with
+  nothing lost that was committed. **Never delete files in the data directory**, `pg_wal`
+  included: that destroys the database.
+
+**Room to keep.** Besides the data, the write-ahead log takes up to `max_wal_size` (2 GB in the
+release's compose), more during a long load or a community recompute, and a recompute rewrites
+the rows it changes. Keep at least that much free, and watch the volume's free space: graphos
+does not report it.
+
 ### Direct SQL readers
 
 Reports, notebooks or a DBA may read graphos's tables directly (they are plain AGE tables, see
