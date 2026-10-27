@@ -4,6 +4,19 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Fixed
+
+- **The schema summary (MCP `get_schema`) is about five times faster, and slow only once.** On a
+  tenant of about 250,000 nodes it took 80 s, longer than some MCP clients wait.
+  Each label's properties were read twice, counting distinct values by sorting all of them, one
+  label after another. They are now read once per label, grouped by property and value, with the
+  value lists built only for the properties that have 20 or fewer, and four labels at a time: 17 s
+  on the same tenant, with the same summary, byte for byte. After its five minutes the kept
+  summary is answered at once while a new one is built in the background, instead of every call
+  waiting for the rebuild; a schema change still drops it. **Docs:** usage §3 (schema summary).
+
 ## 0.14.4 — 2026-10-22
 
 The Cypher console's docs and the schema summary say how to read analysis results in Cypher,

@@ -20,8 +20,10 @@ The summary gives it, compactly, what the data really holds:
 Caps keep it short (40 labels, 25 properties a label, 60 label pairs, 20
 values a property, values cut at 80 characters); each list says how many
 there were, so a cut is visible.  Labels above 50,000 nodes are read on a
-sample, flagged ``estimated``.  It is kept per tenant for
-five minutes (:data:`TTL_S`) and dropped when the schema changes.
+sample, flagged ``estimated``; labels are read a few at a time
+(:data:`PARALLEL_LABELS`), each in one pass.  It is kept per tenant: fresh
+for five minutes (:data:`TTL_S`), then answered as it is while a new one is
+built in the background; a schema change drops it at once.
 ``format=text`` answers the compact text alone, for a prompt.
 """
 
@@ -29,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from typing import Annotated, Any, cast
 
@@ -55,6 +58,7 @@ from graphos.contracts.schema_summary import (
 )
 
 router = APIRouter(tags=["tenants"])
+log = logging.getLogger(__name__)
 
 MAX_LABELS = 40
 MAX_PROPERTIES = 25
@@ -63,12 +67,18 @@ MAX_VALUES = 20
 MAX_VALUE_CHARS = 80
 MAX_RENAMES = 20
 SAMPLE_ROWS = 50_000
-# How long a tenant's summary is kept; a schema change drops it at once.
+# Labels read at once: the largest one bounds a cold summary, and the pool keeps room
+# for other requests (graph_map reads its tables the same way).
+PARALLEL_LABELS = 4
+# How long a tenant's summary is fresh; after that the kept one is answered while a
+# new one is built. A schema change drops it at once.
 TTL_S = 300
 
 _cache: dict[str, tuple[float, str, SchemaSummaryResponse]] = {}
 # One rebuild per tenant at a time: a cold summary scans every label.
 _building: dict[str, asyncio.Lock] = {}
+# The background refresh in flight per tenant (also kept so it is not collected early).
+_refreshing: dict[str, asyncio.Task[None]] = {}
 
 
 async def _fingerprint(conn: asyncpg.Connection, tenant: str, spec: TenantSpec) -> str:
@@ -102,25 +112,26 @@ async def _label_properties(
         f'(SELECT properties::text::jsonb AS p FROM ONLY "{tenant}"."{label}"{sample}) s, '
         f"jsonb_each(s.p) AS e(k, v)"
     )
+    # One pass: the rows are grouped by key and value once, which gives each key's
+    # rows and distinct values and, for the keys with few (FILTER: only theirs are
+    # listed and sorted), their counts. Counting the distinct values by sorting
+    # them, then reading the rows again for the counts, took about three times as
+    # long. A string is shown as it is, any other value as its JSON text (5, true,
+    # null).
+    shown = "CASE WHEN jsonb_typeof(v) = 'string' THEN v #>> '{}' ELSE v::text END"
     stats = await conn.fetch(
-        f"SELECT e.k, count(*) AS records, count(DISTINCT e.v) AS n_distinct FROM {source} "
-        f"WHERE e.k <> 'id' GROUP BY e.k ORDER BY count(*) DESC, e.k;",
+        f"WITH g AS (SELECT e.k, e.v, count(*) AS n FROM {source} WHERE e.k <> 'id' "
+        f"GROUP BY e.k, e.v), "
+        f"c AS (SELECT k, v, n, count(*) OVER (PARTITION BY k) AS d FROM g) "
+        f"SELECT k, sum(n)::bigint AS records, max(d) AS n_distinct, "
+        f"(jsonb_agg(jsonb_build_array({shown}, jsonb_typeof(v), n) ORDER BY n DESC, {shown}) "
+        f"FILTER (WHERE d <= {MAX_VALUES}))::text AS vals "
+        f"FROM c GROUP BY k ORDER BY sum(n) DESC, k;",
     )
-    few = [
-        r["k"] for r in stats
-        if r["n_distinct"] <= MAX_VALUES and not reserved.is_reserved(r["k"])
-    ]
     values: dict[str, list[tuple[str, str, int]]] = {}
-    if few:
-        # A string as it is; any other value as its JSON text (5, true, null).
-        for r in await conn.fetch(
-            f"SELECT e.k, CASE WHEN jsonb_typeof(e.v) = 'string' THEN e.v #>> '{{}}' "
-            f"ELSE e.v::text END AS v, jsonb_typeof(e.v) AS kind, count(*) AS n "
-            f"FROM {source} WHERE e.k = ANY($1::text[]) "
-            f"GROUP BY e.k, e.v ORDER BY e.k, count(*) DESC, 2;",
-            few,
-        ):
-            values.setdefault(r["k"], []).append((r["v"], r["kind"], round(r["n"] * scale)))
+    for r in stats:
+        if r["vals"] is not None and not reserved.is_reserved(r["k"]):
+            values[r["k"]] = [(v, kind, round(n * scale)) for v, kind, n in json.loads(r["vals"])]
     return [(r["k"], round(r["records"] * scale), r["n_distinct"]) for r in stats], values, scale
 
 
@@ -234,24 +245,56 @@ async def build_summary(
     async with request.app.state.pool.acquire() as conn:
         key = await _fingerprint(conn, tenant, spec)
 
-    def fresh() -> SchemaSummaryResponse | None:
+    def kept(*, stale_ok: bool) -> SchemaSummaryResponse | None:
         hit = _cache.get(tenant)
-        if hit is None or hit[1] != key or time.monotonic() - hit[0] >= TTL_S:
+        if hit is None or hit[1] != key:
+            return None
+        if not stale_ok and time.monotonic() - hit[0] >= TTL_S:
             return None
         return hit[2].model_copy(update={
             "cached": True, "elapsed_ms": int((time.perf_counter() - started) * 1000),
         })
 
-    cached = fresh()
+    cached = kept(stale_ok=False)
     if cached is not None:
         return cached
-    async with _building.setdefault(tenant, asyncio.Lock()):
-        cached = fresh()        # built by another request while this one waited
+    lock = _building.setdefault(tenant, asyncio.Lock())
+    stale = kept(stale_ok=True)
+    if stale is not None:
+        # Past its time but for the same schema: answered at once, a new one built behind.
+        running = _refreshing.get(tenant)
+        if running is None or running.done():
+            _refresh(request, tenant, principal, spec, key, lock)
+        return stale
+    async with lock:
+        cached = kept(stale_ok=False)        # built by another request while this one waited
         if cached is not None:
             return cached
         summary = await _build(request, tenant, principal, spec, started)
         _cache[tenant] = (time.monotonic(), key, summary)
         return summary
+
+
+def _refresh(
+    request: Request, tenant: str, principal: Any, spec: TenantSpec, key: str,
+    lock: asyncio.Lock,
+) -> None:
+    """Builds the tenant's summary again in the background, unless one is built."""
+
+    async def rebuild() -> None:
+        async with lock:
+            hit = _cache.get(tenant)
+            if hit is not None and hit[1] == key and time.monotonic() - hit[0] < TTL_S:
+                return
+            try:
+                summary = await _build(request, tenant, principal, spec, time.perf_counter())
+            except Exception:  # noqa: BLE001 -- the kept summary stays; the next call tries again
+                log.warning("schema summary refresh failed", extra={"tenant": tenant},
+                            exc_info=True)
+                return
+            _cache[tenant] = (time.monotonic(), key, summary)
+
+    _refreshing[tenant] = asyncio.create_task(rebuild())
 
 
 async def _build(
@@ -263,9 +306,19 @@ async def _build(
     computed: set[str] = set()
     labels: list[SummaryLabel] = []
     estimated = the_map.estimated
-    async with request.app.state.pool.acquire() as conn:
-        for entry in the_map.labels[:MAX_LABELS]:
-            stats, values, scale = await _label_properties(conn, tenant, entry.label, entry.count)
+    pool = request.app.state.pool
+    entries = the_map.labels[:MAX_LABELS]
+    gate = asyncio.Semaphore(PARALLEL_LABELS)
+
+    async def read(label: str, count: int) -> tuple[
+        list[tuple[str, int, int]], dict[str, list[tuple[str, str, int]]], float,
+    ]:
+        async with gate, pool.acquire() as conn:
+            return await _label_properties(conn, tenant, label, count)
+
+    read_labels = await asyncio.gather(*(read(e.label, e.count) for e in entries))
+    async with pool.acquire() as conn:
+        for entry, (stats, values, scale) in zip(entries, read_labels, strict=True):
             estimated = estimated or scale != 1.0
             declared = policies.for_vertex(entry.label).properties
             props: list[SummaryProperty] = []
@@ -336,8 +389,9 @@ async def _build(
         "graphos computes itself, the deprecated names with what replaces them and the "
         "latest renames. Compact on purpose (about 1,000 tokens on a mid-sized "
         "tenant): capped lists say how many there were. `text` is the same as compact text; "
-        "`format=text` answers it alone (`text/plain`). Kept per tenant for "
-        "five minutes and dropped when the schema changes."
+        "`format=text` answers it alone (`text/plain`). Kept per tenant: fresh for "
+        "five minutes, then answered as it is (`cached`) while a new one is built; dropped "
+        "when the schema changes."
     ),
     responses={200: {
         "description": "The summary, as JSON or (`format=text`) as text.",

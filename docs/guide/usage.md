@@ -510,7 +510,10 @@ parameters, the `graphos_*` names graphos computes itself, the deprecated names 
 them (`deprecated`) and the latest 20 renames (`renames`, newest first). Lists are capped (40 labels, 25
 properties a label, 60 label pairs) and say how many there were; labels above 50,000 nodes are read
 on a sample (`estimated`). `text` holds the same as compact text, and `?format=text` answers it
-alone. It is kept per tenant for five minutes and dropped when the schema changes.
+alone. Building it reads every label's properties (labels a few at a time), so the first call on a
+large tenant takes seconds; it is then kept per tenant: fresh for five minutes, after which the
+kept one is answered at once (`cached: true`) while a new one is built in the background. A schema
+change drops it.
 
 ```text
 graphos tenant acme: 2 labels with nodes, 1 label pairs with edges.
