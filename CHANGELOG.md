@@ -4,7 +4,10 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.14.5 — 2026-10-27
+
+The schema summary, which agents read through MCP `get_schema`, is about five times faster, and
+slow only the first time.
 
 ### Fixed
 
