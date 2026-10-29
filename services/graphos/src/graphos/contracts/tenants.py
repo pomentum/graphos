@@ -870,6 +870,17 @@ class TenantSpecBody(BaseModel):
             "Omitted: unchanged."
         ),
     )
+    schema_manager: str | None = Field(
+        default=None,
+        pattern=r"^user:\S+$",
+        description=(
+            "The tenant's schema manager (ADR-0013): a user or service account, "
+            "`user:<name>`, whose registrations alone may then change the tenant's structure "
+            "(others may still change `display`); `null` releases it. Omitted: unchanged. "
+            "Setting, transferring or releasing it needs `owner` on the tenant (the creator of "
+            "a new tenant is its owner)."
+        ),
+    )
 
     @field_validator("edge_endpoints")
     @classmethod
@@ -1044,6 +1055,13 @@ class TenantInfo(BaseModel):
         "louvain",
         description="The algorithm a community recompute uses when its request names none.",
     )
+    schema_manager: str | None = Field(
+        None,
+        description=(
+            "The tenant's schema manager (`user:<name>`), whose registrations alone may change "
+            "its structure; null when it has none (ADR-0013)."
+        ),
+    )
 
 
 class MeResponse(BaseModel):
@@ -1133,6 +1151,13 @@ class TenantSchema(BaseModel):
     )
     renames: list[SchemaRename] = Field(
         default_factory=list, description="Its renames, oldest first.",
+    )
+    schema_manager: str | None = Field(
+        None,
+        description=(
+            "The tenant's schema manager (`user:<name>`): only its registrations may change the "
+            "structure; others may change `display`. Null when it has none (ADR-0013)."
+        ),
     )
 
 
@@ -1293,6 +1318,17 @@ class RegisterDryRunResponse(BaseModel):
             "The changes that refuse writes or calls that worked before, or change what a read "
             "returns: removed labels, indexes, rules or pairs, and property rules that refuse "
             "more where the mode is strict. Additions and relaxations are never listed."
+        ),
+    )
+    drift: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "How the stored schema differs from the one sent (ADR-0013), for a program that "
+            "declares its whole schema: `not_declared` (what the tenant has that the body does "
+            "not mention, per part), `overwrites` (entries the body would replace with a "
+            "different value) and `recreates` (labels, edge types and pairs it would create "
+            "again after they were dropped or removed: kind, name, when, by whom). Empty parts "
+            "are left out; null for a new tenant."
         ),
     )
     status: str = Field("dry_run", description="Always `dry_run`: nothing was applied.")

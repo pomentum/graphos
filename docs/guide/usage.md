@@ -630,6 +630,41 @@ curl -s -X POST "$G/v1/tenants" -H "$AUTH" -H "If-Match: $ETAG" -H "Content-Type
 The Python client returns it as `schema().etag` (and `get_tenant().etag`) and takes `if_match=` on
 `register_tenant`, `import_schema`, the renames, `drop_label` and `remove_edge_endpoint`.
 
+### A schema manager, and the drift report
+
+A program that declares a tenant's schema from its code and registers it on every start, while
+people edit the same schema in the web UI, would undo their changes, or fail on them, without
+knowing ([ADR-0013](adrs/ADR-0013-schema-manager-and-drift-reports.md)). Two things prevent it:
+
+**A schema manager.** A tenant may name one user or service account as its schema manager, in a
+registration field like `strict_endpoints`: `"schema_manager": "user:loader"` sets or transfers
+it, `null` releases it, leaving it out keeps it. Setting it needs `owner` on the tenant (the
+creator of a new tenant is its owner, so a program names itself in its first registration).
+`GET /v1/{tenant}/schema` and `GET /v1/tenants/{name}` show it. Then:
+
+- only the manager's schema writes may change the tenant's structure: labels, edge types, pairs,
+  property definitions, deprecations, indexes, rules, `meta`, `strict_endpoints`, the property
+  mode and the community algorithm. Anyone else's registration, rename, drop or pair removal that
+  would change any of it answers **409** `{"detail", "code": "schema_managed", "schema_manager"}`,
+  writing nothing. Declaring again what is stored is not a change, so it is not refused;
+- styles (`display`) stay everyone's with `maintain`: the manager's own registrations add only
+  the styles that do not exist yet and never overwrite or remove those people set;
+- being the manager grants nothing: each write still needs its level;
+- the web UI shows the structure read-only, names the manager, and lets an owner release it.
+
+**The drift report.** A registration's dry run (`?dry_run=true`) answers `drift`: what the tenant
+has that the body does not declare (`not_declared`), the entries the body would replace with a
+different value (`overwrites`), and the labels, edge types and pairs it would create again after
+they were dropped or removed (`recreates`, with when and by whom). Nothing is refused for drift:
+what a registration declares wins, as before, and the report says what that will change. The
+Python client's `ensure_tenant(..., on_drift="warn")` runs the dry run, logs each item, and then
+registers (`"fail"` stops instead when something would be overwritten or created again).
+
+```bash
+curl -s -X POST "$G/v1/tenants?dry_run=true" -H "$AUTH" -H "Content-Type: application/json" \
+  -d '{"name": "acme", "vertex_labels": ["Doc", "Team"], "schema_manager": "user:loader"}' | jq .drift
+```
+
 ### Changing a schema: deprecate, rename, drop
 
 Registration only adds; these three change or remove names, so consumers can follow.
@@ -1858,7 +1893,7 @@ and the 422 of a `strict` property schema (with `violations` and `total`).
 | 401 | missing or malformed `Authorization` header, unknown or expired token, or a failed sign-in |
 | 403 | no access to the tenant, a level below what the operation needs (`read` / `write` / `maintain` / `owner`), the endpoint needs admin, or a password that must be changed first |
 | 404 | tenant not registered; single sign-on not configured (`/v1/auth/oidc/*`); node (`GET`, `PATCH`, `POST …/properties`), edge (`GET`, `PATCH`), unregistered edge type in the path, or cache key not found; unknown tenant on `GET`/`DELETE /v1/tenants/{name}`; unknown search `index`, unknown label on `map/hubs`; a job the caller may not see; the Cypher console off, or an unknown saved query |
-| 409 | removing the last admin; a recompute or metrics run while one of either is running or queued for the tenant; cancelling a finished job, or a direct call whose job was cancelled; an id or edge that matches in several labels (pass `label` / `src_label` / `dst_label`); a write that would give two nodes the values of a unique property index (`application/problem+json`); `snapshot-import?mode=empty` into a tenant with nodes; registering or restoring a name that is kept unregistered for someone else, or is an orphan; `drop_data` while a job or a long query holds the tenant |
+| 409 | removing the last admin; a recompute or metrics run while one of either is running or queued for the tenant; cancelling a finished job, or a direct call whose job was cancelled; an id or edge that matches in several labels (pass `label` / `src_label` / `dst_label`); a write that would give two nodes the values of a unique property index (`application/problem+json`); `snapshot-import?mode=empty` into a tenant with nodes; registering or restoring a name that is kept unregistered for someone else, or is an orphan; `drop_data` while a job or a long query holds the tenant; a schema write that would change the structure of a tenant whose schema manager is someone else (`code: schema_managed`) |
 | 410 | a change-feed cursor whose records were pruned (§10) |
 | 412 | `If-Match` did not match: the node or edge changed (or is gone) since it was read; or, on a schema write, the tenant's schema changed since it was read (*Schema versions and `If-Match`*) |
 | 413 | `snapshot-import` over 50M rows, or a body past `GRAPHOS_IMPORT_MAX_BYTES`; a CSV file past `GRAPHOS_CSV_MAX_BYTES` |

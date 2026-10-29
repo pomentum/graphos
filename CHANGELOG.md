@@ -4,6 +4,39 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+A program that declares a tenant's schema from its code can own it: people still change its
+styles in the web UI but not its structure, and the program's start reports what people changed
+instead of undoing it unseen (ADR-0013).
+
+### Added
+
+- **A tenant's schema manager.** A registration may name a user or service account as the
+  tenant's schema manager, `"schema_manager": "user:<name>"` (`null` releases it, leaving it out
+  keeps it; setting it needs `owner`, and the creator of a new tenant is its owner). Only the
+  manager's schema writes may then change the structure: anyone else's registration, rename,
+  label drop or pair removal that would change labels, edge types, pairs, property definitions,
+  deprecations, indexes, rules, `meta`, `strict_endpoints`, the property mode or the community
+  algorithm answers **409** `{"detail", "code": "schema_managed", "schema_manager"}` and writes
+  nothing; declaring again what is stored is not a change. Styles (`display`) stay everyone's:
+  the manager's registrations add only the styles that do not exist yet. `GET /v1/{tenant}/schema`
+  and `GET /v1/tenants/{name}` show `schema_manager`. No new routes. A tenant that never had a
+  manager keeps its schema `ETag` across the upgrade.
+- **A drift report in the registration's dry run.** `drift` lists what the tenant has that the
+  body does not declare (`not_declared`), the entries the body would replace with a different
+  value (`overwrites`), and the labels, edge types and pairs it would create again after they
+  were dropped or removed (`recreates`, with when and by whom; drops and pair removals are now
+  recorded). Nothing is refused for drift: what a registration declares still wins.
+- **Python client:** `schema_manager=` and `manage_schema=True` on `register_tenant` and
+  `import_schema`, `ensure_tenant(..., on_drift="warn" | "fail" | "ignore")` (a dry run whose drift
+  is logged, or raised as `SchemaDriftError`, before registering), `schema_manager` on
+  `schema()` and `get_tenant()`; `GraphosPool` registers through `ensure_tenant`.
+- **Web UI:** a managed tenant's schema view names its manager and keeps the structure controls
+  disabled for everyone else, styles excepted; an owner can release the manager there.
+  **Docs:** usage §3 (A schema manager, and the drift report), §12; concept §2.2; features;
+  ADR-0013.
+
 ## 0.14.6 — 2026-10-29
 
 graphos-api can set its database up itself at start, so a deployment no longer has to mount the

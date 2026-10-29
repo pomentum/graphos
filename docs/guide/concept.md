@@ -231,6 +231,20 @@ names. A graph created by graphos starts complete; a graph that predates
 the record is read once, in the background at startup, or when a lookup
 first needs it.
 
+A tenant may name a **schema manager** (ADR-0013, `schema_drift.py`): a user
+or service account, set by an owner through the registration's
+`schema_manager` field and kept in `graphos_meta.tenant_settings`. Its
+registrations alone may then change the structure; anyone else's schema write
+that would change more than `display` answers 409 `schema_managed`, judged on
+what the merge would change (`schema_changes.diff`), so declaring again what
+is stored passes. The manager's own registrations add only the styles that do
+not exist yet, so styles people set are kept. A registration's dry run also
+answers a drift report: what the tenant has that the body does not declare,
+what it would overwrite, and the labels, edge types and pairs it would create
+again after a drop or removal (recorded in `graphos_meta.schema_removals`).
+Nothing is refused for drift: the declared schema wins, and the report says
+what that changes.
+
 On startup graphos reloads every stored spec and re-runs `bootstrap_tenant`
 for each, so consumers need not re-register after a restart. A tenant whose
 bootstrap fails at startup is logged and skipped; the service still starts. Bootstrap, the

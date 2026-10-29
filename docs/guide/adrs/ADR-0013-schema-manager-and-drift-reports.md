@@ -1,7 +1,9 @@
 # ADR-0013: A tenant's schema manager, and drift reports
 
 - **Status:** Proposed (2026-10-29); revised (2026-10-29): drops and pair removals are reported in
-  the drift report instead of refused (tombstones with 409 dropped), and the precedents recorded
+  the drift report instead of refused (tombstones with 409 dropped), and the precedents recorded;
+  built (2026-10-29) without new routes (the manager is a registration field). Accepted after the
+  trial in *Acceptance*.
 - **Scope:** tenant schema writes (`POST /v1/tenants`, `schema:rename`, label drops, pair
   removal), the Python client, the web UI's schema editor
 - **Related:** concept.md §2.3, usage.md (registration, dry run, *Schema versions and `If-Match`*),
@@ -43,15 +45,19 @@ Three parts, each usable alone.
 A tenant may name one **schema manager**: a user or service account, as grants name them
 (`user:loader`).
 
-- **Set** by an owner of the tenant: at registration with `"manage_schema": true`, which makes
-  the caller the manager (a program creating its own tenant is its owner), or with
-  `PUT /v1/tenants/{name}/schema-manager` `{"subject": "user:loader"}`. **Released** by an owner
-  with `DELETE /v1/tenants/{name}/schema-manager`. Both audited, both a schema change record.
+- **Set, transferred or released** by an owner of the tenant through the registration itself, a
+  field like `strict_endpoints`: `"schema_manager": "user:loader"` sets or transfers it, `null`
+  releases it, and leaving it out leaves it as it is. A program creating its own tenant is its
+  owner, so it names itself in its first registration. No route of its own: setting the manager
+  is a schema write like the others (audited, a schema change record, `If-Match`).
 - **Stored** apart from the spec, in `graphos_meta.tenant_settings` (`schema_manager`,
   `schema_manager_since`), for the reason the other settings are there: a server that predates
-  it rewrites the spec on re-registration and must not drop it.
-- **Shown** in `GET /v1/tenants/{name}` (`schema_manager`) and the exported schema document's
-  header, and in the schema summary agents read.
+  it rewrites the spec on re-registration and must not drop it. It joins the schema version
+  only when set, so a tenant that never had a manager keeps its `ETag` across the upgrade. Unregistering a tenant forgets
+  its manager, as it forgets the tenant's other settings.
+- **Shown** in `GET /v1/tenants/{name}` and `GET /v1/{tenant}/schema` (`schema_manager`). Not in
+  the exported schema document: importing it into another tenant must not make anyone its
+  manager.
 - **On a managed tenant, the structure is the manager's.** Anyone else's schema write that
   would change anything but `display` is refused with 409, `code: schema_managed`, naming the
   manager: registrations (judged on the merged result, so re-sending what is stored is not a
@@ -65,7 +71,7 @@ A tenant may name one **schema manager**: a user or service account, as grants n
 - **The UI** shows a managed tenant's structure read-only, with a banner naming the manager and
   saying where changes are made; style controls stay. Owners see *Release* (its confirmation
   says the program's next registration then merges as on any unmanaged tenant, and may overwrite
-  what people change) and *Transfer*.
+  what people change). Transferring is the registration field, for an owner's program or script.
 - An owner or admin has no silent bypass: they release the tenant (audited) and then edit.
 
 ### 2. A drift report
@@ -75,15 +81,19 @@ A tenant may name one **schema manager**: a user or service account, as grants n
     pairs, and the `display`, `property_schema`, `deprecated` entries, search indexes);
   - `overwrites`: entries the body would replace with a different value (part and name);
   - `recreates`: labels, edge types and pairs the body declares that were dropped or removed,
-    with when and by whom (part 3);
-  - `refused`: names the body uses that were renamed, with where they went (ADR-0009).
+    with when and by whom (part 3).
 
-  It is meaningful for a body that declares a whole schema, which is what a program sends.
-- **Client.** `GraphosClient.ensure_tenant(spec, on_drift="warn" | "fail" | "ignore")` runs the
-  dry run, logs the drift (`graphos_client.drift`, one line per item), raises
-  `SchemaDriftError` on `fail` or on a refusal, then registers. With `"warn"` a program learns
-  at start what people changed instead of undoing it unseen or failing on a bare 409.
-  `GraphosPool` uses it with `"warn"`. `register_tenant` is unchanged.
+  A body naming a renamed name is refused as before (409, ADR-0009), in the dry run too, so it
+  needs no list of its own. The report is meaningful for a body that declares a whole schema,
+  which is what a program sends.
+- **Client.** `GraphosClient.ensure_tenant(..., on_drift="warn" | "fail" | "ignore")`, with
+  `register_tenant`'s keywords, runs the dry run, logs the drift (`graphos_client.drift`, one
+  line per item), raises `SchemaDriftError` with `"fail"` when something would be overwritten or
+  created again, then registers. A refusal (409: a renamed name, or `schema_managed`) is the
+  client's usual error, which now carries the body's `code` and `schema_manager`. With `"warn"`
+  a program learns at start what people changed instead of undoing it unseen. `GraphosPool`
+  uses it with `"warn"`. `register_tenant` keeps its behaviour and gains `schema_manager=` and
+  `manage_schema=True` (the caller's own `user:<name>`).
 
 ### 3. Drops and pair removals: recorded and reported, not refused
 
@@ -99,8 +109,9 @@ A tenant may name one **schema manager**: a user or service account, as grants n
 - Renames keep ADR-0009's refusal (409): a renamed label's rows live on under the new name, and
   creating the old name again would split one label's data across two tables. A drop has no
   rows to split.
-- `GET /v1/tenants/{name}/removals` lists the records; they are kept with the change feed's
-  retention rules and deleted with the tenant.
+- The records are read only by the dry run's drift report (the change feed already shows each
+  drop); a record goes when its item is registered again, and all of them with the tenant's
+  data.
 
 ## Decision options
 
@@ -152,15 +163,16 @@ write-ups, not their official documentation):
   information. No registration that works today is refused by this ADR.
 - A rolling upgrade or a rollback runs servers that do not know the manager: while they serve,
   edits are not refused. Documented; the state is kept.
-- Contracts: `TenantInfo.schema_manager`, the registration's `manage_schema`, the dry run's
-  `drift`, the `schema-manager` and `removals` endpoints, the code `schema_managed`. The Python
-  client mirrors them (`ensure_tenant`, `SchemaDriftError`, the manager methods); the UI's schema
-  editor, Name changes and Access views change.
-- A program such as one that registers its schema on every start adopts it by sending
-  `manage_schema: true` (once its service account owns the tenant) and calling `ensure_tenant`
-  instead of `register_tenant`.
-- Docs: usage (registration, dry run, the new endpoints), concept §2.3, features, the UI's
-  screenshots of the schema editor.
+- Contracts, no new routes: the registration's `schema_manager` field, `schema_manager` in
+  `GET /v1/tenants/{name}` and `GET /v1/{tenant}/schema`, the dry run's `drift`, and the 409
+  `code: schema_managed`. The Python client mirrors them (`schema_manager=` and
+  `manage_schema=True` on its registrations, `ensure_tenant`, `SchemaDriftError`); the UI's
+  schema editor shows the banner and keeps structure controls disabled for others.
+- A program that registers its schema on every start adopts it by naming itself manager in a
+  registration (its service account owns the tenant) and calling `ensure_tenant` instead of
+  `register_tenant`.
+- Docs: usage (registration, the dry run's drift, the schema manager), concept §2.3, features;
+  the UI's screenshots of the schema editor later.
 
 ## Open questions
 

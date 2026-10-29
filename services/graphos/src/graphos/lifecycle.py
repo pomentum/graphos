@@ -158,6 +158,7 @@ _TENANT_ROWS = (
     "DELETE FROM graphos_meta.unregistered_tenants WHERE name = $1;",
     "DELETE FROM graphos_meta.edge_endpoints WHERE tenant = $1;",
     "DELETE FROM graphos_meta.tenant_settings WHERE tenant = $1;",
+    "DELETE FROM graphos_meta.schema_removals WHERE tenant = $1;",
     "DELETE FROM graphos_meta.cache WHERE tenant = $1;",
     "DELETE FROM graphos_meta.node_properties WHERE tenant = $1;",
     "DELETE FROM graphos_meta.node_properties_complete WHERE tenant = $1;",

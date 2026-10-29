@@ -162,6 +162,7 @@ async def tenant_schema(
         property_schema=PropertySchemaSpec.model_validate(spec.property_schema),
         deprecated=DeprecatedSpec.model_validate(spec.deprecated),
         renames=[SchemaRename.model_validate({"status": "done", **r}) for r in spec.renames],
+        schema_manager=spec.schema_manager,
     )
 
 

@@ -233,6 +233,24 @@ CREATE TABLE IF NOT EXISTS graphos_meta.tenant_settings (
     strict_endpoints  boolean NOT NULL DEFAULT false,
     updated_at        timestamptz NOT NULL DEFAULT now()
 );
+-- The tenant's schema manager (ADR-0013, ``graphos.schema_drift``): the one
+-- subject whose registrations may change its structure; NULL: none.
+ALTER TABLE graphos_meta.tenant_settings ADD COLUMN IF NOT EXISTS schema_manager text;
+ALTER TABLE graphos_meta.tenant_settings ADD COLUMN IF NOT EXISTS schema_manager_since timestamptz;
+
+-- Labels, edge types and declared pairs dropped or removed (ADR-0013): a
+-- registration that declares one again creates it again, and its dry run's
+-- drift report says so.  A row goes when the item is registered again.
+CREATE TABLE IF NOT EXISTS graphos_meta.schema_removals (
+    tenant      text NOT NULL,
+    kind        text NOT NULL CHECK (kind IN ('vertex_label', 'edge_type', 'edge_endpoint')),
+    name        text NOT NULL,
+    src_label   text NOT NULL DEFAULT '',
+    dst_label   text NOT NULL DEFAULT '',
+    removed_at  timestamptz NOT NULL DEFAULT now(),
+    removed_by  text,
+    PRIMARY KEY (tenant, kind, name, src_label, dst_label)
+);
 
 -- Schema-agnostic K/V cache.  Per-tenant key namespace; value is
 -- arbitrary JSON.  ``expires_at`` is the absolute deadline (TTL is

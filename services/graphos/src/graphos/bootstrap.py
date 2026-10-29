@@ -115,6 +115,11 @@ class TenantSpec:
     # (ADR-0011): "louvain" or "leiden". Always set once stored ("louvain" by
     # default); ``None`` on an incoming spec: leave as stored.
     community_algorithm: str | None = None
+    # The subject (``user:<name>``) whose registrations alone may change the
+    # structure (ADR-0013, ``graphos.schema_drift``); ``None``: anyone with
+    # ``maintain``.  Stored in ``graphos_meta.tenant_settings``, set apart from
+    # registrations (``set_schema_manager``): never read from an incoming spec.
+    schema_manager: str | None = None
 
 
 DEFAULT_COMMUNITY_ALGORITHM = "louvain"
@@ -132,7 +137,7 @@ _NEW_SPEC_SQL = (
 )
 
 # Spec fields stored in their own tables rather than in ``tenants.spec``.
-_KEPT_APART = ("edge_endpoints", "strict_endpoints")
+_KEPT_APART = ("edge_endpoints", "strict_endpoints", "schema_manager")
 
 
 # ── In-process registry ─────────────────────────────────────────────────────
@@ -946,8 +951,13 @@ async def _persist_endpoints(
 
 async def remove_edge_endpoint(
     pool: asyncpg.Pool, tenant: str, edge_type: str, src_label: str, dst_label: str,
+    *, by: str | None = None,
 ) -> bool:
-    """Remove one declared pair.  True if it was declared.  Data is not touched."""
+    """Remove one declared pair.  True if it was declared.  Data is not touched.
+
+    The removal is recorded (``record_removal``), for the drift report of a
+    later registration that declares the pair again.
+    """
     async with pool.acquire() as conn, conn.transaction():
         result: str = await conn.execute(
             """
@@ -956,8 +966,91 @@ async def remove_edge_endpoint(
             """,
             tenant, edge_type, src_label, dst_label,
         )
+        if result == "DELETE 1":
+            await record_removal(conn, tenant, "edge_endpoint", edge_type, src_label, dst_label,
+                                 by=by)
         await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, tenant)
     return result == "DELETE 1"
+
+
+async def record_removal(
+    conn: asyncpg.Connection, tenant: str, kind: str, name: str,
+    src_label: str = "", dst_label: str = "", *, by: str | None,
+) -> None:
+    """Record that a label, edge type or declared pair was dropped or removed
+    (ADR-0013): ``kind`` is ``vertex_label``, ``edge_type`` or ``edge_endpoint``."""
+    await conn.execute(
+        """
+        INSERT INTO graphos_meta.schema_removals
+            (tenant, kind, name, src_label, dst_label, removed_by)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (tenant, kind, name, src_label, dst_label)
+        DO UPDATE SET removed_at = now(), removed_by = EXCLUDED.removed_by;
+        """,
+        tenant, kind, name, src_label, dst_label, by,
+    )
+
+
+async def load_removals(pool: asyncpg.Pool, tenant: str) -> list[dict[str, Any]]:
+    """The tenant's recorded removals, oldest first."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT kind, name, src_label, dst_label, removed_at, removed_by
+            FROM graphos_meta.schema_removals WHERE tenant = $1 ORDER BY removed_at;
+            """,
+            tenant,
+        )
+    return [dict(r) for r in rows]
+
+
+async def forget_removals(
+    pool: asyncpg.Pool, tenant: str, spec: TenantSpec,
+) -> None:
+    """Forget the removals ``spec`` (a tenant's stored spec) has registered again."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            DELETE FROM graphos_meta.schema_removals r
+            WHERE r.tenant = $1 AND (
+                   (r.kind = 'vertex_label' AND r.name = ANY($2::text[]))
+                OR (r.kind = 'edge_type' AND r.name = ANY($3::text[]))
+                OR (r.kind = 'edge_endpoint' AND EXISTS (
+                        SELECT 1 FROM graphos_meta.edge_endpoints e
+                        WHERE e.tenant = r.tenant AND e.edge_type = r.name
+                          AND e.src_label = r.src_label AND e.dst_label = r.dst_label)));
+            """,
+            tenant, list(spec.vertex_labels), list(spec.edge_labels),
+        )
+
+
+async def set_schema_manager(
+    pool: asyncpg.Pool, tenant: str, subject: str | None,
+) -> str | None:
+    """Set (a subject) or release (``None``) the tenant's schema manager; the one before."""
+    async with pool.acquire() as conn, conn.transaction():
+        before: str | None = await conn.fetchval(
+            "SELECT schema_manager FROM graphos_meta.tenant_settings WHERE tenant = $1 "
+            "FOR UPDATE;",
+            tenant,
+        )
+        await conn.execute(
+            """
+            INSERT INTO graphos_meta.tenant_settings (tenant, schema_manager, schema_manager_since)
+            VALUES ($1, $2, CASE WHEN $2::text IS NULL THEN NULL ELSE now() END)
+            ON CONFLICT (tenant) DO UPDATE
+            SET schema_manager = EXCLUDED.schema_manager,
+                schema_manager_since = CASE
+                    WHEN graphos_meta.tenant_settings.schema_manager
+                         IS NOT DISTINCT FROM EXCLUDED.schema_manager
+                    THEN graphos_meta.tenant_settings.schema_manager_since
+                    ELSE EXCLUDED.schema_manager_since END,
+                updated_at = now();
+            """,
+            tenant, subject,
+        )
+        await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, tenant)
+    return before
 
 
 # The by-entry merges of ``persist_spec`` (parameters $4-$9: the removed entries).
@@ -1136,8 +1229,12 @@ SELECT t.name,
        t.spec::text AS spec,
        COALESCE(e.pairs, '[]') AS endpoints,
        COALESCE(s.strict_endpoints, false) AS strict_endpoints,
+       s.schema_manager,
+       -- The manager only when set, so a tenant that never had one keeps
+       -- the version (and ETag) it had before managers existed.
        md5(t.spec::text || '|' || COALESCE(e.pairs, '')
-           || '|' || COALESCE(s.strict_endpoints::text, '')) AS version
+           || '|' || COALESCE(s.strict_endpoints::text, '')
+           || COALESCE('|' || s.schema_manager, '')) AS version
 FROM graphos_meta.tenants t
 LEFT JOIN LATERAL (
     SELECT jsonb_agg(jsonb_build_array(edge_type, src_label, dst_label)
@@ -1155,7 +1252,11 @@ def spec_from_row(row: Mapping[str, Any]) -> TenantSpec:
     endpoints = tuple(
         (str(t), str(s), str(d)) for t, s, d in json.loads(row["endpoints"] or "[]")
     )
-    return replace(spec, edge_endpoints=endpoints, strict_endpoints=bool(row["strict_endpoints"]))
+    return replace(
+        spec, edge_endpoints=endpoints, strict_endpoints=bool(row["strict_endpoints"]),
+        # Not in every row read through here (an unregistered tenant's).
+        schema_manager=row.get("schema_manager"),
+    )
 
 
 async def _convert_legacy_specs(
