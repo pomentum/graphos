@@ -1,12 +1,13 @@
 import { Center, Loader, MantineProvider, useMantineColorScheme } from "@mantine/core";
-import { Notifications, notifications } from "@mantine/notifications";
-import { MutationCache, QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
+import { Notifications } from "@mantine/notifications";
+import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { addressFor, tenantBase } from "./session/tenantPath";
 import { ApiError } from "./api/http";
 import { AppLayout } from "./components/AppLayout";
 import { ActivityProvider } from "./data/ActivityProvider";
+import { createQueryClient } from "./data/queryClient";
 import { WorkspaceProvider } from "./graph/WorkspaceProvider";
 import { SessionProvider, useSessionContext } from "./session/SessionProvider";
 import { memoryColorSchemeManager } from "./theme/colorScheme";
@@ -21,7 +22,6 @@ import { ExploreView } from "./views/explore/ExploreView";
 import { OverviewView } from "./views/overview/OverviewView";
 import { PathView } from "./views/path/PathView";
 import { QueryView } from "./views/query/QueryView";
-import { t } from "./i18n";
 import { VIEWS } from "./views/registry";
 
 /** The component behind each view of the registry. */
@@ -35,35 +35,6 @@ const SCREENS: Record<string, ComponentType> = {
   access: AccessView,
   query: QueryView,
 };
-
-/** Client errors (4xx) are answers, not outages: they are not retried. */
-function createQueryClient(): QueryClient {
-  return new QueryClient({
-    // A write that fails always says so, whichever screen started it.
-    mutationCache: new MutationCache({
-      onSuccess: (_data, _variables, _context, mutation) => {
-        // `meta.success` and `meta.errorTitle` are i18n keys (see data/queries).
-        if (mutation.meta?.success) notifications.show({ message: t(mutation.meta.success), autoClose: 2000 });
-      },
-      onError: (error, _variables, _context, mutation) =>
-        !mutation.meta?.silent &&
-        notifications.show({
-          color: "red",
-          title:
-            error instanceof ApiError && error.isConflict
-              ? t("errors.conflict")
-              : t(mutation.meta?.errorTitle ?? "errors.notSaved"),
-          message: error.message,
-        }),
-    }),
-    defaultOptions: {
-      queries: {
-        refetchOnWindowFocus: false,
-        retry: (count, error) => !(error instanceof ApiError && error.status < 500) && count < 2,
-      },
-    },
-  });
-}
 
 /** Providers and routes: sign-in first, then the views of the chosen tenant. */
 export function App() {

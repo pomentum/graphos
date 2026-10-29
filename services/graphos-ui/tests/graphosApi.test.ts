@@ -51,3 +51,33 @@ describe("GraphosApi", () => {
     expect(calls[0]).toMatchObject({ method: "POST", body: { labels: ["Doc"], project: ["*"], limit: 50 } });
   });
 });
+
+describe("GraphosApi schema versions", () => {
+  it("keeps the ETag the schema was read with", async () => {
+    const impl = (async () =>
+      new Response(JSON.stringify({ name: "demo co", vertex_labels: ["Doc"] }), {
+        status: 200,
+        headers: { ETag: '"v1"' },
+      })) as unknown as typeof fetch;
+    const api = new GraphosApi(new HttpClient("/api", "t", impl), "demo co");
+    const schema = await api.schema();
+    expect(schema).toMatchObject({ vertex_labels: ["Doc"], etag: '"v1"' });
+  });
+
+  it("sends it back as If-Match on every schema write", async () => {
+    const { api, calls } = recorder();
+    await api.addToSchema({ vertex_labels: ["Team"] }, '"v1"');
+    await api.renameSchema({ kind: "label", from: "Team", to: "Group" }, false, '"v2"');
+    await api.dropLabel("Old", '"v3"');
+    await api.removeEdgeEndpoint("OWNS", "Team", "Doc", '"v4"');
+    await api.importSchema({ name: "x", vertex_labels: ["Doc"] } as never, { etag: '"v5"' });
+    expect(calls.map((c) => c.headers["If-Match"])).toEqual(['"v1"', '"v2"', '"v3"', '"v4"', '"v5"']);
+  });
+
+  it("sends no If-Match without a version, or for an import into another tenant", async () => {
+    const { api, calls } = recorder();
+    await api.addToSchema({ vertex_labels: ["Team"] });
+    await api.importSchema({ name: "x", vertex_labels: ["Doc"] } as never, { name: "copy", etag: '"v5"' });
+    expect(calls.map((c) => c.headers?.["If-Match"])).toEqual([undefined, undefined]);
+  });
+});

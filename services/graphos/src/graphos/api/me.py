@@ -16,11 +16,15 @@ import logging
 from typing import Any, Literal, cast
 
 import asyncpg
-from fastapi import APIRouter, Body, HTTPException, Request, status
+from fastapi import APIRouter, Body, HTTPException, Request, Response, status
 
-from graphos import preferences
+from graphos import preferences, schema_version
 from graphos.auth import ReadPrincipal, Tenant
-from graphos.bootstrap import DEFAULT_COMMUNITY_ALGORITHM, registered_tenants
+from graphos.bootstrap import (
+    DEFAULT_COMMUNITY_ALGORITHM,
+    load_spec_versioned,
+    registered_tenants,
+)
 from graphos.contracts.property_schema import PropertySchemaSpec
 from graphos.contracts.tenants import (
     DeprecatedSpec,
@@ -121,20 +125,28 @@ async def update_preferences(
         "that have resolve rules, the declared edge endpoints and whether they are strict, "
         "the display hints and the property schema (each definition with only the keywords it "
         "states). The whole schema, rules and metadata included, is "
-        "`GET /v1/tenants/{name}/spec` (`maintain`)."
+        "`GET /v1/tenants/{name}/spec` (`maintain`). The `ETag` is the schema's version, for "
+        "`If-Match` on schema writes: read with the schema, so it describes exactly this one."
     ),
     responses={404: {"description": "Tenant not registered."}},
     # Declarations as declared: a property definition lists only the keywords
     # it states, so a narrowing entry is not read as restating the defaults.
     response_model_exclude_unset=True,
 )
-async def tenant_schema(tenant: Tenant, principal: ReadPrincipal) -> TenantSchema:  # noqa: ARG001 — auth
-    spec = registered_tenants().get(tenant)
-    if spec is None:
+async def tenant_schema(
+    tenant: Tenant, request: Request, response: Response,
+    principal: ReadPrincipal,  # noqa: ARG001 — auth
+) -> TenantSchema:
+    # The stored schema with its version, not this replica's copy: the ETag
+    # must describe exactly what is answered (graphos.schema_version).
+    found = await load_spec_versioned(request.app.state.pool, tenant)
+    if found is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"tenant '{tenant}' is not registered",
         )
+    spec, version = found
+    response.headers["ETag"] = schema_version.etag(version)
     return TenantSchema(
         name=spec.name,
         vertex_labels=list(spec.vertex_labels),

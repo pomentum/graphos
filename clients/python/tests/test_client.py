@@ -539,6 +539,40 @@ async def test_if_match_is_sent_and_etag_read() -> None:
 
 
 @pytest.mark.asyncio
+async def test_schema_reads_give_the_etag_and_schema_writes_send_if_match() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.headers.get("if-match") == '"old"':
+            return httpx.Response(412, json={"detail": "If-Match failed"}, headers={"ETag": '"v1"'})
+        if request.method == "GET":
+            return httpx.Response(200, json={"name": "demo"}, headers={"ETag": '"v1"'})
+        if request.url.path.endswith(":rename"):
+            return httpx.Response(200, json={"tenant": "demo", "kind": "label",
+                                              "from": "A", "to": "B"})
+        if "/labels/" in request.url.path:
+            return httpx.Response(200, json={"tenant": "demo", "kind": "label", "name": "Old"})
+        return httpx.Response(200, json={"tenant": "demo"}, headers={"ETag": '"v2"'})
+
+    cli = GraphosClient(base_url="http://x", tenant="demo", transport=_mock_transport(handler))
+    assert (await cli.schema()).etag == '"v1"'
+    assert (await cli.get_tenant()).etag == '"v1"'
+    await cli.register_tenant(vertex_labels=["Doc"], if_match='"v1"')
+    await cli.import_schema({"name": "demo", "vertex_labels": ["Doc"]}, if_match='"v1"')
+    await cli.rename_label("A", "B", if_match='"v1"')
+    await cli.drop_label("Old", if_match='"v1"')
+    await cli.remove_edge_endpoint("OWNS", "Team", "Doc", if_match='"v1"')
+    assert [r.headers.get("if-match") for r in seen[2:]] == ['"v1"'] * 5
+    with pytest.raises(GraphosError) as exc:
+        await cli.register_tenant(vertex_labels=["Doc"], if_match='"old"')
+    assert exc.value.status_code == 412
+    await cli.register_tenant(vertex_labels=["Doc"])
+    assert "if-match" not in seen[-1].headers
+    await cli.close()
+
+
+@pytest.mark.asyncio
 async def test_find_paths() -> None:
     seen: list[httpx.Request] = []
 

@@ -13,7 +13,9 @@ import type {
   SchemaAddition,
   SchemaDocument,
   SchemaRenameRequest,
+  TenantSchema,
 } from "../api/types";
+import { ApiError } from "../api/http";
 import { CATEGORY_OPS, type ActivityCategory } from "../lib/changes";
 import { saveFile } from "../lib/download";
 import { isActiveJob } from "../lib/jobs";
@@ -465,15 +467,36 @@ export function useCreateNode() {
 }
 
 /**
+ * Schema writes are made from the schema on screen, so they send its `ETag`
+ * (`If-Match`): when someone saved the schema since, graphos refuses (412,
+ * "Changed by someone else") and the schema is read again, instead of the
+ * write silently undoing the other save. `etag()` is read when the write is
+ * sent, from the same cached schema the edit was built from.
+ */
+function useSchemaVersion() {
+  const { tenant } = useTenantSession();
+  const client = useQueryClient();
+  return {
+    etag: () => client.getQueryData<TenantSchema>(keys.schema(tenant))?.etag ?? undefined,
+    onError: (error: unknown) => {
+      if (error instanceof ApiError && error.isConflict)
+        void client.invalidateQueries({ queryKey: keys.schema(tenant) });
+    },
+  };
+}
+
+/**
  * Adds labels, relationship types, parents or search indexes (admin). The
  * schema, the map and the property catalogue are read again afterwards.
  */
 export function useAddToSchema() {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
+  const version = useSchemaVersion();
   return useMutation({
     meta: { success: "notices.schemaUpdated", errorTitle: "errors.schemaNotUpdated" },
-    mutationFn: (addition: SchemaAddition) => api.addToSchema(addition),
+    mutationFn: (addition: SchemaAddition) => api.addToSchema(addition, version.etag()),
+    onError: version.onError,
     onSuccess: () =>
       Promise.all([
         client.invalidateQueries({ queryKey: keys.schema(tenant) }),
@@ -516,9 +539,12 @@ export function useExportSchema() {
 export function useImportSchema() {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
+  const version = useSchemaVersion();
   return useMutation({
     meta: { success: "notices.schemaImported", errorTitle: "errors.schemaNotImported" },
-    mutationFn: ({ doc, options }: { doc: SchemaDocument; options: ImportOptions }) => api.importSchema(doc, options),
+    mutationFn: ({ doc, options }: { doc: SchemaDocument; options: ImportOptions }) =>
+      api.importSchema(doc, { ...options, etag: version.etag() }),
+    onError: version.onError,
     onSuccess: () =>
       Promise.all([
         client.invalidateQueries({ queryKey: keys.schema(tenant) }),
@@ -557,10 +583,12 @@ export function useRefreshSchema() {
 export function useRenameSchema() {
   const { api } = useTenantSession();
   const refresh = useRefreshSchema();
+  const version = useSchemaVersion();
   return useMutation({
     meta: { errorTitle: "errors.notRenamed" },
-    mutationFn: (request: SchemaRenameRequest) => api.renameSchema(request, false),
+    mutationFn: (request: SchemaRenameRequest) => api.renameSchema(request, false, version.etag()),
     onSuccess: () => refresh(),
+    onError: version.onError,
   });
 }
 
@@ -568,10 +596,13 @@ export function useRenameSchema() {
 export function useDeprecate() {
   const { api } = useTenantSession();
   const refresh = useRefreshSchema();
+  const version = useSchemaVersion();
   return useMutation({
     meta: { success: "notices.deprecationSaved", errorTitle: "errors.deprecationNotSaved" },
-    mutationFn: (deprecated: NonNullable<SchemaAddition["deprecated"]>) => api.addToSchema({ deprecated }),
+    mutationFn: (deprecated: NonNullable<SchemaAddition["deprecated"]>) =>
+      api.addToSchema({ deprecated }, version.etag()),
     onSuccess: () => refresh(),
+    onError: version.onError,
   });
 }
 
@@ -579,10 +610,12 @@ export function useDeprecate() {
 export function useDropLabel() {
   const { api } = useTenantSession();
   const refresh = useRefreshSchema();
+  const version = useSchemaVersion();
   return useMutation({
     meta: { success: "notices.labelDropped", errorTitle: "errors.labelNotDropped" },
-    mutationFn: (name: string) => api.dropLabel(name),
+    mutationFn: (name: string) => api.dropLabel(name, version.etag()),
     onSuccess: () => refresh(),
+    onError: version.onError,
   });
 }
 
@@ -590,11 +623,13 @@ export function useDropLabel() {
 export function useRemoveEdgeEndpoint() {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
+  const version = useSchemaVersion();
   return useMutation({
     meta: { success: "notices.schemaUpdated", errorTitle: "errors.schemaNotUpdated" },
     mutationFn: ({ type, src, dst }: { type: string; src: string; dst: string }) =>
-      api.removeEdgeEndpoint(type, src, dst),
+      api.removeEdgeEndpoint(type, src, dst, version.etag()),
     onSuccess: () => client.invalidateQueries({ queryKey: keys.schema(tenant) }),
+    onError: version.onError,
   });
 }
 

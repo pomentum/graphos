@@ -119,6 +119,9 @@ class TenantInfo(BaseModel):
     # The algorithm a community recompute uses when its request names none
     # (``louvain`` or ``leiden``); ``louvain`` from an older server.
     community_algorithm: str = "louvain"
+    # The schema's version, from the ``ETag`` header: send it back as
+    # ``if_match`` to change only this version.  None from an older server.
+    etag: str | None = None
 
 
 class Me(BaseModel):
@@ -194,6 +197,9 @@ class TenantSchemaInfo(BaseModel):
     # What is deprecated and the renames, oldest first; empty from a server before 0.13.2.
     deprecated: dict[str, dict[str, dict[str, Any]]] = Field(default_factory=dict)
     renames: list[SchemaRename] = Field(default_factory=list)
+    # The schema's version, from the ``ETag`` header: send it back as
+    # ``if_match`` to change only this version.  None from an older server.
+    etag: str | None = None
 
 
 # ── Reads ───────────────────────────────────────────────────────────────────

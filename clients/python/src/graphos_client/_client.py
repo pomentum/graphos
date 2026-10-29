@@ -369,12 +369,12 @@ class GraphosClient:
         """``GET /v1/{tenant}/schema``: labels, hierarchy, declared endpoints and
         search indexes (any token)."""
         resp = await self._request("GET", f"/v1/{name or self._tenant}/schema")
-        return TenantSchemaInfo.model_validate(resp.json())
+        return TenantSchemaInfo.model_validate({**resp.json(), "etag": resp.headers.get("ETag")})
 
     async def get_tenant(self, name: str | None = None) -> TenantInfo:
         target = name or self._tenant
         resp = await self._request("GET", f"/v1/tenants/{target}")
-        return TenantInfo.model_validate(resp.json())
+        return TenantInfo.model_validate({**resp.json(), "etag": resp.headers.get("ETag")})
 
     async def register_tenant(
         self,
@@ -395,6 +395,7 @@ class GraphosClient:
         deprecated: Mapping[str, Mapping[str, Mapping[str, Any] | None]] | None = None,
         force_shrink: bool = False,
         dry_run: bool = False,
+        if_match: str | None = None,
     ) -> dict[str, Any]:
         """Register / re-register a tenant.
 
@@ -462,6 +463,10 @@ class GraphosClient:
         child label are visible to ``MATCH (n:parent)`` queries
         without storing duplicate rows.  Both child and parent must
         appear in ``vertex_labels``.  Acyclic.
+
+        ``if_match`` (the ``etag`` of :meth:`schema` or :meth:`get_tenant`)
+        writes only if the schema has not changed since: else ``GraphosError``
+        412, and nothing is written.
         """
         body = {
             "name": name or self._tenant,
@@ -489,14 +494,20 @@ class GraphosClient:
             body["property_schema"] = dict(property_schema)
         if deprecated:
             body["deprecated"] = {part: dict(entries) for part, entries in deprecated.items()}
-        return await self._register(body, force_shrink=force_shrink, dry_run=dry_run)
+        return await self._register(
+            body, force_shrink=force_shrink, dry_run=dry_run, if_match=if_match,
+        )
 
     async def _register(
         self, body: Mapping[str, Any], *, force_shrink: bool, dry_run: bool,
+        if_match: str | None = None,
     ) -> dict[str, Any]:
         flags = (("force_shrink", force_shrink), ("dry_run", dry_run))
         params = {k: "true" for k, on in flags if on}
-        resp = await self._request("POST", "/v1/tenants", params=params or None, json_body=body)
+        resp = await self._request(
+            "POST", "/v1/tenants", params=params or None, json_body=body,
+            headers=_if_match_header(if_match),
+        )
         return resp.json()
 
     async def export_schema(self, name: str | None = None) -> dict[str, Any]:
@@ -512,6 +523,7 @@ class GraphosClient:
         name: str | None = None,
         replace: bool = False,
         dry_run: bool = False,
+        if_match: str | None = None,
     ) -> dict[str, Any]:
         """Register the schema in ``document`` (from :meth:`export_schema`).
 
@@ -523,6 +535,9 @@ class GraphosClient:
         more is sent in several calls, the first with everything else (and
         ``replace``), the rest adding pairs.  A dry run previews the first 5,000
         and says how many it left out.
+
+        ``if_match`` (the target tenant's schema ``etag``) holds the first call
+        to that version: 412 when the schema changed since, nothing written.
         """
         body = {k: v for k, v in document.items() if k != "edge_endpoints"}
         if name is not None:
@@ -538,7 +553,9 @@ class GraphosClient:
                   for i in range(0, len(pairs), _MAX_PAIRS_PER_CALL)] or [[]]
         if "edge_endpoints" in document:
             body["edge_endpoints"] = _by_type(chunks[0])
-        result = await self._register(body, force_shrink=replace, dry_run=dry_run)
+        result = await self._register(
+            body, force_shrink=replace, dry_run=dry_run, if_match=if_match,
+        )
         if dry_run:
             rest = len(pairs) - len(chunks[0])
             if rest:
@@ -556,38 +573,47 @@ class GraphosClient:
 
     async def remove_edge_endpoint(
         self, edge_type: str, src_label: str, dst_label: str, *, name: str | None = None,
+        if_match: str | None = None,
     ) -> dict[str, Any]:
         """Remove one declared label pair (maintain).  No data is touched; a type
-        with no pairs left accepts any pair again."""
+        with no pairs left accepts any pair again.  ``if_match``: as in
+        :meth:`register_tenant`."""
         target = name or self._tenant
         resp = await self._request(
             "DELETE", f"/v1/tenants/{target}/edge_endpoints",
             params={"type": edge_type, "src": src_label, "dst": dst_label},
+            headers=_if_match_header(if_match),
         )
         return resp.json()
 
     async def rename_label(
         self, old: str, new: str, *, dry_run: bool = False, name: str | None = None,
+        if_match: str | None = None,
     ) -> SchemaRenameResult:
         """Rename the vertex label ``old`` to ``new`` in place (owner): its rows,
         ids and edges stay, everything graphos keeps that names it follows, and
         the old name answers 409 saying where it went.  Saved queries naming it
-        are listed, not rewritten.  ``dry_run`` answers what it would change."""
+        are listed, not rewritten.  ``dry_run`` answers what it would change.
+        ``if_match``: as in :meth:`register_tenant`."""
         return await self._rename(
             {"kind": "label", "from": old, "to": new}, dry_run=dry_run, name=name,
+            if_match=if_match,
         )
 
     async def rename_edge_type(
         self, old: str, new: str, *, dry_run: bool = False, name: str | None = None,
+        if_match: str | None = None,
     ) -> SchemaRenameResult:
         """Rename the edge type ``old`` to ``new`` in place (owner), as
         :meth:`rename_label` does a label."""
         return await self._rename(
             {"kind": "edge_type", "from": old, "to": new}, dry_run=dry_run, name=name,
+            if_match=if_match,
         )
 
     async def rename_property(  # noqa: PLR0913 — one rename's parts
         self, on: str, old: str, new: str, *, dry_run: bool = False, name: str | None = None,
+        if_match: str | None = None,
     ) -> SchemaRenameResult:
         """Rename the property ``old`` to ``new`` on the vertex label (and the
         labels below it) or edge type ``on`` (owner).  The rows are rewritten by
@@ -597,25 +623,30 @@ class GraphosClient:
         resumes when asked again."""
         return await self._rename(
             {"kind": "property", "on": on, "from": old, "to": new}, dry_run=dry_run, name=name,
+            if_match=if_match,
         )
 
     async def _rename(
         self, body: dict[str, str], *, dry_run: bool, name: str | None,
+        if_match: str | None = None,
     ) -> SchemaRenameResult:
         resp = await self._request(
             "POST", f"/v1/tenants/{name or self._tenant}/schema:rename",
             params={"dry_run": "true"} if dry_run else None, json_body=body,
-            idempotent=dry_run,
+            headers=_if_match_header(if_match), idempotent=dry_run,
         )
         return SchemaRenameResult.model_validate(resp.json())
 
-    async def drop_label(self, label: str, *, name: str | None = None) -> SchemaDropResult:
+    async def drop_label(
+        self, label: str, *, name: str | None = None, if_match: str | None = None,
+    ) -> SchemaDropResult:
         """Drop a deprecated vertex label or edge type that has no rows (owner),
         with its indexes and everything graphos keeps that names it.  Refused
-        (400) when it is not deprecated, has rows, or something still needs it."""
+        (400) when it is not deprecated, has rows, or something still needs it.
+        ``if_match``: as in :meth:`register_tenant`."""
         resp = await self._request(
             "DELETE", f"/v1/tenants/{name or self._tenant}/labels/{quote(label, safe='')}",
-            idempotent=False,
+            headers=_if_match_header(if_match), idempotent=False,
         )
         return SchemaDropResult.model_validate(resp.json())
 

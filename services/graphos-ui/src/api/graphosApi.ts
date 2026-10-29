@@ -162,6 +162,13 @@ export interface ImportOptions {
   name?: string;
   /** Replace the registered schema instead of adding to it. */
   replace?: boolean;
+  /** This tenant's schema `ETag`: an import into it is refused (412) if the schema changed since. */
+  etag?: string | null;
+}
+
+/** `If-Match` for a schema write made from the version `etag` names, when there is one. */
+function ifMatch(etag: string | null | undefined): Record<string, string> | undefined {
+  return etag ? { "If-Match": etag } : undefined;
 }
 
 function byType(pairs: (readonly [string, unknown])[]): Record<string, unknown[]> {
@@ -185,9 +192,10 @@ export class GraphosApi {
     return `/v1/${enc(this.tenant)}/graph`;
   }
 
-  /** Labels, hierarchy and search indexes of the tenant. */
-  schema(): Promise<TenantSchema> {
-    return this.http.get(`/v1/${enc(this.tenant)}/schema`);
+  /** Labels, hierarchy and search indexes of the tenant, with the `ETag` schema writes send back. */
+  async schema(): Promise<TenantSchema> {
+    const { data, etag } = await this.http.request<TenantSchema>("GET", `/v1/${enc(this.tenant)}/schema`);
+    return { ...data, etag };
   }
 
   /** The first `limit` nodes of a label with all their properties. */
@@ -441,8 +449,10 @@ export class GraphosApi {
    * tenant (admin). graphos merges a registration with what exists, so
    * nothing already there is removed.
    */
-  addToSchema(addition: SchemaAddition): Promise<unknown> {
-    return this.http.post("/v1/tenants", { name: this.tenant, ...addition });
+  addToSchema(addition: SchemaAddition, etag?: string | null): Promise<unknown> {
+    return this.http
+      .request("POST", "/v1/tenants", { body: { name: this.tenant, ...addition }, headers: ifMatch(etag) })
+      .then((r) => r.data);
   }
 
   /**
@@ -559,7 +569,9 @@ export class GraphosApi {
     for (let i = 0; i < pairs.length; i += MAX_PAIRS_PER_CALL) chunks.push(pairs.slice(i, i + MAX_PAIRS_PER_CALL));
     const query = { ...(options.replace ? { force_shrink: true } : {}), ...(dryRun ? { dry_run: true } : {}) };
     const first = { ...doc, name, ...(doc.edge_endpoints ? { edge_endpoints: byType(chunks[0] ?? []) } : {}) };
-    let result = await this.http.post<unknown>("/v1/tenants", first, query);
+    // The version is this tenant's: only an import into it is conditional on it.
+    const headers = name === this.tenant ? ifMatch(options.etag) : undefined;
+    let result = (await this.http.request<unknown>("POST", "/v1/tenants", { body: first, query, headers })).data;
     if (dryRun) {
       const rest = pairs.length - (chunks[0]?.length ?? 0);
       const preview = result as SchemaDryRun;
@@ -575,26 +587,31 @@ export class GraphosApi {
    * Renames a label, a relationship type or a property (owner); `dryRun`
    * answers what it would change. A property is renamed by a job (`job_id`).
    */
-  async renameSchema(request: SchemaRenameRequest, dryRun: boolean): Promise<SchemaRenameResult> {
+  async renameSchema(request: SchemaRenameRequest, dryRun: boolean, etag?: string | null): Promise<SchemaRenameResult> {
     return (
       await this.http.request<SchemaRenameResult>("POST", `/v1/tenants/${enc(this.tenant)}/schema:rename`, {
         body: request,
         query: dryRun ? { dry_run: true } : undefined,
+        headers: ifMatch(etag),
       })
     ).data;
   }
 
   /** Drops a deprecated label or relationship type that has no rows (owner). */
-  async dropLabel(name: string): Promise<SchemaDropResult> {
-    return (await this.http.request<SchemaDropResult>("DELETE", `/v1/tenants/${enc(this.tenant)}/labels/${enc(name)}`))
-      .data;
+  async dropLabel(name: string, etag?: string | null): Promise<SchemaDropResult> {
+    return (
+      await this.http.request<SchemaDropResult>("DELETE", `/v1/tenants/${enc(this.tenant)}/labels/${enc(name)}`, {
+        headers: ifMatch(etag),
+      })
+    ).data;
   }
 
   /** Removes one declared label pair of an edge type (admin); no data is touched. */
-  async removeEdgeEndpoint(type: string, src: string, dst: string): Promise<unknown> {
+  async removeEdgeEndpoint(type: string, src: string, dst: string, etag?: string | null): Promise<unknown> {
     return (
       await this.http.request("DELETE", `/v1/tenants/${enc(this.tenant)}/edge_endpoints`, {
         query: { type, src, dst },
+        headers: ifMatch(etag),
       })
     ).data;
   }

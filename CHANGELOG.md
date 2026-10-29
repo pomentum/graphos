@@ -7,8 +7,9 @@ under one version.
 ## Unreleased
 
 graphos-api can set its database up itself at start, so a deployment no longer has to mount the
-db-init folder into the database container; and its image installs python-igraph for Louvain and
-Leiden with one setting, `GRAPHOS_IGRAPH=true`, instead of a script in the compose file.
+db-init folder into the database container; its image installs python-igraph for Louvain and
+Leiden with one setting, `GRAPHOS_IGRAPH=true`, instead of a script in the compose file; and two
+people editing one tenant's schema in the web UI no longer undo each other's changes.
 
 ### Added
 
@@ -45,6 +46,22 @@ Leiden with one setting, `GRAPHOS_IGRAPH=true`, instead of a script in the compo
   release's graphos-api image: it sets `GRAPHOS_IGRAPH=true` for the image's entrypoint instead of
   overriding the entrypoint. With an image up to 0.14.5, use that release's
   `docker-compose.louvain.yml`.
+
+### Fixed
+
+- **A schema save made from an older version is refused instead of undoing someone else's.** The
+  schema editor writes whole entries (a label's style, a property definition, a deprecation)
+  built from the schema it loaded, so of two people editing at once the later save silently put
+  back the earlier one's entry. The schema now has a version, served as the `ETag` of
+  `GET /v1/{tenant}/schema`, `GET /v1/tenants/{name}` and the exported document, and every schema
+  write takes `If-Match`: registration (and its dry run), `schema:rename`, label drops and pair
+  removals answer **412** with the current `ETag`, writing nothing, when the schema changed since,
+  and answer the new `ETag` when they write. The web UI sends the version it loaded; a refused
+  save says "Changed by someone else" and the schema is read again. `If-Match` stays optional, so
+  programs that register their schema on every start are unaffected. Schema writes to one tenant
+  now run one at a time, and a registration compares against the schema as it is under that lock.
+  The Python client returns the version as `schema().etag` and `get_tenant().etag` and takes
+  `if_match=` on its schema writes. **Docs:** usage §3 (Schema versions and `If-Match`), §12.
 
 ### Upgrading
 

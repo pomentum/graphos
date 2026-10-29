@@ -1,6 +1,7 @@
 """``GET /v1/me`` and ``GET /v1/{tenant}/schema``: what a non-admin client may learn.
 
-Pure Python: tenants are put in the in-memory registry, no database.
+Pure Python: tenants are put in the in-memory registry, no database; the
+stored schema the schema read takes (``load_spec_versioned``) is that registry.
 """
 
 from __future__ import annotations
@@ -11,9 +12,10 @@ from http import HTTPStatus
 import pytest
 from fastapi.testclient import TestClient
 
+from graphos.api import me
 from graphos.app import create_app
 from graphos.auth import StaticAuthenticator
-from graphos.bootstrap import TenantSpec, forget, remember
+from graphos.bootstrap import TenantSpec, forget, registered_tenants, remember
 from graphos.config import Settings
 from graphos.identity import Principal
 
@@ -39,8 +41,14 @@ OTHER = TenantSpec(name="other", vertex_labels=("Thing",))
 
 
 @pytest.fixture
-def client() -> Iterator[TestClient]:
+def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    async def stored(_pool: object, name: str) -> tuple[TenantSpec, str] | None:
+        spec = registered_tenants().get(name)
+        return None if spec is None else (spec, f"v-{name}")
+
+    monkeypatch.setattr(me, "load_spec_versioned", stored)
     app = create_app(Settings(db_password="placeholder"))
+    app.state.pool = None   # the lifespan is not run; ``stored`` needs none
     app.state.authenticator = StaticAuthenticator(PRINCIPALS)
     remember(ACME)
     remember(OTHER)
@@ -79,6 +87,7 @@ def test_schema_gives_labels_and_search_indexes_but_not_the_admin_spec(
 ) -> None:
     resp = _get(client, "/v1/acme/schema", "tok_read")
     assert resp.status_code == HTTPStatus.OK, resp.text
+    assert resp.headers["ETag"] == '"v-acme"'   # the version read with the schema
     body = resp.json()
     assert body["vertex_labels"] == ["Person", "Employee", "Doc"]
     assert body["edge_labels"] == ["WROTE", "SAME_TEAM"]
