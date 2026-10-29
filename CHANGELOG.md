@@ -6,35 +6,50 @@ under one version.
 
 ## Unreleased
 
-Closes what the third review of the schema manager left open (ADR-0014): two older races around
-unregistering and restoring, and four small points.
+Closes what the reviews of the schema manager left open (ADR-0014): the races around
+unregistering, restoring and deleting a tenant, and a set of small points.
 
 ### Fixed
 
 - **Unregistering, restoring and deleting a tenant take its schema-write lock**, as every schema
-  write does: a registration judged on the tenant no longer sees it unregistered or deleted
-  half-way, which could lose the kept registration (its schema, pairs, settings and manager) or
-  create an empty tenant in place of one being deleted.
+  write does, together with what follows them (their change records; a delete's grant removal,
+  cache eviction and cache notice). A registration judged on the tenant no longer sees it
+  unregistered or deleted half-way, which could lose the kept registration (its schema, pairs,
+  settings and manager), create an empty tenant in place of one being deleted, or remove the
+  grant of a creator who took the freed name. They wait at most 30 s for another schema write of
+  the tenant (a registration building indexes, say), then answer **409** `code: schema_busy`;
+  any schema write whose wait outlasts the database's statement timeout answers the same instead
+  of 504. Schema writes on one replica hold at most half its database connections at once, so a
+  burst of them on many tenants cannot take them all.
 - **A registration that restores a tenant and then fails restores nothing.** When bootstrap
-  refuses it (a unique index the data does not allow: 422) or anything after the restore fails,
-  the tenant goes back to unregistered with the very row it was kept with; the "restored" change
-  record is written only with the registration. A restore that finds the tenant no longer
+  refuses it (a unique index the data does not allow: 422), or anything fails before its change
+  record commits, the tenant goes back to unregistered with the very row it was kept with; the
+  undo is shielded from the request's cancellation, and when it fails itself it is logged and the
+  registration's own error is the answer. A failure after the commit (building a search index,
+  say) leaves the registration in place. Other replicas hear of the restore once the
+  registration persists. Labels bootstrap created before failing stay as empty tables outside
+  the schema; registering them again uses them. A restore that finds the tenant no longer
   unregistered answers 409. Such a registration is also checked against the schema it restores
   (for its owner or an admin), not as a new tenant's: a property index on a label it keeps was
   refused 422 before.
-- **The dry run checks `If-Match` against the version it judged**, read with the spec, not read
-  again.
+- **Dry runs check `If-Match` against the version they judged**, read with the spec, not read
+  again; a rename's dry run now also answers that version as its `ETag`.
 - **Python client:** `ensure_tenant` logs each drift line once, also across its second dry run;
-  its second attempt never restores a tenant someone unregistered in between (412 instead).
+  its second attempt never restores a tenant someone unregistered in between (412, saying so).
 - **Web UI:** a single-sign-on schema manager shows as "a single sign-on user (…id)", not as its
   raw subject.
 
 ### Added
 
-- **`If-None-Match: *` on `POST /v1/tenants`** (and its dry run): register only if the tenant is
-  not registered yet, 412 otherwise; an unregistered tenant counts as not registered. The Python
-  client takes `if_none_match=True` on `register_tenant`, and `ensure_tenant` sends it when its
-  dry run found no tenant, so a tenant someone else created meanwhile is not registered unchecked.
+- **`If-None-Match: *` on `POST /v1/tenants`** (and its dry run): register only a new tenant;
+  412 when it is registered, or is unregistered and would be restored. The Python client takes
+  `if_none_match=True` on `register_tenant`, and `ensure_tenant` sends it when its dry run found
+  neither, so a tenant someone else created meanwhile is not registered unchecked.
+
+### Upgrading
+
+Nothing to do. During a rolling upgrade, a 0.14.7 replica still unregisters, restores and deletes
+without the lock: upgrade every replica.
 
 ## 0.14.7 — 2026-10-29
 

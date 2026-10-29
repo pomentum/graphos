@@ -182,6 +182,9 @@ def test_a_tenant_drop_the_database_restarts_under_answers_503(
         async def execute(self, *_args: object) -> None:
             return None
 
+        async def fetchval(self, *_args: object) -> str:
+            return "0"   # lock_timeout, read and set back around the wait
+
     class Pool:
         def acquire(self) -> contextlib.AbstractAsyncContextManager[object]:
             return contextlib.nullcontext(Conn())  # type: ignore[return-value]

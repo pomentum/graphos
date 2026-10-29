@@ -118,7 +118,11 @@ bootstrap (422) leaves the tenant restored. Both were fixed in 0.14.8, with the 
 nits (the dry run's `If-Match` read apart, the UI showing a raw single-sign-on subject, drift
 lines logged twice on `ensure_tenant`'s second attempt, which could also restore a tenant
 someone unregistered meanwhile) and the race `ensure_tenant` left on a new tenant
-(`If-None-Match: *`).
+(`If-None-Match: *`). A fourth review of that fix found the restore undone even after the
+registration had committed, the undo itself unshielded, and the lifecycle routes' records and
+clean-up still outside the lock; 0.14.8 undoes only what precedes the commit, shields the undo,
+keeps everything under the lock with a bounded wait (409 `schema_busy`) and caps schema writers at
+half the connection pool.
 
 ## Consequences
 

@@ -505,6 +505,7 @@ async def test_ensure_tenant_never_restores_a_tenant_unregistered_meanwhile() ->
         with pytest.raises(GraphosError) as info:
             await cli.ensure_tenant(vertex_labels=["Doc"])
     assert info.value.status_code == 412
+    assert "unregistered meanwhile" in info.value.detail
     # Dry run, refused registration, dry run that would restore: no restoring registration.
     assert len(server.requests) == 3
 
@@ -681,18 +682,20 @@ async def test_ensure_tenant_refuses_an_unknown_on_drift() -> None:
 
 @pytest.mark.asyncio
 async def test_ensure_tenant_creates_only_what_it_judged_absent() -> None:
-    seen: list[tuple[str | None, str | None]] = []
+    for restores, expected in ((False, "*"), (True, None)):
+        seen: list[tuple[str | None, str | None]] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/v1/auth/login":
-            return httpx.Response(200, json={"access_token": "tok", "expires_in": 900})
-        seen.append((request.headers.get("if-match"), request.headers.get("if-none-match")))
-        if request.url.params.get("dry_run") == "true":
-            return httpx.Response(200, json={"tenant": "fresh", "exists": False, "drift": None})
-        return httpx.Response(200, json={"tenant": "fresh", "status": "bootstrapped"})
+        def handler(request: httpx.Request, restores: bool = restores,
+                    seen: list[tuple[str | None, str | None]] = seen) -> httpx.Response:
+            seen.append((request.headers.get("if-match"), request.headers.get("if-none-match")))
+            if request.url.params.get("dry_run") == "true":
+                return httpx.Response(200, json={"tenant": "fresh", "exists": False,
+                                                 "restores": restores, "drift": None})
+            return httpx.Response(200, json={"tenant": "fresh", "status": "bootstrapped"})
 
-    async with GraphosClient(base_url="http://x", tenant="fresh", token="tok",
-                             transport=httpx.MockTransport(handler)) as cli:
-        await cli.ensure_tenant(vertex_labels=["Doc"])
-    # The dry run found no tenant: the registration is sent with If-None-Match: *.
-    assert seen == [(None, None), (None, "*")]
+        async with GraphosClient(base_url="http://x", tenant="fresh", token="tok",
+                                 transport=httpx.MockTransport(handler)) as cli:
+            await cli.ensure_tenant(vertex_labels=["Doc"])
+        # A new tenant is created with If-None-Match: *; one it restores (as the dry
+        # run said) is not, which graphos would refuse.
+        assert seen == [(None, None), (None, expected)]

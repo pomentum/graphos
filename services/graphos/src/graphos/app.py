@@ -39,6 +39,7 @@ from graphos import (
     resources,
     schema_drift,
     schema_rename,
+    schema_version,
     vault,
 )
 from graphos.api import (
@@ -408,6 +409,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     app.add_exception_handler(schema_drift.SchemaManaged, _schema_managed)
+
+    async def _schema_busy(request: Request, exc: Exception) -> JSONResponse:
+        # Another schema write of the tenant held its lock longer than this one waits.
+        assert isinstance(exc, schema_version.SchemaBusyError)
+        log.info("schema busy path=%s tenant=%s", request.url.path, exc.tenant)
+        return JSONResponse(
+            status_code=409, content={"detail": str(exc), "code": "schema_busy"},
+        )
+
+    app.add_exception_handler(schema_version.SchemaBusyError, _schema_busy)
 
     async def _property_refusal(request: Request, exc: Exception) -> JSONResponse:
         assert isinstance(exc, properties.Refused)

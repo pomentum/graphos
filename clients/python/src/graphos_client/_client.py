@@ -675,7 +675,12 @@ class GraphosClient:
             # Unregistered by someone in between: registering would restore it,
             # undoing what they did. Not this call's to decide: give up.
             if refused is not None and preview.get("restores"):
-                raise refused
+                raise GraphosError(
+                    HTTPStatus.PRECONDITION_FAILED,
+                    f"tenant '{name or self._tenant}' was unregistered meanwhile: registering "
+                    "it again would restore it, which is not this call's to decide",
+                    refused.method, refused.url,
+                ) from refused
             tenant = name or self._tenant
             drift = preview.get("drift") or {}
             lines = drift_lines(tenant, drift)
@@ -696,7 +701,10 @@ class GraphosClient:
                 tag = preview.get("etag") or if_match
                 return await self.register_tenant(
                     **args, if_match=tag,
-                    if_none_match=tag is None and not preview.get("exists", True),
+                    if_none_match=(
+                        tag is None and not preview.get("exists", True)
+                        and not preview.get("restores")
+                    ),
                 )
             except GraphosError as exc:
                 if exc.status_code != HTTPStatus.PRECONDITION_FAILED or attempt == _ENSURE_ATTEMPTS:

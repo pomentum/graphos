@@ -109,8 +109,10 @@ async def list_unregistered(pool: asyncpg.Pool) -> list[Unregistered]:
     return sorted(out, key=lambda u: u.name)
 
 
-async def restore_tenant(pool: asyncpg.Pool, name: str) -> bool:
-    """Register an unregistered tenant again, as it was.  False if it is not one."""
+async def restore_tenant(pool: asyncpg.Pool, name: str, *, announce: bool = True) -> bool:
+    """Register an unregistered tenant again, as it was.  False if it is not one.
+    ``announce=False`` leaves telling the other replicas to what follows (a
+    registration restoring it announces it when it persists)."""
     async with pool.acquire() as conn, conn.transaction():
         row = await conn.fetchrow(
             """
@@ -150,7 +152,8 @@ async def restore_tenant(pool: asyncpg.Pool, name: str) -> bool:
                 name, bool(row["strict_endpoints"]), row["schema_manager"],
                 row["schema_manager_since"],
             )
-        await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, name)
+        if announce:
+            await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, name)
     spec = await load_spec(pool, name)
     if spec is not None:
         remember(spec)

@@ -38,10 +38,9 @@ export function useSchemaManager(): SchemaManagement {
   const subject = schema.data?.schema_manager ?? null;
   const isManager = isSchemaManager(subject, me);
   const locked = subject !== null && !isManager;
+  const sso = ssoManagerId(subject);
   return {
-    manager: ssoManagerId(subject)
-      ? t("views.schema.manager.ssoUser", { id: ssoManagerId(subject) })
-      : managerName(subject),
+    manager: sso ? t("views.schema.manager.ssoUser", { id: sso }) : managerName(subject),
     isManager,
     locked,
     canEditStructure: canMaintain && !locked,

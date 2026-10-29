@@ -20,7 +20,7 @@ import httpx
 import pytest
 import pytest_asyncio
 
-from graphos import schema_version
+from graphos import lifecycle, schema_version
 from graphos.app import create_app
 from graphos.auth import StaticAuthenticator
 from graphos.bootstrap import forget, registered_tenants
@@ -305,21 +305,133 @@ async def test_unregister_restore_and_delete_wait_for_a_schema_write(
     assert dropped.json() == {"tenant": NAME, "status": "deleted"}
 
 
+async def _hold_advisory(pool: asyncpg.Pool) -> asyncpg.pool.PoolConnectionProxy:
+    """The schema-write lock as another replica holds it: the advisory lock
+    alone, not this process's own lock."""
+    conn = await pool.acquire()
+    await conn.execute("SELECT pg_advisory_lock(hashtextextended($1, 0));",
+                       "graphos.schema-write:" + NAME)
+    return conn
+
+
+async def _release_advisory(pool: asyncpg.Pool, conn: asyncpg.pool.PoolConnectionProxy) -> None:
+    await conn.execute("SELECT pg_advisory_unlock(hashtextextended($1, 0));",
+                       "graphos.schema-write:" + NAME)
+    await pool.release(conn)
+
+
 @requires_db
 @pytest.mark.asyncio
-async def test_if_none_match_registers_only_a_tenant_not_registered(
+async def test_another_replicas_schema_write_is_waited_for(
+    api: httpx.AsyncClient, db_pool: asyncpg.Pool,
+) -> None:
+    conn = await _hold_advisory(db_pool)
+    try:
+        task = asyncio.ensure_future(api.delete(f"/v1/tenants/{NAME}", headers=_as("owner")))
+        await asyncio.sleep(0.5)
+        assert not task.done(), "it went ahead under another replica's schema write"
+    finally:
+        await _release_advisory(db_pool, conn)
+    assert (await task).json() == {"tenant": NAME, "status": "unregistered"}
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_schema_write_held_too_long_answers_409(
+    api: httpx.AsyncClient, db_pool: asyncpg.Pool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(schema_version, "LIFECYCLE_WAIT_S", 0.3)
+    conn = await _hold_advisory(db_pool)
+    try:
+        for call in (
+            lambda: api.delete(f"/v1/tenants/{NAME}", headers=_as("owner")),
+            lambda: api.delete(f"/v1/tenants/{NAME}", params={"drop_data": "true"},
+                               headers=_as("owner")),
+            lambda: api.post(f"/v1/tenants/{NAME}/restore", headers=_as("owner")),
+        ):
+            resp = await call()
+            assert resp.status_code == HTTPStatus.CONFLICT, resp.text
+            assert resp.json()["code"] == "schema_busy"
+    finally:
+        await _release_advisory(db_pool, conn)
+    assert NAME in registered_tenants()   # nothing happened meanwhile
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_failure_after_the_registration_committed_keeps_the_restore(
+    api: httpx.AsyncClient, db_pool: asyncpg.Pool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def broken(*_args: object) -> None:
+        raise RuntimeError("index build failed")
+
+    monkeypatch.setattr("graphos.api.tenants.ensure_search_indexes", broken)
+    assert (await api.delete(f"/v1/tenants/{NAME}", headers=_as("owner"))).status_code == 200
+    body = {"name": NAME, "search_indexes": {"names": {"labels": ["Person"],
+                                                       "properties": ["name"]}}}
+    with pytest.raises(RuntimeError):
+        await api.post("/v1/tenants", json=body, headers=_as("owner"))
+    # The registration and its records stand: the tenant is restored, not put back.
+    assert await _kept(db_pool) is None
+    restored = await db_pool.fetchval(
+        "SELECT count(*) FROM graphos_meta.changes WHERE tenant = $1 "
+        "AND detail::text LIKE '%restored%';", NAME,
+    )
+    assert restored == 1
+    assert (await api.get(f"/v1/{NAME}/schema", headers=_as("owner"))).status_code == 200
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_failed_undo_keeps_the_registrations_own_answer(
+    api: httpx.AsyncClient, db_pool: asyncpg.Pool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def down(*_args: object) -> None:
+        raise ConnectionError("database restarting")
+
+    monkeypatch.setattr(lifecycle, "put_back", down)
+    twin = {"_kind": "node", "id": "p2", "label": "Person", "properties": {"name": "Ada"}}
+    await api.post(f"/v1/{NAME}/graph/snapshot-import", headers=_as("admin"),
+                   content=json.dumps(twin) + "\n")
+    assert (await api.delete(f"/v1/tenants/{NAME}", headers=_as("owner"))).status_code == 200
+    unique = {"name": NAME, "property_indexes": [
+        {"label": "Person", "properties": ["name"], "unique": True},
+    ]}
+    resp = await api.post("/v1/tenants", json=unique, headers=_as("owner"))
+    # The bootstrap's 422, not the undo's failure (which is logged).
+    assert resp.status_code == HTTPStatus.UNPROCESSABLE_ENTITY, resp.text
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_if_none_match_registers_only_a_new_tenant(
     api: httpx.AsyncClient,
 ) -> None:
-    star = {**_as("owner"), "If-None-Match": "*"}
+    star = {**_as("admin"), "If-None-Match": "*"}
     for query in ("?dry_run=true", ""):
         resp = await api.post(f"/v1/tenants{query}", json={"name": NAME}, headers=star)
         assert resp.status_code == HTTPStatus.PRECONDITION_FAILED, resp.text
         assert "is registered" in resp.json()["detail"] and resp.headers["ETag"]
     bad = await api.post("/v1/tenants", json={"name": NAME},
-                         headers={**_as("owner"), "If-None-Match": '"v1"'})
+                         headers={**_as("admin"), "If-None-Match": '"v1"'})
     assert bad.status_code == HTTPStatus.UNPROCESSABLE_ENTITY, bad.text
-    # An unregistered tenant counts as not registered: registering it restores it.
+
+    # An unregistered tenant is not new: If-None-Match: * never restores it.
     assert (await api.delete(f"/v1/tenants/{NAME}", headers=_as("owner"))).status_code == 200
-    resp = await api.post("/v1/tenants", json={"name": NAME}, headers=star)
-    assert resp.status_code == HTTPStatus.OK, resp.text
-    assert await _counts(api) == (2, 1)
+    for query in ("?dry_run=true", ""):
+        resp = await api.post(f"/v1/tenants{query}", json={"name": NAME}, headers=star)
+        assert resp.status_code == HTTPStatus.PRECONDITION_FAILED, resp.text
+        assert "would restore it" in resp.json()["detail"]
+    assert NAME not in registered_tenants()
+
+    # Two creators of a new name at once: one creates it, the other is refused.
+    gone = await api.delete(f"/v1/tenants/{NAME}", params={"drop_data": "true"},
+                            headers=_as("admin"))
+    assert gone.status_code == HTTPStatus.OK, gone.text
+    first, second = await asyncio.gather(*(
+        api.post("/v1/tenants", json={"name": NAME, "vertex_labels": ["Doc"]}, headers=star)
+        for _ in range(2)
+    ))
+    assert sorted((first.status_code, second.status_code)) == [
+        HTTPStatus.OK, HTTPStatus.PRECONDITION_FAILED,
+    ]

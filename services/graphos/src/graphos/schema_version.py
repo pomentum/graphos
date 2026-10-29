@@ -26,6 +26,8 @@ connection while they wait.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import weakref
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -62,21 +64,66 @@ class SchemaWrite:
         return await current(self._conn, self._tenant)
 
 
+class SchemaBusyError(Exception):
+    """Another schema write of the tenant held its lock longer than the caller
+    waits for it (answered 409 by graphos.app)."""
+
+    def __init__(self, tenant: str) -> None:
+        super().__init__(
+            f"a schema write on '{tenant}' is in progress; try again when it ends",
+        )
+        self.tenant = tenant
+
+
+#: How long unregistering, restoring and deleting wait for a schema write in
+#: progress (a registration building indexes, say) before answering 409. A
+#: registration itself waits as long as it takes, as it always has.
+LIFECYCLE_WAIT_S = 30.0
+
+# Schema writers per event loop hold at most half the pool at once: each holds
+# its lock's connection and takes more inside, so a burst of them on many
+# tenants must not take every connection and wait for one more.
+_gates: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _gate(pool: asyncpg.Pool) -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    gate = _gates.get(loop)
+    if gate is None:
+        size = pool.get_max_size() if hasattr(pool, "get_max_size") else 2
+        gate = _gates[loop] = asyncio.Semaphore(max(1, size // 2))
+    return gate
+
+
 @asynccontextmanager
 async def write(
     pool: asyncpg.Pool, tenant: str, if_match: IfMatch | None, *, absent: bool = False,
+    wait_s: float | None = None,
 ) -> AsyncIterator[SchemaWrite]:
     """Hold the tenant's schema-write lock; check ``if_match`` first, and with
     ``absent`` (``If-None-Match: *``) that the tenant is not registered.
 
     Raises :class:`graphos.lookup.PreconditionFailedError` (with the current
     ETag, ``None`` when the tenant is not registered) when either does not
-    hold; nothing is written then.
+    hold; nothing is written then. Raises :class:`SchemaBusyError` when the
+    lock is not had within ``wait_s`` seconds (``None``: wait), or when the
+    wait outlasts the database's statement timeout.
     """
+    loop = asyncio.get_running_loop()
+    deadline = None if wait_s is None else loop.time() + wait_s
     local = _local.setdefault(tenant, asyncio.Lock())
-    async with local, pool.acquire() as conn:
+    async with contextlib.AsyncExitStack() as stack:
+        try:
+            async with asyncio.timeout_at(deadline):
+                await stack.enter_async_context(local)
+                await stack.enter_async_context(_gate(pool))
+                conn = await stack.enter_async_context(pool.acquire())
+        except TimeoutError as exc:
+            raise SchemaBusyError(tenant) from exc
         key = _LOCK_KEY + tenant
-        await conn.execute("SELECT pg_advisory_lock(hashtextextended($1, 0));", key)
+        await _lock(conn, key, tenant, None if deadline is None else deadline - loop.time())
         try:
             if if_match is not None:
                 if_match.check(await current(conn, tenant))
@@ -87,9 +134,23 @@ async def write(
             await conn.execute("SELECT pg_advisory_unlock(hashtextextended($1, 0));", key)
 
 
-async def check(pool: asyncpg.Pool, tenant: str, if_match: IfMatch | None) -> None:
-    """Check ``if_match`` without writing (a dry run)."""
-    if if_match is None:
+async def _lock(conn: asyncpg.Connection, key: str, tenant: str, wait_s: float | None) -> None:
+    """Take the advisory lock, waiting at most ``wait_s`` (the database's
+    ``lock_timeout``, set for this wait only); :class:`SchemaBusyError` when
+    it is not had."""
+    if wait_s is None:
+        try:
+            await conn.execute("SELECT pg_advisory_lock(hashtextextended($1, 0));", key)
+        except asyncpg.QueryCanceledError as exc:   # the statement timeout
+            raise SchemaBusyError(tenant) from exc
         return
-    async with pool.acquire() as conn:
-        if_match.check(await current(conn, tenant))
+    before = await conn.fetchval("SELECT current_setting('lock_timeout');")
+    await conn.execute(
+        "SELECT set_config('lock_timeout', $1, false);", f"{max(1, int(wait_s * 1000))}ms",
+    )
+    try:
+        await conn.execute("SELECT pg_advisory_lock(hashtextextended($1, 0));", key)
+    except (asyncpg.LockNotAvailableError, asyncpg.QueryCanceledError) as exc:
+        raise SchemaBusyError(tenant) from exc
+    finally:
+        await conn.execute("SELECT set_config('lock_timeout', $1, false);", before)
