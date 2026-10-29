@@ -95,3 +95,4 @@ What has to be true for the decision to count as carried out (tests, docs).
 | [ADR-0009](ADR-0009-rename-and-deprecate.md) | Renaming and deprecating labels, edge types and properties | Accepted (2026-10-19) |
 | [ADR-0010](ADR-0010-analysis-results-outside-properties.md) | Analysis results outside `properties` | Rejected (2026-10-21): the churn, not the storage, is the cost |
 | [ADR-0011](ADR-0011-communities-from-the-previous-partition.md) | Communities computed from the previous partition (Leiden) | Accepted (2026-10-21) |
+| [ADR-0013](ADR-0013-schema-manager-drift-and-tombstones.md) | A tenant's schema manager, drift reports, and drops that stay dropped | Proposed (2026-10-29) |
