@@ -134,6 +134,7 @@ class Me(BaseModel):
     """``GET /v1/me``: who is signed in and what they may use."""
 
     consumer: str
+    subject: str | None = None                # user:<name> | oidc-sub:<sub>; a manager names it
     kind: str = "person"                      # person | service | anonymous
     via: str = "password"                     # password | oidc | none: how it signed in
     admin: bool = False

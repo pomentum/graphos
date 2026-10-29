@@ -667,9 +667,12 @@ answer says which manager it left. Then:
 - the manager stays named when its user is deleted or disabled, and when authentication is turned
   off later (every write is then the anonymous admin's, which manages nothing): the structure
   stays locked until an owner releases it (`"schema_manager": null`);
-- during a rolling upgrade from a server without managers, an older replica serves a different
-  `ETag` for a managed tenant (a write may answer 412: read and send again), and an older
-  replica's unregister drops the manager.
+- during a rolling upgrade from a server without managers, an older replica knows none of this:
+  it does not refuse anyone's structural change, merges styles as `entries`, serves a different
+  `ETag` for a managed tenant (a write may answer 412: read and send again), and its unregister
+  or restore drops the manager. Upgrade every replica before relying on a manager;
+- a registration that names its own caller the manager merges its styles as the manager's do,
+  from that first call on, so claiming an existing tenant keeps the styles people set.
 
 **The drift report.** A registration's dry run (`?dry_run=true`) answers `drift`: what the tenant
 has that the body does not declare (`not_declared`), what a replace would remove (`removes`), the

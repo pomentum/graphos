@@ -50,7 +50,7 @@ instead of undoing it unseen (ADR-0013).
   `schema_manager_since` on `schema()` and `get_tenant()`. `GraphosPool` takes `on_drift`,
   `"ignore"` by default (as before).
 - **`GET /v1/me`** gains `subject`, the caller's own grant subject (`user:<name>`,
-  `oidc-sub:<sub>`; null with authentication disabled).
+  `oidc-sub:<sub>`; null with authentication disabled); the Python client's `Me` has it too.
 - **Web UI:** a managed tenant's schema view names its manager and keeps the structure controls
   disabled for everyone else, styles excepted; an owner can release the manager there. A person
   signed in through single sign-on who is the manager is recognised (from `/v1/me`'s `subject`).

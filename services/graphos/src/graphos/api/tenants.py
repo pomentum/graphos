@@ -302,14 +302,15 @@ def _judge(
     stored: TenantSpec | None, spec: TenantSpec, principal: Principal, body: TenantSpecBody, *,
     replace: bool, endpoints_stated: bool, meta_removed: tuple[str, ...],
     display_removed: by_entry.Removed, schema_removed: by_entry.Removed,
-    deprecated_removed: by_entry.Removed,
+    deprecated_removed: by_entry.Removed, claims: bool = False,
 ) -> tuple[TenantSpec, by_entry.Removed]:
     """A registration's styles merged as it says (the manager's default to
-    ``missing_only``), and on a managed tenant, anyone else's held to styles
-    only (409 otherwise; ADR-0013, ADR-0014)."""
+    ``missing_only``, and that of a registration naming its caller the
+    manager, ``claims``), and on a managed tenant, anyone else's held to
+    styles only (409 otherwise; ADR-0013, ADR-0014)."""
     manager = stored.schema_manager if stored else None
     is_manager = manager is not None and schema_drift.principal_subject(principal) == manager
-    mode = body.display_merge or ("missing_only" if is_manager else "entries")
+    mode = body.display_merge or ("missing_only" if is_manager or claims else "entries")
     spec, display_removed = schema_drift.apply_display_merge(
         stored, spec, display_removed, mode, replace_all=replace,
     )
@@ -323,6 +324,15 @@ def _judge(
     if schema_drift.changes_structure(schema_changes.diff(stored, after)):
         raise schema_drift.SchemaManaged(spec.name, manager)
     return spec, display_removed
+
+
+def _claims(manager_stated: bool, manager: str | None, principal: Principal) -> bool:
+    """Whether a registration names its own caller the schema manager: its
+    styles then merge as the manager's do, from that first registration on."""
+    return (
+        manager_stated and manager is not None
+        and manager == schema_drift.principal_subject(principal)
+    )
 
 
 async def _breaking(
@@ -660,6 +670,7 @@ async def register(
             endpoints_stated=endpoints_stated, meta_removed=meta_removed,
             display_removed=display_removed, schema_removed=schema_removed,
             deprecated_removed=deprecated_removed,
+            claims=_claims(manager_stated, manager, principal),
         )
         result = await _dry_run(
             pool, known, judged, declared=spec, replace=force_shrink,
@@ -784,6 +795,7 @@ async def _register(
         endpoints_stated="edge_endpoints" in body.model_fields_set,
         meta_removed=meta_removed, display_removed=display_removed,
         schema_removed=schema_removed, deprecated_removed=deprecated_removed,
+        claims=_claims(manager_stated, manager, principal),
     )
     if restores:
         await lifecycle.restore_tenant(pool, spec.name)

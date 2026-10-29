@@ -225,6 +225,21 @@ async def test_a_managers_replace_drops_the_styles_of_labels_it_removes(
 
 
 @requires_db
+async def test_claiming_the_schema_keeps_peoples_styles_from_the_first_call(
+    api: httpx.AsyncClient,
+) -> None:   # third review
+    await _register(api, "loader", SCHEMA)   # unmanaged
+    await _register(api, "olive", {"display": {"vertex": {"Team": {"color": "#00AA00"}}}})
+    claimed = await _register(api, "loader", {
+        **SCHEMA, "display": {"vertex": {"Team": {"color": "#FF0000"}}}, "schema_manager": "self",
+    })
+    assert claimed.status_code == HTTPStatus.OK, claimed.text
+    schema, _ = await _schema(api)
+    assert schema["schema_manager"] == "user:loader"
+    assert schema["display"]["vertex"]["Team"]["color"] == "#00AA00"
+
+
+@requires_db
 async def test_the_manager_may_correct_its_styles_when_it_says_so(
     api: httpx.AsyncClient,
 ) -> None:   # T1

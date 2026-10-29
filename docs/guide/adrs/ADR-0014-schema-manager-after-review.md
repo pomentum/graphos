@@ -109,6 +109,13 @@ task, done in the same change.
 | T25 | R7, R8 | Documented, not changed: a manager whose user is deleted, or authentication turned off later, keeps the structure until an owner releases it; during a rolling upgrade an older replica serves another `ETag` for a managed tenant and its unregister drops the manager | usage.md |
 | T26 | R9, R10 | Tests for the 409 and `DriftReport` in OpenAPI and for removing a style with `entries`; a name a rename brought back is not reported under `recreates`. Kept as they are: `removed_by` names the caller as change records do; `missing_only` does not report styles people changed (they are theirs); a tenant created by someone else between `ensure_tenant`'s two calls is registered without a check, as `register_tenant` always was | Tests; this table |
 
+A third, focused review of T19–T26 found them met and nothing Critical or Major. Done with it:
+a registration that names its own caller the manager merges styles as the manager's from that
+first call (it overwrote people's styles once); the client's `Me` gains `subject`; the
+rolling-upgrade note is complete. Left as follow-ups, both older than ADR-0013: unregister,
+restore and delete do not take the schema-write lock, and a restoring registration refused by
+bootstrap (422) leaves the tenant restored.
+
 ## Consequences
 
 - The program decides how its styles merge; the safe default protects people's styles, and a
