@@ -4,7 +4,7 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.14.6 — 2026-10-29
 
 graphos-api can set its database up itself at start, so a deployment no longer has to mount the
 db-init folder into the database container; its image installs python-igraph for Louvain and
