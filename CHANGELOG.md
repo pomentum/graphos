@@ -4,7 +4,7 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.14.8 — 2026-10-29
 
 Closes what the reviews of the schema manager left open (ADR-0014): the races around
 unregistering, restoring and deleting a tenant, and a set of small points.
