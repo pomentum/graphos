@@ -474,3 +474,37 @@ async def test_a_rename_dry_run_answers_the_version_it_planned_on(
     stale = await api.post(f"/v1/tenants/{NAME}/schema:rename?dry_run=true", json=rename,
                            headers={**_as("owner"), "If-Match": '"stale"'})
     assert stale.status_code == HTTPStatus.PRECONDITION_FAILED, stale.text
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_an_undo_puts_back_exactly_what_was_kept(
+    api: httpx.AsyncClient, db_pool: asyncpg.Pool,
+) -> None:
+    assert (await api.delete(f"/v1/tenants/{NAME}", headers=_as("owner"))).status_code == 200
+    kept = await lifecycle.kept_registration(db_pool, NAME)
+    assert kept is not None
+    # Restored, and its registration failed before recording it: put back as it was.
+    assert await lifecycle.restore_tenant(db_pool, NAME, announce=False)
+    await lifecycle.put_back(db_pool, kept)
+    assert await _kept(db_pool) == kept.row
+    assert await db_pool.fetchval(
+        "SELECT count(*) FROM graphos_meta.tenants WHERE name = $1;", NAME,
+    ) == 0
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_an_undo_stands_down_once_the_restore_was_recorded(
+    api: httpx.AsyncClient, db_pool: asyncpg.Pool,
+) -> None:
+    assert (await api.delete(f"/v1/tenants/{NAME}", headers=_as("owner"))).status_code == 200
+    kept = await lifecycle.kept_registration(db_pool, NAME)
+    assert kept is not None
+    # The registration committed its "restored" record (a cancellation during the
+    # commit leaves the request not knowing): the undo leaves the tenant registered.
+    back = await api.post(f"/v1/tenants/{NAME}/restore", headers=_as("owner"))
+    assert back.json() == {"tenant": NAME, "status": "restored"}
+    await lifecycle.put_back(db_pool, kept)
+    assert await _kept(db_pool) is None
+    assert await _counts(api) == (2, 1)

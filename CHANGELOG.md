@@ -25,8 +25,10 @@ unregistering, restoring and deleting a tenant, and a set of small points.
   never holds up the other replica's concurrent index builds. Schema writes on one replica hold
   at most half its database connections (besides the one the replica listener keeps) at once, so
   a burst of them on many tenants cannot take them all; `GRAPHOS_DB_POOL_MAX_SIZE` must be at
-  least 4. The property rename job's last step (the spec, the indexes) takes the lock too, and a
-  graph expansion no longer takes two more connections while holding one.
+  least 4. The property rename job's last step (the spec, the indexes) takes the lock too, after a
+  last pass over rows written meanwhile; a lock it cannot have answers 409 in the job, and asking
+  again finishes it. A graph expansion in both directions takes a second connection only when
+  one is free at once, else runs both on its own, never holding one while waiting for more.
 - **A registration that restores a tenant and then fails restores nothing.** When bootstrap
   refuses it (a unique index the data does not allow: 422), or anything fails before its change
   record commits, the tenant goes back to unregistered with the very row it was kept with; the
@@ -57,8 +59,11 @@ unregistering, restoring and deleting a tenant, and a set of small points.
 
 ### Upgrading
 
-Nothing to do. During a rolling upgrade, a 0.14.7 replica still unregisters, restores and deletes
-without the lock: upgrade every replica.
+- **`GRAPHOS_DB_POOL_MAX_SIZE` must be at least 4** (the default is 16): a smaller value now stops
+  graphos-api at start, where before a pool of 2 could hang the replica on its first
+  registration.
+- During a rolling upgrade, a 0.14.7 replica still unregisters, restores and deletes without the
+  lock: upgrade every replica.
 
 ## 0.14.7 — 2026-10-29
 

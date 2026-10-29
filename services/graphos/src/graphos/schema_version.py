@@ -113,19 +113,22 @@ class _TenantLocks:
 _locals: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, _TenantLocks] = (
     weakref.WeakKeyDictionary()
 )
-_gates: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[int, asyncio.Semaphore]] = (
-    weakref.WeakKeyDictionary()
-)
+# Per event loop, by pool (its identity and size: an asyncpg pool takes no weak
+# reference, and a closed pool's identity reused by one of another size must
+# not get its gate); the entries go with their loop.
+_gates: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, dict[tuple[int, int], asyncio.Semaphore],
+] = weakref.WeakKeyDictionary()
 
 
 def _gate(pool: asyncpg.Pool) -> asyncio.Semaphore:
     """Half of what the pool has besides the connection the replica listener
     keeps for good (graphos.sync), per pool and event loop."""
+    size = pool.get_max_size() if hasattr(pool, "get_max_size") else 4
     gates = _gates.setdefault(asyncio.get_running_loop(), {})
-    gate = gates.get(id(pool))
+    gate = gates.get((id(pool), size))
     if gate is None:
-        size = pool.get_max_size() if hasattr(pool, "get_max_size") else 4
-        gate = gates[id(pool)] = asyncio.Semaphore(max(1, (size - 1) // 2))
+        gate = gates[(id(pool), size)] = asyncio.Semaphore(max(1, (size - 1) // 2))
     return gate
 
 
@@ -157,11 +160,14 @@ async def write(
                 raise SchemaBusyError(tenant, waiting) from exc
             raise
         try:
-            conn = await stack.enter_async_context(
-                pool.acquire(timeout=max(0.0, deadline - loop.time())),
-            )
+            # Bounded here, not with acquire(timeout=): that would also bound the
+            # connection's reset when it goes back, after the write is done.
+            async with asyncio.timeout_at(deadline) as turn:
+                conn = await stack.enter_async_context(pool.acquire())
         except TimeoutError as exc:
-            raise SchemaBusyError(tenant, "this replica's connections are all in use") from exc
+            if turn.expired():
+                raise SchemaBusyError(tenant, "this replica's connections are all in use") from exc
+            raise
         key = _LOCK_KEY + tenant
         await _lock(conn, key, tenant, deadline)
         try:

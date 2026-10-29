@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import asyncpg
+from fastapi import HTTPException
 from pydantic import BaseModel
 
 from graphos import changes, declared, jobs, reserved, schema_version, search, writes
@@ -805,8 +806,26 @@ async def finish_property(  # noqa: PLR0913 -- one rename's inputs
     then the indexes on the new name are built and those on the old dropped; under
     the tenant's schema-write lock, as every schema write (the job runs apart from
     the request that started it)."""
-    async with schema_version.write(pool, tenant, None):
-        await _finish_property(pool, tenant, on, old, new, tables)
+    try:
+        async with schema_version.write(pool, tenant, None):
+            # Rows written with the old name while this waited for the lock.
+            kind = "node" if on in (await _spec(pool, tenant)).vertex_labels else "edge"
+            for table in tables:
+                while await writes.rename_property_batch(
+                    pool, tenant=tenant, table=table, kind=kind, on=on, old=old, new=new,
+                ):
+                    pass
+            await _finish_property(pool, tenant, on, old, new, tables)
+    except schema_version.SchemaBusyError as exc:
+        # Every row is rewritten: asking again resumes and finishes it.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+async def _spec(pool: asyncpg.Pool, tenant: str) -> TenantSpec:
+    spec = await load_spec(pool, tenant)
+    if spec is None:
+        raise RenameError(f"tenant '{tenant}' is not registered")
+    return spec
 
 
 async def _finish_property(  # noqa: PLR0913 -- one rename's inputs

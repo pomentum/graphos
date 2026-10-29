@@ -191,9 +191,13 @@ async def put_back(pool: asyncpg.Pool, kept: Kept) -> None:
     name = str(kept.row["name"])
     columns = list(kept.row)
     async with pool.acquire() as conn, conn.transaction():
-        # The registration's final transaction locks this row first: wait for it
-        # to end. Committed, its "restored" record says so, and then it stands
-        # (a registration cancelled while its commit was under way).
+        # Wait for what may still be committing: a restore deletes the kept row
+        # (still visible until it commits), and the registration's final
+        # transaction locks the tenant's row first. Committed, that registration's
+        # "restored" record says so, and then it stands.
+        await conn.execute(
+            "SELECT 1 FROM graphos_meta.unregistered_tenants WHERE name = $1 FOR UPDATE;", name,
+        )
         await conn.execute(
             "SELECT 1 FROM graphos_meta.tenants WHERE name = $1 FOR UPDATE;", name,
         )

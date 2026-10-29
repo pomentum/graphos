@@ -1812,6 +1812,22 @@ async def catalogue(
 # ── Expand (variable-length BFS) ────────────────────────────────────────────
 
 
+
+async def _free_connection(pool: asyncpg.Pool) -> asyncpg.Connection | None:
+    """A second connection if one is free at once, else ``None`` (never wait
+    for one while holding another). Bounded around the acquire, not with its
+    ``timeout=``, which asyncpg would also apply to the connection's reset on
+    release."""
+    try:
+        async with asyncio.timeout(_FREE_CONNECTION_S):
+            return await pool.acquire()
+    except TimeoutError:
+        return None
+
+
+# How long "at once" is for a second connection (connecting a new one included).
+_FREE_CONNECTION_S = 0.05
+
 @router.get(
     "/expand",
     response_model=ExpandResponse,
@@ -2024,15 +2040,14 @@ async def expand(
             # child label that matches the IN clause, each using its
             # own ``btree(start_id, end_id)`` index.
             #
-            # When ``direction=both`` we fire OUT and IN concurrently
-            # via ``pool.fetch`` (each call acquires + releases its
-            # own connection from the pool — different connections so
-            # there's no asyncpg single-in-flight-per-conn constraint).
-            # The single-direction case stays on the outer ``conn`` to
-            # avoid pool churn.  Empirically this halves the per-hop
-            # wall-clock on ``direction=both`` traversals — a 3-hop
-            # 40-seed expand was 1+ s of sequential round-trips; the
-            # gather collapses 6 serial fetches to 3 parallel pairs.
+            # When ``direction=both`` OUT runs on the outer ``conn`` and IN
+            # on a second connection at the same time, if one is free at
+            # once; else both run on ``conn``, one after the other (waiting
+            # for a connection while holding one could leave a burst of
+            # expands, with schema writes holding half the pool, waiting for
+            # connections none of them lets go).  Empirically the pair halves
+            # the per-hop wall-clock on ``direction=both`` traversals — a
+            # 3-hop 40-seed expand was 1+ s of sequential round-trips.
             out_limit = max(limit * 4, 1000)
             out_sql = (
                 f'SELECT c.relname AS rel, '
@@ -2062,14 +2077,21 @@ async def expand(
             # served by the per-edge-label partial btrees directly.
             args = (out_limit, list(communities)) if communities else (out_limit,)
             try:
-                # On the connection this request holds, one after the other: two
-                # more from the pool while holding one could leave a burst of
-                # expands (with schema writes holding half the pool) waiting for
-                # connections none of them will let go.
-                if out_sql:
-                    edge_rows.extend(await conn.fetch(out_sql, *args))
-                if in_sql:
-                    edge_rows.extend(await conn.fetch(in_sql, *args))
+                other = await _free_connection(pool) if out_sql and in_sql else None
+                if other is not None:
+                    try:
+                        out_rows, in_rows = await asyncio.gather(
+                            conn.fetch(out_sql, *args), other.fetch(in_sql, *args),
+                        )
+                    finally:
+                        await pool.release(other)
+                    edge_rows.extend(out_rows)
+                    edge_rows.extend(in_rows)
+                else:
+                    if out_sql:
+                        edge_rows.extend(await conn.fetch(out_sql, *args))
+                    if in_sql:
+                        edge_rows.extend(await conn.fetch(in_sql, *args))
             except asyncpg.exceptions.QueryCanceledError:
                 raise
             except asyncpg.exceptions.PostgresError as exc:
