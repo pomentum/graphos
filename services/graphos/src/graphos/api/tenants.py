@@ -38,7 +38,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, cast
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Path, Query, Request, status
+from fastapi import APIRouter, Header, HTTPException, Path, Query, Request, status
 from fastapi.responses import JSONResponse, Response
 
 from graphos import (
@@ -50,6 +50,7 @@ from graphos import (
     schema_changes,
     schema_document,
     schema_rename,
+    schema_version,
     sync,
 )
 from graphos.api.cache import LRU
@@ -67,6 +68,7 @@ from graphos.bootstrap import (
     bootstrap_tenant,
     ensure_search_indexes,
     load_spec,
+    load_spec_versioned,
     persist_spec,
     persist_spec_replace,
     registered_tenants,
@@ -95,6 +97,7 @@ from graphos.contracts.tenants import (
     UnregisteredTenant,
 )
 from graphos.identity import Level, Principal
+from graphos.lookup import IfMatch, PreconditionFailedError
 from graphos.properties import SchemaError, definitions_count, validate_schema
 from graphos.resolver.indexer import ensure_resolve_rule_indexes
 
@@ -300,6 +303,58 @@ def _may_maintain(principal: Principal, name: str) -> bool:
     return principal.has(name, Level.MAINTAIN) or principal.can_create(name)
 
 
+# ── Schema versions: ETag / If-Match (graphos.schema_version) ───────────────
+
+SchemaIfMatch = Annotated[
+    str | None,
+    Header(
+        description=(
+            "The schema's ETag from an earlier read (`GET /v1/{tenant}/schema`, "
+            "`GET /v1/tenants/{name}`, the exported document), or `*`: the write happens only "
+            "if the schema has not changed since (412 otherwise, with its current ETag). "
+            "Optional."
+        ),
+    ),
+]
+
+_SCHEMA_PRECONDITION: dict[int | str, dict[str, Any]] = {
+    412: {"description": (
+        "`If-Match` did not match: the schema changed since it was read (its current `ETag` "
+        "is in the answer); nothing was written."
+    )},
+}
+
+
+def _if_match(header: str | None) -> IfMatch | None:
+    return None if header is None else IfMatch.parse(header)
+
+
+def _schema_changed(name: str, exc: PreconditionFailedError) -> HTTPException:
+    if exc.current is None:
+        return HTTPException(
+            status_code=status.HTTP_412_PRECONDITION_FAILED,
+            detail=f"If-Match failed: tenant '{name}' is not registered",
+        )
+    return HTTPException(
+        status_code=status.HTTP_412_PRECONDITION_FAILED,
+        detail=(
+            f"If-Match failed: the schema of '{name}' changed since it was read; "
+            f"its ETag is now {exc.current}"
+        ),
+        headers={"ETag": exc.current},
+    )
+
+
+async def _versioned(request: Request, name: str) -> tuple[TenantSpec, str]:
+    """The stored spec and its ETag, read together; 404 when not registered."""
+    found = await load_spec_versioned(request.app.state.pool, name)
+    if found is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"tenant '{name}' is not registered",
+        )
+    return found[0], schema_version.etag(found[1])
+
+
 @router.get(
     "", summary="List the registered tenants the caller may maintain",
     description=(
@@ -341,20 +396,19 @@ async def list_tenants(
         "`maintain` on the tenant, or `create_tenants` on a pattern its name matches. Its "
         "registered spec: labels, property indexes, generated columns, the number of resolve "
         "rules, label hierarchy, metadata, search indexes, display hints and property schema. "
-        "The whole schema as a file is `GET /v1/tenants/{name}/spec`."
+        "The whole schema as a file is `GET /v1/tenants/{name}/spec`. The `ETag` is the "
+        "schema's version, for `If-Match` on schema writes."
     ),
     responses={404: {"description": "Not registered."}},
 )
-async def get_tenant(name: TenantName, principal: MaintainPrincipal) -> TenantInfo:
+async def get_tenant(
+    name: TenantName, request: Request, response: Response, principal: MaintainPrincipal,
+) -> TenantInfo:
     if not _may_maintain(principal, name):
         require_level(principal, name, Level.MAINTAIN)
-    specs = registered_tenants()
-    if name not in specs:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"tenant '{name}' is not registered",
-        )
-    return _spec_to_info(specs[name])
+    spec, tag = await _versioned(request, name)
+    response.headers["ETag"] = tag
+    return _spec_to_info(spec)
 
 
 @router.get(
@@ -382,16 +436,12 @@ async def get_tenant(name: TenantName, principal: MaintainPrincipal) -> TenantIn
 async def export_spec(name: TenantName, request: Request, principal: MaintainPrincipal) -> Response:
     if not _may_maintain(principal, name):
         require_level(principal, name, Level.MAINTAIN)
-    spec = await load_spec(request.app.state.pool, name)
-    if spec is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"tenant '{name}' is not registered",
-        )
+    spec, tag = await _versioned(request, name)
     doc = schema_document.document(spec, now=datetime.now(UTC))
     return Response(
         content=json.dumps(doc, indent=2, ensure_ascii=False) + "\n",
         media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{name}.schema.json"'},
+        headers={"Content-Disposition": f'attachment; filename="{name}.schema.json"', "ETag": tag},
     )
 
 
@@ -401,12 +451,14 @@ async def export_spec(name: TenantName, request: Request, principal: MaintainPri
     responses={409: {"description": (
         "The name is an unregistered tenant that keeps its data, which only its owner or an "
         "admin may restore; or an orphan graph, which only an admin may register again."
-    )}},
+    )}, **_SCHEMA_PRECONDITION},
 )
 async def register(
     body: TenantSpecBody,
     request: Request,
+    response: Response,
     principal: MaintainPrincipal,
+    if_match: SchemaIfMatch = None,
     force_shrink: Annotated[
         bool,
         Query(description=(
@@ -539,16 +591,13 @@ async def register(
     # ``null`` removes a key from the stored meta (a merge); replacing keeps only those sent.
     meta_removed = tuple(sorted(k for k, v in body.meta.items() if v is None))
     pool = request.app.state.pool
-    previous = await load_spec(pool, spec.name)
-    # A name whose data is kept unregistered is not free: registering it
-    # restores it, for whoever may (never hands old data to a new creator).
-    restores = previous is None and await _restores(pool, spec.name, principal)
-    if previous is None and not restores and not principal.can_create(spec.name):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"tenant '{spec.name}' does not exist; creating it needs 'create_tenants'",
-        )
+    wanted = _if_match(if_match)
     if dry_run:
+        previous, restores = await _existing(pool, spec.name, principal)
+        try:
+            await schema_version.check(pool, spec.name, wanted)
+        except PreconditionFailedError as exc:
+            raise _schema_changed(spec.name, exc) from exc
         known = await lifecycle.unregistered_spec(pool, spec.name) if restores else previous
         result = await _dry_run(
             pool, known, spec, replace=force_shrink,
@@ -557,6 +606,47 @@ async def register(
             schema_removed=schema_removed, deprecated_removed=deprecated_removed,
         )
         return result.model_copy(update={"exists": previous is not None, "restores": restores})
+    try:
+        async with schema_version.write(pool, spec.name, wanted) as written:
+            answer = await _register(
+                request, principal, body, spec, force_shrink=force_shrink,
+                meta_removed=meta_removed, display_removed=display_removed,
+                schema_removed=schema_removed, deprecated_removed=deprecated_removed,
+            )
+            tag = await written.etag()
+    except PreconditionFailedError as exc:
+        raise _schema_changed(spec.name, exc) from exc
+    if tag is not None:
+        response.headers["ETag"] = tag
+    return answer
+
+
+async def _existing(
+    pool: asyncpg.Pool, name: str, principal: Principal,
+) -> tuple[TenantSpec | None, bool]:
+    """The stored spec, and whether registering ``name`` restores it; 403 when
+    the caller may not create it."""
+    previous = await load_spec(pool, name)
+    # A name whose data is kept unregistered is not free: registering it
+    # restores it, for whoever may (never hands old data to a new creator).
+    restores = previous is None and await _restores(pool, name, principal)
+    if previous is None and not restores and not principal.can_create(name):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"tenant '{name}' does not exist; creating it needs 'create_tenants'",
+        )
+    return previous, restores
+
+
+async def _register(
+    request: Request, principal: Principal, body: TenantSpecBody, spec: TenantSpec, *,
+    force_shrink: bool, meta_removed: tuple[str, ...],
+    display_removed: by_entry.Removed, schema_removed: by_entry.Removed,
+    deprecated_removed: by_entry.Removed,
+) -> RegisterResponse:
+    """Apply a registration, under the tenant's schema-write lock."""
+    pool = request.app.state.pool
+    previous, restores = await _existing(pool, spec.name, principal)
     if restores:
         await lifecycle.restore_tenant(pool, spec.name)
         await _record_schema(pool, spec.name, {"restored": True})
@@ -676,18 +766,47 @@ async def register(
         404: {"description": "The tenant is not registered."},
         409: {"description": "A job runs on the tenant (a property rename: another one), a "
                              "reconcile holds the edge type, or its tables stay in use (5 s)."},
+        **_SCHEMA_PRECONDITION,
     },
 )
 async def rename_schema_name(
     name: TenantName,
     body: SchemaRenameRequest,
     request: Request,
+    response: Response,
     principal: OwnerPrincipal,
+    if_match: SchemaIfMatch = None,
     dry_run: Annotated[
         bool, Query(description="Answer what the rename would change, writing nothing."),
     ] = False,
 ) -> SchemaRenameResponse | JSONResponse:
     require_level(principal, name, Level.OWNER)
+    if registered_tenants().get(name) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"tenant '{name}' is not registered",
+        )
+    pool = request.app.state.pool
+    wanted = _if_match(if_match)
+    try:
+        if dry_run:
+            await schema_version.check(pool, name, wanted)
+            return await _rename(request, name, body, dry_run=True, by=principal.consumer)
+        async with schema_version.write(pool, name, wanted) as written:
+            answer = await _rename(request, name, body, dry_run=False, by=principal.consumer)
+            tag = await written.etag()
+    except PreconditionFailedError as exc:
+        raise _schema_changed(name, exc) from exc
+    if tag is not None:
+        # A property rename answers 202 itself; the others through ``response``.
+        (answer if isinstance(answer, JSONResponse) else response).headers["ETag"] = tag
+    return answer
+
+
+async def _rename(
+    request: Request, name: str, body: SchemaRenameRequest, *, dry_run: bool, by: str | None,
+) -> SchemaRenameResponse | JSONResponse:
+    """A rename, or its plan; under the tenant's schema-write lock unless a dry run."""
+    # Read here, under the lock: the spec as it is now, not as it was at the request.
     spec = registered_tenants().get(name)
     if spec is None:
         raise HTTPException(
@@ -695,14 +814,13 @@ async def rename_schema_name(
         )
     pool = request.app.state.pool
     if body.kind == "property":
-        return await _rename_property(request, name, spec, body, dry_run=dry_run,
-                                      by=principal.consumer)
+        return await _rename_property(request, name, spec, body, dry_run=dry_run, by=by)
     try:
         if dry_run:
             done = await schema_rename.plan(pool, spec, body.kind, body.from_, body.to)
         else:
             done = await schema_rename.rename(
-                pool, spec, body.kind, body.from_, body.to, by=principal.consumer,
+                pool, spec, body.kind, body.from_, body.to, by=by,
                 vertex_graphid_indexes=request.app.state.settings.vertex_graphid_indexes,
             )
     except schema_rename.RenameError as exc:
@@ -770,13 +888,16 @@ async def _rename_property(
         404: {"description": "The tenant is not registered."},
         409: {"description": "A job runs on the tenant, a reconcile holds the edge type, or "
                              "its tables stay in use (5 s)."},
+        **_SCHEMA_PRECONDITION,
     },
 )
 async def drop_schema_label(
     name: TenantName,
     label: Annotated[str, Path(description="The vertex label or edge type.")],
     request: Request,
+    response: Response,
     principal: OwnerPrincipal,
+    if_match: SchemaIfMatch = None,
 ) -> SchemaDropResponse:
     require_level(principal, name, Level.OWNER)
     spec = registered_tenants().get(name)
@@ -784,12 +905,19 @@ async def drop_schema_label(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"tenant '{name}' is not registered",
         )
+    pool = request.app.state.pool
     try:
-        saved = await schema_rename.drop_label(request.app.state.pool, name, label)
+        async with schema_version.write(pool, name, _if_match(if_match)) as written:
+            saved = await schema_rename.drop_label(pool, name, label)
+            tag = await written.etag()
+    except PreconditionFailedError as exc:
+        raise _schema_changed(name, exc) from exc
     except schema_rename.RenameError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except lifecycle.TenantBusyError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if tag is not None:
+        response.headers["ETag"] = tag
     return SchemaDropResponse(
         tenant=name, kind="label" if label in spec.vertex_labels else "edge_type", name=label,
         saved_queries=saved,
@@ -804,7 +932,10 @@ async def drop_schema_label(
         "No data is touched. When the type has no declared pairs left, it is "
         "open again (any label pair accepted, even with `strict_endpoints`)."
     ),
-    responses={404: {"description": "Tenant not registered, or the pair is not declared."}},
+    responses={
+        404: {"description": "Tenant not registered, or the pair is not declared."},
+        **_SCHEMA_PRECONDITION,
+    },
 )
 async def delete_edge_endpoint(
     name: TenantName,
@@ -814,7 +945,9 @@ async def delete_edge_endpoint(
     src: Annotated[str, Query(description="The pair's source vertex label.")],
     dst: Annotated[str, Query(description="The pair's target vertex label.")],
     request: Request,
+    response: Response,
     principal: MaintainPrincipal,
+    if_match: SchemaIfMatch = None,
 ) -> dict[str, object]:
     if not _may_maintain(principal, name):
         require_level(principal, name, Level.MAINTAIN)
@@ -824,15 +957,22 @@ async def delete_edge_endpoint(
             detail=f"tenant '{name}' is not registered",
         )
     pool = request.app.state.pool
-    if not await remove_edge_endpoint(pool, name, type, src, dst):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"{src}-[{type}]->{dst} is not a declared pair of '{name}'",
-        )
-    spec = await load_spec(pool, name)
-    if spec is not None:
-        remember(spec)
-    await _record_schema(pool, name, {"removed": {"edge_endpoints": [[type, src, dst]]}})
+    try:
+        async with schema_version.write(pool, name, _if_match(if_match)) as written:
+            if not await remove_edge_endpoint(pool, name, type, src, dst):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"{src}-[{type}]->{dst} is not a declared pair of '{name}'",
+                )
+            spec = await load_spec(pool, name)
+            if spec is not None:
+                remember(spec)
+            await _record_schema(pool, name, {"removed": {"edge_endpoints": [[type, src, dst]]}})
+            tag = await written.etag()
+    except PreconditionFailedError as exc:
+        raise _schema_changed(name, exc) from exc
+    if tag is not None:
+        response.headers["ETag"] = tag
     return {"tenant": name, "type": type, "src": src, "dst": dst, "status": "removed"}
 
 

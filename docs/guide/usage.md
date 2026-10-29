@@ -604,6 +604,31 @@ A graph unregistered before 0.8.2 kept no registration: it is listed as an `orph
 An admin registers it again with its schema, or deletes it with its data; anyone else is refused
 (409) when registering its name.
 
+### Schema versions and `If-Match`
+
+A tenant's schema has a version, served as the `ETag` of `GET /v1/{tenant}/schema`,
+`GET /v1/tenants/{name}` and the exported document `GET /v1/tenants/{name}/spec`; any change to the
+schema, its declared pairs or `strict_endpoints` changes it. Every schema write takes `If-Match`:
+a registration (and its dry run), `schema:rename`, a label drop, a pair removal. When the schema
+changed since the version sent, the write answers **412** with the current `ETag` and changes
+nothing; read again, then decide. Each write answers the new `ETag`. `If-Match: *` means "if the
+tenant is registered".
+
+This is how two people editing one schema keep each other's work: the web UI sends the version it
+loaded, so the second of two saves made from it is refused ("Changed by someone else") and the
+schema is read again, instead of silently undoing the first. `If-Match` stays optional on schema
+writes (`GRAPHOS_REQUIRE_IF_MATCH` does not apply to them): a program that registers its schema on
+every start works as before. Schema writes to one tenant run one at a time.
+
+```bash
+ETAG=$(curl -s -D - -o /dev/null "$G/v1/acme/schema" -H "$AUTH" | awk 'tolower($1)=="etag:" {print $2}' | tr -d '\r')
+curl -s -X POST "$G/v1/tenants" -H "$AUTH" -H "If-Match: $ETAG" -H "Content-Type: application/json" \
+  -d '{"name": "acme", "display": {"vertex": {"Doc": {"color": "#336699"}}}}'
+```
+
+The Python client returns it as `schema().etag` (and `get_tenant().etag`) and takes `if_match=` on
+`register_tenant`, `import_schema`, the renames, `drop_label` and `remove_edge_endpoint`.
+
 ### Changing a schema: deprecate, rename, drop
 
 Registration only adds; these three change or remove names, so consumers can follow.
@@ -1831,7 +1856,7 @@ and the 422 of a `strict` property schema (with `violations` and `total`).
 | 404 | tenant not registered; single sign-on not configured (`/v1/auth/oidc/*`); node (`GET`, `PATCH`, `POST …/properties`), edge (`GET`, `PATCH`), unregistered edge type in the path, or cache key not found; unknown tenant on `GET`/`DELETE /v1/tenants/{name}`; unknown search `index`, unknown label on `map/hubs`; a job the caller may not see; the Cypher console off, or an unknown saved query |
 | 409 | removing the last admin; a recompute or metrics run while one of either is running or queued for the tenant; cancelling a finished job, or a direct call whose job was cancelled; an id or edge that matches in several labels (pass `label` / `src_label` / `dst_label`); a write that would give two nodes the values of a unique property index (`application/problem+json`); `snapshot-import?mode=empty` into a tenant with nodes; registering or restoring a name that is kept unregistered for someone else, or is an orphan; `drop_data` while a job or a long query holds the tenant |
 | 410 | a change-feed cursor whose records were pruned (§10) |
-| 412 | `If-Match` did not match: the node or edge changed (or is gone) since it was read |
+| 412 | `If-Match` did not match: the node or edge changed (or is gone) since it was read; or, on a schema write, the tenant's schema changed since it was read (*Schema versions and `If-Match`*) |
 | 413 | `snapshot-import` over 50M rows, or a body past `GRAPHOS_IMPORT_MAX_BYTES`; a CSV file past `GRAPHOS_CSV_MAX_BYTES` |
 | 422 | body or query validation (patterns, ranges, `resolve_rule`, `label_hierarchy`), or `order_by: null` sent with a `cursor`; a registration that sends SQL (`indexes`, or a string in `generated_columns`), declares a property index or generated column on a label that is not a vertex label, changes a registered generated column, or declares a unique index over values nodes already share; a property-schema entry for an unregistered label, a pattern that does not compile, or a narrowing that changes a type; a write a `strict` property schema refuses (`application/problem+json` with `violations`) |
 | 428 | `If-Match` missing with `GRAPHOS_REQUIRE_IF_MATCH=true` |

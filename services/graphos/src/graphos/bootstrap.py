@@ -1224,9 +1224,19 @@ async def load_registered_tenants(pool: asyncpg.Pool) -> int:
 
 async def load_spec(pool: asyncpg.Pool, name: str) -> TenantSpec | None:
     """Return the persisted (merged) spec for ``name``, or None."""
+    found = await load_spec_versioned(pool, name)
+    return None if found is None else found[0]
+
+
+async def load_spec_versioned(pool: asyncpg.Pool, name: str) -> tuple[TenantSpec, str] | None:
+    """The persisted spec for ``name`` and its version, read together, or None.
+
+    The version is the one ``graphos.schema_version`` serves as the ETag: read
+    from the same row, so it describes exactly this spec.
+    """
     async with pool.acquire() as conn:
         row = await conn.fetchrow(TENANT_ROWS_SQL + " WHERE t.name = $1;", name)
-    return None if row is None else spec_from_row(row)
+    return None if row is None else (spec_from_row(row), str(row["version"]))
 
 
 async def register_tenant(
