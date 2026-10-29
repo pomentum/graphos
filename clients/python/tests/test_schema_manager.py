@@ -462,7 +462,9 @@ async def test_ensure_tenant_without_an_etag_registers_without_if_match() -> Non
 
 
 @pytest.mark.asyncio
-async def test_ensure_tenant_judges_once_more_when_another_start_moved_the_version() -> None:
+async def test_ensure_tenant_judges_once_more_when_another_start_moved_the_version(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     class _MovedOnce(_Server):
         def __call__(self, request: httpx.Request) -> httpx.Response:
             if request.headers.get("if-match") == '"v7"' and self._etag == '"v7"':
@@ -472,12 +474,39 @@ async def test_ensure_tenant_judges_once_more_when_another_start_moved_the_versi
                                       headers={"ETag": '"v9"'})
             return super().__call__(request)
 
-    server = _MovedOnce()
+    server = _MovedOnce(report={"not_declared": {"vertex_labels": ["Team"]}})
+    caplog.set_level(logging.INFO, logger=_DRIFT_LOG)
     async with _client(server) as cli:
         result = await cli.ensure_tenant(vertex_labels=["Doc"])
     assert result["status"] == "bootstrapped"
+    # The second dry run's report is the same: it is not logged twice.
+    assert len(_drift_records(caplog)) == 1
     # dry run, refused registration, dry run on the new version, registration with it.
     assert [r[2] for r in server.requests] == [None, '"v7"', None, '"v9"']
+
+
+@pytest.mark.asyncio
+async def test_ensure_tenant_never_restores_a_tenant_unregistered_meanwhile() -> None:
+    class _Unregistered(_Server):
+        def __call__(self, request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content)
+            if request.headers.get("if-match") == '"v7"':
+                self.requests.append((body, {}, '"v7"'))
+                self._gone = True                         # someone unregistered it
+                return httpx.Response(412, json={"detail": "If-Match failed"})
+            if getattr(self, "_gone", False):
+                self.requests.append((body, dict(request.url.params), None))
+                return httpx.Response(200, json={"tenant": body["name"], "restores": True,
+                                                 "drift": None})
+            return super().__call__(request)
+
+    server = _Unregistered()
+    async with _client(server) as cli:
+        with pytest.raises(GraphosError) as info:
+            await cli.ensure_tenant(vertex_labels=["Doc"])
+    assert info.value.status_code == 412
+    # Dry run, refused registration, dry run that would restore: no restoring registration.
+    assert len(server.requests) == 3
 
 
 @pytest.mark.asyncio
@@ -648,3 +677,22 @@ async def test_ensure_tenant_refuses_an_unknown_on_drift() -> None:
         with pytest.raises(ValueError, match="on_drift"):
             await cli.ensure_tenant(on_drift="loud", vertex_labels=["Doc"])  # type: ignore[arg-type]
     assert server.requests == []
+
+
+@pytest.mark.asyncio
+async def test_ensure_tenant_creates_only_what_it_judged_absent() -> None:
+    seen: list[tuple[str | None, str | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/auth/login":
+            return httpx.Response(200, json={"access_token": "tok", "expires_in": 900})
+        seen.append((request.headers.get("if-match"), request.headers.get("if-none-match")))
+        if request.url.params.get("dry_run") == "true":
+            return httpx.Response(200, json={"tenant": "fresh", "exists": False, "drift": None})
+        return httpx.Response(200, json={"tenant": "fresh", "status": "bootstrapped"})
+
+    async with GraphosClient(base_url="http://x", tenant="fresh", token="tok",
+                             transport=httpx.MockTransport(handler)) as cli:
+        await cli.ensure_tenant(vertex_labels=["Doc"])
+    # The dry run found no tenant: the registration is sent with If-None-Match: *.
+    assert seen == [(None, None), (None, "*")]

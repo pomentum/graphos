@@ -176,9 +176,15 @@ def test_a_write_that_fills_the_disk_answers_507_without_the_databases_message()
 def test_a_tenant_drop_the_database_restarts_under_answers_503(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    class Conn:
+        """Takes the schema-write lock (an advisory lock) and lets it go."""
+
+        async def execute(self, *_args: object) -> None:
+            return None
+
     class Pool:
         def acquire(self) -> contextlib.AbstractAsyncContextManager[object]:
-            return contextlib.nullcontext(object())  # type: ignore[return-value]
+            return contextlib.nullcontext(Conn())  # type: ignore[return-value]
 
     async def registered(_conn: object, _name: str) -> str:
         return "registered"

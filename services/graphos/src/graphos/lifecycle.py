@@ -157,6 +157,36 @@ async def restore_tenant(pool: asyncpg.Pool, name: str) -> bool:
     return True
 
 
+async def kept_registration(pool: asyncpg.Pool, name: str) -> dict[str, object] | None:
+    """An unregistered tenant's kept row as it is, for :func:`put_back`."""
+    row = await pool.fetchrow(
+        "SELECT * FROM graphos_meta.unregistered_tenants WHERE name = $1;", name,
+    )
+    return None if row is None else dict(row)
+
+
+async def put_back(pool: asyncpg.Pool, kept: dict[str, object]) -> None:
+    """Undo a restore that the registration restoring it could not finish:
+    the tenant is unregistered again with the very row it was restored from
+    (its schema, pairs, settings, manager, and when and by whom it was
+    unregistered), not with what the registration wrote meanwhile."""
+    name = str(kept["name"])
+    columns = list(kept)
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute("DELETE FROM graphos_meta.tenants WHERE name = $1;", name)
+        await conn.execute("DELETE FROM graphos_meta.edge_endpoints WHERE tenant = $1;", name)
+        await conn.execute("DELETE FROM graphos_meta.tenant_settings WHERE tenant = $1;", name)
+        await conn.execute(
+            f"INSERT INTO graphos_meta.unregistered_tenants ({', '.join(columns)}) "
+            f"VALUES ({', '.join(f'${i}' for i in range(1, len(columns) + 1))}) "
+            "ON CONFLICT (name) DO NOTHING;",
+            *kept.values(),
+        )
+        await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, name)
+    forget(name)
+    log.warning("restore undone: the registration restoring it failed", extra={"tenant": name})
+
+
 # Every row graphos keeps about a tenant besides its graph.  Jobs still queued
 # or running refuse the deletion before any of this runs.
 _TENANT_ROWS = (

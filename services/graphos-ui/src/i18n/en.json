@@ -736,6 +736,7 @@
       "addProperty": "Property",
       "manager": {
         "title": "Managed by {{name}}",
+        "ssoUser": "a single sign-on user ({{id}})",
         "others": "The structure of this schema is managed by {{name}}: change it in that program. Styles can still be changed here.",
         "yours": "You manage this schema's structure",
         "locked": "Managed by {{name}}: change it in that program",

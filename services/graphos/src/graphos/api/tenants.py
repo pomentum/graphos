@@ -373,6 +373,18 @@ SchemaIfMatch = Annotated[
     ),
 ]
 
+SchemaIfNoneMatch = Annotated[
+    str | None,
+    Header(
+        pattern=r"^\*$",
+        description=(
+            "`*`: register only if the tenant is not registered yet (412 otherwise), for a "
+            "program creating a tenant that someone may create at the same time. An "
+            "unregistered tenant counts as not registered. Optional."
+        ),
+    ),
+]
+
 # The 409 of a schema write on a tenant someone else manages (ADR-0013).
 _SCHEMA_MANAGED = (
     " Or the tenant's schema manager is someone else and the write would change its structure: "
@@ -389,6 +401,14 @@ _SCHEMA_PRECONDITION: dict[int | str, dict[str, Any]] = {
 
 def _if_match(header: str | None) -> IfMatch | None:
     return None if header is None else IfMatch.parse(header)
+
+
+def _registered_already(name: str, current: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_412_PRECONDITION_FAILED,
+        detail=f"If-None-Match failed: tenant '{name}' is registered (its ETag is {current})",
+        headers={"ETag": current},
+    )
 
 
 def _schema_changed(name: str, exc: PreconditionFailedError) -> HTTPException:
@@ -522,6 +542,7 @@ async def register(
     response: Response,
     principal: MaintainPrincipal,
     if_match: SchemaIfMatch = None,
+    if_none_match: SchemaIfNoneMatch = None,
     force_shrink: Annotated[
         bool,
         Query(description=(
@@ -592,6 +613,10 @@ async def register(
     # Declared pairs, indexes and columns may name labels and types registered
     # earlier, or added now.
     known = registered_tenants().get(body.name)
+    if known is None and principal.has(body.name, Level.OWNER):
+        # A registration that restores the tenant is checked against the schema it
+        # restores (only for whoever may restore it: no one else learns that schema).
+        known = await lifecycle.unregistered_spec(request.app.state.pool, body.name)
     display, display_removed = _display(body)
     property_schema, schema_removed = _property_schema(body)
     deprecated, deprecated_removed = _deprecated(body)
@@ -656,12 +681,17 @@ async def register(
     manager_stated, manager = _wanted_manager(request, body, principal)
     pool = request.app.state.pool
     wanted = _if_match(if_match)
+    absent = if_none_match is not None
     if dry_run:
         previous, restores, judged_tag = await _existing(pool, spec.name, principal)
         try:
-            await schema_version.check(pool, spec.name, wanted)
+            # Against the version read with the spec it judges, not read again.
+            if wanted is not None:
+                wanted.check(judged_tag)
         except PreconditionFailedError as exc:
             raise _schema_changed(spec.name, exc) from exc
+        if absent and judged_tag is not None:
+            raise _registered_already(spec.name, judged_tag)
         known = await lifecycle.unregistered_spec(pool, spec.name) if restores else previous
         endpoints_stated = "edge_endpoints" in body.model_fields_set
         manager_change = _manager_change(known, manager_stated, manager, principal, spec.name)
@@ -686,7 +716,7 @@ async def register(
             response.headers["ETag"] = judged_tag
         return result.model_copy(update={"exists": previous is not None, "restores": restores})
     try:
-        async with schema_version.write(pool, spec.name, wanted) as written:
+        async with schema_version.write(pool, spec.name, wanted, absent=absent) as written:
             answer = await _register(
                 request, principal, body, spec, force_shrink=force_shrink,
                 meta_removed=meta_removed, display_removed=display_removed,
@@ -695,6 +725,8 @@ async def register(
             )
             tag = await written.etag()
     except PreconditionFailedError as exc:
+        if absent and exc.current is not None:
+            raise _registered_already(spec.name, exc.current) from exc
         raise _schema_changed(spec.name, exc) from exc
     if tag is not None:
         response.headers["ETag"] = tag
@@ -797,10 +829,38 @@ async def _register(
         schema_removed=schema_removed, deprecated_removed=deprecated_removed,
         claims=_claims(manager_stated, manager, principal),
     )
+    # A restore is undone when the registration restoring it fails (a 422 from
+    # bootstrap, say): the tenant goes back to how it was kept.
+    kept = await lifecycle.kept_registration(pool, spec.name) if restores else None
     if restores:
-        await lifecycle.restore_tenant(pool, spec.name)
-        await _record_schema(pool, spec.name, {"restored": True})
+        if kept is None or not await lifecycle.restore_tenant(pool, spec.name):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"tenant '{spec.name}' is no longer unregistered: read it and try again",
+            )
         previous = await load_spec(pool, spec.name)
+    try:
+        return await _apply_registration(
+            request, principal, body, spec, previous, force_shrink=force_shrink,
+            restored=kept is not None, manager_change=manager_change, manager=manager,
+            meta_removed=meta_removed, display_removed=display_removed,
+            schema_removed=schema_removed, deprecated_removed=deprecated_removed,
+        )
+    except BaseException:
+        if kept is not None:
+            await lifecycle.put_back(pool, kept)
+        raise
+
+
+async def _apply_registration(
+    request: Request, principal: Principal, body: TenantSpecBody, spec: TenantSpec,
+    previous: TenantSpec | None, *, force_shrink: bool, restored: bool,
+    manager_change: list[str | None] | None, manager: str | None,
+    meta_removed: tuple[str, ...], display_removed: by_entry.Removed,
+    schema_removed: by_entry.Removed, deprecated_removed: by_entry.Removed,
+) -> RegisterResponse:
+    """A judged registration's writes, under the tenant's schema-write lock."""
+    pool = request.app.state.pool
     try:
         await bootstrap_tenant(
             pool, spec,
@@ -839,6 +899,11 @@ async def _register(
         change["schema_manager"] = manager_change
     # The manager, the removal records and the change record together (ADR-0014).
     async with pool.acquire() as conn, conn.transaction():
+        if restored:
+            await changes.record(
+                conn, tenant=spec.name, op="schema", kind="tenant",
+                count=schema_changes.size({"restored": True}), detail={"restored": True},
+            )
         if manager_change is not None:
             await set_schema_manager(conn, spec.name, manager)
         if force_shrink:
@@ -1185,25 +1250,29 @@ async def unregister(
     if not drop_data:
         require_level(principal, name, Level.OWNER)
         pool = request.app.state.pool
-        if not await unregister_tenant(pool, name, by=principal.consumer):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"tenant '{name}' is not registered",
-            )
+        # Under the schema-write lock, as every schema write: a registration
+        # judged on the tenant must not see it unregistered half-way.
+        async with schema_version.write(pool, name, None):
+            if not await unregister_tenant(pool, name, by=principal.consumer):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"tenant '{name}' is not registered",
+                )
         await _record_schema(pool, name, {"unregistered": True})
         return {"tenant": name, "status": "unregistered"}
 
     pool = request.app.state.pool
-    async with pool.acquire() as conn:
-        state = await lifecycle.tenant_state(conn, name)
-    if state == "orphan":
-        require_admin(principal)
-    else:
-        require_level(principal, name, Level.OWNER)
-    try:
-        dropped = state is not None and await lifecycle.drop_tenant_data(pool, name)
-    except lifecycle.TenantBusyError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    async with schema_version.write(pool, name, None):
+        async with pool.acquire() as conn:
+            state = await lifecycle.tenant_state(conn, name)
+        if state == "orphan":
+            require_admin(principal)
+        else:
+            require_level(principal, name, Level.OWNER)
+        try:
+            dropped = state is not None and await lifecycle.drop_tenant_data(pool, name)
+        except lifecycle.TenantBusyError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     if not dropped:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"no tenant named '{name}'",
@@ -1236,7 +1305,9 @@ async def restore(
 ) -> dict[str, object]:
     require_level(principal, name, Level.OWNER)
     pool = request.app.state.pool
-    if not await lifecycle.restore_tenant(pool, name):
+    async with schema_version.write(pool, name, None):
+        restored = await lifecycle.restore_tenant(pool, name)
+    if not restored:
         async with pool.acquire() as conn:
             state = await lifecycle.tenant_state(conn, name)
         if state == "registered":

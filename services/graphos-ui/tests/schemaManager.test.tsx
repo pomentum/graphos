@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import type { GraphMap, Me, TenantSchema } from "../src/api/types";
 import { WorkspaceProvider } from "../src/graph/WorkspaceProvider";
-import { isSchemaManager, managerName } from "../src/lib/schemaManager";
+import { isSchemaManager, managerName, ssoManagerId } from "../src/lib/schemaManager";
 import { SessionProvider } from "../src/session/SessionProvider";
 import { theme } from "../src/theme/mantineTheme";
 import { DiagramPanel } from "../src/views/schema/diagram/DiagramPanel";
@@ -125,6 +125,9 @@ describe("the schema manager's name", () => {
   it("is its subject without user:, and is matched to the viewer's own subject", () => {
     expect(managerName("user:importer")).toBe("importer");
     expect(managerName(null)).toBeNull();
+    expect(ssoManagerId("oidc-sub:0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0")).toBe("…c3d2e1f0");
+    expect(ssoManagerId("oidc-sub:ada-1")).toBe("ada-1");
+    expect(ssoManagerId("user:importer")).toBeNull();
     expect(isSchemaManager("user:importer", { consumer: "importer", via: "password" })).toBe(true);
     expect(isSchemaManager("user:importer", { consumer: "importer", via: "oidc" })).toBe(false);
     expect(isSchemaManager("user:importer", { consumer: "olive", via: "password" })).toBe(false);

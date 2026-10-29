@@ -32,7 +32,7 @@ from contextlib import asynccontextmanager
 import asyncpg
 
 from graphos.bootstrap import TENANT_ROWS_SQL
-from graphos.lookup import IfMatch
+from graphos.lookup import IfMatch, PreconditionFailedError
 
 _VERSION_SQL = f"SELECT version FROM ({TENANT_ROWS_SQL}) r WHERE r.name = $1;"
 _LOCK_KEY = "graphos.schema-write:"
@@ -64,13 +64,14 @@ class SchemaWrite:
 
 @asynccontextmanager
 async def write(
-    pool: asyncpg.Pool, tenant: str, if_match: IfMatch | None,
+    pool: asyncpg.Pool, tenant: str, if_match: IfMatch | None, *, absent: bool = False,
 ) -> AsyncIterator[SchemaWrite]:
-    """Hold the tenant's schema-write lock; check ``if_match`` first.
+    """Hold the tenant's schema-write lock; check ``if_match`` first, and with
+    ``absent`` (``If-None-Match: *``) that the tenant is not registered.
 
     Raises :class:`graphos.lookup.PreconditionFailedError` (with the current
-    ETag, ``None`` when the tenant is not registered) when ``if_match`` does
-    not match; nothing is written then.
+    ETag, ``None`` when the tenant is not registered) when either does not
+    hold; nothing is written then.
     """
     local = _local.setdefault(tenant, asyncio.Lock())
     async with local, pool.acquire() as conn:
@@ -79,6 +80,8 @@ async def write(
         try:
             if if_match is not None:
                 if_match.check(await current(conn, tenant))
+            if absent and (now := await current(conn, tenant)) is not None:
+                raise PreconditionFailedError(now)
             yield SchemaWrite(conn, tenant)
         finally:
             await conn.execute("SELECT pg_advisory_unlock(hashtextextended($1, 0));", key)

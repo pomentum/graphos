@@ -83,8 +83,11 @@ types or label pairs dropped earlier that the call creates again. Then it regist
 `If-Match` set to the dry run's `ETag`, so it applies exactly what was previewed. If the schema
 changed in between (another replica of the program starting at the same time), it runs the dry
 run once more on the new version, logs it, and registers with that; a second change raises
-`GraphosError` 412 and nothing is registered. An `if_match=` you pass pins the version: the second
-dry run is then refused with 412. With `on_drift="fail"` it raises `SchemaDriftError` (its `drift` is the report) and
+`GraphosError` 412 and nothing is registered, as when someone unregistered the tenant in between
+(registering would restore it, undoing that). A tenant the dry run found not registered is
+registered with `If-None-Match: *`, so one someone else created meanwhile is not registered
+unchecked. An `if_match=` you pass pins the version: the second dry run is then refused with 412.
+Each drift line is logged once, also across the second dry run. With `on_drift="fail"` it raises `SchemaDriftError` (its `drift` is the report) and
 registers nothing when the call would remove, replace or change something, or bring a removed
 item back; what is only not declared never fails it.
 

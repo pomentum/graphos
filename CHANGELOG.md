@@ -4,6 +4,38 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+Closes what the third review of the schema manager left open (ADR-0014): two older races around
+unregistering and restoring, and four small points.
+
+### Fixed
+
+- **Unregistering, restoring and deleting a tenant take its schema-write lock**, as every schema
+  write does: a registration judged on the tenant no longer sees it unregistered or deleted
+  half-way, which could lose the kept registration (its schema, pairs, settings and manager) or
+  create an empty tenant in place of one being deleted.
+- **A registration that restores a tenant and then fails restores nothing.** When bootstrap
+  refuses it (a unique index the data does not allow: 422) or anything after the restore fails,
+  the tenant goes back to unregistered with the very row it was kept with; the "restored" change
+  record is written only with the registration. A restore that finds the tenant no longer
+  unregistered answers 409. Such a registration is also checked against the schema it restores
+  (for its owner or an admin), not as a new tenant's: a property index on a label it keeps was
+  refused 422 before.
+- **The dry run checks `If-Match` against the version it judged**, read with the spec, not read
+  again.
+- **Python client:** `ensure_tenant` logs each drift line once, also across its second dry run;
+  its second attempt never restores a tenant someone unregistered in between (412 instead).
+- **Web UI:** a single-sign-on schema manager shows as "a single sign-on user (…id)", not as its
+  raw subject.
+
+### Added
+
+- **`If-None-Match: *` on `POST /v1/tenants`** (and its dry run): register only if the tenant is
+  not registered yet, 412 otherwise; an unregistered tenant counts as not registered. The Python
+  client takes `if_none_match=True` on `register_tenant`, and `ensure_tenant` sends it when its
+  dry run found no tenant, so a tenant someone else created meanwhile is not registered unchecked.
+
 ## 0.14.7 — 2026-10-29
 
 A program that declares a tenant's schema from its code can own it: people still change its

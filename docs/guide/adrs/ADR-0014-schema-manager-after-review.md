@@ -114,7 +114,11 @@ a registration that names its own caller the manager merges styles as the manage
 first call (it overwrote people's styles once); the client's `Me` gains `subject`; the
 rolling-upgrade note is complete. Left as follow-ups, both older than ADR-0013: unregister,
 restore and delete do not take the schema-write lock, and a restoring registration refused by
-bootstrap (422) leaves the tenant restored.
+bootstrap (422) leaves the tenant restored. Both were fixed in 0.14.8, with the review's four
+nits (the dry run's `If-Match` read apart, the UI showing a raw single-sign-on subject, drift
+lines logged twice on `ensure_tenant`'s second attempt, which could also restore a tenant
+someone unregistered meanwhile) and the race `ensure_tenant` left on a new tenant
+(`If-None-Match: *`).
 
 ## Consequences
 
