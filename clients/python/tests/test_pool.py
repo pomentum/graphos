@@ -15,6 +15,7 @@ from graphos_client import (
     GraphosError,
     GraphosPool,
     NodeUpsert,
+    SchemaDriftError,
     TenantSchema,
     is_schema_drift,
 )
@@ -58,10 +59,10 @@ class _Server:
         return [b for m, p, b in self.calls if p == "/v1/tenants"]
 
 
-def _pool(server: _Server) -> GraphosPool:
+def _pool(server: _Server, **options: object) -> GraphosPool:
     return GraphosPool(
         base_url="http://x", token="tok", schema=_SCHEMA,
-        transport=httpx.MockTransport(server), retry_backoff_s=0.0,
+        transport=httpx.MockTransport(server), retry_backoff_s=0.0, **options,
     )
 
 
@@ -92,29 +93,62 @@ async def test_pool_call_reregisters_once_on_schema_drift() -> None:
         )
     assert resp.nodes_upserted == 1
     assert len(server.registrations()) == 2          # first use + one re-registration
-    assert len(server.dry_runs) == 2                 # each one after its dry run
+    assert server.dry_runs == []                     # on_drift="ignore" by default
+
+
+_REPORT = {
+    "not_declared": {"vertex_labels": ["Team"]},
+    "overwrites": {"display": {"vertex": ["Document"]}},
+}
 
 
 @pytest.mark.asyncio
-async def test_pool_registers_with_ensure_tenant_and_warns_of_drift(
+async def test_pool_by_default_registers_with_one_request_and_no_drift_check(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    caplog.set_level(logging.WARNING, logger="graphos_client.drift")
-    report = {
-        "not_declared": {"vertex_labels": ["Team"]},
-        "overwrites": {"display": {"vertex": ["Document"]}},
-    }
-    server = _Server(report=report)
+    caplog.set_level(logging.INFO, logger="graphos_client.drift")
+    server = _Server(report=_REPORT)
     async with _pool(server) as pool:
         await pool.client("acme")
-    # A dry run of the same body first, then the registration: drift warns, never stops it.
+    assert server.dry_runs == []
+    assert [p for _, p, _ in server.calls] == ["/v1/tenants"]
+    assert [r for r in caplog.records if r.name == "graphos_client.drift"] == []
+
+
+@pytest.mark.asyncio
+async def test_pool_warn_runs_a_dry_run_then_registers_and_logs_drift(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="graphos_client.drift")
+    server = _Server(report=_REPORT)
+    async with _pool(server, on_drift="warn") as pool:
+        await pool.client("acme")
+    # A dry run of the same body first, then the registration: drift logs, never stops it.
+    assert len(server.dry_runs) == 1
     assert server.dry_runs == server.registrations()
-    assert [r.getMessage() for r in caplog.records if r.name == "graphos_client.drift"] == [
-        "acme: vertex label 'Team' is in the tenant but not declared here "
-        "(added elsewhere, e.g. in the web UI)",
-        "acme: display of vertex label 'Document' would be replaced: it differs from the "
-        "stored one",
+    records = [r for r in caplog.records if r.name == "graphos_client.drift"]
+    assert [(r.levelno, r.getMessage()) for r in records] == [
+        (logging.INFO, "acme: vertex label 'Team' is in the tenant but not declared here "
+                       "(added elsewhere, e.g. in the web UI)"),
+        (logging.WARNING, "acme: display of vertex label 'Document' would be replaced: it "
+                          "differs from the stored one"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_pool_fail_raises_on_drift_and_registers_nothing() -> None:
+    server = _Server(report={"removes": {"vertex_labels": ["Team"]}})
+    pool = _pool(server, on_drift="fail")
+    with pytest.raises(SchemaDriftError):
+        await pool.client("acme")
+    assert len(server.dry_runs) == 1 and server.registrations() == []
+    await pool.close()
+
+
+def test_pool_refuses_an_unknown_on_drift() -> None:
+    with pytest.raises(ValueError, match="on_drift"):
+        GraphosPool(base_url="http://x", token="tok", schema=_SCHEMA,
+                    on_drift="loud")  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio

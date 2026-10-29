@@ -118,7 +118,8 @@ def test_merge_adds_and_keeps() -> None:
     # The change feed names search indexes, so a redefinition is not listed.
     # meta keys by name: the text of one changed.
     assert diff(SPEC, after) == {
-        "added": {"vertex_labels": ["Invoice"]}, "changed": {"meta": ["a"]},
+        "added": {"vertex_labels": ["Invoice"]},
+        "changed": {"meta": ["a"], "search_indexes": ["names"]},   # a redefined index (ADR-0014)
     }
 
 

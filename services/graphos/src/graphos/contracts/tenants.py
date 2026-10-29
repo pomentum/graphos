@@ -872,13 +872,25 @@ class TenantSpecBody(BaseModel):
     )
     schema_manager: str | None = Field(
         default=None,
-        pattern=r"^user:\S+$",
+        pattern=r"^(self|user:\S+|oidc-sub:\S+)$",
         description=(
-            "The tenant's schema manager (ADR-0013): a user or service account, "
-            "`user:<name>`, whose registrations alone may then change the tenant's structure "
-            "(others may still change `display`); `null` releases it. Omitted: unchanged. "
-            "Setting, transferring or releasing it needs `owner` on the tenant (the creator of "
-            "a new tenant is its owner)."
+            "The tenant's schema manager (ADR-0013, ADR-0014), whose registrations alone may "
+            "then change the tenant's structure (others may still change `display`): "
+            "`user:<name>` (an existing, enabled graphos user or service account), "
+            "`oidc-sub:<sub>` (a caller signed in through the identity provider) or `self` "
+            "(the caller); `null` releases it. Omitted, or the current one: unchanged. "
+            "Changing it needs `owner` on the tenant (the creator of a new tenant is its "
+            "owner); refused (422) while authentication is disabled."
+        ),
+    )
+    display_merge: Literal["entries", "missing_only"] | None = Field(
+        default=None,
+        description=(
+            "How the `display` entries sent merge with the stored ones: `entries` (an entry "
+            "sent replaces the stored one, `null` removes it) or `missing_only` (only the "
+            "entries the tenant does not have are added; none is replaced or removed, in a "
+            "replace (`force_shrink`) too). Omitted: `missing_only` for the tenant's schema "
+            "manager, `entries` for anyone else."
         ),
     )
 
@@ -1058,9 +1070,12 @@ class TenantInfo(BaseModel):
     schema_manager: str | None = Field(
         None,
         description=(
-            "The tenant's schema manager (`user:<name>`), whose registrations alone may change "
-            "its structure; null when it has none (ADR-0013)."
+            "The tenant's schema manager (`user:<name>` or `oidc-sub:<sub>`), whose "
+            "registrations alone may change its structure; null when it has none (ADR-0013)."
         ),
+    )
+    schema_manager_since: datetime | None = Field(
+        None, description="When the schema manager was named; null when it has none.",
     )
 
 
@@ -1068,6 +1083,14 @@ class MeResponse(BaseModel):
     """Returned by GET /v1/me: who is signed in and what they may use."""
 
     consumer: str = Field(description="The user name; audit, changes and jobs record it.")
+    subject: str | None = Field(
+        None,
+        description=(
+            "The caller's own grant subject: `user:<name>` for a graphos user or service "
+            "account, `oidc-sub:<sub>` for single sign-on; what a tenant's `schema_manager` "
+            "names. Null with authentication disabled."
+        ),
+    )
     kind: Literal["person", "service", "anonymous"] = Field(
         "person",
         description=(
@@ -1155,9 +1178,13 @@ class TenantSchema(BaseModel):
     schema_manager: str | None = Field(
         None,
         description=(
-            "The tenant's schema manager (`user:<name>`): only its registrations may change the "
-            "structure; others may change `display`. Null when it has none (ADR-0013)."
+            "The tenant's schema manager (`user:<name>` or `oidc-sub:<sub>`): only its "
+            "registrations may change the structure; others may change `display`. Null when it "
+            "has none (ADR-0013)."
         ),
+    )
+    schema_manager_since: datetime | None = Field(
+        None, description="When the schema manager was named; null when it has none.",
     )
 
 
@@ -1281,6 +1308,48 @@ class BreakingChange(BaseModel):
     )
 
 
+class DriftReport(BaseModel):
+    """How a registration differs from the stored schema (ADR-0013, ADR-0014).
+
+    Items are named as the change feed names them; the by-entry parts
+    (`display`, `property_schema`, `deprecated`) as `{"vertex": [...], "edge": [...]}`; pairs as
+    `[type, src, dst]`. Parts with nothing in them are left out.
+    """
+
+    not_declared: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "What the tenant has that the body does not declare, per part (a merge keeps it; "
+            "typically added elsewhere, e.g. in the web UI)."
+        ),
+    )
+    removes: dict[str, Any] | None = Field(
+        None, description="What a replace (`force_shrink`) would remove, per part.",
+    )
+    overwrites: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Entries the body would replace with a different value: by-entry parts, `meta` "
+            "keys, search indexes."
+        ),
+    )
+    settings: dict[str, list[Any]] | None = Field(
+        None,
+        description=(
+            "Settings the body would change, as `[before, after]`: `strict_endpoints`, "
+            "`property_mode`, `community_algorithm`."
+        ),
+    )
+    recreates: dict[str, list[dict[str, Any]]] | None = Field(
+        None,
+        description=(
+            "Labels (`vertex_labels`), edge types (`edge_labels`) and pairs "
+            "(`edge_endpoints`) the body declares that were dropped or removed: each with "
+            "`name` (or `pair`), `removed_at` and `removed_by`. Registering creates them again."
+        ),
+    )
+
+
 class RegisterDryRunResponse(BaseModel):
     """``POST /v1/tenants?dry_run=true``: what the registration would change."""
 
@@ -1320,15 +1389,13 @@ class RegisterDryRunResponse(BaseModel):
             "more where the mode is strict. Additions and relaxations are never listed."
         ),
     )
-    drift: dict[str, Any] | None = Field(
+    drift: DriftReport | None = Field(
         None,
         description=(
-            "How the stored schema differs from the one sent (ADR-0013), for a program that "
-            "declares its whole schema: `not_declared` (what the tenant has that the body does "
-            "not mention, per part), `overwrites` (entries the body would replace with a "
-            "different value) and `recreates` (labels, edge types and pairs it would create "
-            "again after they were dropped or removed: kind, name, when, by whom). Empty parts "
-            "are left out; null for a new tenant."
+            "How the stored schema differs from the one sent (ADR-0013, ADR-0014), for a "
+            "program that declares its whole schema; null for a new tenant. The answer's "
+            "`ETag` is the version it was judged on: send it as `If-Match` with the "
+            "registration to apply exactly what was previewed."
         ),
     )
     status: str = Field("dry_run", description="Always `dry_run`: nothing was applied.")
@@ -1371,6 +1438,13 @@ class RegisterResponse(BaseModel):
     )
     n_property_definitions: int = Field(0, description="Declared properties, `*` included.")
     property_mode: str = Field("off", description="How writes are held to them.")
+    schema_manager: str | None = Field(
+        None,
+        description=(
+            "The tenant's schema manager after the registration (null when it has none): a "
+            "client that named one checks it here (an older server ignores the field)."
+        ),
+    )
     status: str = Field("bootstrapped", description="Always `bootstrapped`: the spec is applied.")
 
 

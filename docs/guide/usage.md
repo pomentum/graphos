@@ -634,35 +634,59 @@ The Python client returns it as `schema().etag` (and `get_tenant().etag`) and ta
 
 A program that declares a tenant's schema from its code and registers it on every start, while
 people edit the same schema in the web UI, would undo their changes, or fail on them, without
-knowing ([ADR-0013](adrs/ADR-0013-schema-manager-and-drift-reports.md)). Two things prevent it:
+knowing ([ADR-0013](adrs/ADR-0013-schema-manager-and-drift-reports.md), amended by
+[ADR-0014](adrs/ADR-0014-schema-manager-after-review.md)). Two things prevent it:
 
-**A schema manager.** A tenant may name one user or service account as its schema manager, in a
-registration field like `strict_endpoints`: `"schema_manager": "user:loader"` sets or transfers
-it, `null` releases it, leaving it out keeps it. Setting it needs `owner` on the tenant (the
-creator of a new tenant is its owner, so a program names itself in its first registration).
-`GET /v1/{tenant}/schema` and `GET /v1/tenants/{name}` show it. Then:
+**A schema manager.** A tenant may name one schema manager, in a registration field like
+`strict_endpoints`: `"schema_manager": "user:<name>"` (an existing, enabled graphos user or
+service account), `"oidc-sub:<sub>"` (a caller signed in through the identity provider) or
+`"self"` (the caller); `null` releases it; leaving it out, or naming the current one, keeps it.
+Changing it needs `owner` on the tenant (the creator of a new tenant is its owner), so a program
+names itself in its first registration and may do so again at every start without being an
+owner. With authentication disabled, naming one is refused (422). `GET /v1/{tenant}/schema` and
+`GET /v1/tenants/{name}` show `schema_manager` and `schema_manager_since`; the registration's
+answer says which manager it left. Then:
 
 - only the manager's schema writes may change the tenant's structure: labels, edge types, pairs,
-  property definitions, deprecations, indexes, rules, `meta`, `strict_endpoints`, the property
-  mode and the community algorithm. Anyone else's registration, rename, drop or pair removal that
-  would change any of it answers **409** `{"detail", "code": "schema_managed", "schema_manager"}`,
-  writing nothing. Declaring again what is stored is not a change, so it is not refused;
-- styles (`display`) stay everyone's with `maintain`: the manager's own registrations add only
-  the styles that do not exist yet and never overwrite or remove those people set;
+  property definitions, deprecations, indexes (search indexes redefined included), rules, `meta`,
+  `strict_endpoints` and the property mode. Anyone else's registration, rename, drop or pair
+  removal that would change any of it answers **409**
+  `{"detail", "code": "schema_managed", "schema_manager"}`, writing nothing. Declaring again what
+  is stored is not a change, so it is not refused;
+- styles (`display`) and the community algorithm stay everyone's with `maintain`;
+- the registration says how its styles merge: `"display_merge": "entries"` (an entry sent
+  replaces the stored one, `null` removes it) or `"missing_only"` (only the styles the tenant does
+  not have are added; none is replaced or removed, and a replace keeps the stored styles of the
+  labels and edge types it keeps). The manager's default is `missing_only`, so people's styles
+  survive its starts; it sends `entries` to correct its own;
 - being the manager grants nothing: each write still needs its level;
-- the web UI shows the structure read-only, names the manager, and lets an owner release it.
+- unregistering and restoring a tenant keeps its manager; a registration that would restore a
+  managed tenant is judged as that tenant, and restores nothing when refused;
+- the web UI shows the structure read-only, names the manager, and lets an owner release it
+  (`GET /v1/me` gives the viewer's own `subject`, which the UI compares with the manager);
+- the manager stays named when its user is deleted or disabled, and when authentication is turned
+  off later (every write is then the anonymous admin's, which manages nothing): the structure
+  stays locked until an owner releases it (`"schema_manager": null`);
+- during a rolling upgrade from a server without managers, an older replica serves a different
+  `ETag` for a managed tenant (a write may answer 412: read and send again), and an older
+  replica's unregister drops the manager.
 
 **The drift report.** A registration's dry run (`?dry_run=true`) answers `drift`: what the tenant
-has that the body does not declare (`not_declared`), the entries the body would replace with a
-different value (`overwrites`), and the labels, edge types and pairs it would create again after
-they were dropped or removed (`recreates`, with when and by whom). Nothing is refused for drift:
-what a registration declares wins, as before, and the report says what that will change. The
-Python client's `ensure_tenant(..., on_drift="warn")` runs the dry run, logs each item, and then
-registers (`"fail"` stops instead when something would be overwritten or created again).
+has that the body does not declare (`not_declared`), what a replace would remove (`removes`), the
+entries the body would replace with a different value (`overwrites`), the settings it would
+change (`settings`, as `[before, after]`), and the labels, edge types and pairs it would create
+again after they were dropped or removed, by any route or by a replace (`recreates`, with when and
+by whom). Items are named as the change feed names them. Nothing is refused for drift: what a
+registration declares wins, and the report says what that will change. The dry run's `ETag` is
+the version it was judged on: sent as `If-Match`, the registration applies exactly the preview.
+The Python client's `ensure_tenant(..., on_drift="warn")` does both: it logs the report (what is
+not declared at INFO, the rest at WARNING) and registers with that version; `"fail"` raises
+instead when something would be overwritten, removed, changed or created again. When another
+start registered in between (replicas starting together), it judges the new version once more.
 
 ```bash
 curl -s -X POST "$G/v1/tenants?dry_run=true" -H "$AUTH" -H "Content-Type: application/json" \
-  -d '{"name": "acme", "vertex_labels": ["Doc", "Team"], "schema_manager": "user:loader"}' | jq .drift
+  -d '{"name": "acme", "vertex_labels": ["Doc", "Team"], "schema_manager": "self"}' | jq .drift
 ```
 
 ### Changing a schema: deprecate, rename, drop

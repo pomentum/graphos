@@ -122,13 +122,20 @@ async function schemaPage(schema: TenantSchema, who: Me) {
 }
 
 describe("the schema manager's name", () => {
-  it("is its subject without user:, and is never a single sign-on person", () => {
+  it("is its subject without user:, and is matched to the viewer's own subject", () => {
     expect(managerName("user:importer")).toBe("importer");
     expect(managerName(null)).toBeNull();
     expect(isSchemaManager("user:importer", { consumer: "importer", via: "password" })).toBe(true);
     expect(isSchemaManager("user:importer", { consumer: "importer", via: "oidc" })).toBe(false);
     expect(isSchemaManager("user:importer", { consumer: "olive", via: "password" })).toBe(false);
     expect(isSchemaManager(null, { consumer: "olive", via: "password" })).toBe(false);
+    // With the subject graphos gives for the viewer: single sign-on manages too.
+    expect(isSchemaManager("oidc-sub:ada-1", { consumer: "Ada", via: "oidc", subject: "oidc-sub:ada-1" })).toBe(true);
+    expect(isSchemaManager("user:Ada", { consumer: "Ada", via: "oidc", subject: "oidc-sub:ada-1" })).toBe(false);
+    expect(isSchemaManager("user:importer", { consumer: "importer", via: "password", subject: "user:importer" })).toBe(
+      true,
+    );
+    expect(isSchemaManager("user:importer", { consumer: "importer", via: "none", subject: null })).toBe(false);
   });
 });
 

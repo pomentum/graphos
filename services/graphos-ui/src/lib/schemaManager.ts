@@ -10,10 +10,15 @@ export function managerName(subject: string | null | undefined): string | null {
 }
 
 /**
- * Whether `me` is the schema manager `subject`. Only graphos users and
- * service accounts (`user:<consumer>`) manage a schema; a person signed in
- * through single sign-on never does.
+ * Whether `me` is the schema manager `subject`: compared with the grant
+ * subject graphos gives for `me` (`user:<name>`, or `oidc-sub:<sub>` for single
+ * sign-on). A server that does not give it: a graphos user as `user:<consumer>`.
  */
-export function isSchemaManager(subject: string | null | undefined, me: Pick<Me, "consumer" | "via">): boolean {
-  return Boolean(subject) && me.via !== "oidc" && subject === `${USER}${me.consumer}`;
+export function isSchemaManager(
+  subject: string | null | undefined,
+  me: Pick<Me, "consumer" | "via" | "subject">,
+): boolean {
+  if (!subject) return false;
+  if (me.subject !== undefined) return subject === me.subject;
+  return me.via !== "oidc" && subject === `${USER}${me.consumer}`;
 }

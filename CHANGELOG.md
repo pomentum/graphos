@@ -12,30 +12,50 @@ instead of undoing it unseen (ADR-0013).
 
 ### Added
 
-- **A tenant's schema manager.** A registration may name a user or service account as the
-  tenant's schema manager, `"schema_manager": "user:<name>"` (`null` releases it, leaving it out
-  keeps it; setting it needs `owner`, and the creator of a new tenant is its owner). Only the
+- **A tenant's schema manager** (ADR-0013, amended by ADR-0014). A registration may name the
+  tenant's schema manager: `"schema_manager": "user:<name>"` (an existing, enabled graphos user or
+  service account), `"oidc-sub:<sub>"` (a caller signed in through the identity provider) or
+  `"self"`; `null` releases it, leaving it out or naming the current one keeps it. Changing it
+  needs `owner` (the creator of a new tenant is its owner), so a program names itself at every
+  start without being an owner; refused (422) while authentication is disabled. Only the
   manager's schema writes may then change the structure: anyone else's registration, rename,
   label drop or pair removal that would change labels, edge types, pairs, property definitions,
-  deprecations, indexes, rules, `meta`, `strict_endpoints`, the property mode or the community
-  algorithm answers **409** `{"detail", "code": "schema_managed", "schema_manager"}` and writes
-  nothing; declaring again what is stored is not a change. Styles (`display`) stay everyone's:
-  the manager's registrations add only the styles that do not exist yet. `GET /v1/{tenant}/schema`
-  and `GET /v1/tenants/{name}` show `schema_manager`. No new routes. A tenant that never had a
-  manager keeps its schema `ETag` across the upgrade.
+  deprecations, indexes (a search index redefined included), rules, `meta`, `strict_endpoints` or
+  the property mode answers **409** `{"detail", "code": "schema_managed", "schema_manager"}` and
+  writes nothing; declaring again what is stored is not a change. Styles and the community
+  algorithm stay everyone's. The manager survives unregistering and restoring; a registration that
+  would restore a managed tenant is judged as that tenant first. The two schema
+  reads show `schema_manager` and `schema_manager_since`, and the registration's answer the
+  manager it left. No new routes. A tenant that never had a manager keeps its schema `ETag`
+  across the upgrade.
+- **Styles merge as the registration says.** `display_merge: "entries"` (an entry sent replaces
+  the stored one, `null` removes it) or `"missing_only"` (only the styles the tenant does not have
+  are added, none replaced or removed; a replace keeps the stored styles of the labels and edge
+  types it keeps). The manager's registrations default to
+  `missing_only`, so people's styles survive its starts; everyone else's to `entries`.
 - **A drift report in the registration's dry run.** `drift` lists what the tenant has that the
-  body does not declare (`not_declared`), the entries the body would replace with a different
-  value (`overwrites`), and the labels, edge types and pairs it would create again after they
-  were dropped or removed (`recreates`, with when and by whom; drops and pair removals are now
-  recorded). Nothing is refused for drift: what a registration declares still wins.
-- **Python client:** `schema_manager=` and `manage_schema=True` on `register_tenant` and
-  `import_schema`, `ensure_tenant(..., on_drift="warn" | "fail" | "ignore")` (a dry run whose drift
-  is logged, or raised as `SchemaDriftError`, before registering), `schema_manager` on
-  `schema()` and `get_tenant()`; `GraphosPool` registers through `ensure_tenant`.
+  body does not declare (`not_declared`), what a replace would remove (`removes`), the entries
+  the body would overwrite (`overwrites`), the settings it would change (`settings`), and the
+  labels, edge types and pairs it would create again after they were dropped, removed or replaced
+  away (`recreates`, with when and by whom). Nothing is refused for drift: what a registration
+  declares still wins. The dry run's `ETag` is the version it judged, for `If-Match` on the
+  registration. A search index redefined under its name is now a change in the change feed too.
+- **Python client:** `schema_manager=`, `manage_schema=True` (sends `"self"`) and
+  `display_merge=` on `register_tenant` and `import_schema`; `ensure_tenant(..., on_drift="warn"
+  | "fail" | "ignore")` runs the dry run, logs the drift (what is not declared at INFO, the rest
+  at WARNING) or raises `SchemaDriftError`, and registers with the version it previewed (judged
+  once more when another start registered in between, then 412); after a
+  registration that names or releases a manager, the client checks the answer and raises
+  `SchemaManagerNotApplied` when the server ignored it (an older server); `schema_manager` and
+  `schema_manager_since` on `schema()` and `get_tenant()`. `GraphosPool` takes `on_drift`,
+  `"ignore"` by default (as before).
+- **`GET /v1/me`** gains `subject`, the caller's own grant subject (`user:<name>`,
+  `oidc-sub:<sub>`; null with authentication disabled).
 - **Web UI:** a managed tenant's schema view names its manager and keeps the structure controls
-  disabled for everyone else, styles excepted; an owner can release the manager there.
+  disabled for everyone else, styles excepted; an owner can release the manager there. A person
+  signed in through single sign-on who is the manager is recognised (from `/v1/me`'s `subject`).
   **Docs:** usage §3 (A schema manager, and the drift report), §12; concept §2.2; features;
-  ADR-0013.
+  ADR-0013, ADR-0014.
 
 ## 0.14.6 — 2026-10-29
 

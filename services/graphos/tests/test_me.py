@@ -66,8 +66,8 @@ def _get(client: TestClient, path: str, token: str):  # noqa: ANN202
 def test_me_lists_the_registered_tenants_and_levels(client: TestClient) -> None:
     body = _get(client, "/v1/me", "tok_read").json()
     assert body == {
-        "consumer": "reader", "kind": "person", "via": "password", "admin": False,
-        "must_change": False,
+        "consumer": "reader", "subject": "user:reader", "kind": "person", "via": "password",
+        "admin": False, "must_change": False,
         "tenants": ["acme"], "levels": {"acme": "read"}, "create_tenants": [], "preferences": {},
     }
     assert _get(client, "/v1/me", "tok_write").json()["levels"] == {"acme": "write"}

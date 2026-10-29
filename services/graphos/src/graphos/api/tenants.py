@@ -43,6 +43,7 @@ from fastapi.responses import JSONResponse, Response
 
 from graphos import (
     by_entry,
+    changes,
     declared,
     lifecycle,
     renames,
@@ -74,6 +75,7 @@ from graphos.bootstrap import (
     load_spec_versioned,
     persist_spec,
     persist_spec_replace,
+    record_removal,
     registered_tenants,
     remember,
     remove_edge_endpoint,
@@ -87,6 +89,7 @@ from graphos.contracts.tenants import (
     BreakingChange,
     DeprecatedSpec,
     DisplaySpec,
+    DriftReport,
     GeneratedColumnSpec,
     PropertyIndexSpec,
     RegisterDryRunResponse,
@@ -157,6 +160,7 @@ def _spec_to_info(spec: TenantSpec) -> TenantInfo:
         renames=[SchemaRename.model_validate({"status": "done", **r}) for r in spec.renames],
         community_algorithm=spec.community_algorithm or DEFAULT_COMMUNITY_ALGORITHM,
         schema_manager=spec.schema_manager,
+        schema_manager_since=spec.schema_manager_since,
     )
 
 
@@ -248,8 +252,13 @@ async def _dry_run(
     display_removed: tuple[tuple[str, str], ...] = (),
     schema_removed: tuple[tuple[str, str], ...] = (),
     deprecated_removed: tuple[tuple[str, str], ...] = (),
+    declared: TenantSpec | None = None,
 ) -> RegisterDryRunResponse:
-    """What registering ``spec`` would change, checked as bootstrap would."""
+    """What registering ``spec`` would change, checked as bootstrap would.
+
+    ``declared`` is the registration as sent, before its styles merge
+    (``schema_drift.apply_display_merge``): the drift report is about it.
+    """
     after = schema_document.merged(
         previous, spec, replace=replace, endpoints_stated=endpoints_stated,
         meta_removed=meta_removed, display_removed=display_removed,
@@ -282,35 +291,36 @@ async def _dry_run(
         changes=changes,
         warnings=await schema_document.warnings(pool, previous, after, replace=replace),
         breaking=await _breaking(pool, previous, after, replace=replace),
-        drift=None if previous is None else schema_drift.drift(
-            previous, spec, changes, await load_removals(pool, spec.name),
-        ),
+        drift=None if previous is None else DriftReport(**schema_drift.drift(
+            previous, declared or spec, after, replace_all=replace,
+            removals=await load_removals(pool, spec.name),
+        )),
     )
 
 
-def _as_managed(
-    stored: TenantSpec | None, spec: TenantSpec, principal: Principal, *,
+def _judge(
+    stored: TenantSpec | None, spec: TenantSpec, principal: Principal, body: TenantSpecBody, *,
     replace: bool, endpoints_stated: bool, meta_removed: tuple[str, ...],
     display_removed: by_entry.Removed, schema_removed: by_entry.Removed,
     deprecated_removed: by_entry.Removed,
 ) -> tuple[TenantSpec, by_entry.Removed]:
-    """A registration on a managed tenant (ADR-0013): the manager's keeps the
-    styles people set; anyone else's may change styles only (409 otherwise)."""
+    """A registration's styles merged as it says (the manager's default to
+    ``missing_only``), and on a managed tenant, anyone else's held to styles
+    only (409 otherwise; ADR-0013, ADR-0014)."""
     manager = stored.schema_manager if stored else None
-    if stored is None or manager is None:
+    is_manager = manager is not None and schema_drift.principal_subject(principal) == manager
+    mode = body.display_merge or ("missing_only" if is_manager else "entries")
+    spec, display_removed = schema_drift.apply_display_merge(
+        stored, spec, display_removed, mode, replace_all=replace,
+    )
+    if stored is None or manager is None or is_manager:
         return spec, display_removed
-    if principal.subject == manager:
-        return schema_drift.keep_peoples_styles(stored, spec, display_removed)
     after = schema_document.merged(
         stored, spec, replace=replace, endpoints_stated=endpoints_stated,
         meta_removed=meta_removed, display_removed=display_removed,
         schema_removed=schema_removed, deprecated_removed=deprecated_removed,
     )
-    algorithm_changed = (
-        spec.community_algorithm is not None
-        and spec.community_algorithm != stored.community_algorithm
-    )
-    if algorithm_changed or schema_drift.changes_structure(schema_changes.diff(stored, after)):
+    if schema_drift.changes_structure(schema_changes.diff(stored, after)):
         raise schema_drift.SchemaManaged(spec.name, manager)
     return spec, display_removed
 
@@ -352,6 +362,12 @@ SchemaIfMatch = Annotated[
         ),
     ),
 ]
+
+# The 409 of a schema write on a tenant someone else manages (ADR-0013).
+_SCHEMA_MANAGED = (
+    " Or the tenant's schema manager is someone else and the write would change its structure: "
+    "`{\"detail\", \"code\": \"schema_managed\", \"schema_manager\"}`, nothing written."
+)
 
 _SCHEMA_PRECONDITION: dict[int | str, dict[str, Any]] = {
     412: {"description": (
@@ -487,6 +503,7 @@ async def export_spec(name: TenantName, request: Request, principal: MaintainPri
     responses={409: {"description": (
         "The name is an unregistered tenant that keeps its data, which only its owner or an "
         "admin may restore; or an orphan graph, which only an admin may register again."
+        + _SCHEMA_MANAGED
     )}, **_SCHEMA_PRECONDITION},
 )
 async def register(
@@ -626,40 +643,36 @@ async def register(
 
     # ``null`` removes a key from the stored meta (a merge); replacing keeps only those sent.
     meta_removed = tuple(sorted(k for k, v in body.meta.items() if v is None))
-    # Setting, transferring or releasing the schema manager is an owner's
-    # (ADR-0013); the creator of a new tenant is its owner.
-    if (
-        "schema_manager" in body.model_fields_set and known is not None
-        and not (principal.admin or principal.has(body.name, Level.OWNER))
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"setting the schema manager of '{body.name}' needs 'owner' on it",
-        )
+    manager_stated, manager = _wanted_manager(request, body, principal)
     pool = request.app.state.pool
     wanted = _if_match(if_match)
     if dry_run:
-        previous, restores = await _existing(pool, spec.name, principal)
+        previous, restores, judged_tag = await _existing(pool, spec.name, principal)
         try:
             await schema_version.check(pool, spec.name, wanted)
         except PreconditionFailedError as exc:
             raise _schema_changed(spec.name, exc) from exc
         known = await lifecycle.unregistered_spec(pool, spec.name) if restores else previous
         endpoints_stated = "edge_endpoints" in body.model_fields_set
-        spec, display_removed = _as_managed(
-            known, spec, principal, replace=force_shrink, endpoints_stated=endpoints_stated,
-            meta_removed=meta_removed, display_removed=display_removed,
-            schema_removed=schema_removed, deprecated_removed=deprecated_removed,
+        manager_change = _manager_change(known, manager_stated, manager, principal, spec.name)
+        judged, display_removed = _judge(
+            known, spec, principal, body, replace=force_shrink,
+            endpoints_stated=endpoints_stated, meta_removed=meta_removed,
+            display_removed=display_removed, schema_removed=schema_removed,
+            deprecated_removed=deprecated_removed,
         )
         result = await _dry_run(
-            pool, known, spec, replace=force_shrink, endpoints_stated=endpoints_stated,
-            meta_removed=meta_removed, display_removed=display_removed,
-            schema_removed=schema_removed, deprecated_removed=deprecated_removed,
+            pool, known, judged, declared=spec, replace=force_shrink,
+            endpoints_stated=endpoints_stated, meta_removed=meta_removed,
+            display_removed=display_removed, schema_removed=schema_removed,
+            deprecated_removed=deprecated_removed,
         )
-        before = known.schema_manager if known else None
-        if "schema_manager" in body.model_fields_set and before != body.schema_manager:
-            result.changes = {**(result.changes or {}),
-                              "schema_manager": [before, body.schema_manager]}
+        if manager_change is not None:
+            result.changes = {**(result.changes or {}), "schema_manager": manager_change}
+        # The version of the spec the preview judged (read with it): sent back
+        # as If-Match, the registration applies exactly this (ADR-0014).
+        if judged_tag is not None:
+            response.headers["ETag"] = judged_tag
         return result.model_copy(update={"exists": previous is not None, "restores": restores})
     try:
         async with schema_version.write(pool, spec.name, wanted) as written:
@@ -667,6 +680,7 @@ async def register(
                 request, principal, body, spec, force_shrink=force_shrink,
                 meta_removed=meta_removed, display_removed=display_removed,
                 schema_removed=schema_removed, deprecated_removed=deprecated_removed,
+                manager_stated=manager_stated, manager=manager,
             )
             tag = await written.etag()
     except PreconditionFailedError as exc:
@@ -680,15 +694,67 @@ async def _refuse_if_managed(pool: asyncpg.Pool, name: str, principal: Principal
     """409 when the tenant has a schema manager and the caller is not it (ADR-0013):
     for the writes that change structure only (renames, drops, pair removals)."""
     stored = await load_spec(pool, name)
-    schema_drift.check(name, stored.schema_manager if stored else None, principal.subject)
+    schema_drift.check(name, stored.schema_manager if stored else None, principal)
+
+
+def _wanted_manager(
+    request: Request, body: TenantSpecBody, principal: Principal,
+) -> tuple[bool, str | None]:
+    """Whether the registration names a schema manager, and which (``self``
+    resolved to the caller); 422 for one that cannot be (ADR-0014)."""
+    if "schema_manager" not in body.model_fields_set:
+        return False, None
+    value = body.schema_manager
+    if value is None:
+        return True, None
+    if request.app.state.settings.auth_disabled:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="a schema manager needs sign-in; authentication is disabled here",
+        )
+    if value == "self":
+        value = schema_drift.principal_subject(principal)
+        if value is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="\"self\" names the caller, and this caller has no name to manage with",
+            )
+    store = getattr(request.app.state, "access_store", None)
+    if value.startswith("user:") and store is not None:
+        user = store.user(value.removeprefix("user:"))
+        if user is None or user.disabled:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"schema manager {value}: no such enabled user or service account",
+            )
+    return True, value
+
+
+def _manager_change(
+    stored: TenantSpec | None, stated: bool, manager: str | None, principal: Principal,
+    name: str,
+) -> list[str | None] | None:
+    """``[before, after]`` when the registration changes the schema manager, else
+    ``None``; 403 unless the caller owns the tenant (the creator of a new one
+    does). Judged on the stored tenant, under the lock for a registration."""
+    current = stored.schema_manager if stored else None
+    if not stated or manager == current:
+        return None
+    if stored is not None and not (principal.admin or principal.has(name, Level.OWNER)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"changing the schema manager of '{name}' needs 'owner' on it",
+        )
+    return [current, manager]
 
 
 async def _existing(
     pool: asyncpg.Pool, name: str, principal: Principal,
-) -> tuple[TenantSpec | None, bool]:
-    """The stored spec, and whether registering ``name`` restores it; 403 when
-    the caller may not create it."""
-    previous = await load_spec(pool, name)
+) -> tuple[TenantSpec | None, bool, str | None]:
+    """The stored spec, whether registering ``name`` restores it, and the ETag
+    of that spec (read with it); 403 when the caller may not create it."""
+    found = await load_spec_versioned(pool, name)
+    previous, tag = (None, None) if found is None else (found[0], schema_version.etag(found[1]))
     # A name whose data is kept unregistered is not free: registering it
     # restores it, for whoever may (never hands old data to a new creator).
     restores = previous is None and await _restores(pool, name, principal)
@@ -697,29 +763,32 @@ async def _existing(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"tenant '{name}' does not exist; creating it needs 'create_tenants'",
         )
-    return previous, restores
+    return previous, restores, tag
 
 
 async def _register(
     request: Request, principal: Principal, body: TenantSpecBody, spec: TenantSpec, *,
     force_shrink: bool, meta_removed: tuple[str, ...],
     display_removed: by_entry.Removed, schema_removed: by_entry.Removed,
-    deprecated_removed: by_entry.Removed,
+    deprecated_removed: by_entry.Removed, manager_stated: bool, manager: str | None,
 ) -> RegisterResponse:
     """Apply a registration, under the tenant's schema-write lock."""
     pool = request.app.state.pool
-    previous, restores = await _existing(pool, spec.name, principal)
-    if restores:
-        await lifecycle.restore_tenant(pool, spec.name)
-        await _record_schema(pool, spec.name, {"restored": True})
-        previous = await load_spec(pool, spec.name)
-    # Judged here, under the lock, on the schema as it is now.
-    spec, display_removed = _as_managed(
-        previous, spec, principal, replace=force_shrink,
+    previous, restores, _ = await _existing(pool, spec.name, principal)
+    # Judged here, under the lock, on the schema as it is now (an unregistered
+    # tenant's as it would be restored): a refused registration restores nothing.
+    known = await lifecycle.unregistered_spec(pool, spec.name) if restores else previous
+    manager_change = _manager_change(known, manager_stated, manager, principal, spec.name)
+    spec, display_removed = _judge(
+        known, spec, principal, body, replace=force_shrink,
         endpoints_stated="edge_endpoints" in body.model_fields_set,
         meta_removed=meta_removed, display_removed=display_removed,
         schema_removed=schema_removed, deprecated_removed=deprecated_removed,
     )
+    if restores:
+        await lifecycle.restore_tenant(pool, spec.name)
+        await _record_schema(pool, spec.name, {"restored": True})
+        previous = await load_spec(pool, spec.name)
     try:
         await bootstrap_tenant(
             pool, spec,
@@ -749,21 +818,37 @@ async def _register(
             pool, spec, meta_removed=meta_removed, display_removed=display_removed,
             schema_removed=schema_removed, deprecated_removed=deprecated_removed,
         )
-    change = None
-    if "schema_manager" in body.model_fields_set:
-        before = await set_schema_manager(pool, spec.name, body.schema_manager)
-        if before != body.schema_manager:
-            change = {"schema_manager": [before, body.schema_manager]}
     # Persisting merges with the stored spec (unless force_shrink); keep the
     # merged result in memory so a partial re-registration never hides labels
     # or resolve rules registered earlier.
-    spec = await load_spec(pool, spec.name) or spec
+    stored = await load_spec(pool, spec.name) or spec
+    change = schema_changes.diff(previous, stored) or {}
+    if manager_change is not None:
+        change["schema_manager"] = manager_change
+    # The manager, the removal records and the change record together (ADR-0014).
+    async with pool.acquire() as conn, conn.transaction():
+        if manager_change is not None:
+            await set_schema_manager(conn, spec.name, manager)
+        if force_shrink:
+            # What a replace removes is a removal too: reported if declared again.
+            removed = change.get("removed") or {}
+            for kind, part in schema_drift.REMOVAL_PARTS.items():
+                if kind == "edge_endpoint":
+                    continue
+                for name in removed.get(part) or ():
+                    await record_removal(conn, spec.name, kind, name, by=principal.consumer)
+            for edge_type, src, dst in removed.get("edge_endpoints") or ():
+                await record_removal(conn, spec.name, "edge_endpoint", edge_type, src, dst,
+                                     by=principal.consumer)
+        # What it declared again after a drop is no longer a removal (ADR-0013).
+        await forget_removals(conn, spec.name, stored)
+        if change:
+            await changes.record(
+                conn, tenant=spec.name, op="schema", kind="tenant",
+                count=schema_changes.size(change), detail=change,
+            )
+    spec = await load_spec(pool, spec.name) or stored
     remember(spec)
-    # What it declared again after a drop is no longer a removal (ADR-0013).
-    await forget_removals(pool, spec.name, spec)
-    change = {**(schema_changes.diff(previous, spec) or {}), **(change or {})} or None
-    if change is not None:
-        await _record_schema(pool, spec.name, change)
     # The creator owns what it creates (as in PostgreSQL); an admin needs no grant.
     store = getattr(request.app.state, "access_store", None)
     if previous is None and store is not None and principal.subject and not principal.admin:
@@ -808,6 +893,7 @@ async def _register(
         community_algorithm=spec.community_algorithm or DEFAULT_COMMUNITY_ALGORITHM,
         n_property_definitions=definitions_count(spec.property_schema),
         property_mode=spec.property_schema.get("mode", "off"),
+        schema_manager=spec.schema_manager,
     )
 
 
@@ -841,7 +927,8 @@ async def _register(
                              "something still uses the property (see the description)."},
         404: {"description": "The tenant is not registered."},
         409: {"description": "A job runs on the tenant (a property rename: another one), a "
-                             "reconcile holds the edge type, or its tables stay in use (5 s)."},
+                             "reconcile holds the edge type, or its tables stay in use (5 s)."
+                             + _SCHEMA_MANAGED},
         **_SCHEMA_PRECONDITION,
     },
 )
@@ -965,7 +1052,7 @@ async def _rename_property(
                              "or something still needs it (see the description)."},
         404: {"description": "The tenant is not registered."},
         409: {"description": "A job runs on the tenant, a reconcile holds the edge type, or "
-                             "its tables stay in use (5 s)."},
+                             "its tables stay in use (5 s)." + _SCHEMA_MANAGED},
         **_SCHEMA_PRECONDITION,
     },
 )
@@ -1013,6 +1100,7 @@ async def drop_schema_label(
     ),
     responses={
         404: {"description": "Tenant not registered, or the pair is not declared."},
+        409: {"description": _SCHEMA_MANAGED.strip()},
         **_SCHEMA_PRECONDITION,
     },
 )

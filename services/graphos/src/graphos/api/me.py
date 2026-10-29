@@ -58,6 +58,7 @@ async def me(principal: ReadPrincipal, request: Request) -> MeResponse:
     levels = {t: level.label for t in tenants if (level := principal.level(t)) is not None}
     return MeResponse(
         consumer=principal.consumer,
+        subject=principal.subject,
         kind=cast(Literal["person", "service"], principal.kind)
         if principal.subject else "anonymous",
         via=cast(Literal["password", "oidc"], principal.via) if principal.subject else "none",
@@ -163,6 +164,7 @@ async def tenant_schema(
         deprecated=DeprecatedSpec.model_validate(spec.deprecated),
         renames=[SchemaRename.model_validate({"status": "done", **r}) for r in spec.renames],
         schema_manager=spec.schema_manager,
+        schema_manager_since=spec.schema_manager_since,
     )
 
 

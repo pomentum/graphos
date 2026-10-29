@@ -533,6 +533,10 @@ CREATE TABLE IF NOT EXISTS graphos_meta.unregistered_tenants (
     unregistered_at   timestamptz NOT NULL DEFAULT now(),
     unregistered_by   text
 );
+-- Its schema manager, restored with it (ADR-0014): unregistering is not a way round it.
+ALTER TABLE graphos_meta.unregistered_tenants ADD COLUMN IF NOT EXISTS schema_manager text;
+ALTER TABLE graphos_meta.unregistered_tenants
+    ADD COLUMN IF NOT EXISTS schema_manager_since timestamptz;
 
 -- Saved Cypher queries of the console (graphos.api.cypher), per tenant:
 -- the query, its parameters and how to show it, as one JSON document.

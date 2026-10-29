@@ -19,7 +19,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from http import HTTPStatus
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 import httpx
 
@@ -88,12 +88,20 @@ class GraphosPool:
     matches (or admin). Concurrent first uses of the same tenant register it
     once.
 
-    Each registration is :meth:`GraphosClient.ensure_tenant` with
-    ``on_drift="warn"``: what was changed in the tenant elsewhere (in the
-    web UI, by another program) is logged on ``graphos_client.drift``
-    before the schema is registered.  A tenant whose schema is managed by
-    someone else refuses it (``GraphosError`` 409, ``code ==
-    "schema_managed"``) when it would change more than ``display``.
+    ``on_drift`` says whether a registration first reports what was changed
+    in the tenant elsewhere (in the web UI, by another program):
+
+    - ``"ignore"`` (the default): a plain :meth:`GraphosClient.register_tenant`,
+      one request, as the pool always did;
+    - ``"warn"`` or ``"fail"``: :meth:`GraphosClient.ensure_tenant` with that
+      mode, a dry run then the registration; the drift is logged on
+      ``graphos_client.drift`` (what is only not declared at INFO, the rest at
+      WARNING), and ``"fail"`` raises :class:`SchemaDriftError` instead of
+      registering a change that would undo work done elsewhere.
+
+    A tenant whose schema is managed by someone else refuses a registration
+    (``GraphosError`` 409, ``code == "schema_managed"``) when it would change
+    more than ``display``.
     """
 
     def __init__(
@@ -103,8 +111,12 @@ class GraphosPool:
         schema: TenantSchema,
         token: str | None = None,
         auth: httpx.Auth | None = None,
+        on_drift: Literal["ignore", "warn", "fail"] = "ignore",
         **client_options: Any,
     ) -> None:
+        if on_drift not in ("ignore", "warn", "fail"):
+            raise ValueError(f"on_drift must be 'ignore', 'warn' or 'fail', not {on_drift!r}")
+        self._on_drift = on_drift
         self._base_url = base_url
         self._token = token
         # One sign-in shared by every tenant's client.
@@ -184,7 +196,7 @@ class GraphosPool:
     async def _register(self, cli: GraphosClient, tenant: str) -> None:
         s = self._schema
         await cli.ensure_tenant(
-            on_drift="warn",
+            on_drift=self._on_drift,
             vertex_labels=s.vertex_labels,
             edge_labels=s.edge_labels,
             property_indexes=s.property_indexes,

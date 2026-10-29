@@ -12,6 +12,8 @@ export type Level = "read" | "write" | "maintain" | "owner";
 /** Who is signed in (`GET /v1/me`): their level on each tenant and their rights. */
 export interface Me {
   consumer: string;
+  /** Their own grant subject (`user:<name>`, `oidc-sub:<sub>`); what a schema manager names. */
+  subject?: string | null;
   kind: "person" | "service" | "anonymous";
   /** How they signed in: a graphos password, or the identity provider. */
   via: "password" | "oidc" | "none";
