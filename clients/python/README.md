@@ -48,7 +48,7 @@ asyncio.run(main())
 
 ## Many tenants: `GraphosPool`
 
-A service that writes to one tenant per customer, project or team can let the pool manage the clients. Each tenant gets its own client, is registered with the shared schema on first use, and is re-registered (then retried once) if the server no longer knows a label.
+A service that writes to one tenant per customer, project or team can let the pool manage the clients. Each tenant gets its own client, is registered with the shared schema on first use (with `ensure_tenant(on_drift="warn")`, below), and is re-registered (then retried once) if the server no longer knows a label.
 
 ```python
 from graphos_client import GraphosPool, PasswordAuth, TenantSchema
@@ -63,6 +63,32 @@ async with GraphosPool(base_url=URL, auth=PasswordAuth("loader", SECRET), schema
     await pool.call("team_red", lambda g: g.upsert_nodes(nodes))    # registers, writes
     cli = await pool.client("team_red")                              # the same client
 ```
+
+## A program's schema: `ensure_tenant`
+
+A program that declares its schema in code and registers it on every start can learn what people
+changed in the tenant meanwhile (in the web UI, say) instead of undoing it unseen:
+
+```python
+await cli.ensure_tenant(vertex_labels=["User", "Document"], edge_labels=["AUTHORED"],
+                        on_drift="warn")      # or "fail", or "ignore" (no dry run)
+```
+
+It runs the registration as a dry run first and logs the dry run's `drift` at WARNING on the
+logger `graphos_client.drift`, one line per item: what the tenant has that the call does not
+declare (registering keeps it), entries the call would replace with a different value, and
+labels, edge types or label pairs dropped earlier that the call creates again. Then it registers.
+With `on_drift="fail"` it raises `SchemaDriftError` (its `drift` is the report) and registers
+nothing when the call would replace an entry or bring a removed one back; what is only not
+declared never fails it.
+
+A tenant can name one **schema manager** (`schema_manager="user:loader"` on `register_tenant`,
+`ensure_tenant` or `import_schema`; `manage_schema=True` names the signed-in user of a
+`PasswordAuth`; `None` releases it; set by an owner). On a managed tenant only the manager changes
+more than the styles (`display`): anyone else's such write raises `GraphosError` 409 with
+`code == "schema_managed"` and `schema_manager` naming the manager. The manager's registration
+adds only the styles not stored yet, so people's styles stay. `get_tenant()` and `schema()` show
+it (`schema_manager`, `None` when there is none).
 
 ## Copying a tenant
 
@@ -112,7 +138,7 @@ Runnable scripts in [`examples/`](examples/). Each reads `GRAPHOS_URL` (default 
 
 | Area | Methods |
 |---|---|
-| Tenants | `register_tenant` (with `edge_endpoints`, `strict_endpoints`, `display`, `property_schema`, `deprecated`, `force_shrink`, `dry_run`), `export_schema`, `import_schema`, `remove_edge_endpoint`, `rename_label`, `rename_edge_type`, `rename_property` (a job: `wait_for_job(result.job_id)`), `drop_label` (a deprecated, empty one), `list_tenants`, `get_tenant`, `unregister_tenant` (`drop_data=True` deletes it with its data), `restore_tenant`, `list_unregistered_tenants`, `me`, `schema`, `schema_summary` (the schema as a model needs it, with the values) |
+| Tenants | `register_tenant` (with `edge_endpoints`, `strict_endpoints`, `display`, `property_schema`, `deprecated`, `schema_manager` / `manage_schema`, `force_shrink`, `dry_run`), `ensure_tenant` (a dry run's drift logged, or `SchemaDriftError`, then the registration), `export_schema`, `import_schema`, `remove_edge_endpoint`, `rename_label`, `rename_edge_type`, `rename_property` (a job: `wait_for_job(result.job_id)`), `drop_label` (a deprecated, empty one), `list_tenants`, `get_tenant`, `unregister_tenant` (`drop_data=True` deletes it with its data), `restore_tenant`, `list_unregistered_tenants`, `me`, `schema`, `schema_summary` (the schema as a model needs it, with the values) |
 | Cypher console (on unless the server turns it off) | `cypher` (read-only, `$name` parameters; write clauses and functions that are not Cypher's are refused with 400), `saved_queries`, `save_query`, `run_saved_query`, `saved_query` (one by name), `delete_saved_query` |
 | Dataset | `export_dataset` (streamed to a file, gzip by suffix), `import_dataset` (streamed from one; `mode="empty"` to restore, `schema="apply"` to register the file's schema first), `read_dataset_header` |
 | Writes | `upsert_nodes`, `upsert_edges`, `bulk_upsert_nodes`, `bulk_upsert_edges`, `import_csv_nodes`, `import_csv_edges`, `snapshot_import`, `upsert_node_properties`, `patch_node`, `patch_edge`, `delete_node`, `delete_nodes` (a batch, by `NodeRef`), `delete_edge`, `delete_by_property`, `reconcile_node_edges` / `reconcile_type_edges` (a scope made exactly a given set), `resolve_edges` (`mode="reconcile"`) |
@@ -131,7 +157,7 @@ Not wrapped (use HTTP, see the [usage guide](https://github.com/pomentum/graphos
 
 ## Behaviour
 
-- **Errors.** Non-2xx responses raise `GraphosError` (`status_code`, `detail`); a 503 raises `GraphosNotReady` (graphos starting or without its database, or the database out of memory or connections). A statement timeout on the server is a `504`, the database out of disk space a `507`, both with an `application/problem+json` body and not retried.
+- **Errors.** Non-2xx responses raise `GraphosError` (`status_code`, `detail`, and `body`, `code` and `schema_manager` from a JSON body: `code == "schema_managed"` is a write refused on a tenant whose schema someone else manages); `ensure_tenant(on_drift="fail")` raises `SchemaDriftError` (`drift`, status 0) before registering; a 503 raises `GraphosNotReady` (graphos starting or without its database, or the database out of memory or connections). A statement timeout on the server is a `504`, the database out of disk space a `507`, both with an `application/problem+json` body and not retried.
 - **Retries.** Network errors and 5xx responses are retried with exponential backoff (`retries`, `retry_backoff_s`), except `504` timeouts, `507` (the database out of disk space), read and write timeouts, and calls that are long or should not run twice (community recompute, graph metrics, rule-based edge resolution, snapshot and dataset import, vacuum, Cypher queries, restoring or deleting a tenant with its data), job submissions and cancels, which are never re-run automatically. 4xx errors are raised at once.
 - **One tenant per client.** The tenant is part of every data-plane URL; what a token may touch is enforced by the server.
 - **Connections.** One pooled `httpx.AsyncClient` per client; use `async with` or call `close()`. Pass `transport=` to supply your own `httpx` transport (tests, proxies).

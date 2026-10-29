@@ -87,6 +87,13 @@ class GraphosPool:
     time it is used; that needs ``create_tenants`` on a pattern its name
     matches (or admin). Concurrent first uses of the same tenant register it
     once.
+
+    Each registration is :meth:`GraphosClient.ensure_tenant` with
+    ``on_drift="warn"``: what was changed in the tenant elsewhere (in the
+    web UI, by another program) is logged on ``graphos_client.drift``
+    before the schema is registered.  A tenant whose schema is managed by
+    someone else refuses it (``GraphosError`` 409, ``code ==
+    "schema_managed"``) when it would change more than ``display``.
     """
 
     def __init__(
@@ -176,7 +183,8 @@ class GraphosPool:
 
     async def _register(self, cli: GraphosClient, tenant: str) -> None:
         s = self._schema
-        await cli.register_tenant(
+        await cli.ensure_tenant(
+            on_drift="warn",
             vertex_labels=s.vertex_labels,
             edge_labels=s.edge_labels,
             property_indexes=s.property_indexes,

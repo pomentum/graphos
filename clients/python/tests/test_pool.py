@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 import httpx
 import pytest
@@ -28,14 +29,20 @@ _NODES_OK = {"tenant": "t", "nodes_upserted": 1, "by_label": {"User": 1}, "elaps
 
 
 class _Server:
-    """Records requests; optionally fails the first node write with schema drift."""
+    """Records requests; optionally fails the first node write with schema drift,
+    and answers a registration's dry run with a drift report."""
 
-    def __init__(self, *, drift_once: bool = False) -> None:
+    def __init__(self, *, drift_once: bool = False, report: dict | None = None) -> None:
         self.calls: list[tuple[str, str, dict]] = []
+        self.dry_runs: list[dict] = []
         self._drift = drift_once
+        self._report = report
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content) if request.content else {}
+        if request.url.params.get("dry_run") == "true":
+            self.dry_runs.append(body)
+            return httpx.Response(200, json={"tenant": body["name"], "drift": self._report})
         self.calls.append((request.method, request.url.path, body))
         if request.url.path == "/v1/tenants":
             return httpx.Response(200, json={"tenant": body["name"]})
@@ -47,6 +54,7 @@ class _Server:
         return httpx.Response(200, json={})
 
     def registrations(self) -> list[dict]:
+        """The registrations made (dry runs left out)."""
         return [b for m, p, b in self.calls if p == "/v1/tenants"]
 
 
@@ -84,6 +92,46 @@ async def test_pool_call_reregisters_once_on_schema_drift() -> None:
         )
     assert resp.nodes_upserted == 1
     assert len(server.registrations()) == 2          # first use + one re-registration
+    assert len(server.dry_runs) == 2                 # each one after its dry run
+
+
+@pytest.mark.asyncio
+async def test_pool_registers_with_ensure_tenant_and_warns_of_drift(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger="graphos_client.drift")
+    report = {
+        "not_declared": {"vertex_labels": ["Team"]},
+        "overwrites": {"display": {"vertex": ["Document"]}},
+    }
+    server = _Server(report=report)
+    async with _pool(server) as pool:
+        await pool.client("acme")
+    # A dry run of the same body first, then the registration: drift warns, never stops it.
+    assert server.dry_runs == server.registrations()
+    assert [r.getMessage() for r in caplog.records if r.name == "graphos_client.drift"] == [
+        "acme: vertex label 'Team' is in the tenant but not declared here "
+        "(added elsewhere, e.g. in the web UI)",
+        "acme: display of vertex label 'Document' would be replaced: it differs from the "
+        "stored one",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_pool_raises_when_the_tenant_is_managed_by_someone_else() -> None:
+    managed = {"detail": "the schema of 'acme' is managed by user:loader",
+               "code": "schema_managed", "schema_manager": "user:loader"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(409, json=managed)
+
+    pool = GraphosPool(base_url="http://x", token="tok", schema=_SCHEMA,
+                       transport=httpx.MockTransport(handler))
+    with pytest.raises(GraphosError) as info:
+        await pool.client("acme")
+    assert (info.value.status_code, info.value.code) == (409, "schema_managed")
+    assert info.value.schema_manager == "user:loader"
+    await pool.close()
 
 
 @pytest.mark.asyncio
