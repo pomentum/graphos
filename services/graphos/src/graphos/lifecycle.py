@@ -116,7 +116,7 @@ async def restore_tenant(pool: asyncpg.Pool, name: str) -> bool:
             """
             DELETE FROM graphos_meta.unregistered_tenants WHERE name = $1
             RETURNING spec::text AS spec, endpoints::text AS endpoints,
-                      strict_endpoints, created_at;
+                      strict_endpoints, schema_manager, schema_manager_since, created_at;
             """,
             name,
         )
@@ -135,14 +135,20 @@ async def restore_tenant(pool: asyncpg.Pool, name: str) -> bool:
                 """,
                 pairs,
             )
-        if row["strict_endpoints"]:
+        if row["strict_endpoints"] or row["schema_manager"]:
             await conn.execute(
                 """
-                INSERT INTO graphos_meta.tenant_settings (tenant, strict_endpoints)
-                VALUES ($1, true)
-                ON CONFLICT (tenant) DO UPDATE SET strict_endpoints = true, updated_at = now();
+                INSERT INTO graphos_meta.tenant_settings
+                    (tenant, strict_endpoints, schema_manager, schema_manager_since)
+                VALUES ($1, $2, $3, CASE WHEN $3::text IS NULL THEN NULL
+                                         ELSE COALESCE($4, now()) END)
+                ON CONFLICT (tenant) DO UPDATE
+                SET strict_endpoints = EXCLUDED.strict_endpoints,
+                    schema_manager = EXCLUDED.schema_manager,
+                    schema_manager_since = EXCLUDED.schema_manager_since, updated_at = now();
                 """,
-                name,
+                name, bool(row["strict_endpoints"]), row["schema_manager"],
+                row["schema_manager_since"],
             )
         await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, name)
     spec = await load_spec(pool, name)
@@ -158,6 +164,7 @@ _TENANT_ROWS = (
     "DELETE FROM graphos_meta.unregistered_tenants WHERE name = $1;",
     "DELETE FROM graphos_meta.edge_endpoints WHERE tenant = $1;",
     "DELETE FROM graphos_meta.tenant_settings WHERE tenant = $1;",
+    "DELETE FROM graphos_meta.schema_removals WHERE tenant = $1;",
     "DELETE FROM graphos_meta.cache WHERE tenant = $1;",
     "DELETE FROM graphos_meta.node_properties WHERE tenant = $1;",
     "DELETE FROM graphos_meta.node_properties_complete WHERE tenant = $1;",
@@ -232,7 +239,8 @@ async def unregistered_spec(pool: asyncpg.Pool, name: str) -> TenantSpec | None:
     """The registration an unregistered tenant would be restored with."""
     row = await pool.fetchrow(
         """
-        SELECT name, spec::text AS spec, endpoints::text AS endpoints, strict_endpoints
+        SELECT name, spec::text AS spec, endpoints::text AS endpoints, strict_endpoints,
+               schema_manager, schema_manager_since
         FROM graphos_meta.unregistered_tenants WHERE name = $1;
         """,
         name,

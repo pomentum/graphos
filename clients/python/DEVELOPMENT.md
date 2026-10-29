@@ -13,6 +13,7 @@ Paths are under `clients/python/`.
 |---|---|
 | A method, its URL, retries and errors | `src/graphos_client/_client.py` (`GraphosClient`) |
 | Request and response models | `src/graphos_client/_models.py` |
+| `ensure_tenant`'s drift lines | `src/graphos_client/_drift.py` |
 | Sign-in and token renewal | `src/graphos_client/_auth.py` (`PasswordAuth`, `BearerAuth`) |
 | One client per tenant, re-registration | `src/graphos_client/_pool.py` (`GraphosPool`, `TenantSchema`) |
 | Errors raised | `src/graphos_client/_errors.py` |

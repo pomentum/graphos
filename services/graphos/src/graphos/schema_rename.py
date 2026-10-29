@@ -40,6 +40,7 @@ from graphos.bootstrap import (
     bootstrap_tenant,
     ensure_search_indexes,
     load_spec,
+    record_removal,
     remember,
     spec_from_json,
 )
@@ -932,7 +933,9 @@ def dropped_spec(spec: TenantSpec, part: str, name: str) -> TenantSpec:
     )
 
 
-async def drop_label(pool: asyncpg.Pool, tenant: str, name: str) -> list[str]:
+async def drop_label(
+    pool: asyncpg.Pool, tenant: str, name: str, *, by: str | None = None,
+) -> list[str]:
     """Drop the deprecated label or edge type ``name`` when it has no rows: its AGE
     label (table, sequence, indexes), and everything graphos keeps that names it,
     in one transaction under the tenant's lock; one ``schema`` record.  Returns
@@ -983,6 +986,10 @@ async def drop_label(pool: asyncpg.Pool, tenant: str, name: str) -> list[str]:
                     "DELETE FROM graphos_meta.edge_endpoints WHERE tenant = $1 AND edge_type = $2;",
                     tenant, name,
                 )
+            # For the drift report of a registration that declares it again (ADR-0013).
+            await record_removal(
+                conn, tenant, "vertex_label" if part == "vertex" else "edge_type", name, by=by,
+            )
             await changes.record(
                 conn, tenant=tenant, op="schema", kind="tenant", count=1,
                 detail={"dropped": {"kind": "label" if part == "vertex" else "edge_type",

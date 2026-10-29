@@ -4,6 +4,10 @@
   server's contracts.
 - ``GraphosPool`` + ``TenantSchema``: one registered client per tenant, with
   re-registration and a single retry when the server has lost a label.
+- ``GraphosClient.ensure_tenant``: registration that first reports what was
+  changed in the tenant elsewhere; ``SchemaDriftError`` when told to fail on it.
+- ``SchemaManagerNotApplied``: a registration naming a schema manager that the
+  server did not apply (an older server).
 
 The package is async-only (``asyncio`` + ``httpx``).
 """
@@ -15,6 +19,7 @@ from graphos_client._client import (
     GraphosNotReady,
     read_dataset_header,
 )
+from graphos_client._errors import SchemaDriftError, SchemaManagerNotApplied
 from graphos_client._models import (
     AggregateRow,
     AnalysisFreshness,
@@ -131,6 +136,8 @@ __all__ = [
     "BearerAuth",
     "PasswordAuth",
     "GraphosNotReady",
+    "SchemaDriftError",
+    "SchemaManagerNotApplied",
     "GraphosPool",
     "TenantSchema",
     "is_schema_drift",

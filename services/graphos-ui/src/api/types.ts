@@ -12,6 +12,8 @@ export type Level = "read" | "write" | "maintain" | "owner";
 /** Who is signed in (`GET /v1/me`): their level on each tenant and their rights. */
 export interface Me {
   consumer: string;
+  /** Their own grant subject (`user:<name>`, `oidc-sub:<sub>`); what a schema manager names. */
+  subject?: string | null;
   kind: "person" | "service" | "anonymous";
   /** How they signed in: a graphos password, or the identity provider. */
   via: "password" | "oidc" | "none";
@@ -180,6 +182,12 @@ export interface TenantSchema {
   deprecated?: DeprecatedSpec;
   /** Every rename, oldest first: the old names are gone (absent from older servers). */
   renames?: SchemaRename[];
+  /**
+   * The subject (`user:<name>`) of the program that manages the schema's
+   * structure, or null: only it changes anything but styles (`display`);
+   * others are refused (409, `schema_managed`). Absent from older servers.
+   */
+  schema_manager?: string | null;
   /**
    * The schema's version, from the response's `ETag` (not the body): schema
    * writes send it back as `If-Match`, so a save made from an older version is

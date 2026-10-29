@@ -18,9 +18,20 @@ const COLOR: Record<PropertyMode, string> = { off: "gray", warn: "yellow", stric
  * stored rows break of it. Maintainers set the mode (`off`, `warn`,
  * `strict`; turning strict on asks first, with the last check's count) and
  * check the stored rows as a background job, followed whoever started it;
- * its report opens from here. Others see the mode while it is not off.
+ * its report opens from here. Others see the mode while it is not off. While a
+ * program manages the schema, the mode cannot be set here (`locked` says who);
+ * checking the stored rows writes nothing and stays.
  */
-export function PropertyChecks({ schema, editable }: { schema: TenantSchema; editable: boolean }) {
+export function PropertyChecks({
+  schema,
+  editable,
+  locked = null,
+}: {
+  schema: TenantSchema;
+  editable: boolean;
+  /** Why the mode cannot be set here (a schema manager), or null. */
+  locked?: string | null;
+}) {
   const { t } = useTranslation();
   const save = useAddToSchema();
   const check = usePropertyCheck();
@@ -62,12 +73,17 @@ export function PropertyChecks({ schema, editable }: { schema: TenantSchema; edi
         </Menu.Target>
         <Menu.Dropdown>
           <Menu.Label>{t("views.schema.properties.modeLabel")}</Menu.Label>
+          {locked ? (
+            <Text size="xs" c="dimmed" px="sm" pb={4}>
+              {locked}
+            </Text>
+          ) : null}
           {MODES.map((value) => (
             <Menu.Item
               key={value}
               leftSection={value === mode ? <IconCheck size={14} /> : <span style={{ width: 14 }} />}
               onClick={() => choose(value)}
-              disabled={!declared && value !== "off"}
+              disabled={locked !== null || (!declared && value !== "off")}
             >
               <Text size="sm">{t(`views.schema.properties.modes.${value}`)}</Text>
               <Text size="xs" c="dimmed">

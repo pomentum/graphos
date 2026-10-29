@@ -21,7 +21,18 @@ from graphos import by_entry, changes, declared
 from graphos.bootstrap import TenantSpec
 
 # Spec keys kept per label and edge type (graphos.by_entry), recorded by entry.
-_BY_ENTRY = ("display", "property_schema", "deprecated")
+BY_ENTRY = ("display", "property_schema", "deprecated")
+
+
+def parts(spec: TenantSpec | None) -> dict[str, set[Any]]:
+    """The items of each part of a spec, as the change records name them
+    (by-entry parts as ``vertex:Person``); shared with ``graphos.schema_drift``."""
+    return _sets(spec)
+
+
+def shown(field: str, values: Iterable[Any]) -> list[Any]:
+    """Items of one part as a record shows them (resolve rules by edge type)."""
+    return _shown(field, values)
 
 
 def _sets(spec: TenantSpec | None) -> dict[str, set[Any]]:
@@ -42,7 +53,7 @@ def _sets(spec: TenantSpec | None) -> dict[str, set[Any]]:
         "generated_columns": {declared.describe_column(x) for x in spec.generated_columns},
         # By key: the notes themselves are free text, kept in the schema, not the feed.
         "meta": set(spec.meta),
-        **{key: set(_entries(spec, key)) for key in _BY_ENTRY},
+        **{key: set(_entries(spec, key)) for key in BY_ENTRY},
     }
 
 
@@ -86,7 +97,14 @@ def diff(before: TenantSpec | None, after: TenantSpec) -> dict[str, Any] | None:
         )
         if rewritten:
             detail["changed"] = {"meta": rewritten}
-        for key in _BY_ENTRY:
+        # A search index declared again under its name replaces its definition.
+        redefined = sorted(
+            name for name, body in after.search_indexes.items()
+            if name in before.search_indexes and before.search_indexes[name] != body
+        )
+        if redefined:
+            detail.setdefault("changed", {})["search_indexes"] = redefined
+        for key in BY_ENTRY:
             old_entries, new_entries = _entries(before, key), _entries(after, key)
             redeclared = sorted(
                 k for k, v in new_entries.items() if k in old_entries and old_entries[k] != v

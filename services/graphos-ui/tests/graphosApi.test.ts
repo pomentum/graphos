@@ -74,6 +74,20 @@ describe("GraphosApi schema versions", () => {
     expect(calls.map((c) => c.headers["If-Match"])).toEqual(['"v1"', '"v2"', '"v3"', '"v4"', '"v5"']);
   });
 
+  it("releases the schema manager with a registration and If-Match", async () => {
+    const { api, calls } = recorder();
+    await api.setSchemaManager(null, '"v6"');
+    await api.setSchemaManager("user:importer");
+    expect(calls[0]).toMatchObject({
+      method: "POST",
+      url: "/api/v1/tenants",
+      body: { name: "demo co", schema_manager: null },
+    });
+    expect(calls[0]?.headers["If-Match"]).toBe('"v6"');
+    expect(calls[1]?.body).toEqual({ name: "demo co", schema_manager: "user:importer" });
+    expect(calls[1]?.headers?.["If-Match"]).toBeUndefined();
+  });
+
   it("sends no If-Match without a version, or for an import into another tenant", async () => {
     const { api, calls } = recorder();
     await api.addToSchema({ vertex_labels: ["Team"] });

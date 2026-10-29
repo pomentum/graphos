@@ -77,6 +77,13 @@ carries) and `deprecated` (what is on its way out).
   (labels and declarations unioned); `?force_shrink=true` replaces it. graphos
   serves, and the response reports, the merged spec, so a partial
   re-registration never hides earlier labels. A bad `label_hierarchy` → 422.
+- **A program can own its schema.** A tenant may name a schema manager (a user,
+  service account or single-sign-on caller, `schema_manager`): only its
+  registrations change the structure, people may still change styles, and the
+  web UI shows the structure read-only. The program chooses whether its styles
+  overwrite people's (`display_merge`). A registration's dry run reports drift:
+  what people added, what it would overwrite or remove, which settings it would
+  change, what it would create again after a drop (ADR-0013, ADR-0014).
 - **Schema as a file.** `GET /v1/tenants/{name}/spec` exports the whole schema
   (rules, pairs, indexes, columns and `meta` included) as a registration body;
   posting it imports it, into the same tenant or, renamed, another one.

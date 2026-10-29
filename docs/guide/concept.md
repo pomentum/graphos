@@ -231,6 +231,28 @@ names. A graph created by graphos starts complete; a graph that predates
 the record is read once, in the background at startup, or when a lookup
 first needs it.
 
+A tenant may name a **schema manager** (ADR-0013, ADR-0014, `schema_drift.py`):
+a graphos user or service account (`user:<name>`) or a caller signed in
+through the identity provider (`oidc-sub:<sub>`), set by an owner through the
+registration's `schema_manager` field and kept in
+`graphos_meta.tenant_settings` (and with the registration while a tenant is
+unregistered). Its registrations alone may then change the structure; anyone
+else's schema write that would change more than `display` or the community
+algorithm answers 409 `schema_managed`, judged under the schema-write lock on
+what the merge would change (`schema_changes.diff`), so declaring again what is
+stored passes. Styles merge as the registration says (`display_merge`): the
+manager's default to `missing_only`, which adds only the styles the tenant
+lacks, so styles people set are kept unless it sends `entries` (a replace
+keeps those of the labels and edge types it keeps). A registration that would
+restore an unregistered tenant is judged as the tenant it restores, before
+restoring it, so a refused one restores nothing. A
+registration's dry run also answers a drift report: what the tenant has that
+the body does not declare, what a replace would remove, what it would
+overwrite, the settings it would change, and the labels, edge types and pairs
+it would create again after a drop, removal or replace (recorded in
+`graphos_meta.schema_removals`). Nothing is refused for drift: the declared
+schema wins, and the report says what that changes.
+
 On startup graphos reloads every stored spec and re-runs `bootstrap_tenant`
 for each, so consumers need not re-register after a restart. A tenant whose
 bootstrap fails at startup is logged and skipped; the service still starts. Bootstrap, the
@@ -441,7 +463,7 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `GET /v1/tenants[?unregistered=true]` | The registered tenants the caller may maintain; also the unregistered ones it owns | signed in |
 | `GET /v1/tenants/{name}` | One tenant's spec summary | `maintain` |
 | `GET /v1/tenants/{name}/spec` | The whole schema as a registration body (the schema file) | `maintain` |
-| `GET /v1/me` | The caller: user, kind, `admin`, `must_change`, its tenants, its level on each, `create_tenants` patterns, its web UI preferences | signed in |
+| `GET /v1/me` | The caller: user, its grant `subject` (what a schema manager names), kind, `admin`, `must_change`, its tenants, its level on each, `create_tenants` patterns, its web UI preferences | signed in |
 | `PATCH /v1/me/preferences` | Change one's web UI preferences (`theme`, `last_tenant`) | signed in |
 | `GET /v1/{tenant}/schema/summary[?format=text]` | The schema as a model needs it: labels with counts and properties (declared type, rows, distinct values, the values when few), label pairs per edge type, search indexes, saved queries, deprecated names and the latest renames; cached per tenant | tenant |
 | `/oauth/authorize`, `/oauth/login`, `/oauth/token`, `/oauth/register`, `/oauth/revoke`, `/.well-known/oauth-authorization-server` | Without single sign-on, graphos signs people in for MCP clients: registration (public clients, loopback callbacks), a sign-in page, single-use codes, graphos sessions as refresh tokens (`graphos.oauth`, ADR-0008) | none (the page takes a password) |

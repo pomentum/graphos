@@ -129,3 +129,25 @@ def test_every_code_a_route_raises_is_declared(route: APIRoute) -> None:
 
 def test_every_route_is_checked() -> None:
     assert len(ROUTES) == len(OPERATIONS)
+
+
+@pytest.mark.parametrize(("method", "path"), [
+    ("post", "/v1/tenants"),
+    ("post", "/v1/tenants/{name}/schema:rename"),
+    ("delete", "/v1/tenants/{name}/labels/{label}"),
+    ("delete", "/v1/tenants/{name}/edge_endpoints"),
+])
+def test_the_schema_writes_a_manager_refuses_declare_it(method: str, path: str) -> None:
+    # ADR-0013/0014: anyone but the manager changing structure gets 409 schema_managed.
+    conflict = SPEC["paths"][path][method]["responses"]["409"]["description"]
+    assert '"code": "schema_managed"' in conflict and "schema_manager" in conflict
+
+
+def test_the_dry_run_answers_a_drift_report() -> None:
+    schemas = SPEC["components"]["schemas"]
+    drift = schemas["RegisterDryRunResponse"]["properties"]["drift"]
+    assert {"$ref": "#/components/schemas/DriftReport"} in drift["anyOf"]
+    assert set(schemas["DriftReport"]["properties"]) == {
+        "not_declared", "removes", "overwrites", "settings", "recreates",
+    }
+    assert "schema_manager" in schemas["RegisterResponse"]["properties"]

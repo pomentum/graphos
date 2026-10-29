@@ -37,6 +37,7 @@ from graphos import (
     openapi,
     properties,
     resources,
+    schema_drift,
     schema_rename,
     vault,
 )
@@ -395,6 +396,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     app.add_exception_handler(asyncpg.exceptions.UniqueViolationError, _unique_violation)
+
+    async def _schema_managed(request: Request, exc: Exception) -> JSONResponse:
+        # A managed tenant's structure, changed by someone else (ADR-0013):
+        # ``detail`` stays a string, as every client reads it.
+        assert isinstance(exc, schema_drift.SchemaManaged)
+        log.info("schema managed refusal path=%s tenant=%s", request.url.path, exc.tenant)
+        return JSONResponse(
+            status_code=409,
+            content={"detail": str(exc), "code": "schema_managed", "schema_manager": exc.manager},
+        )
+
+    app.add_exception_handler(schema_drift.SchemaManaged, _schema_managed)
 
     async def _property_refusal(request: Request, exc: Exception) -> JSONResponse:
         assert isinstance(exc, properties.Refused)

@@ -456,6 +456,17 @@ export class GraphosApi {
   }
 
   /**
+   * Sets, transfers (`user:<name>`) or releases (`null`) the program that
+   * manages the tenant's schema (owner). Released, a program's next
+   * registration merges as on any tenant.
+   */
+  setSchemaManager(subject: string | null, etag?: string | null): Promise<unknown> {
+    return this.http
+      .request("POST", "/v1/tenants", { body: { name: this.tenant, schema_manager: subject }, headers: ifMatch(etag) })
+      .then((r) => r.data);
+  }
+
+  /**
    * The tenant's data as one file, as a response to stream: a header line,
    * every node, every edge, an end line (`read`; recorded in the audit log).
    */

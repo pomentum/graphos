@@ -39,6 +39,7 @@ import { isActiveJob } from "../../lib/jobs";
 import { PROPERTY_NAME, type SchemaPart } from "../../lib/propertySchema";
 import { formatCount, relativeTime } from "../../lib/time";
 import { useTenantSession } from "../../session/SessionProvider";
+import { LockedHint, useLockedReason } from "./SchemaManager";
 import { LABEL_NAME } from "./schemaModel";
 import classes from "./SchemaView.module.css";
 
@@ -95,7 +96,8 @@ export function DeprecationLines({ schema, part, name }: { schema: TenantSchema;
 /**
  * The buttons on a label's or type's open row: rename it or one of its
  * properties (owner), deprecate either (maintain), and drop it once it is
- * deprecated and empty (owner).
+ * deprecated and empty (owner). While a program manages the schema they show
+ * disabled, saying who.
  */
 export function NameActions({
   schema,
@@ -115,26 +117,34 @@ export function NameActions({
   const { isOwner, canMaintain } = useTenantSession();
   const [dialog, setDialog] = useState<"rename" | "deprecate" | null>(null);
   const drop = useDropLabel();
+  const locked = useLockedReason();
   const deprecated = isDeprecated(schema, part, name);
   return (
     <>
       {isOwner ? (
-        <Button size="compact-xs" variant="subtle" onClick={() => setDialog("rename")}>
-          {t("views.schema.changes.rename")}
-        </Button>
+        <LockedHint reason={locked}>
+          <Button size="compact-xs" variant="subtle" disabled={locked !== null} onClick={() => setDialog("rename")}>
+            {t("views.schema.changes.rename")}
+          </Button>
+        </LockedHint>
       ) : null}
       {canMaintain ? (
-        <Button size="compact-xs" variant="subtle" onClick={() => setDialog("deprecate")}>
-          {t("views.schema.changes.deprecate")}
-        </Button>
+        <LockedHint reason={locked}>
+          <Button size="compact-xs" variant="subtle" disabled={locked !== null} onClick={() => setDialog("deprecate")}>
+            {t("views.schema.changes.deprecate")}
+          </Button>
+        </LockedHint>
       ) : null}
       {isOwner && deprecated && rows === 0 ? (
-        <ConfirmDelete
-          question={t(`views.schema.changes.dropQuestion.${part}`, { name })}
-          confirmLabel={t("views.schema.changes.drop", { name })}
-          busy={drop.isPending}
-          onConfirm={() => drop.mutate(name)}
-        />
+        <LockedHint reason={locked}>
+          <ConfirmDelete
+            question={t(`views.schema.changes.dropQuestion.${part}`, { name })}
+            confirmLabel={t("views.schema.changes.drop", { name })}
+            busy={drop.isPending}
+            disabled={locked !== null}
+            onConfirm={() => drop.mutate(name)}
+          />
+        </LockedHint>
       ) : null}
       {dialog === "rename" ? (
         <RenameDialog schema={schema} part={part} name={name} carried={carried} onClose={() => setDialog(null)} />
@@ -446,6 +456,7 @@ function RenameRow({ rename: r }: { rename: SchemaRename }) {
   const job = useJob(r.status === "running" ? r.job_id : null);
   const refresh = useRefreshSchema();
   const again = useRenameSchema();
+  const locked = useLockedReason();
   const ended = useRef<string | null>(null);
   const finished = r.status === "running" && job.data !== undefined && !isActiveJob(job.data);
   // The job ended while the schema still says running: read the schema again, once.
@@ -490,14 +501,17 @@ function RenameRow({ rename: r }: { rename: SchemaRename }) {
           </Tooltip>
         ) : null}
         {r.status === "failed" && isOwner ? (
-          <Button
-            size="compact-xs"
-            variant="subtle"
-            loading={again.isPending}
-            onClick={() => again.mutate({ kind: "property", on: r.on ?? undefined, from: r.from, to: r.to })}
-          >
-            {t("views.schema.changes.resume")}
-          </Button>
+          <LockedHint reason={locked}>
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              loading={again.isPending}
+              disabled={locked !== null}
+              onClick={() => again.mutate({ kind: "property", on: r.on ?? undefined, from: r.from, to: r.to })}
+            >
+              {t("views.schema.changes.resume")}
+            </Button>
+          </LockedHint>
         ) : null}
       </div>
       <Text size="xs" c="dimmed" className={classes.end}>

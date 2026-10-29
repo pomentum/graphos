@@ -7,6 +7,7 @@ import { useWorkspace } from "../../../graph/WorkspaceProvider";
 import { useAddToSchema, useRemoveEdgeEndpoint, useSchema } from "../../../data/queries";
 import { entryOf } from "../../../lib/propertySchema";
 import { DeprecatedBadge, DeprecationLines, NameActions } from "../NameChanges";
+import { LockedHint, useLockedReason } from "../SchemaManager";
 import { EdgeProperties, SchemaProperties } from "../properties/SchemaProperties";
 
 import { formatCount } from "../../../lib/time";
@@ -28,7 +29,7 @@ export interface DiagramPanelProps {
  * children, properties, its lines in and out, and the ways to its nodes.
  * A line: the labels it joins and every relationship type on it, each with
  * how it stands against the declarations; administrators declare a pair
- * or remove a declared one here. A label, and each type on a line, can be
+ * or remove a declared one here (unless a program manages the schema). A label, and each type on a line, can be
  * renamed, deprecated and, once deprecated and empty, dropped here too.
  */
 export function DiagramPanel({ diagram, selection, properties, onSelect }: DiagramPanelProps) {
@@ -237,6 +238,7 @@ function TypeRow({ link, type, rows }: { link: Link; type: LinkType; rows: numbe
   const description = schema.data ? entryOf(schema.data, "edge", type.type)?.description : undefined;
   const declare = useAddToSchema();
   const remove = useRemoveEdgeEndpoint();
+  const locked = useLockedReason();
   const exact = type.via !== null && type.via.src === link.src && type.via.dst === link.dst;
   const statusLabel = {
     declared: exact
@@ -262,7 +264,13 @@ function TypeRow({ link, type, rows }: { link: Link; type: LinkType; rows: numbe
         <Text size="xs" className={classes.typeStatus} data-status={type.status} truncate>
           {statusLabel}
         </Text>
-        {canMaintain && type.status !== "declared" ? (
+        {canMaintain && type.status !== "declared" && locked ? (
+          <LockedHint reason={locked}>
+            <Button size="compact-xs" variant="light" disabled>
+              {t("views.schema.diagram.declare")}
+            </Button>
+          </LockedHint>
+        ) : canMaintain && type.status !== "declared" ? (
           <Tooltip
             label={t(
               type.status === "open" ? "views.schema.diagram.declareOpenHint" : "views.schema.diagram.declareHint",
@@ -285,15 +293,18 @@ function TypeRow({ link, type, rows }: { link: Link; type: LinkType; rows: numbe
           </Tooltip>
         ) : null}
         {canMaintain && type.status === "declared" && exact ? (
-          <Button
-            size="compact-xs"
-            variant="subtle"
-            color="gray"
-            loading={remove.isPending}
-            onClick={() => remove.mutate({ type: type.type, src: link.src, dst: link.dst })}
-          >
-            {t("views.schema.diagram.undeclare")}
-          </Button>
+          <LockedHint reason={locked}>
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              color="gray"
+              loading={remove.isPending}
+              disabled={locked !== null}
+              onClick={() => remove.mutate({ type: type.type, src: link.src, dst: link.dst })}
+            >
+              {t("views.schema.diagram.undeclare")}
+            </Button>
+          </LockedHint>
         ) : null}
       </Group>
       {description ? (

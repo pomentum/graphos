@@ -17,7 +17,13 @@ from uuid import UUID
 import httpx
 
 from graphos_client._auth import PasswordAuth, from_environment
-from graphos_client._errors import GraphosError, GraphosNotReady
+from graphos_client._drift import drift_lines
+from graphos_client._errors import (
+    GraphosError,
+    GraphosNotReady,
+    SchemaDriftError,
+    check_schema_manager,
+)
 from graphos_client._models import (
     BulkEdgesResponse,
     BulkNodesResponse,
@@ -78,8 +84,15 @@ from graphos_client._models import (
 )
 
 log = logging.getLogger(__name__)
+# Where ensure_tenant reports how a tenant differs from what a program declares.
+drift_log = logging.getLogger("graphos_client.drift")
 
 _MERGE_PATCH = "application/merge-patch+json"
+# ensure_tenant: a dry run and a registration, judged again once when the version moved.
+_ENSURE_ATTEMPTS = 2
+
+# How a registration's ``display`` entries merge with the stored ones (ADR-0014).
+DisplayMerge = Literal["entries", "missing_only"]
 
 
 def _label_param(label: str | None) -> dict[str, str] | None:
@@ -195,6 +208,7 @@ class GraphosClient:
             auth = from_environment()
         if isinstance(auth, PasswordAuth):
             auth.bind(self._base_url)
+        self._auth = auth
         self._tenant = tenant
         self._retries = retries
         self._retry_backoff_s = retry_backoff_s
@@ -329,10 +343,10 @@ class GraphosClient:
                 await asyncio.sleep(self._retry_backoff_s * (2 ** (attempt - 1)))
                 continue
 
-            detail = _extract_detail(resp)
+            detail, body = _extract_detail(resp), _json_body(resp)
             if resp.status_code == httpx.codes.SERVICE_UNAVAILABLE:
-                raise GraphosNotReady(resp.status_code, detail, method, url)
-            raise GraphosError(resp.status_code, detail, method, url)
+                raise GraphosNotReady(resp.status_code, detail, method, url, body=body)
+            raise GraphosError(resp.status_code, detail, method, url, body=body)
 
     # ── health & info ──────────────────────────────────────────────────────
 
@@ -393,6 +407,9 @@ class GraphosClient:
         display: Mapping[str, Mapping[str, Mapping[str, Any] | None]] | None = None,
         property_schema: Mapping[str, Any] | None = None,
         deprecated: Mapping[str, Mapping[str, Mapping[str, Any] | None]] | None = None,
+        schema_manager: str | None = _UNSET,
+        manage_schema: bool = False,
+        display_merge: DisplayMerge | None = None,
         force_shrink: bool = False,
         dry_run: bool = False,
         if_match: str | None = None,
@@ -464,10 +481,46 @@ class GraphosClient:
         without storing duplicate rows.  Both child and parent must
         appear in ``vertex_labels``.  Acyclic.
 
-        ``if_match`` (the ``etag`` of :meth:`schema` or :meth:`get_tenant`)
-        writes only if the schema has not changed since: else ``GraphosError``
-        412, and nothing is written.
+        ``schema_manager`` names the tenant's schema manager: ``"user:<name>"``
+        (an existing, enabled graphos user or service account),
+        ``"oidc-sub:<sub>"`` (a caller signed in through the identity provider)
+        or ``"self"`` (the caller, whichever kind); ``None`` releases the
+        tenant; left out, the manager stays as it is.  ``manage_schema=True``
+        is ``schema_manager="self"``, whatever the client signs in with.  Only
+        an owner of the tenant (or whoever creates it, or an admin) sets,
+        transfers or releases it: else 403; naming the one stored needs no
+        right.  A server with authentication disabled refuses it (422).  On a
+        managed tenant, anyone else's write that changes more than ``display``
+        is refused, ``GraphosError`` 409 with ``code == "schema_managed"`` and
+        the manager in ``schema_manager``.
+
+        After a registration (not a dry run) that sends ``schema_manager``, the
+        client checks the answer's ``schema_manager``: when it is missing (a
+        server older than the field ignores it) or not what was asked (for
+        ``"self"``: none), it raises :class:`SchemaManagerNotApplied`.  The
+        rest of the registration was applied then.
+
+        ``display_merge`` says how the ``display`` entries sent merge with the
+        stored ones: ``"entries"`` (an entry sent replaces the stored one,
+        ``None`` removes it) or ``"missing_only"`` (only the entries the tenant
+        lacks are added; none is replaced or removed, in a ``force_shrink``
+        too).  Left out (``None``, not sent), the server picks:
+        ``"missing_only"`` for the tenant's schema manager, so people's styles
+        stay, ``"entries"`` for anyone else.  A manager that wants to correct or
+        remove a style it shipped sends ``"entries"``.
+
+        ``if_match`` (the ``etag`` of :meth:`schema` or :meth:`get_tenant`, or of
+        a dry run) writes only if the schema has not changed since: else
+        ``GraphosError`` 412, and nothing is written.  The answer carries
+        ``etag`` (the schema's version, from the ``ETag`` header) when the
+        server sent one: a dry run's is the version it was judged on, to send
+        back as ``if_match`` so the registration applies exactly what was
+        previewed.
+
+        See :meth:`ensure_tenant` for a registration that first reports what
+        was changed elsewhere (the dry run's ``drift``).
         """
+        manager = self._schema_manager_arg(schema_manager, manage_schema)
         body = {
             "name": name or self._tenant,
             "vertex_labels": list(vertex_labels),
@@ -494,21 +547,157 @@ class GraphosClient:
             body["property_schema"] = dict(property_schema)
         if deprecated:
             body["deprecated"] = {part: dict(entries) for part, entries in deprecated.items()}
-        return await self._register(
+        if manager is not _UNSET:
+            body["schema_manager"] = manager
+        if display_merge is not None:
+            body["display_merge"] = display_merge
+        result = await self._register(
             body, force_shrink=force_shrink, dry_run=dry_run, if_match=if_match,
         )
+        if manager is not _UNSET and not dry_run:
+            check_schema_manager(name or self._tenant, manager, result)
+        return result
+
+    @staticmethod
+    def _schema_manager_arg(schema_manager: str | None, manage_schema: bool) -> Any:
+        """The ``schema_manager`` to send, or ``_UNSET`` to leave it out."""
+        if not manage_schema:
+            return schema_manager
+        if schema_manager is not _UNSET:
+            raise ValueError("pass either schema_manager or manage_schema=True, not both")
+        return "self"
+
+    async def ensure_tenant(
+        self,
+        *,
+        on_drift: Literal["warn", "fail", "ignore"] = "warn",
+        name: str | None = None,
+        vertex_labels: Iterable[str] = (),
+        edge_labels: Iterable[str | Mapping[str, Any]] = (),
+        property_indexes: Iterable[Mapping[str, Any]] = (),
+        generated_columns: Iterable[Mapping[str, Any]] = (),
+        label_hierarchy: Mapping[str, str] | None = None,
+        meta: Mapping[str, str | None] | None = None,
+        search_indexes: Mapping[str, Mapping[str, Any]] | None = None,
+        edge_endpoints: Mapping[str, Iterable[tuple[str, str] | Mapping[str, str]]] | None = None,
+        strict_endpoints: bool | None = None,
+        community_algorithm: str | None = None,
+        display: Mapping[str, Mapping[str, Mapping[str, Any] | None]] | None = None,
+        property_schema: Mapping[str, Any] | None = None,
+        deprecated: Mapping[str, Mapping[str, Mapping[str, Any] | None]] | None = None,
+        schema_manager: str | None = _UNSET,
+        manage_schema: bool = False,
+        display_merge: DisplayMerge | None = None,
+        force_shrink: bool = False,
+        if_match: str | None = None,
+    ) -> dict[str, Any]:
+        """Register a tenant as a program does on every start, saying first
+        what was changed elsewhere.
+
+        Takes the arguments of :meth:`register_tenant` (but ``dry_run``).  It
+        runs the registration as a dry run first and logs each item of its
+        ``drift`` on the logger ``graphos_client.drift``, one line each.  At
+        INFO: what the tenant has that this call does not declare (added
+        elsewhere, e.g. in the web UI; a merge keeps it, and most programs
+        declare less than the tenant has).  At WARNING: what a
+        ``force_shrink`` would remove, entries this call would replace with a
+        different value, settings it would change (``strict_endpoints``, the
+        property mode, the community algorithm), and labels, edge types or
+        label pairs dropped earlier that it creates again.  Then it registers
+        and answers what :meth:`register_tenant` answers.
+
+        ``on_drift``:
+
+        - ``"warn"``: log, then register;
+        - ``"fail"``: log, and raise :class:`SchemaDriftError` (``.drift``)
+          without registering when the call would remove, replace or change
+          something, or create a removed item again; what is only not
+          declared never fails;
+        - ``"ignore"``: register without the dry run.
+
+        The registration applies exactly what was previewed: it is sent with
+        ``If-Match`` set to the dry run's ``ETag`` (the schema version the
+        drift was judged on; ``if_match`` when the server sent none, as for a
+        new tenant).  If the schema changes between the two calls (another
+        replica starting at the same time), it runs the dry run once more on
+        the new version and registers with that; a second change raises
+        ``GraphosError`` 412 and nothing is registered.  An ``if_match`` given
+        pins the version: the second dry run is refused 412 when it moved.
+
+        A dry run the server refuses raises as :meth:`register_tenant` does:
+        ``GraphosError`` 409 for a label renamed away, or for a managed
+        tenant (``code == "schema_managed"``), and nothing is registered.  A
+        new tenant has no drift.
+        """
+        if on_drift not in ("warn", "fail", "ignore"):
+            raise ValueError(f"on_drift must be 'warn', 'fail' or 'ignore', not {on_drift!r}")
+        # Iterables are read twice (the dry run, then the registration).
+        args: dict[str, Any] = {
+            "name": name,
+            "vertex_labels": list(vertex_labels),
+            "edge_labels": list(edge_labels),
+            "property_indexes": list(property_indexes),
+            "generated_columns": list(generated_columns),
+            "label_hierarchy": label_hierarchy,
+            "meta": meta,
+            "search_indexes": search_indexes,
+            "edge_endpoints": None if edge_endpoints is None else {
+                edge_type: list(pairs) for edge_type, pairs in edge_endpoints.items()
+            },
+            "strict_endpoints": strict_endpoints,
+            "community_algorithm": community_algorithm,
+            "display": display,
+            "property_schema": property_schema,
+            "deprecated": deprecated,
+            "schema_manager": self._schema_manager_arg(schema_manager, manage_schema),
+            "display_merge": display_merge,
+            "force_shrink": force_shrink,
+        }
+        if on_drift == "ignore":
+            return await self.register_tenant(**args, if_match=if_match)
+        # Several starts at once (replicas of one program): another's
+        # registration can move the version between this one's dry run and its
+        # registration. Judge the new version once more before giving up.
+        for attempt in range(1, _ENSURE_ATTEMPTS + 1):
+            preview = await self.register_tenant(**args, dry_run=True, if_match=if_match)
+            tenant = name or self._tenant
+            drift = preview.get("drift") or {}
+            lines = drift_lines(tenant, drift)
+            for line in lines.info:
+                drift_log.info("%s", line)
+            for line in lines.warning:
+                drift_log.warning("%s", line)
+            if lines.blocking and on_drift == "fail":
+                raise SchemaDriftError(
+                    tenant, drift, [*lines.info, *lines.warning], lines.blocking,
+                )
+            try:
+                # Apply exactly the version the drift was judged on (412 otherwise).
+                return await self.register_tenant(
+                    **args, if_match=preview.get("etag") or if_match,
+                )
+            except GraphosError as exc:
+                if exc.status_code != HTTPStatus.PRECONDITION_FAILED or attempt == _ENSURE_ATTEMPTS:
+                    raise
+        raise AssertionError("unreachable")
 
     async def _register(
         self, body: Mapping[str, Any], *, force_shrink: bool, dry_run: bool,
         if_match: str | None = None,
     ) -> dict[str, Any]:
+        """``POST /v1/tenants``; the answer with ``etag`` added from the
+        ``ETag`` header when the server sent one."""
         flags = (("force_shrink", force_shrink), ("dry_run", dry_run))
         params = {k: "true" for k, on in flags if on}
         resp = await self._request(
             "POST", "/v1/tenants", params=params or None, json_body=body,
             headers=_if_match_header(if_match),
         )
-        return resp.json()
+        result = resp.json()
+        tag = resp.headers.get("ETag")
+        if tag and isinstance(result, dict):
+            result["etag"] = tag
+        return result
 
     async def export_schema(self, name: str | None = None) -> dict[str, Any]:
         """``GET /v1/tenants/{name}/spec``: the tenant's whole schema as a document
@@ -524,6 +713,8 @@ class GraphosClient:
         replace: bool = False,
         dry_run: bool = False,
         if_match: str | None = None,
+        schema_manager: str | None = _UNSET,
+        display_merge: DisplayMerge | None = None,
     ) -> dict[str, Any]:
         """Register the schema in ``document`` (from :meth:`export_schema`).
 
@@ -531,15 +722,28 @@ class GraphosClient:
         ``create_tenants``); ``replace`` replaces the stored schema instead of
         adding to it; ``dry_run`` answers what it would change, writing nothing.
 
+        ``schema_manager`` sets (``"user:<name>"``, ``"oidc-sub:<sub>"``,
+        ``"self"``) or releases (``None``) the target tenant's schema manager,
+        as in :meth:`register_tenant`, which also says how the answer is
+        checked (:class:`SchemaManagerNotApplied`).  Left out, the manager
+        stays as it is, even when the document names one: importing a schema
+        never moves who manages it by itself.  ``display_merge``: as in
+        :meth:`register_tenant`; not sent when ``None``.
+
         A registration takes at most 5,000 declared label pairs; a document with
         more is sent in several calls, the first with everything else (and
-        ``replace``), the rest adding pairs.  A dry run previews the first 5,000
-        and says how many it left out.
+        ``replace``, ``display_merge``), the rest adding pairs.  The last call
+        carries ``schema_manager``, so the calls before it are not refused by
+        a manager it sets.  A dry run previews the first 5,000 (with
+        ``schema_manager``) and says how many it left out.
 
         ``if_match`` (the target tenant's schema ``etag``) holds the first call
         to that version: 412 when the schema changed since, nothing written.
         """
-        body = {k: v for k, v in document.items() if k != "edge_endpoints"}
+        body = {k: v for k, v in document.items()
+                if k not in ("edge_endpoints", "schema_manager")}
+        if display_merge is not None:
+            body["display_merge"] = display_merge
         if name is not None:
             body["name"] = name
         target = str(body.get("name") or self._tenant)
@@ -553,6 +757,12 @@ class GraphosClient:
                   for i in range(0, len(pairs), _MAX_PAIRS_PER_CALL)] or [[]]
         if "edge_endpoints" in document:
             body["edge_endpoints"] = _by_type(chunks[0])
+        # The manager goes with the last call (the only one in a dry run or a
+        # single call): set earlier, it would refuse the calls adding pairs.
+        bodies = [body, *({"name": target, "edge_endpoints": _by_type(c)} for c in chunks[1:])]
+        last = 0 if dry_run else len(bodies) - 1
+        if schema_manager is not _UNSET:
+            bodies[last]["schema_manager"] = schema_manager
         result = await self._register(
             body, force_shrink=replace, dry_run=dry_run, if_match=if_match,
         )
@@ -564,11 +774,10 @@ class GraphosClient:
                     "(at most 5000 per call); the import adds them"
                 )
             return result
-        for chunk in chunks[1:]:
-            result = await self._register(
-                {"name": target, "edge_endpoints": _by_type(chunk)},
-                force_shrink=False, dry_run=False,
-            )
+        for later in bodies[1:]:
+            result = await self._register(later, force_shrink=False, dry_run=False)
+        if schema_manager is not _UNSET:
+            check_schema_manager(target, schema_manager, result)
         return result
 
     async def remove_edge_endpoint(
@@ -1036,7 +1245,8 @@ class GraphosClient:
             async with self._http.stream("GET", url, params=params, timeout=None) as resp:
                 if resp.status_code >= httpx.codes.BAD_REQUEST:
                     await resp.aread()
-                    raise GraphosError(resp.status_code, _extract_detail(resp), "GET", url)
+                    raise GraphosError(resp.status_code, _extract_detail(resp), "GET", url,
+                                       body=_json_body(resp))
                 async for chunk in resp.aiter_bytes():
                     out.write(chunk)
                     written += len(chunk)
@@ -1086,7 +1296,8 @@ class GraphosClient:
             headers={"content-type": "application/x-ndjson"},
         )
         if resp.status_code >= httpx.codes.BAD_REQUEST:
-            raise GraphosError(resp.status_code, _extract_detail(resp), "POST", url)
+            raise GraphosError(resp.status_code, _extract_detail(resp), "POST", url,
+                               body=_json_body(resp))
         return resp.json()
 
     async def scan_nodes(
@@ -1909,7 +2120,8 @@ class GraphosClient:
                 ) as resp:
                     if resp.status_code >= httpx.codes.BAD_REQUEST:
                         await resp.aread()
-                        error = GraphosError(resp.status_code, _extract_detail(resp), "GET", path)
+                        error = GraphosError(resp.status_code, _extract_detail(resp), "GET", path,
+                                             body=_json_body(resp))
                         if resp.status_code < httpx.codes.INTERNAL_SERVER_ERROR or not reconnect:
                             raise error
                         log.warning("change stream: %s; reconnecting", error)
@@ -2283,6 +2495,14 @@ async def _sse_events(resp: httpx.Response) -> AsyncIterator[tuple[str, str]]:
                 event = value
             elif field == "data":
                 data.append(value)
+
+
+def _json_body(resp: httpx.Response) -> Any:
+    """The response's JSON body, or None when it is not JSON."""
+    try:
+        return resp.json()
+    except ValueError:
+        return None
 
 
 def _extract_detail(resp: httpx.Response) -> str:
