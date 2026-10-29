@@ -54,7 +54,7 @@ the move changes is in the [changelog](../../CHANGELOG.md).)
   with the same passwords.
 - **Your own compose overrides.** If you override `graphos-db` (image, volume, command), check
   them against the new file: the database runs on a new volume, `graphos_data_pg18`, and sets
-  `PGDATA`. The Louvain overlay (`docker-compose.louvain.yml`) needs no change.
+  `PGDATA`. The igraph overlay (`docker-compose.igraph.yml`, `docker-compose.louvain.yml` up to 0.14.5) needs no change.
 
 ## Upgrade with Docker Compose
 

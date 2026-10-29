@@ -35,14 +35,16 @@ Leiden with one setting, `GRAPHOS_IGRAPH=true`, instead of a script in the compo
   names another requirement (default: the `louvain` extra's). Nothing is installed when igraph is
   there already (an image built with the extra, or an earlier install the container kept), and a
   failed install is logged and graphos starts without it. A compose file no longer carries the
-  install script: `docker-compose.louvain.yml` now only sets `GRAPHOS_IGRAPH`. Arguments still go
-  to graphos (`docker run <image> reset-admin-password`). **Docs:** installation §6.
+  install script: the overlay only sets `GRAPHOS_IGRAPH`. Arguments still go to graphos
+  (`docker run <image> reset-admin-password`). **Docs:** installation §6.
 
 ### Changed
 
-- **`docker-compose.louvain.yml` needs this release's graphos-api image**: it sets
-  `GRAPHOS_IGRAPH=true` for the image's entrypoint instead of overriding the entrypoint. With an
-  image up to 0.14.5, use that release's file.
+- **`docker-compose.louvain.yml` is now `docker-compose.igraph.yml`**, named after what it adds
+  (python-igraph gives both Louvain and Leiden): use `-f docker-compose.igraph.yml`. It needs this
+  release's graphos-api image: it sets `GRAPHOS_IGRAPH=true` for the image's entrypoint instead of
+  overriding the entrypoint. With an image up to 0.14.5, use that release's
+  `docker-compose.louvain.yml`.
 
 ### Upgrading
 

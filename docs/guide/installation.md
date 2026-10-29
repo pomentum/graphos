@@ -223,7 +223,7 @@ its name:
 | How you run graphos | Louvain and Leiden |
 |---|---|
 | this compose file, built locally | included (leave it out with `GRAPHOS_EXTRAS= docker compose ...`) |
-| the published image | not included; set `GRAPHOS_IGRAPH=true` on graphos-api (or add `-f docker-compose.louvain.yml`, which sets it), and the image installs it into the container on first start (PyPI must be reachable then): [example below](#louvain-with-the-published-images) |
+| the published image | not included; set `GRAPHOS_IGRAPH=true` on graphos-api (or add `-f docker-compose.igraph.yml`, which sets it), and the image installs it into the container on first start (PyPI must be reachable then): [example below](#louvain-with-the-published-images) |
 | `pip install "./services/graphos[louvain]"` | included |
 
 Everything else, the graph metrics included, works without it; `GET /v1/info` reports
@@ -246,17 +246,17 @@ services:
     build: !reset null
 ```
 
-Then start with the Louvain overlay and the override:
+Then start with the igraph overlay and the override:
 
 ```bash
-docker compose -f docker-compose.graphos.yml -f docker-compose.louvain.yml \
+docker compose -f docker-compose.graphos.yml -f docker-compose.igraph.yml \
   -f docker-compose.published.yml --profile ui up -d
 curl -s http://127.0.0.1:8080/v1/info    # "features": {"louvain": true, ...}
 ```
 
 On its first start graphos-api installs python-igraph into its container; restarts reuse it, and a
 recreated container (a new image or changed settings) installs it again. Without
-`-f docker-compose.louvain.yml`, the same override runs the published images without Louvain. If
+`-f docker-compose.igraph.yml`, the same override runs the published images without Louvain. If
 the packages on ghcr.io are not public, sign in first with `docker login ghcr.io`.
 
 The image's entrypoint does the install, so any deployment turns it on with environment variables

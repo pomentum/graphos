@@ -71,7 +71,7 @@ not a default dependency: it is installed only with the optional extra (`pip ins
 "graphos[louvain]"`) or an image built with `--build-arg GRAPHOS_EXTRAS=louvain`. Without it,
 graphos runs normally and `POST /v1/{tenant}/recompute-communities` answers `501`. The default
 container image published by this repository's workflow does not contain it. `GRAPHOS_IGRAPH=true`
-(which the `docker-compose.louvain.yml` overlay sets) does not change that: the image's entrypoint
+(which the `docker-compose.igraph.yml` overlay sets) does not change that: the image's entrypoint
 then downloads python-igraph from PyPI into the running container, on the machine running it. If you distribute
 an install or image that includes python-igraph, that distribution must comply with the GPL for
 the igraph component.

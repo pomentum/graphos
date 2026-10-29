@@ -95,7 +95,7 @@ worse than what is written here.
 - **Reads by direct SQL roles are not in graphos's audit log.** Use PostgreSQL's logging
   (`log_statement`, `pgaudit`) if they must be.
 - **Community detection (Louvain)** installs python-igraph from PyPI into the container at start
-  when `docker-compose.louvain.yml` is used; pin or mirror it if the host must not reach PyPI.
+  when `docker-compose.igraph.yml` is used; pin or mirror it if the host must not reach PyPI.
 
 ## Dependencies and images
 

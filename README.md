@@ -168,7 +168,7 @@ Community detection uses [python-igraph](https://python.igraph.org/), which is G
 | `pip install "./services/graphos[louvain]"` | yes |
 | `docker build --build-arg GRAPHOS_EXTRAS=louvain` | yes (the image then contains GPL code) |
 | `docker compose ... up` (local build) | yes by default; `GRAPHOS_EXTRAS= docker compose ...` to leave it out |
-| an image without it (the published one), with `GRAPHOS_IGRAPH=true` (or `-f docker-compose.louvain.yml`, which sets it) | yes, no rebuild: the image's entrypoint downloads python-igraph into the container on first start ([example with the published images](docs/guide/installation.md#louvain-with-the-published-images)) |
+| an image without it (the published one), with `GRAPHOS_IGRAPH=true` (or `-f docker-compose.igraph.yml`, which sets it) | yes, no rebuild: the image's entrypoint downloads python-igraph into the container on first start ([example with the published images](docs/guide/installation.md#louvain-with-the-published-images)) |
 
 `GET /v1/info` reports `features.louvain` so clients can check before calling.
 

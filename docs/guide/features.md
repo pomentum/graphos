@@ -369,7 +369,7 @@ What each algorithm (communities and the graph metrics below) finds and what it 
 > installed with `pip install "graphos[louvain]"`, an image built with
 > `--build-arg GRAPHOS_EXTRAS=louvain`, or, with no rebuild, `GRAPHOS_IGRAPH=true`
 > on graphos-api (the image's entrypoint downloads it on first start; the
-> `docker-compose.louvain.yml` overlay sets it). Without it, `recompute-communities` answers 501 and
+> `docker-compose.igraph.yml` overlay sets it). Without it, `recompute-communities` answers 501 and
 > `GET /v1/info` reports `features.louvain: false`.
 
 `POST /v1/{tenant}/recompute-communities` (`maintain`) runs Louvain or Leiden in a

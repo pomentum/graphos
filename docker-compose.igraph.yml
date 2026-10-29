@@ -1,7 +1,7 @@
 # Louvain and Leiden community detection on an image built without python-igraph
 # (the published one), with no rebuild and nothing mounted:
 #
-#   docker compose -f docker-compose.graphos.yml -f docker-compose.louvain.yml up -d
+#   docker compose -f docker-compose.graphos.yml -f docker-compose.igraph.yml up -d
 #
 # The image's entrypoint installs python-igraph from PyPI into the container on its
 # first start when GRAPHOS_IGRAPH is true, then starts graphos as usual; graphos finds
