@@ -13,7 +13,7 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import { IconPencil, IconPlus, IconSettings, IconTrash } from "@tabler/icons-react";
-import { useState, type ReactNode } from "react";
+import { useState, type ReactElement, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { EffectivePolicy, PropertyEntry, PropertyMode, PropertySpec, UndeclaredPolicy } from "../../../api/types";
 import {
@@ -25,6 +25,7 @@ import {
   withSettings,
   type SchemaPart,
 } from "../../../lib/propertySchema";
+import { LockedHint } from "../SchemaManager";
 import { PropertyDialog } from "./PropertyDialog";
 import classes from "./PropertyPanel.module.css";
 
@@ -47,6 +48,11 @@ export interface PropertyPanelProps {
   /** Property names the rows carry. */
   carried: string[];
   editable: boolean;
+  /**
+   * Why an editable panel's controls are disabled (a program manages the
+   * schema): they stay in view, with this as their tooltip. Null otherwise.
+   */
+  locked?: string | null;
   saving: boolean;
   /** The entry to declare, or `null` to remove it. */
   onSave: (entry: PropertyEntry | null, done: () => void) => void;
@@ -65,7 +71,8 @@ type Editing = { name?: string } | null;
  * effect with where it comes from (this entry, `*` or a parent label), and
  * the names its rows carry that nothing declares. Maintainers declare,
  * narrow and remove definitions here, and set the entry's description, mode
- * and what happens to undeclared properties.
+ * and what happens to undeclared properties; while `locked`, those controls
+ * show disabled.
  */
 export function PropertyPanel({
   part,
@@ -75,6 +82,7 @@ export function PropertyPanel({
   inheritedOf,
   carried,
   editable,
+  locked = null,
   saving,
   onSave,
   compact = false,
@@ -100,6 +108,7 @@ export function PropertyPanel({
       <RowActions
         name={name}
         declaredHere={name in own}
+        locked={locked}
         saving={saving}
         onEdit={() => setEditing({ name })}
         onRemove={() => save(withDefinition(entry, name, null))}
@@ -126,16 +135,17 @@ export function PropertyPanel({
           </Badge>
         ) : null}
         {editable ? (
-          <Tooltip label={t("views.schema.properties.settings")} withArrow>
+          <Hint label={t("views.schema.properties.settings")} locked={locked}>
             <ActionIcon
               size="sm"
               variant="subtle"
               aria-label={t("views.schema.properties.settingsOf", { owner: sourceName(part, owner) })}
+              disabled={locked !== null}
               onClick={() => setSettings(true)}
             >
               <IconSettings size={14} />
             </ActionIcon>
-          </Tooltip>
+          </Hint>
         ) : null}
       </Group>
 
@@ -183,7 +193,7 @@ export function PropertyPanel({
             {t("views.schema.properties.carried")}
           </Text>
           {undeclared.map((name) =>
-            editable ? (
+            editable && locked === null ? (
               <Tooltip key={name} label={t("views.schema.properties.declare", { name })} withArrow>
                 <UnstyledButton
                   onClick={() => setEditing({ name })}
@@ -206,14 +216,17 @@ export function PropertyPanel({
       {editable || actions ? (
         <Group gap="xs">
           {editable ? (
-            <Button
-              size="compact-xs"
-              variant="subtle"
-              leftSection={<IconPlus size={12} />}
-              onClick={() => setEditing({})}
-            >
-              {t("views.schema.properties.add")}
-            </Button>
+            <LockedHint reason={locked}>
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                leftSection={<IconPlus size={12} />}
+                disabled={locked !== null}
+                onClick={() => setEditing({})}
+              >
+                {t("views.schema.properties.add")}
+              </Button>
+            </LockedHint>
           ) : null}
           {actions}
         </Group>
@@ -283,16 +296,29 @@ function Rules({ definition }: { definition: PropertySpec }) {
   );
 }
 
+/** A control's tooltip: what it does, or, while `locked`, why it is disabled. */
+function Hint({ label, locked, children }: { label: string; locked: string | null; children: ReactElement }) {
+  return locked ? (
+    <LockedHint reason={locked}>{children}</LockedHint>
+  ) : (
+    <Tooltip label={label} withArrow>
+      {children}
+    </Tooltip>
+  );
+}
+
 /** Edit (or narrow, when inherited) and remove (when declared here) one definition. */
 function RowActions({
   name,
   declaredHere,
+  locked,
   saving,
   onEdit,
   onRemove,
 }: {
   name: string;
   declaredHere: boolean;
+  locked: string | null;
   saving: boolean;
   onEdit: () => void;
   onRemove: () => void;
@@ -300,29 +326,34 @@ function RowActions({
   const { t } = useTranslation();
   return (
     <Group gap={2} wrap="nowrap" justify="flex-end" className={classes.rowActions}>
-      <Tooltip label={declaredHere ? t("views.schema.properties.edit") : t("views.schema.properties.narrow")} withArrow>
+      <Hint
+        label={declaredHere ? t("views.schema.properties.edit") : t("views.schema.properties.narrow")}
+        locked={locked}
+      >
         <ActionIcon
           size="sm"
           variant="subtle"
           aria-label={t("views.schema.properties.editOf", { name })}
+          disabled={locked !== null}
           onClick={onEdit}
         >
           <IconPencil size={14} />
         </ActionIcon>
-      </Tooltip>
+      </Hint>
       {declaredHere ? (
-        <Tooltip label={t("views.schema.properties.remove")} withArrow>
+        <Hint label={t("views.schema.properties.remove")} locked={locked}>
           <ActionIcon
             size="sm"
             variant="subtle"
             color="red"
             aria-label={t("views.schema.properties.removeOf", { name })}
             loading={saving}
+            disabled={locked !== null}
             onClick={onRemove}
           >
             <IconTrash size={14} />
           </ActionIcon>
-        </Tooltip>
+        </Hint>
       ) : null}
     </Group>
   );

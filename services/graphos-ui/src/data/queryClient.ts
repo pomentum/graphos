@@ -16,11 +16,14 @@ export function createQueryClient(): QueryClient {
         !mutation.meta?.silent &&
         notifications.show({
           color: "red",
-          // A node, an edge or the schema changed since it was read (412).
+          // A node, an edge or the schema changed since it was read (412), or a
+          // program manages the schema's structure (409).
           title:
             error instanceof ApiError && error.isConflict
               ? t("errors.conflict")
-              : t(mutation.meta?.errorTitle ?? "errors.notSaved"),
+              : error instanceof ApiError && error.isSchemaManaged
+                ? t("errors.schemaManaged")
+                : t(mutation.meta?.errorTitle ?? "errors.notSaved"),
           message: error.message,
         }),
     }),

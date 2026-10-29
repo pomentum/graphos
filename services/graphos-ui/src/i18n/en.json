@@ -734,6 +734,16 @@
       "addRelationship": "Relationship type",
       "addIndex": "Search index",
       "addProperty": "Property",
+      "manager": {
+        "title": "Managed by {{name}}",
+        "others": "The structure of this schema is managed by {{name}}: change it in that program. Styles can still be changed here.",
+        "yours": "You manage this schema's structure",
+        "locked": "Managed by {{name}}: change it in that program",
+        "release": "Release",
+        "releaseTitle": "Release the schema from {{name}}?",
+        "releaseBody": "Anyone who maintains this tenant can then change its structure here again. The next registration from {{name}} merges as on any tenant, and may overwrite what people change here.",
+        "releaseConfirm": "Release the schema"
+      },
       "file": {
         "export": "Export",
         "exportTooltip": "Download the whole schema as a file, to import here or into another tenant",
@@ -1372,7 +1382,8 @@
     "renamed": "{{from}} renamed to {{to}}",
     "renameStarted": "Renaming {{from}} to {{to}} in the background",
     "deprecationSaved": "Deprecation saved",
-    "labelDropped": "Dropped"
+    "labelDropped": "Dropped",
+    "schemaManagerReleased": "Schema released"
   },
   "csvImport": {
     "entryTitle": "Import a CSV file",
@@ -1517,6 +1528,8 @@
     "schemaNotExported": "Couldn't export the schema",
     "notRenamed": "Not renamed",
     "deprecationNotSaved": "Deprecation not saved",
-    "labelNotDropped": "Not dropped"
+    "labelNotDropped": "Not dropped",
+    "schemaManaged": "Managed by a program",
+    "schemaManagerNotReleased": "Not released"
   }
 }

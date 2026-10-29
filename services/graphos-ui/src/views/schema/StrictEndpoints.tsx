@@ -13,17 +13,21 @@ const SHOWN = 5;
  * Whether graphos refuses edge writes outside the declared label pairs.
  * Administrators switch it; turning it on first says which pairs in the data
  * lie outside the declarations (their edges stay, new ones are refused).
- * Others see a badge while it is on.
+ * Others see a badge while it is on. While a program manages the schema, the
+ * switch shows disabled, saying who.
  */
 export function StrictEndpoints({
   schema,
   map,
   editable,
+  locked = null,
 }: {
   schema: TenantSchema;
   map: GraphMap | undefined;
   /** May switch it (maintain on the tenant). */
   editable: boolean;
+  /** Why it cannot be switched here (a schema manager), or null. */
+  locked?: string | null;
 }) {
   const { t } = useTranslation();
   const save = useAddToSchema();
@@ -47,7 +51,9 @@ export function StrictEndpoints({
   return (
     <>
       <Tooltip
-        label={anyDeclared || strict ? t("views.schema.strict.hint") : t("views.schema.strict.nothingDeclared")}
+        label={
+          locked ?? (anyDeclared || strict ? t("views.schema.strict.hint") : t("views.schema.strict.nothingDeclared"))
+        }
         withArrow
         multiline
         w={280}
@@ -56,7 +62,7 @@ export function StrictEndpoints({
           size="xs"
           label={t("views.schema.strict.label")}
           checked={strict}
-          disabled={save.isPending || (!anyDeclared && !strict)}
+          disabled={locked !== null || save.isPending || (!anyDeclared && !strict)}
           onChange={(e) => (e.currentTarget.checked ? setConfirming(true) : set(false))}
         />
       </Tooltip>

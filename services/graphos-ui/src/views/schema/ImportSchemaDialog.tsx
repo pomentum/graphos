@@ -16,6 +16,11 @@ import {
 export interface ImportSchemaDialogProps {
   /** The tenant the page shows: the default target. */
   tenant: string;
+  /**
+   * Why a schema cannot be imported into this tenant (a program manages its
+   * schema): only another tenant can be chosen. Null otherwise.
+   */
+  locked?: string | null;
   /** Whether the user may create a tenant of this name (`create_tenants`). */
   mayCreate: (name: string) => boolean;
   /** The dry run: what importing would change, writing nothing. */
@@ -34,6 +39,7 @@ export interface ImportSchemaDialogProps {
  */
 export function ImportSchemaDialog({
   tenant,
+  locked = null,
   mayCreate,
   onPreview,
   onImport,
@@ -44,7 +50,7 @@ export function ImportSchemaDialog({
   const [file, setFile] = useState<File | null>(null);
   const [doc, setDoc] = useState<SchemaDocument | null>(null);
   const [problem, setProblem] = useState<SchemaFileProblem | null>(null);
-  const [target, setTarget] = useState<"this" | "other">("this");
+  const [target, setTarget] = useState<"this" | "other">(locked ? "other" : "this");
   const [otherName, setOtherName] = useState("");
   const [mode, setMode] = useState<"merge" | "replace">("merge");
   const [preview, setPreview] = useState<SchemaDryRun | null>(null);
@@ -137,7 +143,12 @@ export function ImportSchemaDialog({
           }}
         >
           <Stack gap={6} mt={4}>
-            <Radio value="this" label={t("views.schema.file.targetThis", { tenant })} />
+            <Radio
+              value="this"
+              label={t("views.schema.file.targetThis", { tenant })}
+              description={locked ?? undefined}
+              disabled={locked !== null}
+            />
             <Radio value="other" label={t("views.schema.file.targetNew")} />
           </Stack>
         </Radio.Group>

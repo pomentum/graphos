@@ -52,6 +52,19 @@ describe("HttpClient", () => {
     expect(source.renew).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the code of a refusal: a schema managed by a program", async () => {
+    const { impl } = fakeFetch(409, {
+      detail: "The schema of 'acme' is managed by user:importer",
+      code: "schema_managed",
+      schema_manager: "user:importer",
+    });
+    const error = await new HttpClient("/api", "t", impl).post("/v1/tenants", {}).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 409, code: "schema_managed", isSchemaManaged: true, isConflict: false });
+    expect((error as ApiError).message).toBe("The schema of 'acme' is managed by user:importer");
+    expect(new ApiError(409, "taken").isSchemaManaged).toBe(false);
+  });
+
   it("sends no Authorization header without a token source (signing in)", async () => {
     const fetchImpl = vi.fn(async () => new Response("{}")) as unknown as typeof fetch;
     await new HttpClient("/api", null, fetchImpl).post("/v1/auth/login", {});

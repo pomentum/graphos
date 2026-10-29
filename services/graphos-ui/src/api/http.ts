@@ -23,6 +23,8 @@ export class ApiError extends Error {
     readonly status: number,
     message: string,
     readonly etag: string | null = null,
+    /** graphos's machine-readable reason (`code` in the body), when it gives one. */
+    readonly code: string | null = null,
   ) {
     super(message);
     this.name = "ApiError";
@@ -32,6 +34,17 @@ export class ApiError extends Error {
   get isConflict(): boolean {
     return this.status === 412;
   }
+
+  /** A schema write refused because a program manages the tenant's schema (`409`, `schema_managed`). */
+  get isSchemaManaged(): boolean {
+    return this.status === 409 && this.code === "schema_managed";
+  }
+}
+
+/** The `code` graphos gives with a refusal, if any. */
+function errorCode(body: unknown): string | null {
+  const code = (body as { code?: unknown } | null)?.code;
+  return typeof code === "string" ? code : null;
 }
 
 /** Property violations named in a refusal; the rest are counted. */
@@ -96,7 +109,8 @@ export class HttpClient {
     const response = await this.send(method, path, options);
     const etag = response.headers.get("ETag");
     if (!response.ok) {
-      throw new ApiError(response.status, describeError(response.status, await readJson(response)), etag);
+      const body = await readJson(response);
+      throw new ApiError(response.status, describeError(response.status, body), etag, errorCode(body));
     }
     return { data: (await readJson(response)) as T, etag };
   }
@@ -132,7 +146,8 @@ export class HttpClient {
       answer = await this.uploadOnce(path, file, options);
     }
     if (answer.status < 200 || answer.status >= 300) {
-      throw new ApiError(answer.status, describeError(answer.status, parseJson(answer.body)));
+      const body = parseJson(answer.body);
+      throw new ApiError(answer.status, describeError(answer.status, body), null, errorCode(body));
     }
     return parseJson(answer.body) as T;
   }

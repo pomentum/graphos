@@ -3,13 +3,14 @@ import type { TenantSchema } from "../../../api/types";
 import { useAddToSchema, useEdgeProperties, usePropertyDefinitions } from "../../../data/queries";
 import { ALL, entryOf, type SchemaPart } from "../../../lib/propertySchema";
 import { useTenantSession } from "../../../session/SessionProvider";
+import { useLockedReason } from "../SchemaManager";
 import { PropertyPanel, type Applied, type PropertyPanelProps } from "./PropertyPanel";
 
 /**
  * One label's or relationship type's property panel, wired to the tenant: its
  * entry and the definitions in effect, what it inherits, and saving through
- * a registration (maintain). The Schema list and the diagram's side panel
- * both show it.
+ * a registration (maintain), unless a program manages the schema. The Schema
+ * list and the diagram's side panel both show it.
  */
 export function SchemaProperties({
   schema,
@@ -28,6 +29,7 @@ export function SchemaProperties({
 } & Pick<PropertyPanelProps, "compact" | "showDescription" | "actions">) {
   const { canMaintain } = useTenantSession();
   const add = useAddToSchema();
+  const locked = useLockedReason();
   const definitions = usePropertyDefinitions();
   const inheritedOf = useInheritedOf(schema, part, owner);
 
@@ -40,6 +42,7 @@ export function SchemaProperties({
       inheritedOf={inheritedOf}
       carried={carried}
       editable={canMaintain}
+      locked={locked}
       saving={add.isPending}
       onSave={(entry, done) => add.mutate({ property_schema: { [part]: { [owner]: entry } } }, { onSuccess: done })}
       compact={compact}

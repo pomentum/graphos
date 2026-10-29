@@ -44,6 +44,7 @@ import { isDeprecated } from "../../../lib/deprecation";
 import { formatCount } from "../../../lib/time";
 import { labelStyles, styledColors } from "../../../theme/labelStyles";
 import { usePalette } from "../../../theme/usePalette";
+import { LockedHint } from "../SchemaManager";
 import { DiagramPanel } from "./DiagramPanel";
 import {
   DiagramContext,
@@ -92,6 +93,8 @@ export interface SchemaDiagramProps {
   properties: Map<string, string[]>;
   /** Administrators add labels and draw relationship types. */
   editable: boolean;
+  /** Why they cannot here (a program manages the schema): the buttons show disabled. Null otherwise. */
+  locked?: string | null;
   onAddLabel: () => void;
   onDrawRelationship: (src: string, dst: string) => void;
 }
@@ -213,6 +216,7 @@ function DiagramCanvas({
   map,
   properties,
   editable,
+  locked = null,
   onAddLabel,
   onDrawRelationship,
 }: SchemaDiagramProps) {
@@ -469,7 +473,7 @@ function DiagramCanvas({
             onEdgeClick={(_event, edge) => setSelection({ kind: "link", id: edge.id })}
             onPaneClick={() => setSelection(null)}
             nodesDraggable={!drawing}
-            nodesConnectable={drawing}
+            nodesConnectable={drawing && locked === null}
             connectOnClick={false}
             deleteKeyCode={null}
             multiSelectionKeyCode={null}
@@ -537,23 +541,29 @@ function DiagramCanvas({
                 </Tooltip>
                 {editable ? (
                   <>
-                    <Button
-                      size="compact-xs"
-                      variant="default"
-                      leftSection={<IconPlus size={14} />}
-                      onClick={onAddLabel}
-                    >
-                      {t("views.schema.addLabel")}
-                    </Button>
-                    <Button
-                      size="compact-xs"
-                      variant={drawing ? "filled" : "default"}
-                      leftSection={<IconLine size={14} />}
-                      aria-pressed={drawing}
-                      onClick={() => setDrawing((on) => !on)}
-                    >
-                      {t("views.schema.diagram.draw")}
-                    </Button>
+                    <LockedHint reason={locked}>
+                      <Button
+                        size="compact-xs"
+                        variant="default"
+                        leftSection={<IconPlus size={14} />}
+                        disabled={locked !== null}
+                        onClick={onAddLabel}
+                      >
+                        {t("views.schema.addLabel")}
+                      </Button>
+                    </LockedHint>
+                    <LockedHint reason={locked}>
+                      <Button
+                        size="compact-xs"
+                        variant={drawing && locked === null ? "filled" : "default"}
+                        leftSection={<IconLine size={14} />}
+                        aria-pressed={drawing && locked === null}
+                        disabled={locked !== null}
+                        onClick={() => setDrawing((on) => !on)}
+                      >
+                        {t("views.schema.diagram.draw")}
+                      </Button>
+                    </LockedHint>
                   </>
                 ) : null}
               </Group>

@@ -471,7 +471,9 @@ export function useCreateNode() {
  * (`If-Match`): when someone saved the schema since, graphos refuses (412,
  * "Changed by someone else") and the schema is read again, instead of the
  * write silently undoing the other save. `etag()` is read when the write is
- * sent, from the same cached schema the edit was built from.
+ * sent, from the same cached schema the edit was built from. A refusal
+ * because a program now manages the schema (409, `schema_managed`) reads it
+ * again too, so the page shows who and locks what it may no longer change.
  */
 function useSchemaVersion() {
   const { tenant } = useTenantSession();
@@ -479,10 +481,26 @@ function useSchemaVersion() {
   return {
     etag: () => client.getQueryData<TenantSchema>(keys.schema(tenant))?.etag ?? undefined,
     onError: (error: unknown) => {
-      if (error instanceof ApiError && error.isConflict)
+      if (error instanceof ApiError && (error.isConflict || error.isSchemaManaged))
         void client.invalidateQueries({ queryKey: keys.schema(tenant) });
     },
   };
+}
+
+/**
+ * Releases the program that manages the tenant's schema (owner): its next
+ * registration then merges as on any tenant. The schema is read again.
+ */
+export function useReleaseSchemaManager() {
+  const { api, tenant } = useTenantSession();
+  const client = useQueryClient();
+  const version = useSchemaVersion();
+  return useMutation({
+    meta: { success: "notices.schemaManagerReleased", errorTitle: "errors.schemaManagerNotReleased" },
+    mutationFn: () => api.setSchemaManager(null, version.etag()),
+    onError: version.onError,
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.schema(tenant) }),
+  });
 }
 
 /**

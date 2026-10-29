@@ -33,6 +33,7 @@ import { useSessionContext, useTenantSession } from "../../session/SessionProvid
 import { browseParams } from "../browse/browseState";
 import { AddToSchemaDialog, type AdditionKind } from "./AddToSchemaDialog";
 import { ImportSchemaDialog } from "./ImportSchemaDialog";
+import { LockedHint, SchemaManagerBanner, useLockedReason } from "./SchemaManager";
 import { DeprecatedBadge, DeprecationLines, NameActions, RenamesSection } from "./NameChanges";
 import { PropertyChecks } from "./properties/PropertyChecks";
 import { AddPropertyDialog } from "./properties/AddPropertyDialog";
@@ -67,7 +68,9 @@ const SHOWN_PAIRS = 3;
  * properties its rows carry that nothing declares; maintainers declare them
  * there, set how strictly writes are held to them, and check the stored rows.
  * Maintainers can export the whole schema as a file and import one (here or
- * into another tenant), after a preview of what it changes.
+ * into another tenant), after a preview of what it changes. When a program
+ * manages the schema, its structure controls stay in view but disabled for
+ * everyone else, who can still change styles (see `SchemaManagerBanner`).
  */
 export function SchemaView() {
   const { t } = useTranslation();
@@ -80,6 +83,7 @@ export function SchemaView() {
   const add = useAddToSchema();
   const exportSchema = useExportSchema();
   const importSchema = useImportSchema();
+  const locked = useLockedReason();
   const [importing, setImporting] = useState(false);
   const [adding, setAdding] = useState<AdditionKind | null>(null);
   const [addingProperty, setAddingProperty] = useState(false);
@@ -149,8 +153,10 @@ export function SchemaView() {
           </Text>
         </div>
         <Group gap="md">
-          {schema.data ? <PropertyChecks schema={schema.data} editable={canMaintain} /> : null}
-          {schema.data ? <StrictEndpoints schema={schema.data} map={map.data} editable={canMaintain} /> : null}
+          {schema.data ? <PropertyChecks schema={schema.data} editable={canMaintain} locked={locked} /> : null}
+          {schema.data ? (
+            <StrictEndpoints schema={schema.data} map={map.data} editable={canMaintain} locked={locked} />
+          ) : null}
           <SegmentedControl
             size="xs"
             aria-label={t("views.schema.view.label")}
@@ -186,7 +192,18 @@ export function SchemaView() {
               </Tooltip>
             </Group>
           ) : null}
-          {canMaintain && schema.data ? (
+          {canMaintain && schema.data && locked ? (
+            <LockedHint reason={locked}>
+              <Button
+                size="xs"
+                leftSection={<IconPlus size={14} />}
+                rightSection={<IconChevronDown size={12} />}
+                disabled
+              >
+                {t("views.schema.add")}
+              </Button>
+            </LockedHint>
+          ) : canMaintain && schema.data ? (
             <Menu position="bottom-end" width={200}>
               <Menu.Target>
                 <Button size="xs" leftSection={<IconPlus size={14} />} rightSection={<IconChevronDown size={12} />}>
@@ -204,6 +221,8 @@ export function SchemaView() {
         </Group>
       </Group>
 
+      <SchemaManagerBanner />
+
       {schema.isLoading ? <Skeleton h={240} radius="lg" /> : null}
 
       {schema.data && view === "diagram" ? (
@@ -215,6 +234,7 @@ export function SchemaView() {
               map={map.data}
               properties={properties}
               editable={canMaintain}
+              locked={locked}
               onAddLabel={() => setAdding("label")}
               onDrawRelationship={addRelationshipBetween}
             />
@@ -459,6 +479,7 @@ export function SchemaView() {
       {importing ? (
         <ImportSchemaDialog
           tenant={tenant}
+          locked={locked}
           mayCreate={(name) => mayCreate(me.create_tenants, me.admin, name)}
           onPreview={(doc, options) => api.previewSchema(doc, options)}
           onImport={(doc, options) =>
