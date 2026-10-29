@@ -122,7 +122,11 @@ someone unregistered meanwhile) and the race `ensure_tenant` left on a new tenan
 registration had committed, the undo itself unshielded, and the lifecycle routes' records and
 clean-up still outside the lock; 0.14.8 undoes only what precedes the commit, shields the undo,
 keeps everything under the lock with a bounded wait (409 `schema_busy`) and caps schema writers at
-half the connection pool.
+half the connection pool. A fifth review of that found the in-process locks shared across event
+loops and the in-database lock wait holding up concurrent index builds; 0.14.8 keeps the locks
+per event loop and tries the advisory lock instead of waiting on it, with the review's minor
+points (a cancelled commit, the undo outliving the lock, orphans under `If-None-Match`, the
+restore's announcement, timeouts other than the lock's) done too.
 
 ## Consequences
 

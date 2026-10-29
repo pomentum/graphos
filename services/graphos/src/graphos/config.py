@@ -39,7 +39,8 @@ class Settings(BaseSettings):
     db_admin_password: SecretStr | None = None
     db_admin_password_file: Path | None = None
     db_pool_min_size: int = 2
-    db_pool_max_size: int = 16
+    # At least 2: a schema write holds one connection for its lock and takes more inside.
+    db_pool_max_size: int = Field(16, ge=2)
     # Server-side ``statement_timeout`` applied to every pooled connection.
     # A statement that exceeds it is cancelled by Postgres and the request
     # answers 504.  The few deliberately long operations (Louvain stages,

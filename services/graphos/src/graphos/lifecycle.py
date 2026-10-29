@@ -154,9 +154,10 @@ async def restore_tenant(pool: asyncpg.Pool, name: str, *, announce: bool = True
             )
         if announce:
             await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, name)
-    spec = await load_spec(pool, name)
-    if spec is not None:
-        remember(spec)
+    if announce:   # else served once the registration restoring it commits
+        spec = await load_spec(pool, name)
+        if spec is not None:
+            remember(spec)
     return True
 
 
@@ -176,9 +177,20 @@ async def put_back(pool: asyncpg.Pool, kept: dict[str, object]) -> None:
     name = str(kept["name"])
     columns = list(kept)
     async with pool.acquire() as conn, conn.transaction():
-        await conn.execute("DELETE FROM graphos_meta.tenants WHERE name = $1;", name)
+        # A registration cancelled while its commit was under way may have
+        # committed: its "restored" record says so, and then it stands.
+        if await conn.fetchval(
+            """
+            SELECT 1 FROM graphos_meta.changes
+            WHERE tenant = $1 AND op = 'schema' AND detail ? 'restored' AND at > $2;
+            """,
+            name, kept["unregistered_at"],
+        ):
+            log.warning("restore not undone: its registration committed", extra={"tenant": name})
+            return
         await conn.execute("DELETE FROM graphos_meta.edge_endpoints WHERE tenant = $1;", name)
         await conn.execute("DELETE FROM graphos_meta.tenant_settings WHERE tenant = $1;", name)
+        await conn.execute("DELETE FROM graphos_meta.tenants WHERE name = $1;", name)
         await conn.execute(
             f"INSERT INTO graphos_meta.unregistered_tenants ({', '.join(columns)}) "
             f"VALUES ({', '.join(f'${i}' for i in range(1, len(columns) + 1))}) "

@@ -51,6 +51,7 @@ carries its own licence file in its distribution.
 | cryptography | Apache-2.0 OR BSD-3-Clause | service (token signing keys) |
 | python-igraph | GPL-2.0-or-later | service, **optional** `louvain` extra only |
 | httpx | BSD-3-Clause | client; service (identity provider) |
+| anyio | MIT | service (shielding work that must finish when a request is cancelled) |
 | mcp, mcp-types (the Model Context Protocol SDK) | MIT | service (the MCP endpoint, `/mcp`) |
 | httpx2, sse-starlette | BSD-3-Clause | service (dependencies of the MCP SDK) |
 | jsonschema | MIT | service (dependency of the MCP SDK) |
@@ -58,7 +59,7 @@ carries its own licence file in its distribution.
 | opentelemetry-api | Apache-2.0 | service (dependency of the MCP SDK) |
 
 These are the direct dependencies. Installing them pulls in further packages
-(for example starlette, anyio, h11, idna, uvloop, httptools, websockets,
+(for example starlette, h11, idna, uvloop, httptools, websockets,
 watchfiles, python-dotenv, PyYAML, click, typing-extensions, certifi), each
 under its own licence: permissive (MIT, BSD, Apache-2.0) or, for certifi,
 the weak-copyleft MPL-2.0 (unmodified, file-level),

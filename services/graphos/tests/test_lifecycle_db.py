@@ -415,6 +415,10 @@ async def test_if_none_match_registers_only_a_new_tenant(
     bad = await api.post("/v1/tenants", json={"name": NAME},
                          headers={**_as("admin"), "If-None-Match": '"v1"'})
     assert bad.status_code == HTTPStatus.UNPROCESSABLE_ENTITY, bad.text
+    both = await api.post("/v1/tenants", json={"name": NAME},
+                          headers={**star, "If-Match": resp.headers["ETag"]})
+    assert both.status_code == HTTPStatus.UNPROCESSABLE_ENTITY, both.text
+    assert "not both" in both.json()["detail"]
 
     # An unregistered tenant is not new: If-None-Match: * never restores it.
     assert (await api.delete(f"/v1/tenants/{NAME}", headers=_as("owner"))).status_code == 200
@@ -435,3 +439,38 @@ async def test_if_none_match_registers_only_a_new_tenant(
     assert sorted((first.status_code, second.status_code)) == [
         HTTPStatus.OK, HTTPStatus.PRECONDITION_FAILED,
     ]
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_if_none_match_never_adopts_an_orphan_graph(
+    api: httpx.AsyncClient, db_pool: asyncpg.Pool,
+) -> None:
+    # A graph unregistered the old way: no registration kept. An admin may adopt
+    # it by registering its name, but not under If-None-Match: *.
+    async with db_pool.acquire() as conn:
+        await conn.execute("DELETE FROM graphos_meta.tenants WHERE name = $1;", NAME)
+    forget(NAME)
+    star = {**_as("admin"), "If-None-Match": "*"}
+    for query in ("?dry_run=true", ""):
+        resp = await api.post(f"/v1/tenants{query}", json={"name": NAME}, headers=star)
+        assert resp.status_code == HTTPStatus.PRECONDITION_FAILED, resp.text
+        assert "would adopt it" in resp.json()["detail"]
+    assert NAME not in registered_tenants()
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_a_rename_dry_run_answers_the_version_it_planned_on(
+    api: httpx.AsyncClient,
+) -> None:
+    read = await api.get(f"/v1/{NAME}/schema", headers=_as("owner"))
+    tag = read.headers["ETag"]
+    rename = {"kind": "label", "from": "Doc", "to": "Document"}
+    plan = await api.post(f"/v1/tenants/{NAME}/schema:rename?dry_run=true", json=rename,
+                          headers={**_as("owner"), "If-Match": tag})
+    assert plan.status_code == HTTPStatus.OK, plan.text
+    assert plan.headers["ETag"] == tag
+    stale = await api.post(f"/v1/tenants/{NAME}/schema:rename?dry_run=true", json=rename,
+                           headers={**_as("owner"), "If-Match": '"stale"'})
+    assert stale.status_code == HTTPStatus.PRECONDITION_FAILED, stale.text

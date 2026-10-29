@@ -16,18 +16,23 @@ unregistering, restoring and deleting a tenant, and a set of small points.
   cache eviction and cache notice). A registration judged on the tenant no longer sees it
   unregistered or deleted half-way, which could lose the kept registration (its schema, pairs,
   settings and manager), create an empty tenant in place of one being deleted, or remove the
-  grant of a creator who took the freed name. They wait at most 30 s for another schema write of
-  the tenant (a registration building indexes, say), then answer **409** `code: schema_busy`;
-  any schema write whose wait outlasts the database's statement timeout answers the same instead
-  of 504. Schema writes on one replica hold at most half its database connections at once, so a
-  burst of them on many tenants cannot take them all.
+  grant of a creator who took the freed name.
+- **Every schema write waits a bounded time for its turn**, then answers **409**
+  `code: schema_busy`: 30 s to unregister, restore or delete a tenant, 5 minutes for the others
+  (a registration building indexes may hold the tenant that long). Before, a wait behind another
+  replica's schema write ended at the statement timeout with 504. The wait no longer keeps a
+  statement open (the lock is tried, not waited on, in the database), so a waiter on one replica
+  never holds up the other replica's concurrent index builds. Schema writes on one replica hold
+  at most half its database connections at once, so a burst of them on many tenants cannot take
+  them all; `GRAPHOS_DB_POOL_MAX_SIZE` must be at least 2.
 - **A registration that restores a tenant and then fails restores nothing.** When bootstrap
   refuses it (a unique index the data does not allow: 422), or anything fails before its change
   record commits, the tenant goes back to unregistered with the very row it was kept with; the
   undo is shielded from the request's cancellation, and when it fails itself it is logged and the
-  registration's own error is the answer. A failure after the commit (building a search index,
-  say) leaves the registration in place. Other replicas hear of the restore once the
-  registration persists. Labels bootstrap created before failing stay as empty tables outside
+  registration's own error is the answer, and the lock is let go only once it is done. A failure
+  after the commit (building a search index, say), or a cancellation during it, leaves the
+  registration in place. Other replicas hear of the restore with the registration's change
+  record. Labels bootstrap created before failing stay as empty tables outside
   the schema; registering them again uses them. A restore that finds the tenant no longer
   unregistered answers 409. Such a registration is also checked against the schema it restores
   (for its owner or an admin), not as a new tenant's: a property index on a label it keeps was
@@ -42,7 +47,8 @@ unregistering, restoring and deleting a tenant, and a set of small points.
 ### Added
 
 - **`If-None-Match: *` on `POST /v1/tenants`** (and its dry run): register only a new tenant;
-  412 when it is registered, or is unregistered and would be restored. The Python client takes
+  412 when it is registered, is unregistered and would be restored, or is a graph without a
+  registration that it would adopt. Sent with `If-Match`, it is refused (422). The Python client takes
   `if_none_match=True` on `register_tenant`, and `ensure_tenant` sends it when its dry run found
   neither, so a tenant someone else created meanwhile is not registered unchecked.
 
