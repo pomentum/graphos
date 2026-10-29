@@ -30,6 +30,14 @@ class Settings(BaseSettings):
     db_user: str = "graphos"
     db_password: SecretStr | None = None
     db_password_file: Path | None = None
+    # A role that may create extensions and roles (the database image's
+    # POSTGRES_USER), used only at start, and only when something graphos's
+    # role needs is missing: the extensions, the role itself, its grants
+    # (graphos.db_setup, ADR-0012).  Unset: graphos sets nothing up, and the
+    # database must be prepared beforehand (deploy/db-init/).
+    db_admin_user: str | None = None
+    db_admin_password: SecretStr | None = None
+    db_admin_password_file: Path | None = None
     db_pool_min_size: int = 2
     db_pool_max_size: int = 16
     # Server-side ``statement_timeout`` applied to every pooled connection.
@@ -233,6 +241,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "admin_password_file", "auth_signing_key_file", "master_key_file",
+        "db_admin_user", "db_admin_password_file",
         "oidc_issuer", "oidc_client_id", "oidc_audience", mode="before",
     )
     @classmethod
@@ -245,32 +254,48 @@ class Settings(BaseSettings):
         return v
 
     def resolved_db_password(self) -> str:
-        """Resolve db_password from inline secret or *_FILE.
+        """Resolve db_password from inline secret or *_FILE."""
+        return _secret(self.db_password, self.db_password_file, "GRAPHOS_DB_PASSWORD")
 
-        Reads via try/open rather than ``Path.exists()`` because some secret
-        mounts (notably Docker Desktop secrets on Windows) raise ``OSError``
-        on stat instead of returning a sensible boolean.
-        """
-        if self.db_password is not None:
-            return self.db_password.get_secret_value()
-        if self.db_password_file is not None:
-            try:
-                return self.db_password_file.read_text(encoding="utf-8").strip()
-            except (FileNotFoundError, OSError) as exc:
-                raise RuntimeError(
-                    f"GRAPHOS_DB_PASSWORD_FILE='{self.db_password_file}' "
-                    f"could not be read: {exc}"
-                ) from exc
-        raise RuntimeError(
-            "GRAPHOS_DB_PASSWORD or GRAPHOS_DB_PASSWORD_FILE must be set"
+    def resolved_db_admin_password(self) -> str:
+        """The admin role's password (``GRAPHOS_DB_ADMIN_PASSWORD`` or ``_FILE``),
+        read when needed and not kept."""
+        return _secret(
+            self.db_admin_password, self.db_admin_password_file, "GRAPHOS_DB_ADMIN_PASSWORD",
         )
 
     def dsn(self) -> str:
+        return self._dsn(self.db_user, self.resolved_db_password())
+
+    def admin_dsn(self) -> str:
+        """The DSN of the admin role (``GRAPHOS_DB_ADMIN_USER``), same database."""
+        if self.db_admin_user is None:
+            raise RuntimeError("GRAPHOS_DB_ADMIN_USER is not set")
+        return self._dsn(self.db_admin_user, self.resolved_db_admin_password())
+
+    def _dsn(self, user: str, password: str) -> str:
         # Percent-encode user and password so characters like @ : / # in a
         # password cannot change how the URL is parsed.
-        user = quote(self.db_user, safe="")
-        pw = quote(self.resolved_db_password(), safe="")
+        user = quote(user, safe="")
+        pw = quote(password, safe="")
         return f"postgresql://{user}:{pw}@{self.db_host}:{self.db_port}/{self.db_name}"
+
+
+def _secret(value: SecretStr | None, file: Path | None, name: str) -> str:
+    """A secret from its inline setting or its ``*_FILE``.
+
+    Reads via try/open rather than ``Path.exists()`` because some secret
+    mounts (notably Docker Desktop secrets on Windows) raise ``OSError``
+    on stat instead of returning a sensible boolean.
+    """
+    if value is not None:
+        return value.get_secret_value()
+    if file is not None:
+        try:
+            return file.read_text(encoding="utf-8").strip()
+        except (FileNotFoundError, OSError) as exc:
+            raise RuntimeError(f"{name}_FILE='{file}' could not be read: {exc}") from exc
+    raise RuntimeError(f"{name} or {name}_FILE must be set")
 
 
 # Always answered as well: the container's own health check and a person on

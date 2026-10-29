@@ -54,7 +54,7 @@ the move changes is in the [changelog](../../CHANGELOG.md).)
   with the same passwords.
 - **Your own compose overrides.** If you override `graphos-db` (image, volume, command), check
   them against the new file: the database runs on a new volume, `graphos_data_pg18`, and sets
-  `PGDATA`. The Louvain overlay (`docker-compose.louvain.yml`) needs no change.
+  `PGDATA`. The igraph overlay (`docker-compose.igraph.yml`, `docker-compose.louvain.yml` up to 0.14.5) needs no change.
 
 ## Upgrade with Docker Compose
 
@@ -215,6 +215,11 @@ vacuumdb -h NEW -U graphos -d graphos --analyze-only --jobs 4
 
 # 4. Point graphos-api at NEW (GRAPHOS_DB_HOST ...) and start it.
 ```
+
+The roles must exist before step 2: the dump's objects belong to `graphos_app`, and `pg_dump` does
+not carry roles. graphos-api's own set-up at start (`GRAPHOS_DB_ADMIN_USER`,
+[installation §2](installation.md#the-databases-set-up)) comes too late for the restore, but with it
+set, graphos-api gives the database-level grant at the end of step 3 by itself.
 
 **AGE's catalogue.** The first part of step 3 points each graph in AGE's catalogue at its
 schema's new OID; without it Cypher on the restored graphs fails ("graph with oid N does not

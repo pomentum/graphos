@@ -27,7 +27,7 @@ Paths are under `services/graphos/src/graphos/`.
 | Tenant DDL, registry, start-up maintenance | `bootstrap.py`, `lifecycle.py` |
 | Finding one node or edge by identity | `lookup.py` |
 | Louvain, PageRank and other algorithms | `louvain*.py`, `graph_metrics*.py`, `graph_compute.py` |
-| Database roles and first-start SQL | `services/graphos/deploy/db-init/` |
+| Database roles and first-start SQL | `services/graphos/deploy/db-init/`, and `db_setup.py`, which does the same at start (ADR-0012): keep the two in step |
 | The move from PostgreSQL 16 to 18 | `services/graphos/deploy/db-upgrade/` |
 | Architecture, write paths, limitations | [`concept.md`](../../docs/guide/concept.md) (§3 internal layout, §4 write paths, §8 known limitations) |
 | AGE behaviour, bugs and workarounds | [`apache-age.md`](../../docs/guide/apache-age.md), [`graph_age_practices.md`](../../docs/guide/graph_age_practices.md) |

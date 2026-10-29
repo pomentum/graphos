@@ -23,7 +23,8 @@ Consumers never see a Postgres DSN and cannot submit SQL, nor Cypher outside
 that console. In the
 bundled compose the API itself connects as `graphos_app`, an unprivileged
 role (no superuser, no role or database creation); the superuser is used only
-by the database init scripts.
+to set the database up (by the init scripts, or by graphos-api at start when
+something is missing).
 
 ---
 
@@ -364,11 +365,11 @@ reported in the response.
 What each algorithm (communities and the graph metrics below) finds and what it is for:
 [algorithms.md](algorithms.md).
 
-> **Optional extra.** Louvain needs python-igraph (GPL-2.0-or-later),
+> **Optional extra.** Louvain and Leiden need python-igraph (GPL-2.0-or-later),
 > installed with `pip install "graphos[louvain]"`, an image built with
-> `--build-arg GRAPHOS_EXTRAS=louvain`, or, with no rebuild, the
-> `docker-compose.louvain.yml` overlay (graphos-api downloads it on first
-> start). Without it, `recompute-communities` answers 501 and
+> `--build-arg GRAPHOS_EXTRAS=louvain`, or, with no rebuild, `GRAPHOS_IGRAPH=true`
+> on graphos-api (the image's entrypoint downloads it on first start; the
+> `docker-compose.igraph.yml` overlay sets it). Without it, `recompute-communities` answers 501 and
 > `GET /v1/info` reports `features.louvain: false`.
 
 `POST /v1/{tenant}/recompute-communities` (`maintain`) runs Louvain or Leiden in a

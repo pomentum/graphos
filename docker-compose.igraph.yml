@@ -1,0 +1,26 @@
+# Louvain and Leiden community detection on an image built without python-igraph
+# (the published one), with no rebuild and nothing mounted:
+#
+#   docker compose -f docker-compose.graphos.yml -f docker-compose.igraph.yml up -d
+#
+# The image's entrypoint installs python-igraph from PyPI into the container on its
+# first start when GRAPHOS_IGRAPH is true, then starts graphos as usual; graphos finds
+# it at startup, so GET /v1/info reports "louvain": true and
+# POST /v1/{tenant}/recompute-communities works. Restarts reuse the install; a
+# recreated container installs it again (it needs PyPI then). Without this file
+# nothing changes, and recompute answers 501. Needs a graphos-api image with the
+# entrypoint (services/graphos/docker-entrypoint.sh).
+#
+# python-igraph is GPL-2.0-or-later. This file downloads it on your machine; the
+# graphos images do not contain it. If you redistribute a container or image with
+# it inside, that distribution must comply with the GPL (see THIRD_PARTY_NOTICES.md).
+
+services:
+  graphos-api:
+    environment:
+      GRAPHOS_IGRAPH: "true"
+      # The requirement installed; the default is the `louvain` extra's.
+      # GRAPHOS_IGRAPH_PACKAGE: "python-igraph>=0.11,<1.0"
+    healthcheck:
+      # The first start downloads python-igraph before graphos listens.
+      start_period: 120s

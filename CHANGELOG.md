@@ -4,6 +4,57 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+graphos-api can set its database up itself at start, so a deployment no longer has to mount the
+db-init folder into the database container; and its image installs python-igraph for Louvain and
+Leiden with one setting, `GRAPHOS_IGRAPH=true`, instead of a script in the compose file.
+
+### Added
+
+- **graphos-api sets its database up at start** (ADR-0012). With `GRAPHOS_DB_ADMIN_USER` and
+  `GRAPHOS_DB_ADMIN_PASSWORD_FILE` (or `GRAPHOS_DB_ADMIN_PASSWORD`) naming a role that may create
+  extensions and roles, the database image's `POSTGRES_USER`, graphos-api does at start what
+  `services/graphos/deploy/db-init/` does: it creates the `age`, `pg_trgm` and
+  `pg_stat_statements` extensions, its own role (`GRAPHOS_DB_USER`, unprivileged, with the password
+  it connects with), and that role's grants. It signs in as its own role first and uses the admin
+  only when something is missing, and does only what is missing, each grant checked against the
+  ACL on record. A role that exists is never changed, its password included: one that refuses
+  graphos's password gets an error naming the fix, and graphos does not start, as before. A new
+  role's password is sent as a SCRAM verifier, never in clear; neither password is logged. A
+  failed set-up is logged and the start goes on as without it. Unset, nothing changes. A
+  restored database gets its database-level grant from it too. The release compose sets the admin
+  role (the superuser `graphos`, whose password file was already mounted) and keeps the db-init
+  mount, which a new deployment may drop. **Docs:** installation §2 (The database's set-up), §8
+  (Backup and restore), §10; concept §2.2; usage §1.1 and Configuration; the upgrade guide (a
+  database you run yourself); the README's configuration table.
+
+- **Louvain and Leiden on the published image, with one setting.** The graphos-api image's
+  entrypoint installs python-igraph (GPL-2.0-or-later, which the image leaves out) from PyPI into
+  the container at start when `GRAPHOS_IGRAPH=true`, then starts graphos; `GRAPHOS_IGRAPH_PACKAGE`
+  names another requirement (default: the `louvain` extra's). Nothing is installed when igraph is
+  there already (an image built with the extra, or an earlier install the container kept), and a
+  failed install is logged and graphos starts without it. A compose file no longer carries the
+  install script: the overlay only sets `GRAPHOS_IGRAPH`. Arguments still go to graphos
+  (`docker run <image> reset-admin-password`). **Docs:** installation §6.
+
+### Changed
+
+- **`docker-compose.louvain.yml` is now `docker-compose.igraph.yml`**, named after what it adds
+  (python-igraph gives both Louvain and Leiden): use `-f docker-compose.igraph.yml`. It needs this
+  release's graphos-api image: it sets `GRAPHOS_IGRAPH=true` for the image's entrypoint instead of
+  overriding the entrypoint. With an image up to 0.14.5, use that release's
+  `docker-compose.louvain.yml`.
+
+### Upgrading
+
+- **Nothing to do.** A database the db-init folder set up, every deployment until now, has
+  everything graphos-api looks for: with or without the admin settings it changes nothing, and it
+  does not even sign in as the admin role (a stale or missing `graphos_pw.txt` does no harm).
+  Checked by upgrading a 0.14.5 deployment, with a tenant, users and grants, to this release:
+  the roles, password hashes, memberships, grants, extensions and data are the same before and
+  after, and everyone signs in as before.
+
 ## 0.14.5 — 2026-10-27
 
 The schema summary, which agents read through MCP `get_schema`, is about five times faster, and

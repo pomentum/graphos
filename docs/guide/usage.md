@@ -45,9 +45,10 @@ that ran PostgreSQL 16 (volume `graphos_data`) has its data moved there by itsel
 `up` from 0.10.0 on: see [Upgrading the database](upgrade-postgresql-18.md).
 
 `graphos_app` is created by `services/graphos/deploy/db-init/01-app-role.sh`. Like every script in
-`db-init/`, it runs only when the data volume is empty. A volume created before that script existed
-has no `graphos_app` role: create it by hand with the SQL in `01-app-role.sh` (as the superuser), or
-start from a fresh volume.
+`db-init/`, it runs only when the data volume is empty. graphos-api also creates it at start, as
+the superuser, when it is missing and `GRAPHOS_DB_ADMIN_USER` is set (the compose sets it; see
+[installation §2](installation.md#the-databases-set-up)), so a deployment can do without the
+`db-init/` mount. It never changes a role that exists.
 
 ### 1.2 Register a tenant (admin, or `create_tenants`)
 
@@ -1325,10 +1326,12 @@ The Python methods are `cache_put(key, value, ttl_seconds=…)`, `cache_get(key)
 
 Louvain is an optional extra because python-igraph is GPL-2.0-or-later: `pip install
 "graphos[louvain]"`, or build the image with `--build-arg GRAPHOS_EXTRAS=louvain`. The bundled compose
-file includes it unless `GRAPHOS_EXTRAS=` is set. On an image without it (the published one), add the
-overlay instead of rebuilding: `docker compose -f docker-compose.graphos.yml -f
-docker-compose.louvain.yml up -d` makes graphos-api download python-igraph into its own container on
-its first start (PyPI must be reachable then) and start as usual; restarts reuse it. Without it,
+file includes it unless `GRAPHOS_EXTRAS=` is set. On an image without it (the published one), set
+`GRAPHOS_IGRAPH=true` on graphos-api instead of rebuilding (the overlay `docker compose -f
+docker-compose.graphos.yml -f docker-compose.igraph.yml up -d` sets it): the image's entrypoint
+downloads python-igraph into the container on its first start (PyPI must be reachable then) and
+starts graphos as usual; restarts reuse it, and an image that has it installs nothing
+([installation §6](installation.md#louvain-with-the-published-images)). Without it,
 `recompute-communities` returns **501**;
 `GET /v1/info` reports availability in `features.louvain`.
 
@@ -1773,6 +1776,7 @@ listed here.
 |---|---|
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` | `graphos-db` / 5432 / `graphos` / `graphos` (the compose file sets `graphos_app`) |
 | `DB_PASSWORD` or `DB_PASSWORD_FILE` | one of the two is required |
+| `DB_ADMIN_USER`, `DB_ADMIN_PASSWORD` or `DB_ADMIN_PASSWORD_FILE` | unset (the compose file sets the superuser `graphos`): a role that may create extensions and roles; at start, graphos-api creates what its own role needs when something is missing ([installation §2](installation.md#the-databases-set-up)) |
 | `DB_POOL_MIN_SIZE` / `DB_POOL_MAX_SIZE` | 2 / 16 |
 | `STATEMENT_TIMEOUT_S` | 60 (greater than 0) |
 | `DB_JIT` | false (see *JIT and plans*) |

@@ -168,7 +168,7 @@ Community detection uses [python-igraph](https://python.igraph.org/), which is G
 | `pip install "./services/graphos[louvain]"` | yes |
 | `docker build --build-arg GRAPHOS_EXTRAS=louvain` | yes (the image then contains GPL code) |
 | `docker compose ... up` (local build) | yes by default; `GRAPHOS_EXTRAS= docker compose ...` to leave it out |
-| an image without it (the published one), plus `-f docker-compose.louvain.yml` | yes, no rebuild: graphos-api downloads python-igraph into its container on first start ([example with the published images](docs/guide/installation.md#louvain-with-the-published-images)) |
+| an image without it (the published one), with `GRAPHOS_IGRAPH=true` (or `-f docker-compose.igraph.yml`, which sets it) | yes, no rebuild: the image's entrypoint downloads python-igraph into the container on first start ([example with the published images](docs/guide/installation.md#louvain-with-the-published-images)) |
 
 `GET /v1/info` reports `features.louvain` so clients can check before calling.
 
@@ -229,6 +229,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | `GRAPHOS_AUDIT_READS` | `exports` | Reads in the audit log besides writes: `exports` (dataset and graph exports, console queries) or `data` (also every read of a tenant's data, with its query string) |
 | `GRAPHOS_RATE_LIMIT_ENABLED` | `false` | Per-user sliding-window rate limit |
 | `GRAPHOS_DB_USER` | `graphos` (compose: `graphos_app`) | Database role; compose uses an unprivileged role created at init |
+| `GRAPHOS_DB_ADMIN_USER`, `GRAPHOS_DB_ADMIN_PASSWORD_FILE` | — (compose: the superuser `graphos`) | A role that may create extensions and roles: at start graphos-api creates the extensions, its own role and its grants when they are missing, so nothing needs mounting into the database; it never changes an existing role ([installation](docs/guide/installation.md#the-databases-set-up)) |
 | `GRAPHOS_BIND_HOST`, `GRAPHOS_BIND_PORT` | `0.0.0.0`, `8080` | The address and port graphos-api listens on (`python -m graphos`; the image runs it so) |
 | `GRAPHOS_FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxies whose `X-Forwarded-*` headers are trusted |
 | `GRAPHOS_KEEP_ALIVE_S` | `75` | Idle client connections kept open this long; longer than your proxy's idle timeout |

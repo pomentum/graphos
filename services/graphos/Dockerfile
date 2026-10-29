@@ -53,11 +53,13 @@ COPY --from=builder /wheels /wheels
 COPY LICENSE NOTICE THIRD_PARTY_NOTICES.md /usr/share/licenses/graphos/
 RUN pip install --no-cache-dir --no-index --find-links /wheels "graphos${GRAPHOS_EXTRAS:+[$GRAPHOS_EXTRAS]}" && \
     rm -rf /wheels
+# Installs python-igraph at start when GRAPHOS_IGRAPH=true, then runs graphos.
+COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/graphos-entrypoint
 
 USER graphos
 
 EXPOSE 8080
 
-# uvicorn invoked through the CLI shim in src/graphos/__main__.py so signal handling
-# and lifespan startup follow the same path as `python -m graphos`.
-ENTRYPOINT ["python", "-m", "graphos"]
+# The entrypoint ends in `python -m graphos` (the CLI shim in src/graphos/__main__.py),
+# so signal handling and lifespan startup follow the same path as before.
+ENTRYPOINT ["graphos-entrypoint"]
