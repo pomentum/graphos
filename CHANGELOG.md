@@ -4,11 +4,11 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.14.7 — 2026-10-29
 
 A program that declares a tenant's schema from its code can own it: people still change its
 styles in the web UI but not its structure, and the program's start reports what people changed
-instead of undoing it unseen (ADR-0013).
+instead of undoing it unseen (ADR-0013, amended by ADR-0014 after two independent reviews).
 
 ### Added
 
