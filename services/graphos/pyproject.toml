@@ -21,6 +21,8 @@ dependencies = [
     "PyJWT[crypto]>=2.10,<3.0",
     # Talking to the identity provider (discovery, keys, code exchange).
     "httpx>=0.27,<1.0",
+    # Shielding a restore's undo from the request's cancellation (comes with FastAPI).
+    "anyio>=4,<5",
     # The MCP endpoint (/mcp, ADR-0002): MIT. Pinned to a minor: protocol
     # revisions are tested like AGE upgrades.
     "mcp>=2.3,<2.4",

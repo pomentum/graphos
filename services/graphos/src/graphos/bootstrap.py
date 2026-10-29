@@ -1057,6 +1057,7 @@ async def persist_spec(
     display_removed: tuple[tuple[str, str], ...] = (),
     schema_removed: tuple[tuple[str, str], ...] = (),
     deprecated_removed: tuple[tuple[str, str], ...] = (),
+    announce: bool = True,
 ) -> None:
     """Upsert the tenant spec into graphos_meta.tenants.
 
@@ -1176,11 +1177,13 @@ async def persist_spec(
         )
         await _supersede_kept(conn, spec.name)
         await _persist_endpoints(conn, spec, replace=replace_endpoints)
-        await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, spec.name)
+        if announce:   # a registration restoring the tenant announces it at its commit
+            await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, spec.name)
 
 
 async def persist_spec_replace(
     pool: asyncpg.Pool, spec: TenantSpec, *, replace_endpoints: bool = False,
+    announce: bool = True,
 ) -> None:
     """Replace the persisted tenant spec wholesale (no merge).
 
@@ -1207,7 +1210,8 @@ async def persist_spec_replace(
         )
         await _supersede_kept(conn, spec.name)
         await _persist_endpoints(conn, spec, replace=replace_endpoints)
-        await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, spec.name)
+        if announce:   # a registration restoring the tenant announces it at its commit
+            await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, spec.name)
 
 
 # A tenant's stored registration: the spec, its declared endpoints and

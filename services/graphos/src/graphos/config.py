@@ -39,7 +39,9 @@ class Settings(BaseSettings):
     db_admin_password: SecretStr | None = None
     db_admin_password_file: Path | None = None
     db_pool_min_size: int = 2
-    db_pool_max_size: int = 16
+    # At least 4: the replica listener keeps one for good, and a schema write holds
+    # one for its lock and takes more inside (graphos.schema_version).
+    db_pool_max_size: int = Field(16, ge=4)
     # Server-side ``statement_timeout`` applied to every pooled connection.
     # A statement that exceeds it is cancelled by Postgres and the request
     # answers 504.  The few deliberately long operations (Louvain stages,

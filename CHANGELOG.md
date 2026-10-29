@@ -4,6 +4,67 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+Closes what the reviews of the schema manager left open (ADR-0014): the races around
+unregistering, restoring and deleting a tenant, and a set of small points.
+
+### Fixed
+
+- **Unregistering, restoring and deleting a tenant take its schema-write lock**, as every schema
+  write does, together with what follows them (their change records; a delete's grant removal,
+  cache eviction and cache notice). A registration judged on the tenant no longer sees it
+  unregistered or deleted half-way, which could lose the kept registration (its schema, pairs,
+  settings and manager), create an empty tenant in place of one being deleted, or remove the
+  grant of a creator who took the freed name.
+- **Every schema write waits a bounded time for its turn**, then answers **409**
+  `code: schema_busy`: 30 s to unregister, restore or delete a tenant, 5 minutes for the others
+  (a registration building indexes may hold the tenant that long). Before, a wait behind another
+  replica's schema write ended at the statement timeout with 504. The wait no longer keeps a
+  statement open (the lock is tried, not waited on, in the database), so a waiter on one replica
+  never holds up the other replica's concurrent index builds. Schema writes on one replica hold
+  at most half its database connections (besides the one the replica listener keeps) at once, so
+  a burst of them on many tenants cannot take them all; `GRAPHOS_DB_POOL_MAX_SIZE` must be at
+  least 4. The property rename job's last step (the spec, the indexes) takes the lock too, after a
+  last pass over rows written meanwhile; a lock it cannot have answers 409 in the job, and asking
+  again finishes it. A graph expansion in both directions takes a second connection only when
+  one is free at once, else runs both on its own, never holding one while waiting for more.
+- **A registration that restores a tenant and then fails restores nothing.** When bootstrap
+  refuses it (a unique index the data does not allow: 422), or anything fails before its change
+  record commits, the tenant goes back to unregistered with the very row it was kept with; the
+  undo is shielded from the request's cancellation, and when it fails itself it is logged and the
+  registration's own error is the answer, and the lock is let go only once it is done. A failure
+  after the commit (building a search index, say), or a cancellation during it, leaves the
+  registration in place. Other replicas are told of the restore with the registration's change
+  record; a request that reaches the tenant meanwhile loads it, and what it writes stays with
+  the tenant's data if the restore is undone. Labels bootstrap created before failing stay as empty tables outside
+  the schema; registering them again uses them. A restore that finds the tenant no longer
+  unregistered answers 409. Such a registration is also checked against the schema it restores
+  (for its owner or an admin), not as a new tenant's: a property index on a label it keeps was
+  refused 422 before.
+- **Dry runs check `If-Match` against the version they judged**, read with the spec, not read
+  again; a rename's dry run now also answers that version as its `ETag`.
+- **Python client:** `ensure_tenant` logs each drift line once, also across its second dry run;
+  its second attempt never restores a tenant someone unregistered in between (412, saying so).
+- **Web UI:** a single-sign-on schema manager shows as "a single sign-on user (…id)", not as its
+  raw subject.
+
+### Added
+
+- **`If-None-Match: *` on `POST /v1/tenants`** (and its dry run): register only a new tenant;
+  412 when it is registered, is unregistered and would be restored, or is a graph without a
+  registration that it would adopt. Sent with `If-Match`, it is refused (422). The Python client takes
+  `if_none_match=True` on `register_tenant`, and `ensure_tenant` sends it when its dry run found
+  neither, so a tenant someone else created meanwhile is not registered unchecked.
+
+### Upgrading
+
+- **`GRAPHOS_DB_POOL_MAX_SIZE` must be at least 4** (the default is 16): a smaller value now stops
+  graphos-api at start, where before a pool of 2 could hang the replica on its first
+  registration.
+- During a rolling upgrade, a 0.14.7 replica still unregisters, restores and deletes without the
+  lock: upgrade every replica.
+
 ## 0.14.7 — 2026-10-29
 
 A program that declares a tenant's schema from its code can own it: people still change its

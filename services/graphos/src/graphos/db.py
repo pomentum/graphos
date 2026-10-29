@@ -73,6 +73,9 @@ async def create_pool(settings: Settings) -> asyncpg.Pool:
         max_size=settings.db_pool_max_size,
         init=_on_connect,
         setup=_on_acquire,
+        # Keep asyncpg's default reset on release (pg_advisory_unlock_all and
+        # RESET ALL): it lets go of a schema-write lock whose unlock was cut
+        # short (graphos.schema_version).
         # Postgres enforces the timeout: ``statement_timeout`` is a startup
         # parameter, so the pool's ``RESET ALL`` on release restores it after
         # ``allow_long_statements`` raised it for a long operation.  No

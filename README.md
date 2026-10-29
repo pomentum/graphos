@@ -233,7 +233,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | `GRAPHOS_BIND_HOST`, `GRAPHOS_BIND_PORT` | `0.0.0.0`, `8080` | The address and port graphos-api listens on (`python -m graphos`; the image runs it so) |
 | `GRAPHOS_FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxies whose `X-Forwarded-*` headers are trusted |
 | `GRAPHOS_KEEP_ALIVE_S` | `75` | Idle client connections kept open this long; longer than your proxy's idle timeout |
-| `GRAPHOS_DB_POOL_MAX_SIZE` | `16` | asyncpg pool size per replica |
+| `GRAPHOS_DB_POOL_MAX_SIZE` | `16` | asyncpg pool size per replica (at least 4) |
 | `GRAPHOS_RECONCILE_MAX_EDGES` | `200000` | Most edges an NDJSON `edges:reconcile` body may carry (held in memory, about 1 KB each) |
 | `GRAPHOS_JOB_CONCURRENCY` | `1` | Background jobs each replica runs at once |
 | `GRAPHOS_JOB_RETENTION_H` | `168` | Hours finished jobs are kept |

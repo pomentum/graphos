@@ -1,10 +1,14 @@
-import { isSchemaManager, managerName } from "../lib/schemaManager";
+import { useTranslation } from "react-i18next";
+import { isSchemaManager, managerName, ssoManagerId } from "../lib/schemaManager";
 import { useTenantSession } from "../session/SessionProvider";
 import { useSchema } from "./queries";
 
 /** Who manages the tenant's schema, and what that leaves the signed-in user. */
 export interface SchemaManagement {
-  /** The manager's name (its subject without `user:`), or null when nobody manages the schema. */
+  /**
+   * The manager's name (its subject without `user:`; "a single sign-on user (…id)" for
+   * `oidc-sub:`), or null when nobody manages the schema.
+   */
   manager: string | null;
   /** The signed-in user is the manager. */
   isManager: boolean;
@@ -28,13 +32,15 @@ export interface SchemaManagement {
  * cached schema, so a refusal that reads it again updates every control.
  */
 export function useSchemaManager(): SchemaManagement {
+  const { t } = useTranslation();
   const { me, canMaintain, isOwner } = useTenantSession();
   const schema = useSchema();
   const subject = schema.data?.schema_manager ?? null;
   const isManager = isSchemaManager(subject, me);
   const locked = subject !== null && !isManager;
+  const sso = ssoManagerId(subject);
   return {
-    manager: managerName(subject),
+    manager: sso ? t("views.schema.manager.ssoUser", { id: sso }) : managerName(subject),
     isManager,
     locked,
     canEditStructure: canMaintain && !locked,

@@ -114,7 +114,26 @@ a registration that names its own caller the manager merges styles as the manage
 first call (it overwrote people's styles once); the client's `Me` gains `subject`; the
 rolling-upgrade note is complete. Left as follow-ups, both older than ADR-0013: unregister,
 restore and delete do not take the schema-write lock, and a restoring registration refused by
-bootstrap (422) leaves the tenant restored.
+bootstrap (422) leaves the tenant restored. Both were fixed in 0.14.8, with the review's four
+nits (the dry run's `If-Match` read apart, the UI showing a raw single-sign-on subject, drift
+lines logged twice on `ensure_tenant`'s second attempt, which could also restore a tenant
+someone unregistered meanwhile) and the race `ensure_tenant` left on a new tenant
+(`If-None-Match: *`). A fourth review of that fix found the restore undone even after the
+registration had committed, the undo itself unshielded, and the lifecycle routes' records and
+clean-up still outside the lock; 0.14.8 undoes only what precedes the commit, shields the undo,
+keeps everything under the lock with a bounded wait (409 `schema_busy`) and caps schema writers at
+half the connection pool. A fifth review of that found the in-process locks shared across event
+loops and the in-database lock wait holding up concurrent index builds; 0.14.8 keeps the locks
+per event loop and tries the advisory lock instead of waiting on it, with the review's minor
+points (a cancelled commit, the undo outliving the lock, orphans under `If-None-Match`, the
+restore's announcement, timeouts other than the lock's) done too. A last review found
+nothing Critical or Major; its minor points were done as well (the gate leaves the listener's
+connection out and the pool needs 4; the wait for the lock's own connection is bounded; the
+restore sits inside the guarded span and the undo waits on the final transaction's row lock;
+the property rename job and graph expansion stop holding connections while waiting for more).
+One property is kept, by design: a waiter on another replica tries the lock at most every half
+second, so a replica with a steady stream of writes to one tenant can keep it waiting until its
+5-minute bound (409); this is fair enough for schema writes, which are rare.
 
 ## Consequences
 

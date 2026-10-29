@@ -30,9 +30,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 import asyncpg
+from fastapi import HTTPException
 from pydantic import BaseModel
 
-from graphos import changes, declared, jobs, reserved, search, writes
+from graphos import changes, declared, jobs, reserved, schema_version, search, writes
 from graphos.bootstrap import (
     TENANTS_CHANNEL,
     TenantSpec,
@@ -802,7 +803,34 @@ async def finish_property(  # noqa: PLR0913 -- one rename's inputs
 ) -> None:
     """Every row is rewritten: the spec follows (definitions, indexes, styles, the
     rename done), the property catalogue loses the old name, one ``schema`` record,
-    then the indexes on the new name are built and those on the old dropped."""
+    then the indexes on the new name are built and those on the old dropped; under
+    the tenant's schema-write lock, as every schema write (the job runs apart from
+    the request that started it)."""
+    try:
+        async with schema_version.write(pool, tenant, None):
+            # Rows written with the old name while this waited for the lock.
+            kind = "node" if on in (await _spec(pool, tenant)).vertex_labels else "edge"
+            for table in tables:
+                while await writes.rename_property_batch(
+                    pool, tenant=tenant, table=table, kind=kind, on=on, old=old, new=new,
+                ):
+                    pass
+            await _finish_property(pool, tenant, on, old, new, tables)
+    except schema_version.SchemaBusyError as exc:
+        # Every row is rewritten: asking again resumes and finishes it.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+async def _spec(pool: asyncpg.Pool, tenant: str) -> TenantSpec:
+    spec = await load_spec(pool, tenant)
+    if spec is None:
+        raise RenameError(f"tenant '{tenant}' is not registered")
+    return spec
+
+
+async def _finish_property(  # noqa: PLR0913 -- one rename's inputs
+    pool: asyncpg.Pool, tenant: str, on: str, old: str, new: str, tables: list[str],
+) -> None:
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0));", tenant)
         stored = spec_from_json(await conn.fetchval(

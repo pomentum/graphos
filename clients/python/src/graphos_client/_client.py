@@ -413,6 +413,7 @@ class GraphosClient:
         force_shrink: bool = False,
         dry_run: bool = False,
         if_match: str | None = None,
+        if_none_match: bool = False,
     ) -> dict[str, Any]:
         """Register / re-register a tenant.
 
@@ -515,7 +516,10 @@ class GraphosClient:
         ``etag`` (the schema's version, from the ``ETag`` header) when the
         server sent one: a dry run's is the version it was judged on, to send
         back as ``if_match`` so the registration applies exactly what was
-        previewed.
+        previewed.  ``if_none_match=True`` (``If-None-Match: *``, graphos
+        0.14.8+) registers only if the tenant is not registered yet, else
+        ``GraphosError`` 412: for a program creating a tenant that someone may
+        create at the same time.
 
         See :meth:`ensure_tenant` for a registration that first reports what
         was changed elsewhere (the dry run's ``drift``).
@@ -553,6 +557,7 @@ class GraphosClient:
             body["display_merge"] = display_merge
         result = await self._register(
             body, force_shrink=force_shrink, dry_run=dry_run, if_match=if_match,
+            if_none_match=if_none_match,
         )
         if manager is not _UNSET and not dry_run:
             check_schema_manager(name or self._tenant, manager, result)
@@ -617,12 +622,16 @@ class GraphosClient:
 
         The registration applies exactly what was previewed: it is sent with
         ``If-Match`` set to the dry run's ``ETag`` (the schema version the
-        drift was judged on; ``if_match`` when the server sent none, as for a
-        new tenant).  If the schema changes between the two calls (another
-        replica starting at the same time), it runs the dry run once more on
+        drift was judged on; ``if_match`` when the server sent none), or, for a
+        tenant the dry run found not registered, with ``If-None-Match: *``, so
+        a tenant someone else created meanwhile is not registered unchecked.
+        If the schema changes between the two calls (another replica starting
+        at the same time), it runs the dry run once more on
         the new version and registers with that; a second change raises
-        ``GraphosError`` 412 and nothing is registered.  An ``if_match`` given
-        pins the version: the second dry run is refused 412 when it moved.
+        ``GraphosError`` 412 and nothing is registered, as when the tenant was
+        unregistered in between (registering would restore it, undoing that).
+        An ``if_match`` given pins the version: the second dry run is refused
+        412 when it moved.
 
         A dry run the server refuses raises as :meth:`register_tenant` does:
         ``GraphosError`` 409 for a label renamed away, or for a managed
@@ -657,41 +666,65 @@ class GraphosClient:
             return await self.register_tenant(**args, if_match=if_match)
         # Several starts at once (replicas of one program): another's
         # registration can move the version between this one's dry run and its
-        # registration. Judge the new version once more before giving up.
+        # registration. Judge the new version once more before giving up; the
+        # second dry run logs only what the first did not.
+        logged: set[str] = set()
+        refused: GraphosError | None = None
         for attempt in range(1, _ENSURE_ATTEMPTS + 1):
             preview = await self.register_tenant(**args, dry_run=True, if_match=if_match)
+            # Unregistered by someone in between: registering would restore it,
+            # undoing what they did. Not this call's to decide: give up.
+            if refused is not None and preview.get("restores"):
+                raise GraphosError(
+                    HTTPStatus.PRECONDITION_FAILED,
+                    f"tenant '{name or self._tenant}' was unregistered meanwhile: registering "
+                    "it again would restore it, which is not this call's to decide",
+                    refused.method, refused.url,
+                ) from refused
             tenant = name or self._tenant
             drift = preview.get("drift") or {}
             lines = drift_lines(tenant, drift)
             for line in lines.info:
-                drift_log.info("%s", line)
+                if line not in logged:
+                    drift_log.info("%s", line)
             for line in lines.warning:
-                drift_log.warning("%s", line)
+                if line not in logged:
+                    drift_log.warning("%s", line)
+            logged.update(lines.info, lines.warning)
             if lines.blocking and on_drift == "fail":
                 raise SchemaDriftError(
                     tenant, drift, [*lines.info, *lines.warning], lines.blocking,
                 )
             try:
-                # Apply exactly the version the drift was judged on (412 otherwise).
+                # Apply exactly the version the drift was judged on (412 otherwise);
+                # a tenant judged absent must still be (If-None-Match: *).
+                tag = preview.get("etag") or if_match
                 return await self.register_tenant(
-                    **args, if_match=preview.get("etag") or if_match,
+                    **args, if_match=tag,
+                    if_none_match=(
+                        tag is None and not preview.get("exists", True)
+                        and not preview.get("restores")
+                    ),
                 )
             except GraphosError as exc:
                 if exc.status_code != HTTPStatus.PRECONDITION_FAILED or attempt == _ENSURE_ATTEMPTS:
                     raise
+                refused = exc
         raise AssertionError("unreachable")
 
     async def _register(
         self, body: Mapping[str, Any], *, force_shrink: bool, dry_run: bool,
-        if_match: str | None = None,
+        if_match: str | None = None, if_none_match: bool = False,
     ) -> dict[str, Any]:
         """``POST /v1/tenants``; the answer with ``etag`` added from the
         ``ETag`` header when the server sent one."""
         flags = (("force_shrink", force_shrink), ("dry_run", dry_run))
         params = {k: "true" for k, on in flags if on}
+        headers = {**(_if_match_header(if_match) or {}),
+                   **({"If-None-Match": "*"} if if_none_match else {})}
         resp = await self._request(
             "POST", "/v1/tenants", params=params or None, json_body=body,
-            headers=_if_match_header(if_match),
+            headers=headers or None,
         )
         result = resp.json()
         tag = resp.headers.get("ETag")

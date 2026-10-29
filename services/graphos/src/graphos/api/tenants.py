@@ -30,6 +30,7 @@ is idempotent and cheap. See ``bootstrap.py`` module docstring for context.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Iterable
@@ -37,6 +38,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Annotated, Any, cast
 
+import anyio
 import asyncpg
 from fastapi import APIRouter, Header, HTTPException, Path, Query, Request, status
 from fastapi.responses import JSONResponse, Response
@@ -65,6 +67,7 @@ from graphos.auth import (
 )
 from graphos.bootstrap import (
     DEFAULT_COMMUNITY_ALGORITHM,
+    TENANTS_CHANNEL,
     TenantSpec,
     _validate_label_hierarchy,
     bootstrap_tenant,
@@ -373,22 +376,63 @@ SchemaIfMatch = Annotated[
     ),
 ]
 
+SchemaIfNoneMatch = Annotated[
+    str | None,
+    Header(
+        pattern=r"^\*$",
+        description=(
+            "`*`: register only a new tenant (412 when it is registered, or is unregistered "
+            "and would be restored), for a program creating a tenant that someone may create "
+            "at the same time. Optional."
+        ),
+    ),
+]
+
 # The 409 of a schema write on a tenant someone else manages (ADR-0013).
 _SCHEMA_MANAGED = (
     " Or the tenant's schema manager is someone else and the write would change its structure: "
     "`{\"detail\", \"code\": \"schema_managed\", \"schema_manager\"}`, nothing written."
+    " Or another schema write of the tenant held it longer than this one waits (5 min; 30 s "
+    "to unregister, restore or delete): `code: schema_busy`."
 )
 
 _SCHEMA_PRECONDITION: dict[int | str, dict[str, Any]] = {
     412: {"description": (
         "`If-Match` did not match: the schema changed since it was read (its current `ETag` "
-        "is in the answer); nothing was written."
+        "is in the answer); or, on a registration, `If-None-Match: *` and the tenant is "
+        "registered or would be restored. Nothing was written."
     )},
 }
 
 
 def _if_match(header: str | None) -> IfMatch | None:
     return None if header is None else IfMatch.parse(header)
+
+
+def _registered_already(name: str, current: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_412_PRECONDITION_FAILED,
+        detail=f"If-None-Match failed: tenant '{name}' is registered (its ETag is {current})",
+        headers={"ETag": current},
+    )
+
+
+async def _refuse_unless_new(pool: asyncpg.Pool, name: str) -> None:
+    """412 for ``If-None-Match: *`` when the name holds data: an unregistered
+    tenant (registering would restore it) or an orphan graph (it would adopt
+    it). A registered one is refused under the lock (``schema_version.write``)."""
+    async with pool.acquire() as conn:
+        state = await lifecycle.tenant_state(conn, name)
+    if state in ("unregistered", "orphan"):
+        what = (
+            "is unregistered and keeps its data; registering it would restore it"
+            if state == "unregistered"
+            else "is a graph without a registration; registering it would adopt it"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_412_PRECONDITION_FAILED,
+            detail=f"If-None-Match failed: '{name}' {what}",
+        )
 
 
 def _schema_changed(name: str, exc: PreconditionFailedError) -> HTTPException:
@@ -522,6 +566,7 @@ async def register(
     response: Response,
     principal: MaintainPrincipal,
     if_match: SchemaIfMatch = None,
+    if_none_match: SchemaIfNoneMatch = None,
     force_shrink: Annotated[
         bool,
         Query(description=(
@@ -592,6 +637,10 @@ async def register(
     # Declared pairs, indexes and columns may name labels and types registered
     # earlier, or added now.
     known = registered_tenants().get(body.name)
+    if known is None and principal.has(body.name, Level.OWNER):
+        # A registration that restores the tenant is checked against the schema it
+        # restores (only for whoever may restore it: no one else learns that schema).
+        known = await lifecycle.unregistered_spec(request.app.state.pool, body.name)
     display, display_removed = _display(body)
     property_schema, schema_removed = _property_schema(body)
     deprecated, deprecated_removed = _deprecated(body)
@@ -656,12 +705,27 @@ async def register(
     manager_stated, manager = _wanted_manager(request, body, principal)
     pool = request.app.state.pool
     wanted = _if_match(if_match)
+    absent = if_none_match is not None
+    if wanted is not None and absent:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "send If-Match (an existing tenant's version) or If-None-Match (a new tenant), "
+                "not both"
+            ),
+        )
     if dry_run:
         previous, restores, judged_tag = await _existing(pool, spec.name, principal)
         try:
-            await schema_version.check(pool, spec.name, wanted)
+            # Against the version read with the spec it judges, not read again.
+            if wanted is not None:
+                wanted.check(judged_tag)
         except PreconditionFailedError as exc:
             raise _schema_changed(spec.name, exc) from exc
+        if absent and judged_tag is not None:
+            raise _registered_already(spec.name, judged_tag)
+        if absent:
+            await _refuse_unless_new(pool, spec.name)
         known = await lifecycle.unregistered_spec(pool, spec.name) if restores else previous
         endpoints_stated = "edge_endpoints" in body.model_fields_set
         manager_change = _manager_change(known, manager_stated, manager, principal, spec.name)
@@ -686,15 +750,17 @@ async def register(
             response.headers["ETag"] = judged_tag
         return result.model_copy(update={"exists": previous is not None, "restores": restores})
     try:
-        async with schema_version.write(pool, spec.name, wanted) as written:
+        async with schema_version.write(pool, spec.name, wanted, absent=absent) as written:
             answer = await _register(
                 request, principal, body, spec, force_shrink=force_shrink,
                 meta_removed=meta_removed, display_removed=display_removed,
                 schema_removed=schema_removed, deprecated_removed=deprecated_removed,
-                manager_stated=manager_stated, manager=manager,
+                manager_stated=manager_stated, manager=manager, absent=absent,
             )
             tag = await written.etag()
     except PreconditionFailedError as exc:
+        if absent and exc.current is not None:
+            raise _registered_already(spec.name, exc.current) from exc
         raise _schema_changed(spec.name, exc) from exc
     if tag is not None:
         response.headers["ETag"] = tag
@@ -782,10 +848,13 @@ async def _register(
     force_shrink: bool, meta_removed: tuple[str, ...],
     display_removed: by_entry.Removed, schema_removed: by_entry.Removed,
     deprecated_removed: by_entry.Removed, manager_stated: bool, manager: str | None,
+    absent: bool = False,
 ) -> RegisterResponse:
     """Apply a registration, under the tenant's schema-write lock."""
     pool = request.app.state.pool
     previous, restores, _ = await _existing(pool, spec.name, principal)
+    if absent:   # If-None-Match: * creates; it never restores nor adopts
+        await _refuse_unless_new(pool, spec.name)
     # Judged here, under the lock, on the schema as it is now (an unregistered
     # tenant's as it would be restored): a refused registration restores nothing.
     known = await lifecycle.unregistered_spec(pool, spec.name) if restores else previous
@@ -797,10 +866,94 @@ async def _register(
         schema_removed=schema_removed, deprecated_removed=deprecated_removed,
         claims=_claims(manager_stated, manager, principal),
     )
-    if restores:
-        await lifecycle.restore_tenant(pool, spec.name)
-        await _record_schema(pool, spec.name, {"restored": True})
-        previous = await load_spec(pool, spec.name)
+    # A restore is undone when the registration restoring it fails before its
+    # change record commits (a 422 from bootstrap, say): the tenant goes back to
+    # how it was kept. Other replicas hear of it with that change record.
+    kept = await lifecycle.kept_registration(pool, spec.name) if restores else None
+    progress = _Progress()
+    try:
+        if restores:
+            # Inside the guarded span: a restore whose commit is cut short is put
+            # back too (a restore that did not commit leaves put_back nothing to do).
+            progress.restoring = kept is not None
+            if kept is None or not await lifecycle.restore_tenant(
+                pool, spec.name, announce=False,
+            ):
+                progress.restoring = False
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"tenant '{spec.name}' is no longer unregistered: read it and try again",
+                )
+            previous = await load_spec(pool, spec.name)
+        stored = await _write_registration(
+            request, principal, body, spec, previous, force_shrink=force_shrink,
+            restored=kept is not None, manager_change=manager_change, manager=manager,
+            meta_removed=meta_removed, display_removed=display_removed,
+            schema_removed=schema_removed, deprecated_removed=deprecated_removed,
+            progress=progress,
+        )
+    except BaseException:
+        if kept is not None and progress.restoring and not progress.committed:
+            await _undo_restore(pool, kept)
+        raise
+    # Committed: what fails from here on leaves the registration in place.
+    return await _finish_registration(request, principal, stored, previous)
+
+
+class _Progress:
+    """How far a registration's writes got: a restore under way is undone on
+    failure until the registration's change record commits."""
+
+    restoring = False
+    committed = False
+
+
+# Undos in flight, held so that none is collected before it ends.
+_undoing: set[asyncio.Task[None]] = set()
+
+
+async def _undo_restore(pool: asyncpg.Pool, kept: lifecycle.Kept) -> None:
+    """Put a tenant back as it was kept, shielded from the request's
+    cancellation and finished before the schema-write lock is let go; a
+    failure is logged, never raised over the registration's own error."""
+    undo = asyncio.ensure_future(_put_back_logged(pool, kept))
+    _undoing.add(undo)
+    undo.add_done_callback(_undoing.discard)
+    cancelled = False
+    with anyio.CancelScope(shield=True):
+        while not undo.done():
+            try:
+                await asyncio.shield(undo)
+            except asyncio.CancelledError:
+                cancelled = True   # wait all the same: the undo holds the lock's turn
+    if cancelled:
+        raise asyncio.CancelledError
+
+
+async def _put_back_logged(pool: asyncpg.Pool, kept: lifecycle.Kept) -> None:
+    try:
+        await lifecycle.put_back(pool, kept)
+    except Exception:  # noqa: BLE001 — the registration's own error is the answer
+        log.exception(
+            "undoing a restore failed: the tenant stays restored; unregister it to go back",
+            extra={"tenant": kept.row["name"],
+                   "unregistered_at": str(kept.row.get("unregistered_at")),
+                   "unregistered_by": kept.row.get("unregistered_by")},
+        )
+
+
+async def _write_registration(
+    request: Request, principal: Principal, body: TenantSpecBody, spec: TenantSpec,
+    previous: TenantSpec | None, *, force_shrink: bool, restored: bool,
+    manager_change: list[str | None] | None, manager: str | None,
+    meta_removed: tuple[str, ...], display_removed: by_entry.Removed,
+    schema_removed: by_entry.Removed, deprecated_removed: by_entry.Removed,
+    progress: _Progress,
+) -> TenantSpec:
+    """A judged registration's writes up to its change record, under the
+    tenant's schema-write lock; the stored spec they leave. A tenant it
+    restored is announced to the other replicas with the change record."""
+    pool = request.app.state.pool
     try:
         await bootstrap_tenant(
             pool, spec,
@@ -824,11 +977,13 @@ async def _register(
         # client that knows nothing of them must not wipe them by accident.
         await persist_spec_replace(
             pool, spec, replace_endpoints="edge_endpoints" in body.model_fields_set,
+            announce=not restored,
         )
     else:
         await persist_spec(
             pool, spec, meta_removed=meta_removed, display_removed=display_removed,
             schema_removed=schema_removed, deprecated_removed=deprecated_removed,
+            announce=not restored,
         )
     # Persisting merges with the stored spec (unless force_shrink); keep the
     # merged result in memory so a partial re-registration never hides labels
@@ -838,28 +993,61 @@ async def _register(
     if manager_change is not None:
         change["schema_manager"] = manager_change
     # The manager, the removal records and the change record together (ADR-0014).
-    async with pool.acquire() as conn, conn.transaction():
-        if manager_change is not None:
-            await set_schema_manager(conn, spec.name, manager)
-        if force_shrink:
-            # What a replace removes is a removal too: reported if declared again.
-            removed = change.get("removed") or {}
-            for kind, part in schema_drift.REMOVAL_PARTS.items():
-                if kind == "edge_endpoint":
-                    continue
-                for name in removed.get(part) or ():
-                    await record_removal(conn, spec.name, kind, name, by=principal.consumer)
-            for edge_type, src, dst in removed.get("edge_endpoints") or ():
-                await record_removal(conn, spec.name, "edge_endpoint", edge_type, src, dst,
-                                     by=principal.consumer)
-        # What it declared again after a drop is no longer a removal (ADR-0013).
-        await forget_removals(conn, spec.name, stored)
-        if change:
-            await changes.record(
-                conn, tenant=spec.name, op="schema", kind="tenant",
-                count=schema_changes.size(change), detail=change,
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await _record_registration(
+                conn, principal, spec, stored, change, restored=restored,
+                manager_change=manager_change, manager=manager, force_shrink=force_shrink,
             )
-    spec = await load_spec(pool, spec.name) or stored
+        progress.committed = True
+    return stored
+
+
+async def _record_registration(
+    conn: asyncpg.Connection, principal: Principal, spec: TenantSpec, stored: TenantSpec,
+    change: dict[str, Any], *, restored: bool, manager_change: list[str | None] | None,
+    manager: str | None, force_shrink: bool,
+) -> None:
+    """A registration's records, in its final transaction (ADR-0014)."""
+    if restored:
+        # Taken first: an undo (lifecycle.put_back) waits for this transaction.
+        await conn.execute(
+            "SELECT 1 FROM graphos_meta.tenants WHERE name = $1 FOR UPDATE;", spec.name,
+        )
+        await changes.record(
+            conn, tenant=spec.name, op="schema", kind="tenant",
+            count=schema_changes.size({"restored": True}), detail={"restored": True},
+        )
+        await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, spec.name)
+    if manager_change is not None:
+        await set_schema_manager(conn, spec.name, manager)
+    if force_shrink:
+        # What a replace removes is a removal too: reported if declared again.
+        removed = change.get("removed") or {}
+        for kind, part in schema_drift.REMOVAL_PARTS.items():
+            if kind == "edge_endpoint":
+                continue
+            for name in removed.get(part) or ():
+                await record_removal(conn, spec.name, kind, name, by=principal.consumer)
+        for edge_type, src, dst in removed.get("edge_endpoints") or ():
+            await record_removal(conn, spec.name, "edge_endpoint", edge_type, src, dst,
+                                 by=principal.consumer)
+    # What it declared again after a drop is no longer a removal (ADR-0013).
+    await forget_removals(conn, spec.name, stored)
+    if change:
+        await changes.record(
+            conn, tenant=spec.name, op="schema", kind="tenant",
+            count=schema_changes.size(change), detail=change,
+        )
+
+
+async def _finish_registration(
+    request: Request, principal: Principal, stored: TenantSpec, previous: TenantSpec | None,
+) -> RegisterResponse:
+    """What follows a committed registration: the spec in memory, the
+    creator's grant, the indexes it needs; and the answer."""
+    pool = request.app.state.pool
+    spec = await load_spec(pool, stored.name) or stored
     remember(spec)
     # The creator owns what it creates (as in PostgreSQL); an admin needs no grant.
     store = getattr(request.app.state, "access_store", None)
@@ -964,9 +1152,22 @@ async def rename_schema_name(
     wanted = _if_match(if_match)
     try:
         if dry_run:
-            await schema_version.check(pool, name, wanted)
-            await _refuse_if_managed(pool, name, principal)
-            return await _rename(request, name, body, dry_run=True, by=principal.consumer)
+            # The version read with the spec: checked, and answered as the ETag to
+            # send with the rename, as a registration's dry run does.
+            found = await load_spec_versioned(pool, name)
+            if found is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"tenant '{name}' is not registered",
+                )
+            judged = schema_version.etag(found[1])
+            if wanted is not None:
+                wanted.check(judged)
+            schema_drift.check(name, found[0].schema_manager, principal)
+            plan = await _rename(request, name, body, dry_run=True, by=principal.consumer,
+                                 spec=found[0])
+            (plan if isinstance(plan, JSONResponse) else response).headers["ETag"] = judged
+            return plan
         async with schema_version.write(pool, name, wanted) as written:
             await _refuse_if_managed(pool, name, principal)
             answer = await _rename(request, name, body, dry_run=False, by=principal.consumer)
@@ -981,10 +1182,12 @@ async def rename_schema_name(
 
 async def _rename(
     request: Request, name: str, body: SchemaRenameRequest, *, dry_run: bool, by: str | None,
+    spec: TenantSpec | None = None,
 ) -> SchemaRenameResponse | JSONResponse:
-    """A rename, or its plan; under the tenant's schema-write lock unless a dry run."""
+    """A rename, or its plan; under the tenant's schema-write lock unless a dry
+    run, whose plan is made from ``spec`` (the one its ETag was read with)."""
     # Read here, under the lock: the spec as it is now, not as it was at the request.
-    spec = registered_tenants().get(name)
+    spec = spec or registered_tenants().get(name)
     if spec is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"tenant '{name}' is not registered",
@@ -1171,7 +1374,10 @@ async def delete_edge_endpoint(
     ),
     responses={
         404: {"description": "No such tenant (registered, or with `drop_data`, unregistered)."},
-        409: {"description": "`drop_data`: a job runs on the tenant, or its tables stay in use."},
+        409: {"description": (
+            "`drop_data`: a job runs on the tenant, or its tables stay in use. Or another "
+            "schema write held the tenant for more than 30 s (`code: schema_busy`)."
+        )},
     },
 )
 async def unregister(
@@ -1185,36 +1391,43 @@ async def unregister(
     if not drop_data:
         require_level(principal, name, Level.OWNER)
         pool = request.app.state.pool
-        if not await unregister_tenant(pool, name, by=principal.consumer):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"tenant '{name}' is not registered",
-            )
-        await _record_schema(pool, name, {"unregistered": True})
+        # Under the schema-write lock, as every schema write, with what follows
+        # it: a registration judged on the tenant must not see it unregistered
+        # half-way, nor its record land after the registration's.
+        async with schema_version.write(pool, name, None, wait_s=schema_version.LIFECYCLE_WAIT_S):
+            if not await unregister_tenant(pool, name, by=principal.consumer):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"tenant '{name}' is not registered",
+                )
+            await _record_schema(pool, name, {"unregistered": True})
         return {"tenant": name, "status": "unregistered"}
 
     pool = request.app.state.pool
-    async with pool.acquire() as conn:
-        state = await lifecycle.tenant_state(conn, name)
-    if state == "orphan":
-        require_admin(principal)
-    else:
-        require_level(principal, name, Level.OWNER)
-    try:
-        dropped = state is not None and await lifecycle.drop_tenant_data(pool, name)
-    except lifecycle.TenantBusyError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    if not dropped:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"no tenant named '{name}'",
-        )
-    store = getattr(request.app.state, "access_store", None)
-    if store is not None:
-        await store.drop_tenant(name)
-    LRU.evict_tenant(name)
-    async with pool.acquire() as conn:
-        await sync.notify_cache(conn, name, None)
-    await _record_schema(pool, name, {"data_deleted": True})
+    async with schema_version.write(pool, name, None, wait_s=schema_version.LIFECYCLE_WAIT_S):
+        async with pool.acquire() as conn:
+            state = await lifecycle.tenant_state(conn, name)
+        if state == "orphan":
+            require_admin(principal)
+        else:
+            require_level(principal, name, Level.OWNER)
+        try:
+            dropped = state is not None and await lifecycle.drop_tenant_data(pool, name)
+        except lifecycle.TenantBusyError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        if not dropped:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"no tenant named '{name}'",
+            )
+        # Still under the lock: a creator registering the freed name next must
+        # not lose the grant it gets to this delete's clean-up.
+        store = getattr(request.app.state, "access_store", None)
+        if store is not None:
+            await store.drop_tenant(name)
+        LRU.evict_tenant(name)
+        async with pool.acquire() as conn:
+            await sync.notify_cache(conn, name, None)
+        await _record_schema(pool, name, {"data_deleted": True})
     return {"tenant": name, "status": "deleted"}
 
 
@@ -1228,7 +1441,10 @@ async def unregister(
     ),
     responses={
         404: {"description": "No unregistered tenant by that name."},
-        409: {"description": "It is registered, or an orphan graph with no kept registration."},
+        409: {"description": (
+            "It is registered, or an orphan graph with no kept registration; or another schema "
+            "write held the tenant for more than 30 s (`code: schema_busy`)."
+        )},
     },
 )
 async def restore(
@@ -1236,7 +1452,11 @@ async def restore(
 ) -> dict[str, object]:
     require_level(principal, name, Level.OWNER)
     pool = request.app.state.pool
-    if not await lifecycle.restore_tenant(pool, name):
+    async with schema_version.write(pool, name, None, wait_s=schema_version.LIFECYCLE_WAIT_S):
+        restored = await lifecycle.restore_tenant(pool, name)
+        if restored:
+            await _record_schema(pool, name, {"restored": True})
+    if not restored:
         async with pool.acquire() as conn:
             state = await lifecycle.tenant_state(conn, name)
         if state == "registered":
@@ -1256,7 +1476,6 @@ async def restore(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"no unregistered tenant named '{name}'",
         )
-    await _record_schema(pool, name, {"restored": True})
     return {"tenant": name, "status": "restored"}
 
 

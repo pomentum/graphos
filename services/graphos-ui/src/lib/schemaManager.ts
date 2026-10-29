@@ -3,6 +3,19 @@ import type { Me } from "../api/types";
 /** The prefix of a graphos user's or service account's subject. */
 const USER = "user:";
 
+/** The prefix of a single-sign-on subject. */
+const SSO = "oidc-sub:";
+
+/**
+ * The identity provider's id of a single-sign-on manager, shortened for
+ * display (its last 8 characters when long), or null for any other subject.
+ */
+export function ssoManagerId(subject: string | null | undefined): string | null {
+  if (!subject?.startsWith(SSO)) return null;
+  const id = subject.slice(SSO.length);
+  return id.length > 12 ? `…${id.slice(-8)}` : id;
+}
+
 /** The name to show for a manager's subject: `user:importer` is `importer`. */
 export function managerName(subject: string | null | undefined): string | null {
   if (!subject) return null;

@@ -599,7 +599,14 @@ pairs; the Python client's `import_schema` and the web UI do this.
 While a tenant is unregistered, data-plane calls to it return 404. Its name is not free: registering
 it again (`POST /v1/tenants`) restores it first, with the schema it had, for its owner or an admin,
 and is refused (409) to anyone else, so a name someone else may create never hands them old data.
-To free the name, delete the tenant with its data (`?drop_data=true`).
+A registration that restores the tenant and then fails before its change record commits (a
+unique index the data does not allow, say: 422) restores nothing: the tenant stays unregistered
+exactly as it was (labels bootstrap created before failing stay as empty tables outside the
+schema). To free the name, delete the tenant with its data (`?drop_data=true`). Unregistering,
+restoring and deleting take the tenant's schema-write lock, as every schema write does, so none of
+them lands half-way through a registration; they wait at most 30 s for another schema write of the
+tenant (on any replica), or behind other tenants' schema writes holding this replica's
+connections, then answer 409 `code: schema_busy`. Other schema writes wait at most 5 minutes.
 
 A graph unregistered before 0.8.2 kept no registration: it is listed as an `orphan` (admins only).
 An admin registers it again with its schema, or deletes it with its data; anyone else is refused
@@ -613,7 +620,11 @@ schema, its declared pairs or `strict_endpoints` changes it. Every schema write 
 a registration (and its dry run), `schema:rename`, a label drop, a pair removal. When the schema
 changed since the version sent, the write answers **412** with the current `ETag` and changes
 nothing; read again, then decide. Each write answers the new `ETag`. `If-Match: *` means "if the
-tenant is registered".
+tenant is registered". A registration also takes `If-None-Match: *`: only a new tenant (412 when
+it is registered, is unregistered and would be restored, or is a graph without a registration
+it would adopt), for a program creating a tenant that someone may create at the same time; not
+together with `If-Match` (422). Dry runs (of a registration or a rename) check `If-Match`
+against the version they judged and answer it as their `ETag`.
 
 This is how two people editing one schema keep each other's work: the web UI sends the version it
 loaded, so the second of two saves made from it is refused ("Changed by someone else") and the
@@ -628,7 +639,8 @@ curl -s -X POST "$G/v1/tenants" -H "$AUTH" -H "If-Match: $ETAG" -H "Content-Type
 ```
 
 The Python client returns it as `schema().etag` (and `get_tenant().etag`) and takes `if_match=` on
-`register_tenant`, `import_schema`, the renames, `drop_label` and `remove_edge_endpoint`.
+`register_tenant`, `import_schema`, the renames, `drop_label` and `remove_edge_endpoint`, and
+`if_none_match=True` on `register_tenant`.
 
 ### A schema manager, and the drift report
 
@@ -1864,7 +1876,7 @@ listed here.
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` | `graphos-db` / 5432 / `graphos` / `graphos` (the compose file sets `graphos_app`) |
 | `DB_PASSWORD` or `DB_PASSWORD_FILE` | one of the two is required |
 | `DB_ADMIN_USER`, `DB_ADMIN_PASSWORD` or `DB_ADMIN_PASSWORD_FILE` | unset (the compose file sets the superuser `graphos`): a role that may create extensions and roles; at start, graphos-api creates what its own role needs when something is missing ([installation §2](installation.md#the-databases-set-up)) |
-| `DB_POOL_MIN_SIZE` / `DB_POOL_MAX_SIZE` | 2 / 16 |
+| `DB_POOL_MIN_SIZE` / `DB_POOL_MAX_SIZE` | 2 / 16 (the maximum at least 4: the replica listener keeps one, schema writes hold at most half of the rest) |
 | `STATEMENT_TIMEOUT_S` | 60 (greater than 0) |
 | `DB_JIT` | false (see *JIT and plans*) |
 | `VERTEX_GRAPHID_INDEXES` | false: `true` adds a btree on `id` to every vertex label table, built at startup for existing tenants; faster path reads and `edges:scan` pages, slower vertex writes (§5, *paths*) |
@@ -1920,9 +1932,9 @@ and the 422 of a `strict` property schema (with `violations` and `total`).
 | 401 | missing or malformed `Authorization` header, unknown or expired token, or a failed sign-in |
 | 403 | no access to the tenant, a level below what the operation needs (`read` / `write` / `maintain` / `owner`), the endpoint needs admin, or a password that must be changed first |
 | 404 | tenant not registered; single sign-on not configured (`/v1/auth/oidc/*`); node (`GET`, `PATCH`, `POST …/properties`), edge (`GET`, `PATCH`), unregistered edge type in the path, or cache key not found; unknown tenant on `GET`/`DELETE /v1/tenants/{name}`; unknown search `index`, unknown label on `map/hubs`; a job the caller may not see; the Cypher console off, or an unknown saved query |
-| 409 | removing the last admin; a recompute or metrics run while one of either is running or queued for the tenant; cancelling a finished job, or a direct call whose job was cancelled; an id or edge that matches in several labels (pass `label` / `src_label` / `dst_label`); a write that would give two nodes the values of a unique property index (`application/problem+json`); `snapshot-import?mode=empty` into a tenant with nodes; registering or restoring a name that is kept unregistered for someone else, or is an orphan; `drop_data` while a job or a long query holds the tenant; a schema write that would change the structure of a tenant whose schema manager is someone else (`code: schema_managed`) |
+| 409 | removing the last admin; a recompute or metrics run while one of either is running or queued for the tenant; cancelling a finished job, or a direct call whose job was cancelled; an id or edge that matches in several labels (pass `label` / `src_label` / `dst_label`); a write that would give two nodes the values of a unique property index (`application/problem+json`); `snapshot-import?mode=empty` into a tenant with nodes; registering or restoring a name that is kept unregistered for someone else, or is an orphan; `drop_data` while a job or a long query holds the tenant; a schema write that would change the structure of a tenant whose schema manager is someone else (`code: schema_managed`); a schema write waiting longer than it may behind another schema write of the tenant: 30 s to unregister, restore or delete it, 5 minutes for the others (`code: schema_busy`) |
 | 410 | a change-feed cursor whose records were pruned (§10) |
-| 412 | `If-Match` did not match: the node or edge changed (or is gone) since it was read; or, on a schema write, the tenant's schema changed since it was read (*Schema versions and `If-Match`*) |
+| 412 | `If-Match` did not match: the node or edge changed (or is gone) since it was read; or, on a schema write, the tenant's schema changed since it was read (*Schema versions and `If-Match`*); `If-None-Match: *` on a registration of a tenant that is registered, would be restored, or is a graph without a registration it would adopt |
 | 413 | `snapshot-import` over 50M rows, or a body past `GRAPHOS_IMPORT_MAX_BYTES`; a CSV file past `GRAPHOS_CSV_MAX_BYTES` |
 | 422 | body or query validation (patterns, ranges, `resolve_rule`, `label_hierarchy`), or `order_by: null` sent with a `cursor`; a registration that sends SQL (`indexes`, or a string in `generated_columns`), declares a property index or generated column on a label that is not a vertex label, changes a registered generated column, or declares a unique index over values nodes already share; a property-schema entry for an unregistered label, a pattern that does not compile, or a narrowing that changes a type; a write a `strict` property schema refuses (`application/problem+json` with `violations`) |
 | 428 | `If-Match` missing with `GRAPHOS_REQUIRE_IF_MATCH=true` |
