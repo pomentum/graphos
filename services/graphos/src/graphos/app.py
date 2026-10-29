@@ -1,6 +1,7 @@
 """FastAPI app factory + lifespan hook.
 
 Lifespan responsibilities:
+- Set the database up when an admin role is configured (graphos.db_setup).
 - Build the asyncpg pool.
 - Load the auth token store (idempotent SIGHUP reload registered too).
 - Start the background job runner (stopped before the pool closes).
@@ -84,6 +85,7 @@ from graphos.db import (
     repair_age_catalogue,
     unsupported_database,
 )
+from graphos.db_setup import ensure_database_setup
 from graphos.graph_compute import configure as configure_compute
 from graphos.graph_compute import terminate_running
 from graphos.graph_metrics import configure as configure_metrics
@@ -206,8 +208,21 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             "is an anonymous admin. Never expose this instance to a network."
         )
 
-    # 2. asyncpg pool
-    pool = await create_pool(settings)
+    # 2. The database set-up deploy/db-init/ does, when an admin role is
+    #    configured (graphos.db_setup, ADR-0012), then the asyncpg pool.
+    await ensure_database_setup(settings)
+    try:
+        pool = await create_pool(settings)
+    except (asyncpg.InvalidPasswordError, asyncpg.InvalidAuthorizationSpecificationError):
+        if settings.db_admin_user is None:
+            log.error(
+                "graphos could not sign in as its database role. A new database needs the "
+                "role and the extensions: mount deploy/db-init/ into the database container, "
+                "or set GRAPHOS_DB_ADMIN_USER and GRAPHOS_DB_ADMIN_PASSWORD_FILE so "
+                "graphos-api creates them (docs/guide/installation.md)",
+                extra={"role": settings.db_user},
+            )
+        raise
     app.state.pool = pool
     versions = await fetch_db_version(pool)
     refused = unsupported_database(versions["postgres_version"], versions["age_version"])

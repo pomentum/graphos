@@ -202,6 +202,8 @@ api POST /v1/ci_smoke/graph/edges     '{"edges": [{"src_id": "a", "src_label": "
 # so it always matches what graphos-db actually expects.
 PW="$(cat "$SERVICE_DIR/deploy/secrets/graphos_pw.txt" | tr -d '\r\n')"
 DSN="postgresql://graphos:${PW}@graphos-db:5432/graphos"
+# graphos_app's, for the tests that start graphos as that role (test_db_setup_db.py).
+APP_PW="$(cat "$SERVICE_DIR/deploy/secrets/graphos_app_pw.txt" | tr -d '\r\n')"
 
 echo "==> running pytest -m db inside an ephemeral python:3.11 container..."
 # Defaults to all @db tests when no extra args are passed.
@@ -222,6 +224,8 @@ container=$(
         --network "$EXTERNAL_NET" \
         -v "$SERVICE_DIR:/work" \
         -e "GRAPHOS_TEST_DSN=$DSN" \
+        -e "GRAPHOS_TEST_APP_PASSWORD=$APP_PW" \
+        -e "GRAPHOS_TEST_MASTER_KEY_FILE=/work/deploy/secrets/master_key.txt" \
         python:3.11-slim \
         sleep 1800
 )

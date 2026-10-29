@@ -45,9 +45,10 @@ that ran PostgreSQL 16 (volume `graphos_data`) has its data moved there by itsel
 `up` from 0.10.0 on: see [Upgrading the database](upgrade-postgresql-18.md).
 
 `graphos_app` is created by `services/graphos/deploy/db-init/01-app-role.sh`. Like every script in
-`db-init/`, it runs only when the data volume is empty. A volume created before that script existed
-has no `graphos_app` role: create it by hand with the SQL in `01-app-role.sh` (as the superuser), or
-start from a fresh volume.
+`db-init/`, it runs only when the data volume is empty. graphos-api also creates it at start, as
+the superuser, when it is missing and `GRAPHOS_DB_ADMIN_USER` is set (the compose sets it; see
+[installation §2](installation.md#the-databases-set-up)), so a deployment can do without the
+`db-init/` mount. It never changes a role that exists.
 
 ### 1.2 Register a tenant (admin, or `create_tenants`)
 
@@ -1773,6 +1774,7 @@ listed here.
 |---|---|
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` | `graphos-db` / 5432 / `graphos` / `graphos` (the compose file sets `graphos_app`) |
 | `DB_PASSWORD` or `DB_PASSWORD_FILE` | one of the two is required |
+| `DB_ADMIN_USER`, `DB_ADMIN_PASSWORD` or `DB_ADMIN_PASSWORD_FILE` | unset (the compose file sets the superuser `graphos`): a role that may create extensions and roles; at start, graphos-api creates what its own role needs when something is missing ([installation §2](installation.md#the-databases-set-up)) |
 | `DB_POOL_MIN_SIZE` / `DB_POOL_MAX_SIZE` | 2 / 16 |
 | `STATEMENT_TIMEOUT_S` | 60 (greater than 0) |
 | `DB_JIT` | false (see *JIT and plans*) |

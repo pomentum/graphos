@@ -102,6 +102,20 @@ by the init scripts only. A volume initialised before `01-app-role.sh`
 existed has no `graphos_app`: run the SQL from that script by hand as the
 superuser, or start from a fresh volume.
 
+`graphos-api` can do the same set-up itself, so that nothing is mounted into
+the database ([ADR-0012](adrs/ADR-0012-database-setup-at-start.md),
+`db_setup.py`). With `GRAPHOS_DB_ADMIN_USER` (and its password file) set, it
+signs in as its own role before it opens its pool and reads what is missing:
+the three extensions, the role, and each of the grants above, checked against
+the ACL on record. When something is, it signs in as the admin and, in one
+transaction under an advisory lock, does only that. It creates the role with
+a SCRAM verifier of its password (never the password in clear) and never
+alters an existing role. `graphos_meta` it creates as its own role, so it owns
+it. On a database the init scripts set up it finds nothing missing and never
+signs in as the admin. A set-up that fails is logged and the start goes on.
+The release compose sets the admin role and keeps the init mount (the move
+from PostgreSQL 16 needs `graphos_app` before graphos-api starts).
+
 On every start `graphos-api` also runs idempotent DDL for its internal tables
 (`db.py::ensure_internal_schema`): `graphos_meta.tenants`,
 `unregistered_tenants`, `tenant_settings`, `edge_endpoints` and `cache`, the

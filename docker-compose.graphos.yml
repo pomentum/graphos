@@ -47,6 +47,10 @@ services:
       - "5432"
     volumes:
       - graphos_data_pg18:/var/lib/postgresql/data
+      # Run once, on an empty volume: the extensions and graphos_app. graphos-api
+      # does the same at start (GRAPHOS_DB_ADMIN_USER below, ADR-0012), so a new
+      # deployment may leave this line out; it is kept for the move from
+      # PostgreSQL 16, which needs graphos_app before graphos-api starts.
       - ./services/graphos/deploy/db-init:/docker-entrypoint-initdb.d:ro
       # Mount the whole secrets dir (not individual files). Docker Desktop
       # on Windows has a known bug where single-file bind-mounts surface
@@ -140,10 +144,17 @@ services:
       GRAPHOS_DB_HOST: graphos-db
       GRAPHOS_DB_PORT: "5432"
       GRAPHOS_DB_NAME: graphos
-      # Unprivileged role created by deploy/db-init/01-app-role.sh; the
-      # superuser (POSTGRES_USER) is only used by the init scripts.
+      # Unprivileged role, created by deploy/db-init/01-app-role.sh or by
+      # graphos-api itself (below).
       GRAPHOS_DB_USER: graphos_app
       GRAPHOS_DB_PASSWORD_FILE: /run/graphos/secrets/graphos_app_pw.txt
+      # The database's superuser (POSTGRES_USER), used at start only when
+      # something graphos_app needs is missing (a new volume without the db-init
+      # folder): the extensions, the role, its grants. On a database that has
+      # them, graphos never signs in as it. An existing role's password is never
+      # changed. Set GRAPHOS_DB_ADMIN_USER= (empty) to turn it off.
+      GRAPHOS_DB_ADMIN_USER: ${GRAPHOS_DB_ADMIN_USER-graphos}
+      GRAPHOS_DB_ADMIN_PASSWORD_FILE: /run/graphos/secrets/graphos_pw.txt
       # Seals the signing keys and ID tokens graphos stores (scripts/init-secrets.sh
       # creates it). Back it up apart from the database: without it, what it
       # sealed cannot be read.

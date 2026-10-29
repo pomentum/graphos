@@ -6,6 +6,10 @@
 # not a superuser, cannot create roles or databases. It can create schemas
 # in this database (AGE puts each tenant graph in its own schema), use AGE's
 # catalog, own graphos_meta, and read query statistics for /v1/db/*.
+#
+# graphos-api does the same at start when GRAPHOS_DB_ADMIN_USER is set
+# (src/graphos/db_setup.py, ADR-0012); keep the two in step
+# (tests/test_db_setup_db.py compares the roles they make).
 set -euo pipefail
 
 pw_file=/run/graphos/secrets/graphos_app_pw.txt

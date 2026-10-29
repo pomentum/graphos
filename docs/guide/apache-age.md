@@ -532,11 +532,13 @@ aggregates back.
 
 - **Unprivileged API role.** The bundled compose runs `graphos-api` as
   `graphos_app` (no superuser), created by
-  `services/graphos/deploy/db-init/01-app-role.sh`. Such a role cannot
-  `LOAD 'age'`; graphos tries it once per connection, ignores the refusal,
-  and relies on `shared_preload_libraries=age`. Init scripts run only on an
-  empty data volume, so a volume created before that script needs the role
-  created by hand (the SQL is in the script).
+  `services/graphos/deploy/db-init/01-app-role.sh`, or by graphos-api at
+  start with `GRAPHOS_DB_ADMIN_USER` set ([ADR-0012](adrs/ADR-0012-database-setup-at-start.md)).
+  Such a role cannot `LOAD 'age'`; graphos tries it once per connection,
+  ignores the refusal, and relies on `shared_preload_libraries=age`. Init
+  scripts run only on an empty data volume, so a volume created before that
+  script needs the role created by hand (the SQL is in the script), or the
+  admin setting.
 - **`pg_advisory_unlock_all`, `RESET ALL` etc. on connection release**
   are asyncpg's normal pool reset — not a bug. graphos re-applies
   `search_path` on every acquire for that reason.

@@ -59,6 +59,39 @@ The data lives in the `graphos_data_pg18` volume (`graphos_data` and `graphos_up
 after an upgrade from PostgreSQL 16, [§11](#11-upgrading-from-postgresql-16)). `docker compose ... down`
 keeps them; `down -v` deletes all three.
 
+### The database's set-up
+
+graphos-api connects as `graphos_app`, a role that is not a superuser. Before its first start the
+database needs the extensions `age`, `pg_trgm` and `pg_stat_statements`, and that role with its
+grants. Two things can make them, and the compose file uses both
+([ADR-0012](adrs/ADR-0012-database-setup-at-start.md)):
+
+- **the db-init folder**, `services/graphos/deploy/db-init/`, mounted into `graphos-db`: the database
+  image runs it once, on an empty volume;
+- **graphos-api itself, at start**, signed in as the database's superuser. It does this only when
+  something is missing, and only what is missing. On a database that has it all, it never signs in
+  as the superuser.
+
+| Setting (graphos-api) | Compose | Meaning |
+|---|---|---|
+| `GRAPHOS_DB_ADMIN_USER` | `graphos` | A role that may create extensions and roles (the database image's `POSTGRES_USER`). Unset or empty: graphos-api sets nothing up, as in 0.14.5 and earlier. |
+| `GRAPHOS_DB_ADMIN_PASSWORD_FILE` | `graphos_pw.txt` | Its password (or `GRAPHOS_DB_ADMIN_PASSWORD`). Read only when needed, never logged. |
+
+- **Without the db-init folder.** A new deployment can leave out the mount (the
+  `./services/graphos/deploy/db-init:/docker-entrypoint-initdb.d:ro` line under `graphos-db`). The
+  first start of graphos-api then creates the extensions and `graphos_app` with the password in
+  `GRAPHOS_DB_PASSWORD_FILE`. Keep the mount if this stack may still move a PostgreSQL 16 volume
+  ([§11](#11-upgrading-from-postgresql-16)): that move needs `graphos_app` before graphos-api starts.
+- **An existing role keeps its password.** graphos never changes a role that exists. If
+  `graphos_app` exists with another password, graphos logs an error naming the fix and does not
+  start, as before; set the password with `ALTER ROLE graphos_app PASSWORD '...'` as the superuser.
+- **The new role's password** reaches the database as a SCRAM verifier, never in clear, so no
+  database log can hold it.
+- **A failed set-up does not stop a start.** graphos logs why (the superuser's password, say) and
+  starts as it would have without it.
+- **Existing deployments: nothing to do.** A database set up by the db-init folder (every graphos
+  deployment so far) has everything: graphos finds nothing missing and changes nothing.
+
 ## 3. The first sign-in
 
 The first start creates one user, the admin **`graphos`** with the password **`graphos`**, as
@@ -324,7 +357,8 @@ docker compose -f docker-compose.graphos.yml exec -T graphos-db   vacuumdb -U gr
 ```
 
 The dump carries the app role's grants on its schemas and tables; the database-level grant is
-the one to give again. Then set `GRAPHOS_DB_NAME=graphos_restored` and start graphos-api (or
+the one to give again. With `GRAPHOS_DB_ADMIN_USER` set (the compose sets it), graphos-api gives
+it itself at start ([§2](#the-databases-set-up)), and the `GRANT` line above is not needed. Then set `GRAPHOS_DB_NAME=graphos_restored` and start graphos-api (or
 restore into a new `graphos` the same way, after dropping the old one).
 
 - **Restore serially.** With `-j`, `pg_restore` can load AGE's label catalogue before its graph
@@ -425,8 +459,10 @@ lists every one; the README the most common). Those for sign-in, besides the OID
 - **The published images.** `ghcr.io/<owner>/graphos-api` and `ghcr.io/<owner>/graphos-ui`, tagged
   by version, take the same settings. The API needs PostgreSQL 18 with Apache AGE 1.8
   and refuses to start on an older database ([upgrade](upgrade-postgresql-18.md)), loaded with
-  `shared_preload_libraries=age,pg_stat_statements`, and a database role for itself: the compose
-  file and `services/graphos/deploy/db-init/` show the set-up to copy. The published API image has
+  `shared_preload_libraries=age,pg_stat_statements`, and a database role for itself. Set
+  `GRAPHOS_DB_ADMIN_USER` and `GRAPHOS_DB_ADMIN_PASSWORD_FILE` and graphos-api creates the role and
+  the extensions at its first start ([§2](#the-databases-set-up)); nothing is mounted into the
+  database. Without them, prepare the database as `services/graphos/deploy/db-init/` does. The published API image has
   no community detection; with the compose file, run the published images and add it as in
   [§6](#louvain-with-the-published-images).
 - **Without containers.** `pip install "./services/graphos[louvain]"`, point `GRAPHOS_DB_*` at the

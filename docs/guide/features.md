@@ -23,7 +23,8 @@ Consumers never see a Postgres DSN and cannot submit SQL, nor Cypher outside
 that console. In the
 bundled compose the API itself connects as `graphos_app`, an unprivileged
 role (no superuser, no role or database creation); the superuser is used only
-by the database init scripts.
+to set the database up (by the init scripts, or by graphos-api at start when
+something is missing).
 
 ---
 
