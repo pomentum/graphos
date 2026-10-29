@@ -161,30 +161,48 @@ async def restore_tenant(pool: asyncpg.Pool, name: str, *, announce: bool = True
     return True
 
 
-async def kept_registration(pool: asyncpg.Pool, name: str) -> dict[str, object] | None:
-    """An unregistered tenant's kept row as it is, for :func:`put_back`."""
-    row = await pool.fetchrow(
-        "SELECT * FROM graphos_meta.unregistered_tenants WHERE name = $1;", name,
-    )
-    return None if row is None else dict(row)
+async def kept_registration(pool: asyncpg.Pool, name: str) -> Kept | None:
+    """An unregistered tenant's kept row as it is, and where the change feed
+    stands, for :func:`put_back`."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM graphos_meta.unregistered_tenants WHERE name = $1;", name,
+        )
+        mark = await conn.fetchval(
+            "SELECT COALESCE(max(seq), 0) FROM graphos_meta.changes WHERE tenant = $1;", name,
+        )
+    return None if row is None else Kept(dict(row), int(mark))
 
 
-async def put_back(pool: asyncpg.Pool, kept: dict[str, object]) -> None:
+@dataclass(frozen=True)
+class Kept:
+    """An unregistered tenant's kept row, and the change feed's last record of
+    it when that row was read."""
+
+    row: dict[str, object]
+    mark: int
+
+
+async def put_back(pool: asyncpg.Pool, kept: Kept) -> None:
     """Undo a restore that the registration restoring it could not finish:
     the tenant is unregistered again with the very row it was restored from
     (its schema, pairs, settings, manager, and when and by whom it was
     unregistered), not with what the registration wrote meanwhile."""
-    name = str(kept["name"])
-    columns = list(kept)
+    name = str(kept.row["name"])
+    columns = list(kept.row)
     async with pool.acquire() as conn, conn.transaction():
-        # A registration cancelled while its commit was under way may have
-        # committed: its "restored" record says so, and then it stands.
+        # The registration's final transaction locks this row first: wait for it
+        # to end. Committed, its "restored" record says so, and then it stands
+        # (a registration cancelled while its commit was under way).
+        await conn.execute(
+            "SELECT 1 FROM graphos_meta.tenants WHERE name = $1 FOR UPDATE;", name,
+        )
         if await conn.fetchval(
             """
             SELECT 1 FROM graphos_meta.changes
-            WHERE tenant = $1 AND op = 'schema' AND detail ? 'restored' AND at > $2;
+            WHERE tenant = $1 AND op = 'schema' AND detail ? 'restored' AND seq > $2;
             """,
-            name, kept["unregistered_at"],
+            name, kept.mark,
         ):
             log.warning("restore not undone: its registration committed", extra={"tenant": name})
             return
@@ -195,7 +213,7 @@ async def put_back(pool: asyncpg.Pool, kept: dict[str, object]) -> None:
             f"INSERT INTO graphos_meta.unregistered_tenants ({', '.join(columns)}) "
             f"VALUES ({', '.join(f'${i}' for i in range(1, len(columns) + 1))}) "
             "ON CONFLICT (name) DO NOTHING;",
-            *kept.values(),
+            *kept.row.values(),
         )
         await conn.execute("SELECT pg_notify($1, $2);", TENANTS_CHANNEL, name)
     forget(name)

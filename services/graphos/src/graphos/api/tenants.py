@@ -870,16 +870,20 @@ async def _register(
     # change record commits (a 422 from bootstrap, say): the tenant goes back to
     # how it was kept. Other replicas hear of it with that change record.
     kept = await lifecycle.kept_registration(pool, spec.name) if restores else None
-    if restores and (
-        kept is None or not await lifecycle.restore_tenant(pool, spec.name, announce=False)
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"tenant '{spec.name}' is no longer unregistered: read it and try again",
-        )
     progress = _Progress()
     try:
         if restores:
+            # Inside the guarded span: a restore whose commit is cut short is put
+            # back too (a restore that did not commit leaves put_back nothing to do).
+            progress.restoring = kept is not None
+            if kept is None or not await lifecycle.restore_tenant(
+                pool, spec.name, announce=False,
+            ):
+                progress.restoring = False
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"tenant '{spec.name}' is no longer unregistered: read it and try again",
+                )
             previous = await load_spec(pool, spec.name)
         stored = await _write_registration(
             request, principal, body, spec, previous, force_shrink=force_shrink,
@@ -889,7 +893,7 @@ async def _register(
             progress=progress,
         )
     except BaseException:
-        if kept is not None and not progress.committed:
+        if kept is not None and progress.restoring and not progress.committed:
             await _undo_restore(pool, kept)
         raise
     # Committed: what fails from here on leaves the registration in place.
@@ -897,9 +901,10 @@ async def _register(
 
 
 class _Progress:
-    """How far a registration's writes got: once its change record commits, a
-    failure no longer undoes the restore it made."""
+    """How far a registration's writes got: a restore under way is undone on
+    failure until the registration's change record commits."""
 
+    restoring = False
     committed = False
 
 
@@ -907,7 +912,7 @@ class _Progress:
 _undoing: set[asyncio.Task[None]] = set()
 
 
-async def _undo_restore(pool: asyncpg.Pool, kept: dict[str, object]) -> None:
+async def _undo_restore(pool: asyncpg.Pool, kept: lifecycle.Kept) -> None:
     """Put a tenant back as it was kept, shielded from the request's
     cancellation and finished before the schema-write lock is let go; a
     failure is logged, never raised over the registration's own error."""
@@ -925,14 +930,15 @@ async def _undo_restore(pool: asyncpg.Pool, kept: dict[str, object]) -> None:
         raise asyncio.CancelledError
 
 
-async def _put_back_logged(pool: asyncpg.Pool, kept: dict[str, object]) -> None:
+async def _put_back_logged(pool: asyncpg.Pool, kept: lifecycle.Kept) -> None:
     try:
         await lifecycle.put_back(pool, kept)
     except Exception:  # noqa: BLE001 — the registration's own error is the answer
         log.exception(
             "undoing a restore failed: the tenant stays restored; unregister it to go back",
-            extra={"tenant": kept["name"], "unregistered_at": str(kept.get("unregistered_at")),
-                   "unregistered_by": kept.get("unregistered_by")},
+            extra={"tenant": kept.row["name"],
+                   "unregistered_at": str(kept.row.get("unregistered_at")),
+                   "unregistered_by": kept.row.get("unregistered_by")},
         )
 
 
@@ -1004,6 +1010,10 @@ async def _record_registration(
 ) -> None:
     """A registration's records, in its final transaction (ADR-0014)."""
     if restored:
+        # Taken first: an undo (lifecycle.put_back) waits for this transaction.
+        await conn.execute(
+            "SELECT 1 FROM graphos_meta.tenants WHERE name = $1 FOR UPDATE;", spec.name,
+        )
         await changes.record(
             conn, tenant=spec.name, op="schema", kind="tenant",
             count=schema_changes.size({"restored": True}), detail={"restored": True},
@@ -1145,14 +1155,18 @@ async def rename_schema_name(
             # The version read with the spec: checked, and answered as the ETag to
             # send with the rename, as a registration's dry run does.
             found = await load_spec_versioned(pool, name)
-            judged = None if found is None else schema_version.etag(found[1])
+            if found is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"tenant '{name}' is not registered",
+                )
+            judged = schema_version.etag(found[1])
             if wanted is not None:
                 wanted.check(judged)
-            schema_drift.check(name, found[0].schema_manager if found else None, principal)
+            schema_drift.check(name, found[0].schema_manager, principal)
             plan = await _rename(request, name, body, dry_run=True, by=principal.consumer,
-                                 spec=found[0] if found else None)
-            if judged is not None:
-                (plan if isinstance(plan, JSONResponse) else response).headers["ETag"] = judged
+                                 spec=found[0])
+            (plan if isinstance(plan, JSONResponse) else response).headers["ETag"] = judged
             return plan
         async with schema_version.write(pool, name, wanted) as written:
             await _refuse_if_managed(pool, name, principal)

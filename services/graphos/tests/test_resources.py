@@ -182,11 +182,13 @@ def test_a_tenant_drop_the_database_restarts_under_answers_503(
         async def execute(self, *_args: object) -> None:
             return None
 
-        async def fetchval(self, *_args: object) -> str:
-            return "0"   # lock_timeout, read and set back around the wait
+        async def fetchval(self, *_args: object) -> bool:
+            return True   # pg_try_advisory_lock: had at once
 
     class Pool:
-        def acquire(self) -> contextlib.AbstractAsyncContextManager[object]:
+        def acquire(
+            self, timeout: float | None = None,
+        ) -> contextlib.AbstractAsyncContextManager[object]:
             return contextlib.nullcontext(Conn())  # type: ignore[return-value]
 
     async def registered(_conn: object, _name: str) -> str:

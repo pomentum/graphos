@@ -23,16 +23,19 @@ unregistering, restoring and deleting a tenant, and a set of small points.
   replica's schema write ended at the statement timeout with 504. The wait no longer keeps a
   statement open (the lock is tried, not waited on, in the database), so a waiter on one replica
   never holds up the other replica's concurrent index builds. Schema writes on one replica hold
-  at most half its database connections at once, so a burst of them on many tenants cannot take
-  them all; `GRAPHOS_DB_POOL_MAX_SIZE` must be at least 2.
+  at most half its database connections (besides the one the replica listener keeps) at once, so
+  a burst of them on many tenants cannot take them all; `GRAPHOS_DB_POOL_MAX_SIZE` must be at
+  least 4. The property rename job's last step (the spec, the indexes) takes the lock too, and a
+  graph expansion no longer takes two more connections while holding one.
 - **A registration that restores a tenant and then fails restores nothing.** When bootstrap
   refuses it (a unique index the data does not allow: 422), or anything fails before its change
   record commits, the tenant goes back to unregistered with the very row it was kept with; the
   undo is shielded from the request's cancellation, and when it fails itself it is logged and the
   registration's own error is the answer, and the lock is let go only once it is done. A failure
   after the commit (building a search index, say), or a cancellation during it, leaves the
-  registration in place. Other replicas hear of the restore with the registration's change
-  record. Labels bootstrap created before failing stay as empty tables outside
+  registration in place. Other replicas are told of the restore with the registration's change
+  record; a request that reaches the tenant meanwhile loads it, and what it writes stays with
+  the tenant's data if the restore is undone. Labels bootstrap created before failing stay as empty tables outside
   the schema; registering them again uses them. A restore that finds the tenant no longer
   unregistered answers 409. Such a registration is also checked against the schema it restores
   (for its owner or an admin), not as a new tenant's: a property index on a label it keeps was

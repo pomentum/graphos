@@ -605,8 +605,8 @@ exactly as it was (labels bootstrap created before failing stay as empty tables 
 schema). To free the name, delete the tenant with its data (`?drop_data=true`). Unregistering,
 restoring and deleting take the tenant's schema-write lock, as every schema write does, so none of
 them lands half-way through a registration; they wait at most 30 s for another schema write of the
-tenant (on any replica), then answer 409 `code: schema_busy`. Other schema writes wait at most 5
-minutes.
+tenant (on any replica), or behind other tenants' schema writes holding this replica's
+connections, then answer 409 `code: schema_busy`. Other schema writes wait at most 5 minutes.
 
 A graph unregistered before 0.8.2 kept no registration: it is listed as an `orphan` (admins only).
 An admin registers it again with its schema, or deletes it with its data; anyone else is refused
@@ -1876,7 +1876,7 @@ listed here.
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` | `graphos-db` / 5432 / `graphos` / `graphos` (the compose file sets `graphos_app`) |
 | `DB_PASSWORD` or `DB_PASSWORD_FILE` | one of the two is required |
 | `DB_ADMIN_USER`, `DB_ADMIN_PASSWORD` or `DB_ADMIN_PASSWORD_FILE` | unset (the compose file sets the superuser `graphos`): a role that may create extensions and roles; at start, graphos-api creates what its own role needs when something is missing ([installation §2](installation.md#the-databases-set-up)) |
-| `DB_POOL_MIN_SIZE` / `DB_POOL_MAX_SIZE` | 2 / 16 (the maximum at least 2: schema writes hold at most half of it) |
+| `DB_POOL_MIN_SIZE` / `DB_POOL_MAX_SIZE` | 2 / 16 (the maximum at least 4: the replica listener keeps one, schema writes hold at most half of the rest) |
 | `STATEMENT_TIMEOUT_S` | 60 (greater than 0) |
 | `DB_JIT` | false (see *JIT and plans*) |
 | `VERTEX_GRAPHID_INDEXES` | false: `true` adds a btree on `id` to every vertex label table, built at startup for existing tenants; faster path reads and `edges:scan` pages, slower vertex writes (§5, *paths*) |
@@ -1934,7 +1934,7 @@ and the 422 of a `strict` property schema (with `violations` and `total`).
 | 404 | tenant not registered; single sign-on not configured (`/v1/auth/oidc/*`); node (`GET`, `PATCH`, `POST …/properties`), edge (`GET`, `PATCH`), unregistered edge type in the path, or cache key not found; unknown tenant on `GET`/`DELETE /v1/tenants/{name}`; unknown search `index`, unknown label on `map/hubs`; a job the caller may not see; the Cypher console off, or an unknown saved query |
 | 409 | removing the last admin; a recompute or metrics run while one of either is running or queued for the tenant; cancelling a finished job, or a direct call whose job was cancelled; an id or edge that matches in several labels (pass `label` / `src_label` / `dst_label`); a write that would give two nodes the values of a unique property index (`application/problem+json`); `snapshot-import?mode=empty` into a tenant with nodes; registering or restoring a name that is kept unregistered for someone else, or is an orphan; `drop_data` while a job or a long query holds the tenant; a schema write that would change the structure of a tenant whose schema manager is someone else (`code: schema_managed`); a schema write waiting longer than it may behind another schema write of the tenant: 30 s to unregister, restore or delete it, 5 minutes for the others (`code: schema_busy`) |
 | 410 | a change-feed cursor whose records were pruned (§10) |
-| 412 | `If-Match` did not match: the node or edge changed (or is gone) since it was read; or, on a schema write, the tenant's schema changed since it was read (*Schema versions and `If-Match`*); `If-None-Match: *` on a registration of a tenant that is registered or would be restored |
+| 412 | `If-Match` did not match: the node or edge changed (or is gone) since it was read; or, on a schema write, the tenant's schema changed since it was read (*Schema versions and `If-Match`*); `If-None-Match: *` on a registration of a tenant that is registered, would be restored, or is a graph without a registration it would adopt |
 | 413 | `snapshot-import` over 50M rows, or a body past `GRAPHOS_IMPORT_MAX_BYTES`; a CSV file past `GRAPHOS_CSV_MAX_BYTES` |
 | 422 | body or query validation (patterns, ranges, `resolve_rule`, `label_hierarchy`), or `order_by: null` sent with a `cursor`; a registration that sends SQL (`indexes`, or a string in `generated_columns`), declares a property index or generated column on a label that is not a vertex label, changes a registered generated column, or declares a unique index over values nodes already share; a property-schema entry for an unregistered label, a pattern that does not compile, or a narrowing that changes a type; a write a `strict` property schema refuses (`application/problem+json` with `violations`) |
 | 428 | `If-Match` missing with `GRAPHOS_REQUIRE_IF_MATCH=true` |

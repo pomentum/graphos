@@ -2062,16 +2062,13 @@ async def expand(
             # served by the per-edge-label partial btrees directly.
             args = (out_limit, list(communities)) if communities else (out_limit,)
             try:
-                if out_sql and in_sql:
-                    out_rows, in_rows = await asyncio.gather(
-                        pool.fetch(out_sql, *args),
-                        pool.fetch(in_sql, *args),
-                    )
-                    edge_rows.extend(out_rows)
-                    edge_rows.extend(in_rows)
-                elif out_sql:
+                # On the connection this request holds, one after the other: two
+                # more from the pool while holding one could leave a burst of
+                # expands (with schema writes holding half the pool) waiting for
+                # connections none of them will let go.
+                if out_sql:
                     edge_rows.extend(await conn.fetch(out_sql, *args))
-                elif in_sql:
+                if in_sql:
                     edge_rows.extend(await conn.fetch(in_sql, *args))
             except asyncpg.exceptions.QueryCanceledError:
                 raise

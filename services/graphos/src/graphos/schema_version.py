@@ -113,17 +113,19 @@ class _TenantLocks:
 _locals: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, _TenantLocks] = (
     weakref.WeakKeyDictionary()
 )
-_gates: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+_gates: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[int, asyncio.Semaphore]] = (
     weakref.WeakKeyDictionary()
 )
 
 
 def _gate(pool: asyncpg.Pool) -> asyncio.Semaphore:
-    loop = asyncio.get_running_loop()
-    gate = _gates.get(loop)
+    """Half of what the pool has besides the connection the replica listener
+    keeps for good (graphos.sync), per pool and event loop."""
+    gates = _gates.setdefault(asyncio.get_running_loop(), {})
+    gate = gates.get(id(pool))
     if gate is None:
-        size = pool.get_max_size() if hasattr(pool, "get_max_size") else 2
-        gate = _gates[loop] = asyncio.Semaphore(max(1, size // 2))
+        size = pool.get_max_size() if hasattr(pool, "get_max_size") else 4
+        gate = gates[id(pool)] = asyncio.Semaphore(max(1, (size - 1) // 2))
     return gate
 
 
@@ -154,7 +156,12 @@ async def write(
             if turn.expired():
                 raise SchemaBusyError(tenant, waiting) from exc
             raise
-        conn = await stack.enter_async_context(pool.acquire())
+        try:
+            conn = await stack.enter_async_context(
+                pool.acquire(timeout=max(0.0, deadline - loop.time())),
+            )
+        except TimeoutError as exc:
+            raise SchemaBusyError(tenant, "this replica's connections are all in use") from exc
         key = _LOCK_KEY + tenant
         await _lock(conn, key, tenant, deadline)
         try:

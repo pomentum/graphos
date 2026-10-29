@@ -32,7 +32,7 @@ from typing import Any
 import asyncpg
 from pydantic import BaseModel
 
-from graphos import changes, declared, jobs, reserved, search, writes
+from graphos import changes, declared, jobs, reserved, schema_version, search, writes
 from graphos.bootstrap import (
     TENANTS_CHANNEL,
     TenantSpec,
@@ -802,7 +802,16 @@ async def finish_property(  # noqa: PLR0913 -- one rename's inputs
 ) -> None:
     """Every row is rewritten: the spec follows (definitions, indexes, styles, the
     rename done), the property catalogue loses the old name, one ``schema`` record,
-    then the indexes on the new name are built and those on the old dropped."""
+    then the indexes on the new name are built and those on the old dropped; under
+    the tenant's schema-write lock, as every schema write (the job runs apart from
+    the request that started it)."""
+    async with schema_version.write(pool, tenant, None):
+        await _finish_property(pool, tenant, on, old, new, tables)
+
+
+async def _finish_property(  # noqa: PLR0913 -- one rename's inputs
+    pool: asyncpg.Pool, tenant: str, on: str, old: str, new: str, tables: list[str],
+) -> None:
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0));", tenant)
         stored = spec_from_json(await conn.fetchval(

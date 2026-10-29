@@ -126,7 +126,14 @@ half the connection pool. A fifth review of that found the in-process locks shar
 loops and the in-database lock wait holding up concurrent index builds; 0.14.8 keeps the locks
 per event loop and tries the advisory lock instead of waiting on it, with the review's minor
 points (a cancelled commit, the undo outliving the lock, orphans under `If-None-Match`, the
-restore's announcement, timeouts other than the lock's) done too.
+restore's announcement, timeouts other than the lock's) done too. A last review found
+nothing Critical or Major; its minor points were done as well (the gate leaves the listener's
+connection out and the pool needs 4; the wait for the lock's own connection is bounded; the
+restore sits inside the guarded span and the undo waits on the final transaction's row lock;
+the property rename job and graph expansion stop holding connections while waiting for more).
+One property is kept, by design: a waiter on another replica tries the lock at most every half
+second, so a replica with a steady stream of writes to one tenant can keep it waiting until its
+5-minute bound (409); this is fair enough for schema writes, which are rare.
 
 ## Consequences
 
