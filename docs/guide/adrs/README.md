@@ -96,4 +96,4 @@ What has to be true for the decision to count as carried out (tests, docs).
 | [ADR-0010](ADR-0010-analysis-results-outside-properties.md) | Analysis results outside `properties` | Rejected (2026-10-21): the churn, not the storage, is the cost |
 | [ADR-0011](ADR-0011-communities-from-the-previous-partition.md) | Communities computed from the previous partition (Leiden) | Accepted (2026-10-21) |
 | [ADR-0012](ADR-0012-database-setup-at-start.md) | graphos-api sets its database up at start | Accepted (2026-10-29) |
-| [ADR-0013](ADR-0013-schema-manager-drift-and-tombstones.md) | A tenant's schema manager, drift reports, and drops that stay dropped | Proposed (2026-10-29) |
+| [ADR-0013](ADR-0013-schema-manager-and-drift-reports.md) | A tenant's schema manager, and drift reports | Proposed (2026-10-29), revised (2026-10-29) |
