@@ -1,13 +1,15 @@
-# Louvain community detection on an image built without it (the published one),
-# with no rebuild and nothing mounted:
+# Louvain and Leiden community detection on an image built without python-igraph
+# (the published one), with no rebuild and nothing mounted:
 #
 #   docker compose -f docker-compose.graphos.yml -f docker-compose.louvain.yml up -d
 #
-# graphos-api installs python-igraph from PyPI into its own container on its first
-# start, then starts graphos as usual; graphos finds it at startup, so
-# GET /v1/info reports "louvain": true and POST /v1/{tenant}/recompute-communities
-# works. Restarts reuse the install; a recreated container installs it again (it
-# needs PyPI then). Without this file nothing changes, and recompute answers 501.
+# The image's entrypoint installs python-igraph from PyPI into the container on its
+# first start when GRAPHOS_IGRAPH is true, then starts graphos as usual; graphos finds
+# it at startup, so GET /v1/info reports "louvain": true and
+# POST /v1/{tenant}/recompute-communities works. Restarts reuse the install; a
+# recreated container installs it again (it needs PyPI then). Without this file
+# nothing changes, and recompute answers 501. Needs a graphos-api image with the
+# entrypoint (services/graphos/docker-entrypoint.sh).
 #
 # python-igraph is GPL-2.0-or-later. This file downloads it on your machine; the
 # graphos images do not contain it. If you redistribute a container or image with
@@ -16,22 +18,9 @@
 services:
   graphos-api:
     environment:
-      # Keep within the `louvain` extra of services/graphos/pyproject.toml.
-      GRAPHOS_IGRAPH: "python-igraph>=0.11,<1.0"
-    entrypoint:
-      - sh
-      - -ec
-      - |
-        extras=/tmp/graphos-extras
-        if [ "$$(cat "$$extras/.installed" 2>/dev/null)" != "$$GRAPHOS_IGRAPH" ]; then
-          echo "graphos-api: installing $$GRAPHOS_IGRAPH for Louvain"
-          rm -rf "$$extras"
-          HOME=/tmp pip install --quiet --no-cache-dir --disable-pip-version-check \
-            --target "$$extras" "$$GRAPHOS_IGRAPH"
-          echo "$$GRAPHOS_IGRAPH" > "$$extras/.installed"
-        fi
-        export PYTHONPATH="/app:$$extras"
-        exec python -m graphos
+      GRAPHOS_IGRAPH: "true"
+      # The requirement installed; the default is the `louvain` extra's.
+      # GRAPHOS_IGRAPH_PACKAGE: "python-igraph>=0.11,<1.0"
     healthcheck:
       # The first start downloads python-igraph before graphos listens.
       start_period: 120s

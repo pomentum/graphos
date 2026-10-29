@@ -223,7 +223,7 @@ its name:
 | How you run graphos | Louvain and Leiden |
 |---|---|
 | this compose file, built locally | included (leave it out with `GRAPHOS_EXTRAS= docker compose ...`) |
-| the published image | not included; add `-f docker-compose.louvain.yml`, which installs it into the container on first start (PyPI must be reachable then): [example below](#louvain-with-the-published-images) |
+| the published image | not included; set `GRAPHOS_IGRAPH=true` on graphos-api (or add `-f docker-compose.louvain.yml`, which sets it), and the image installs it into the container on first start (PyPI must be reachable then): [example below](#louvain-with-the-published-images) |
 | `pip install "./services/graphos[louvain]"` | included |
 
 Everything else, the graph metrics included, works without it; `GET /v1/info` reports
@@ -258,6 +258,17 @@ On its first start graphos-api installs python-igraph into its container; restar
 recreated container (a new image or changed settings) installs it again. Without
 `-f docker-compose.louvain.yml`, the same override runs the published images without Louvain. If
 the packages on ghcr.io are not public, sign in first with `docker login ghcr.io`.
+
+The image's entrypoint does the install, so any deployment turns it on with environment variables
+alone:
+
+| Variable (graphos-api) | Default | Meaning |
+|---|---|---|
+| `GRAPHOS_IGRAPH` | `false` | `true`: install python-igraph at start, for Louvain and Leiden. Nothing is installed when the image has it already (built with `GRAPHOS_EXTRAS=louvain`) or the container kept an earlier install. A failed install is logged and graphos starts without it. |
+| `GRAPHOS_IGRAPH_PACKAGE` | `python-igraph>=0.11,<1.0` | The requirement installed (the `louvain` extra's). |
+
+Images up to 0.14.5 have no such entrypoint: there, `docker-compose.louvain.yml` of that release
+does the install itself.
 
 ## 7. Try it with the demo tenant
 

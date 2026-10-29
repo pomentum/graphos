@@ -1362,9 +1362,9 @@ powers-of-ten test fails against the old form.
 
 > **Optional extra.** Louvain and Leiden need python-igraph (GPL-2.0-or-later),
 > installed with `pip install "graphos[louvain]"`, an image built with
-> `--build-arg GRAPHOS_EXTRAS=louvain`, or, with no rebuild, the
-> `docker-compose.louvain.yml` overlay (graphos-api downloads it on first
-> start). Without it, `recompute-communities` answers 501 and
+> `--build-arg GRAPHOS_EXTRAS=louvain`, or, with no rebuild, `GRAPHOS_IGRAPH=true`
+> on graphos-api (the image's entrypoint downloads it on first start; the
+> `docker-compose.louvain.yml` overlay sets it). Without it, `recompute-communities` answers 501 and
 > `GET /v1/info` reports `features.louvain: false`.
 
 `POST /v1/{tenant}/recompute-communities` (`maintain`) answers when done, or

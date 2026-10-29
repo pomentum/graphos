@@ -7,7 +7,8 @@ under one version.
 ## Unreleased
 
 graphos-api can set its database up itself at start, so a deployment no longer has to mount the
-db-init folder into the database container.
+db-init folder into the database container; and its image installs python-igraph for Louvain and
+Leiden with one setting, `GRAPHOS_IGRAPH=true`, instead of a script in the compose file.
 
 ### Added
 
@@ -27,6 +28,21 @@ db-init folder into the database container.
   mount, which a new deployment may drop. **Docs:** installation §2 (The database's set-up), §8
   (Backup and restore), §10; concept §2.2; usage §1.1 and Configuration; the upgrade guide (a
   database you run yourself); the README's configuration table.
+
+- **Louvain and Leiden on the published image, with one setting.** The graphos-api image's
+  entrypoint installs python-igraph (GPL-2.0-or-later, which the image leaves out) from PyPI into
+  the container at start when `GRAPHOS_IGRAPH=true`, then starts graphos; `GRAPHOS_IGRAPH_PACKAGE`
+  names another requirement (default: the `louvain` extra's). Nothing is installed when igraph is
+  there already (an image built with the extra, or an earlier install the container kept), and a
+  failed install is logged and graphos starts without it. A compose file no longer carries the
+  install script: `docker-compose.louvain.yml` now only sets `GRAPHOS_IGRAPH`. Arguments still go
+  to graphos (`docker run <image> reset-admin-password`). **Docs:** installation §6.
+
+### Changed
+
+- **`docker-compose.louvain.yml` needs this release's graphos-api image**: it sets
+  `GRAPHOS_IGRAPH=true` for the image's entrypoint instead of overriding the entrypoint. With an
+  image up to 0.14.5, use that release's file.
 
 ### Upgrading
 
