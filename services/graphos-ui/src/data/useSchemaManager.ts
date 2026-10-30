@@ -24,6 +24,11 @@ export interface SchemaManagement {
   canOwnStructure: boolean;
   /** May release the manager: owns the tenant (or is an admin), and is not the manager. */
   canRelease: boolean;
+  /**
+   * May name or transfer the manager: owns the tenant (or is an admin), signed in
+   * (graphos refuses a manager while authentication is off).
+   */
+  canName: boolean;
 }
 
 /**
@@ -46,5 +51,6 @@ export function useSchemaManager(): SchemaManagement {
     canEditStructure: canMaintain && !locked,
     canOwnStructure: isOwner && !locked,
     canRelease: subject !== null && isOwner && !isManager,
+    canName: isOwner && me.via !== "none",
   };
 }

@@ -4,6 +4,17 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Added
+
+- **Web UI: name or transfer a schema's manager.** On the Schema page, an owner of a tenant nobody
+  manages can name its manager, and one of a managed tenant can transfer it: to themselves, or to
+  a user or service account (an admin picks it from the accounts, service accounts first; anyone
+  else types its name). Before, the manager could only be named by a registration (a program
+  naming itself, or a call to `POST /v1/tenants`), and released in the web UI. Not offered while
+  authentication is off, where graphos refuses a manager.
+
 ## 0.14.9 — 2026-10-30
 
 ### Fixed

@@ -674,8 +674,10 @@ answer says which manager it left. Then:
 - being the manager grants nothing: each write still needs its level;
 - unregistering and restoring a tenant keeps its manager; a registration that would restore a
   managed tenant is judged as that tenant, and restores nothing when refused;
-- the web UI shows the structure read-only, names the manager, and lets an owner release it
-  (`GET /v1/me` gives the viewer's own `subject`, which the UI compares with the manager);
+- the web UI shows the structure read-only, names the manager, and lets an owner release it,
+  or name or transfer it: themselves, or an account (picked from the accounts by an admin,
+  typed by anyone else) (`GET /v1/me` gives the viewer's own `subject`, which the UI compares
+  with the manager);
 - the manager stays named when its user is deleted or disabled, and when authentication is turned
   off later (every write is then the anonymous admin's, which manages nothing): the structure
   stays locked until an owner releases it (`"schema_manager": null`);
