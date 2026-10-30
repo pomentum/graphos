@@ -4,6 +4,15 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Fixed
+
+- **A failed hop of a two-way graph expansion answers its own error again** ("expand failed in
+  the database", with its reason), not "another operation is in progress". 0.14.8 ran the two directions
+  on two connections at once, and when one query failed it gave the second connection back while
+  that one's query was still running. Both now end, failed or cancelled, before it goes back.
+
 ## 0.14.8 — 2026-10-29
 
 Closes what the reviews of the schema manager left open (ADR-0014): the races around
