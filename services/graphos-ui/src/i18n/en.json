@@ -743,7 +743,18 @@
         "release": "Release",
         "releaseTitle": "Release the schema from {{name}}?",
         "releaseBody": "Anyone who maintains this tenant can then change its structure here again. The next registration from {{name}} merges as on any tenant, and may overwrite what people change here.",
-        "releaseConfirm": "Release the schema"
+        "releaseConfirm": "Release the schema",
+        "none": "Nobody manages this schema's structure: whoever maintains the tenant changes it here.",
+        "name": "Name a manager",
+        "transfer": "Transfer",
+        "nameTitle": "Who manages this schema's structure?",
+        "nameBody": "Only the manager's registrations may then change labels, relationship types, indexes and the rest of the structure; styles stay editable by whoever maintains the tenant. A program usually names itself when it registers: naming it here starts at once.",
+        "me": "Myself",
+        "account": "A user or service account",
+        "accountPick": "Account",
+        "accountName": "Account name",
+        "accountHint": "A graphos user or service account (e.g. loader), or a single sign-on subject as oidc-sub:<id>.",
+        "nameConfirm": "Name the manager"
       },
       "file": {
         "export": "Export",
@@ -1384,7 +1395,8 @@
     "renameStarted": "Renaming {{from}} to {{to}} in the background",
     "deprecationSaved": "Deprecation saved",
     "labelDropped": "Dropped",
-    "schemaManagerReleased": "Schema released"
+    "schemaManagerReleased": "Schema released",
+    "schemaManagerSet": "Schema manager named"
   },
   "csvImport": {
     "entryTitle": "Import a CSV file",
@@ -1531,6 +1543,7 @@
     "deprecationNotSaved": "Deprecation not saved",
     "labelNotDropped": "Not dropped",
     "schemaManaged": "Managed by a program",
-    "schemaManagerNotReleased": "Not released"
+    "schemaManagerNotReleased": "Not released",
+    "schemaManagerNotSet": "Manager not named"
   }
 }

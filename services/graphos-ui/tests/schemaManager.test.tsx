@@ -229,6 +229,70 @@ describe("releasing the schema", () => {
   });
 });
 
+describe("naming the schema's manager", () => {
+  const posted = async (calls: Call[]) => {
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    return calls.find((c) => c.method === "POST")!;
+  };
+
+  it("lets an owner name itself when nobody manages the schema", async () => {
+    const { calls } = await schemaPage(managed(null), me("owner"));
+    expect(screen.getByText(/Nobody manages this schema's structure/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Name a manager" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Name the manager" }));
+    const named = await posted(calls);
+    expect(named.url).toBe("/v1/tenants");
+    expect(named.body).toEqual({ name: "acme", schema_manager: "self" });
+    expect(named.headers["If-Match"]).toBe('"v7"');
+  });
+
+  it("lets an owner who is no admin type the account", async () => {
+    const { calls } = await schemaPage(managed(null), me("owner"));
+    fireEvent.click(screen.getByRole("button", { name: "Name a manager" }));
+    fireEvent.click(await screen.findByLabelText("A user or service account"));
+    const confirm = screen.getByRole("button", { name: "Name the manager" });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Account name"), { target: { value: " loader " } });
+    fireEvent.click(confirm);
+    expect((await posted(calls)).body).toEqual({ name: "acme", schema_manager: "user:loader" });
+  });
+
+  it("lets an admin pick the account, service accounts first, and transfer it", async () => {
+    const admin = { ...me("owner", "ops"), admin: true };
+    const fake = fakeGraphos({
+      "GET /v1/acme/schema": managed("user:importer"),
+      "POST /v1/tenants": { name: "acme" },
+      "GET /v1/users": {
+        users: [
+          { name: "ada", kind: "person", disabled: false },
+          { name: "gone", kind: "service", disabled: true },
+          { name: "meridian", kind: "service", disabled: false },
+        ],
+      },
+      ...READS,
+    });
+    render(ui(fake.fetchImpl, admin, <SchemaView />));
+    fireEvent.click(await screen.findByRole("button", { name: "Transfer" }));
+    fireEvent.click(await screen.findByLabelText("A user or service account"));
+    fireEvent.click(screen.getByRole("textbox", { name: "Account" }));
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["meridian (service)", "ada"]);
+    fireEvent.click(options[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "Name the manager" }));
+    expect((await posted(fake.calls)).body).toEqual({ name: "acme", schema_manager: "user:meridian" });
+  });
+
+  it("offers it to no maintainer", async () => {
+    await schemaPage(managed(null), me("maintain"));
+    expect(screen.queryByRole("button", { name: "Name a manager" })).toBeNull();
+  });
+
+  it("offers nothing to name while authentication is off", async () => {
+    await schemaPage(managed("user:importer"), me("owner", "anonymous", "none"));
+    expect(screen.queryByRole("button", { name: "Transfer" })).toBeNull();
+  });
+});
+
 describe("the diagram's side panel of a managed schema", () => {
   const linkOf = (schema: TenantSchema, type: string) =>
     buildDiagram(schema, MAP).links.find((l) => l.types.some((x) => x.type === type))!.key;

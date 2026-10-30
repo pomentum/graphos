@@ -80,7 +80,8 @@ carries) and `deprecated` (what is on its way out).
 - **A program can own its schema.** A tenant may name a schema manager (a user,
   service account or single-sign-on caller, `schema_manager`): only its
   registrations change the structure, people may still change styles, and the
-  web UI shows the structure read-only. The program chooses whether its styles
+  web UI shows the structure read-only (an owner names, transfers or releases the
+  manager there). The program chooses whether its styles
   overwrite people's (`display_merge`). A registration's dry run reports drift:
   what people added, what it would overwrite or remove, which settings it would
   change, what it would create again after a drop (ADR-0013, ADR-0014).

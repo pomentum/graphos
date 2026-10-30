@@ -504,6 +504,23 @@ export function useReleaseSchemaManager() {
 }
 
 /**
+ * Names or transfers the program that manages the tenant's schema (owner):
+ * `"self"` for the signed-in user, `user:<name>` for a graphos account, or
+ * `oidc-sub:<id>`. The schema is read again.
+ */
+export function useSetSchemaManager() {
+  const { api, tenant } = useTenantSession();
+  const client = useQueryClient();
+  const version = useSchemaVersion();
+  return useMutation({
+    meta: { success: "notices.schemaManagerSet", errorTitle: "errors.schemaManagerNotSet" },
+    mutationFn: (subject: string) => api.setSchemaManager(subject, version.etag()),
+    onError: version.onError,
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.schema(tenant) }),
+  });
+}
+
+/**
  * Adds labels, relationship types, parents or search indexes (admin). The
  * schema, the map and the property catalogue are read again afterwards.
  */

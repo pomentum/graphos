@@ -135,6 +135,10 @@ One property is kept, by design: a waiter on another replica tries the lock at m
 second, so a replica with a steady stream of writes to one tenant can keep it waiting until its
 5-minute bound (409); this is fair enough for schema writes, which are rare.
 
+Later (0.14.10): the web UI names and transfers a manager too, not only releases it (ADR-0013 left
+naming to a program's registration). An owner names themselves or an account; it is the same
+registration field, so nothing else changes.
+
 ## Consequences
 
 - The program decides how its styles merge; the safe default protects people's styles, and a
