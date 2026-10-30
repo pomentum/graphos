@@ -1828,6 +1828,30 @@ async def _free_connection(pool: asyncpg.Pool) -> asyncpg.Connection | None:
 # How long "at once" is for a second connection (connecting a new one included).
 _FREE_CONNECTION_S = 0.05
 
+
+async def _fetch_pair(
+    pool: asyncpg.Pool, conn: asyncpg.Connection, other: asyncpg.Connection,
+    sqls: tuple[str, str], args: tuple[object, ...],
+) -> tuple[list[asyncpg.Record], list[asyncpg.Record]]:
+    """Two queries at once, the first on ``conn``, the second on ``other``
+    (released here). Both end, failed, cancelled or not, before ``other`` goes
+    back: a connection given back mid-query fails as "another operation is in
+    progress". The first failure is raised."""
+    first = asyncio.ensure_future(conn.fetch(sqls[0], *args))
+    second = asyncio.ensure_future(other.fetch(sqls[1], *args))
+    try:
+        results = await asyncio.gather(first, second, return_exceptions=True)
+    finally:
+        for task in (first, second):
+            if not task.done():
+                task.cancel()
+        await asyncio.wait((first, second))
+        await pool.release(other)
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
+    return results[0], results[1]  # type: ignore[return-value]
+
 @router.get(
     "/expand",
     response_model=ExpandResponse,
@@ -2078,13 +2102,10 @@ async def expand(
             args = (out_limit, list(communities)) if communities else (out_limit,)
             try:
                 other = await _free_connection(pool) if out_sql and in_sql else None
-                if other is not None:
-                    try:
-                        out_rows, in_rows = await asyncio.gather(
-                            conn.fetch(out_sql, *args), other.fetch(in_sql, *args),
-                        )
-                    finally:
-                        await pool.release(other)
+                if other is not None and out_sql and in_sql:
+                    out_rows, in_rows = await _fetch_pair(
+                        pool, conn, other, (out_sql, in_sql), args,
+                    )
                     edge_rows.extend(out_rows)
                     edge_rows.extend(in_rows)
                 else:
