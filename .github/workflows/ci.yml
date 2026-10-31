@@ -30,8 +30,15 @@ jobs:
         working-directory: services/graphos
         run: mypy
 
+      # In parallel (pytest-xdist), with coverage: its table goes to the run's summary page.
       - name: Unit tests (no DB)
-        run: pytest -m "not db" services/graphos/tests
+        run: >-
+          pytest -m "not db" -n auto services/graphos/tests
+          --cov=graphos --cov-report=xml:coverage-service.xml --cov-report=html:htmlcov/service
+
+      - name: Coverage summary (service)
+        if: always()
+        run: python3 tools/ci/coverage_summary.py --title "Service (unit tests, no DB)" coverage-service.xml >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install (client)
         run: pip install -e "clients/python[dev]"
@@ -39,8 +46,23 @@ jobs:
       - name: Lint (client)
         run: ruff check clients/python/src clients/python/tests clients/python/examples
 
+      # Serial: a few deliberately slow tests dominate, which workers do not shorten.
       - name: Client tests
-        run: pytest clients/python/tests
+        run: >-
+          pytest clients/python/tests
+          --cov=graphos_client --cov-report=xml:coverage-client.xml --cov-report=html:htmlcov/client
+
+      - name: Coverage summary (client)
+        if: always()
+        run: python3 tools/ci/coverage_summary.py --title "Python client" coverage-client.xml >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Coverage reports (HTML)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-python
+          path: htmlcov/
+          if-no-files-found: ignore
 
   # ── Web UI: format, types, tests, production build ──────────────────────
   ui:
@@ -64,6 +86,24 @@ jobs:
 
       - name: Tests
         run: npm test
+
+      # Report only: coverage slows the jsdom tests, so a test past its time here does not
+      # fail the run (the step above is the gate); the summary is written either way.
+      - name: Coverage
+        continue-on-error: true
+        run: npx vitest run --coverage --testTimeout=30000
+
+      - name: Coverage summary (web UI)
+        if: always()
+        run: python3 ../../tools/ci/coverage_summary.py --title "Web UI" coverage/coverage-summary.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Coverage report (HTML)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-ui
+          path: services/graphos-ui/coverage/
+          if-no-files-found: ignore
 
       - name: Build
         run: npm run build

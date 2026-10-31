@@ -19,6 +19,7 @@ env/
 .coverage.*
 htmlcov/
 coverage.xml
+coverage-*.xml
 
 # Local env / secrets — everything in deploy/secrets except *.example and .gitkeep
 services/graphos/deploy/secrets/*
