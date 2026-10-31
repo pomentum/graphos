@@ -153,7 +153,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The tests run in a container with services/graphos mounted at /work, so the
+      # coverage report written there is on the runner afterwards.
       - name: Run DB-gated tests against compose stack
         env:
           DB_IMAGE: ${{ matrix.image }}
-        run: bash scripts/run-db-tests.sh --down-volumes ${DB_IMAGE:+--db-image "$DB_IMAGE"}
+        run: >-
+          bash scripts/run-db-tests.sh --down-volumes ${DB_IMAGE:+--db-image "$DB_IMAGE"}
+          -m db --cov=graphos --cov-report=xml:/work/coverage-db.xml
+          --cov-report=html:/work/htmlcov/db
+
+      - name: Coverage summary (service, DB tests)
+        if: always()
+        run: python3 tools/ci/coverage_summary.py --title "Service (DB tests)" services/graphos/coverage-db.xml >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Coverage report (HTML)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-db-${{ matrix.db }}
+          path: services/graphos/htmlcov/db/
+          if-no-files-found: ignore
