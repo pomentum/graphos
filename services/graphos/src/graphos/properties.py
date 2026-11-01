@@ -313,9 +313,11 @@ def _names_of(
         for prop, entry in ((entries.get(name) or {}).get("properties") or {}).items():
             deprecated[prop] = renames.deprecation_note(entry, "the property")
     renamed: dict[str, tuple[str, bool]] = {}
-    for entry in spec_renames:
+    for entry in spec_renames:       # oldest first
         if entry.get("kind") == "property" and entry.get("on") in chain:
             to = entry.get("to")
+            # A name renamed to is live again, even one renamed away before (renamed back).
+            renamed.pop(str(to), None)
             renamed[str(entry["from"])] = (
                 (f"renamed to {to!r}", True) if entry.get("status", "done") == "done"
                 else (f"being renamed to {to!r}: write {to!r}", False)

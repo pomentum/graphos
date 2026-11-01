@@ -4,6 +4,45 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+Fixes found by new tests written to raise the unit-test coverage, and a coverage report on every CI
+run.
+
+### Fixed
+
+- **Sign-in.**
+  - Single sign-on's `return_to` refuses a path browsers read as another host (`/\host`, a tab or
+    newline in it); it becomes `/`, as another host does.
+  - A JSON body holding a lone surrogate escape (`"\ud800"`, valid JSON) is answered `422`, as any
+    invalid input is. It was a `500`, without signing in, on every JSON route.
+  - The sign-in throttle's address limit holds when every tracked address is active.
+- **Dataset import.**
+  - A gzip file made of several members (`cat a.gz b.gz`, `gzip -c a b`) is read whole. Everything
+    after the first member was dropped without an error.
+  - `complete` is false when the end line's counts differ from the lines read, or lines follow
+    it, with the reason in `errors`; it was true for any end line. What is imported is unchanged.
+- **Change feed and live sync.**
+  - A cursor with non-ASCII digits, or numbers past what PostgreSQL holds, is a `400`, not a `500`.
+  - One on-connect catch-up failing no longer stops the others or the notifications.
+  - A tenant's reloads run in order, so a stale one cannot win; a tenant dropped on this server and
+    registered again elsewhere with the same spec is reloaded at once.
+- **Renames.**
+  - A label or edge type renamed onto another object's name in the tenant's schema is a `400`, not
+    a `500`.
+  - A label rename carries the property renames recorded on it.
+  - A property renamed back to its old name can be written again.
+  - Renaming a property onto one already declared on the label is refused; one definition was
+    silently dropped.
+  - A property rename updates other deprecations' `replaced_by`.
+  - A refusal after a chain of renames (A to B, then B to C) names the last name too.
+
+### Changed
+
+- **CI:** each run's summary page shows the test coverage of the service (unit tests, and the
+  DB-gated tests on `main`), the Python client and the web UI, with the HTML reports as artifacts.
+  The service's unit tests run in parallel.
+
 ## 0.14.10 — 2026-10-30
 
 ### Added

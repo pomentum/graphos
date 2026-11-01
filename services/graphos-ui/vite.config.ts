@@ -36,5 +36,13 @@ export default defineConfig({
     globals: true,
     setupFiles: ["tests/setup.ts"],
     include: ["tests/**/*.test.{ts,tsx}"],
+    // `npm test -- --coverage` (CI): totals for the job summary, the HTML report as an artifact.
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{ts,tsx}"],
+      reporter: ["text-summary", "json-summary", "html"],
+      reportsDirectory: "coverage",
+      reportOnFailure: true,
+    },
   },
 });

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import json
 import logging
 import time
@@ -99,9 +100,15 @@ class Listener:
                         await conn.add_listener(channel, self._dispatch)
                     self.listening.set()
                     for callback in self._on_connect:
-                        result = callback()
-                        if asyncio.iscoroutine(result):
-                            await result
+                        # One catch-up failing (a reconcile on a database error) must
+                        # not skip the others nor drop the connection: notifications
+                        # would then never be delivered while it kept failing.
+                        try:
+                            result = callback()
+                            if inspect.isawaitable(result):
+                                await result
+                        except Exception:  # noqa: BLE001
+                            log.exception("on-connect catch-up failed")
                     try:
                         await lost.wait()
                     finally:
@@ -135,6 +142,8 @@ class RegistrySync:
         self._interval_s = interval_s
         self._versions: dict[str, str] = {}
         self._unknown: dict[str, float] = {}
+        self._reloading: dict[str, asyncio.Lock] = {}
+        self._reloads: set[asyncio.Task[None]] = set()
         self._task: asyncio.Task[None] | None = None
         listener.subscribe(TENANTS_CHANNEL, self._notified)
         listener.on_connect(self.reconcile)
@@ -150,13 +159,18 @@ class RegistrySync:
 
     def _notified(self, name: str) -> None:
         self._unknown.pop(name, None)
-        asyncio.get_running_loop().create_task(self._apply_logged(name))
+        task = asyncio.get_running_loop().create_task(self._apply_logged(name))
+        self._reloads.add(task)                 # kept until it ends, not collected mid-run
+        task.add_done_callback(self._reloads.discard)
 
     async def _apply_logged(self, name: str) -> None:
-        try:
-            await self.apply(name)
-        except Exception:  # noqa: BLE001 — the periodic reconcile will catch up
-            log.warning("tenant reload failed", extra={"tenant": name}, exc_info=True)
+        # One tenant's reloads in turn: each reads the row when its turn comes, so an
+        # older reload that took longer cannot finish after a newer one and win.
+        async with self._reloading.setdefault(name, asyncio.Lock()):
+            try:
+                await self.apply(name)
+            except Exception:  # noqa: BLE001 — the periodic reconcile will catch up
+                log.warning("tenant reload failed", extra={"tenant": name}, exc_info=True)
 
     async def apply(self, name: str) -> bool:
         """Load tenant ``name`` from the table (or forget it).  True if it exists."""
@@ -166,7 +180,9 @@ class RegistrySync:
                 log.info("tenant unregistered by another replica", extra={"tenant": name})
             self._versions.pop(name, None)
             return False
-        if self._versions.get(name) != row["version"]:
+        # Also when this server no longer has it (dropped here, then registered again
+        # elsewhere with the same spec): the version alone would not change.
+        if self._versions.get(name) != row["version"] or name not in bootstrap.registered_tenants():
             bootstrap.remember(bootstrap.spec_from_row(row))
             self._versions[name] = row["version"]
             log.info("tenant registration loaded", extra={"tenant": name})

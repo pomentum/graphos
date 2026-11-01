@@ -967,6 +967,10 @@ class Throttle:
         with self._lock:
             if len(self._seen) >= self._max_keys and key not in self._seen:
                 self._seen = {k: v for k, v in self._seen.items() if v and v[-1] > now - 60}
+                if len(self._seen) >= self._max_keys:
+                    # Every address still active: the one quiet longest makes room, so
+                    # many addresses cannot grow this without bound.
+                    del self._seen[min(self._seen, key=lambda k: self._seen[k][-1])]
             times = self._seen.setdefault(key, deque())
             while times and times[0] <= now - 60:
                 times.popleft()

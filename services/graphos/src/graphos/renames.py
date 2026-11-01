@@ -38,6 +38,19 @@ def renamed_away(
     return None
 
 
+def _then(spec: Any, entry: Mapping[str, Any], kinds: Iterable[str] = _NAMED) -> str:
+    """``, and later to 'C'`` when the name ``entry`` renamed to was renamed away
+    too (A to B, then B to C), so a refusal names where it is now; else ``""``."""
+    name, seen = str(entry.get("to")), {str(entry.get("from"))}
+    while name not in seen:
+        seen.add(name)
+        later = renamed_away(spec, name, kinds)
+        if later is None:
+            break
+        name = str(later.get("to"))
+    return f", and later to {name!r}" if name != entry.get("to") else ""
+
+
 def where_it_went(entry: Mapping[str, Any]) -> str:
     """``"X" was renamed to "Y" on <date>``."""
     when = str(entry.get("at") or "")[:10]
@@ -55,14 +68,16 @@ def refuse_renamed(spec: Any, name: str | None, *, kinds: Iterable[str] = _NAMED
     if entry is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"{where_it_went(entry)}: use the new name",
+            detail=f"{where_it_went(entry)}{_then(spec, entry, kinds)}: use the new name",
         )
 
 
 def why_unknown(spec: Any, name: str) -> str | None:
     """Why a label or type the tenant lacks is unknown, when it was renamed away."""
     entry = renamed_away(spec, name)
-    return None if entry is None else f"{where_it_went(entry)}: use the new name"
+    return None if entry is None else (
+        f"{where_it_went(entry)}{_then(spec, entry)}: use the new name"
+    )
 
 
 def renamed_properties(spec: Any, on: str) -> dict[str, Mapping[str, Any]]:

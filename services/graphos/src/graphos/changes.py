@@ -72,7 +72,12 @@ ACTOR: ContextVar[Actor | None] = ContextVar("graphos_change_actor", default=Non
 
 # ── Positions ──────────────────────────────────────────────────────────────
 
-_CURSOR = re.compile(r"^(\d{1,20})\.(\d{1,20})$")
+# ASCII digits only (``\d`` also matches other scripts' digits), within what
+# PostgreSQL holds: the txid an xid8, the seq a bigint. Past them the query
+# would fail in the database (a 500) where a bad cursor is a 400.
+_CURSOR = re.compile(r"^([0-9]{1,20})\.([0-9]{1,20})$")
+_MAX_TXID = 2**64 - 1
+_MAX_SEQ = 2**63 - 1
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -88,7 +93,7 @@ class Cursor:
     @classmethod
     def parse(cls, text: str) -> Cursor:
         m = _CURSOR.fullmatch(text.strip())
-        if m is None:
+        if m is None or int(m[1]) > _MAX_TXID or int(m[2]) > _MAX_SEQ:
             raise ValueError(f"not a change-feed cursor: {text!r}")
         return cls(int(m[1]), int(m[2]))
 
