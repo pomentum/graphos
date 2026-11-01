@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -23,6 +24,8 @@ from typing import Any
 import asyncpg
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -353,6 +356,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         min_change=settings.metrics_min_change,
     )
     configure_compute(threads=settings.compute_threads)
+
+    async def _invalid_request(request: Request, exc: Exception) -> Response:
+        # FastAPI's own 422, with the same body, written ASCII-escaped: its handler
+        # echoes the input, and an input holding a lone surrogate (valid JSON, e.g.
+        # "\ud800") cannot be encoded as UTF-8, which turned the 422 into a 500.
+        assert isinstance(exc, RequestValidationError)
+        body = json.dumps({"detail": jsonable_encoder(exc.errors())}, ensure_ascii=True)
+        return Response(body, status_code=422, media_type="application/json")
+
+    app.add_exception_handler(RequestValidationError, _invalid_request)
 
     async def _statement_timeout(request: Request, exc: Exception) -> JSONResponse:
         # Postgres cancelled the statement at ``statement_timeout`` (or the

@@ -97,6 +97,16 @@ def deps(request: Request) -> AuthDeps:
     )
 
 
+def _local_path(value: str) -> bool:
+    """Whether ``value`` is a page of this UI: a path, never another host. Browsers
+    read ``//host``, ``/\\host`` and a path with a tab or newline in it as another
+    host, so a backslash or a control or space character is refused too."""
+    return (
+        value.startswith("/") and not value.startswith("//")
+        and "\\" not in value and not any(ch <= " " or ch == "\x7f" for ch in value)
+    )
+
+
 def _refused(exc: Exception) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc),
@@ -442,9 +452,7 @@ async def oidc_start(body: OidcStart, request: Request) -> OidcStartResponse:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="redirect_uri is not one graphos accepts (GRAPHOS_OIDC_REDIRECT_URIS)",
         )
-    # Only a page of this UI: no other host, no scheme-relative URL.
-    return_to = body.return_to if body.return_to.startswith("/") and \
-        not body.return_to.startswith("//") else "/"
+    return_to = body.return_to if _local_path(body.return_to) else "/"
     state, nonce = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
     verifier, challenge = oidc.pkce_pair()
     await d.pool.execute(
