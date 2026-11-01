@@ -121,7 +121,15 @@ def renamed_spec(
         deprecated=_replacements_renamed(
             _part_rekeyed(spec.deprecated, part, old, new), old, new,
         ),
-        renames=(*spec.renames, entry),
+        # The property renames made on it go with it: a property renamed away there
+        # stays refused under the new name.
+        renames=(
+            *(
+                {**r, "on": new} if r.get("kind") == "property" and r.get("on") == old else r
+                for r in spec.renames
+            ),
+            entry,
+        ),
     )
     if kind != "label":
         return replace(
@@ -227,6 +235,10 @@ def check(spec: TenantSpec, kind: str, old: str, new: str) -> None:
         raise RenameError("the new name is the old one")
     if new in spec.vertex_labels or new in spec.edge_labels:
         raise RenameError(f"{new!r} is already a label or edge type of the tenant")
+    # AGE names each label's sequence <label>_id_seq, in the same schema as the tables.
+    owner = new.removesuffix("_id_seq")
+    if owner != new and owner in (*spec.vertex_labels, *spec.edge_labels):
+        raise RenameError(f"{new!r} is the name of a label's id sequence in the tenant's schema")
 
 
 # ── Indexes ────────────────────────────────────────────────────────────────
@@ -539,6 +551,13 @@ def check_property(spec: TenantSpec, on: str, old: str, new: str) -> list[str]:
         if name == "id" or reserved.is_reserved(name):
             raise RenameError(f"{name!r} cannot be renamed: graphos needs it")
     tables = below(spec, on) if part == "vertex" else [on]
+    # Onto a property already declared there, one of the two definitions would be lost.
+    for table in tables:
+        declared = (spec.property_schema.get(part) or {}).get(table) or {}
+        if isinstance(declared.get("properties"), dict) and new in declared["properties"]:
+            raise RenameError(
+                f"{new!r} is already declared on {table}: remove its definition first"
+            )
     for col in spec.generated_columns:
         if col.get("label") in tables and col.get("property") == old:
             raise RenameError(
@@ -589,6 +608,12 @@ def renamed_property_spec(
     def deprecations(entry: dict[str, Any]) -> dict[str, Any]:
         props = dict(entry.get("properties") or {})
         props.pop(old, None)
+        # Another property deprecated in favour of this one now names it as it is.
+        props = {
+            k: {**v, "replaced_by": new}
+            if isinstance(v, dict) and v.get("replaced_by") == old else v
+            for k, v in props.items()
+        }
         return {**entry, "properties": props} if props else {
             k: v for k, v in entry.items() if k != "properties"
         }

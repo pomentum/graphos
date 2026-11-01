@@ -1205,6 +1205,12 @@ async def _rename(
             )
     except schema_rename.RenameError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except (asyncpg.exceptions.DuplicateTableError, asyncpg.exceptions.DuplicateObjectError) as exc:
+        # The new name is another object's in the tenant's schema (an index, a sequence).
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{body.to!r} is the name of another object in the tenant's schema",
+        ) from exc
     except lifecycle.TenantBusyError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return SchemaRenameResponse(
