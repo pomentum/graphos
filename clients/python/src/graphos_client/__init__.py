@@ -116,7 +116,7 @@ from graphos_client._models import (
 )
 from graphos_client._pool import GraphosPool, TenantSchema, is_schema_drift
 
-__version__ = "0.14.10"
+__version__ = "0.14.11"
 
 __all__ = [
     "AnalysisFreshness",
