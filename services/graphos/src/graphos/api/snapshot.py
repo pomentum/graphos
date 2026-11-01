@@ -190,6 +190,23 @@ async def _is_empty(pool: asyncpg.Pool, tenant: str) -> bool:
     )
 
 
+
+def _end_problem(counts: Any, after_end: int, nodes: int, edges: int) -> str | None:
+    """Why a file whose end line arrived is still not complete, or ``None``."""
+    if after_end:
+        return (
+            f"{after_end} line(s) after the end line: the file is not one export "
+            "(several files run together?)"
+        )
+    if isinstance(counts, dict):
+        want = (counts.get("nodes"), counts.get("edges"))
+        if all(isinstance(n, int) for n in want) and want != (nodes, edges):
+            return (
+                f"the end line counts {want[0]} nodes and {want[1]} relationships, "
+                f"the file has {nodes} and {edges}: lines are missing or were added"
+            )
+    return None
+
 async def _restore_edge_communities(pool: asyncpg.Pool, tenant: str) -> int:
     """Set each edge's ``end_community_id`` / ``start_community_id`` from its
     ends' ``community_id``, as the community recompute's write-back does."""
@@ -342,6 +359,11 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
 
     header: dict[str, Any] | None = None
     complete = False
+    # The end line's counts, and the lines after it: a file is complete only when
+    # its end line came last and counts the lines read (not one cut in the middle,
+    # nor two files run together).
+    end_counts: Any = None
+    after_end = 0
     communities_in_file = False
     gunzip = dataset.Gunzip(request.app.state.settings.import_max_bytes)
     total_rows = 0
@@ -365,6 +387,8 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
                 continue
 
             kind = str(payload.pop("_kind", "node")).lower()
+            if complete and kind != "end":
+                after_end += 1
 
             if kind == "header":
                 try:
@@ -377,6 +401,7 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
                 continue
             if kind == "end":
                 complete = True
+                end_counts = payload.get("counts")
                 continue
 
             if kind == "node":
@@ -473,6 +498,12 @@ async def snapshot_import(  # noqa: PLR0912, PLR0915 — single-stream loop; spl
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"snapshot import failed ({type(exc).__name__}); see server log",
         ) from exc
+
+    if complete:
+        problem = _end_problem(end_counts, after_end, nodes_received, edges_received)
+        if problem is not None:
+            complete = False
+            errors.append(problem)
 
     # The edges' copies of their ends' communities (what community-scoped
     # walks read) are not in the file: restore them from the nodes'.

@@ -255,6 +255,14 @@ class Gunzip:
             piece = self._inflater.decompress(data, self._STEP)
             out.append(self._count(piece))
             data = self._inflater.unconsumed_tail
+            if self._inflater.eof:
+                # One gzip member ended: a file may hold several (`cat a.gz b.gz`,
+                # `gzip -c a b`), read like gzip.decompress reads them; the zeros
+                # some tools pad a file with end it.
+                data = self._inflater.unused_data + data
+                if not data.strip(b"\x00"):
+                    break
+                self._inflater = zlib.decompressobj(31)
         return out
 
     def finish(self) -> list[bytes]:
