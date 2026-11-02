@@ -257,7 +257,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 |---|---|
 | [Installation guide](docs/guide/installation.md) | Installing, the first sign-in, users, single sign-on, production settings, upgrading |
 | [Reading graphos's data without graphos](docs/guide/without-graphos.md) | The table layout, reading it with SQL or Cypher, taking it out, loading an export into plain AGE |
-| [Upgrading the database](docs/guide/upgrade-postgresql-18.md) | Moving from PostgreSQL 16 / AGE 1.6 (no longer supported) to PostgreSQL 18 / AGE 1.8 with `docker compose up` |
+| [Upgrading the database](docs/guide/upgrade-postgresql-18.md) | Moving an older graphos database to PostgreSQL 18 / AGE 1.8 with `docker compose up` |
 | [Single sign-on](docs/guide/sso.md) | Registering graphos at an OpenID Connect provider, a Keycloak example, troubleshooting |
 | [Graph algorithms](docs/guide/algorithms.md) | What the communities (Louvain, Leiden), PageRank, betweenness, components and degree find, what they are for, and how Louvain and Leiden differ |
 | [Usage guide](docs/guide/usage.md) | Practical integration patterns |

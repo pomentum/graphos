@@ -9,8 +9,8 @@ its stylesheet and theme switch (``site.css``, ``site.js``),
 The frame, ``tools/docs/site.html``, has ``{{ name }}`` slots this script fills from files
 the repository already has, so nothing on the page is written twice:
 
-- the README's features (Build, Explore, Run), web UI screenshots and captions, first
-  quickstart block and documentation table;
+- the README's features (Build, Explore, Run), web UI screenshots and captions, and
+  documentation table; the installation guide's install commands (its §2);
 - the version from ``services/graphos/pyproject.toml``;
 - the alt text of each diagram it shows, from the ``<desc>`` that ``diagrams.mjs`` writes
   into ``docs/images/<name>-light.svg``.
@@ -190,11 +190,14 @@ def diagram_alt(name: str) -> str:
 def render() -> str:
     """The page, its slots filled from the README and the version."""
     readme = sections((REPO / "README.md").read_text(encoding="utf-8"))
+    guide = sections((REPO / "docs" / "guide" / "installation.md").read_text(encoding="utf-8"))
     values = {
         "version": version(),
         "features": features(readme["features"]),
         "shots": shots(readme["web ui"]),
-        "quickstart": first_code_block(readme["quickstart"]),
+        # The installation guide's install, not the README's quickstart: the page signs
+        # people in through the UI, so it needs no API sign-in step.
+        "quickstart": first_code_block(guide["2. install with docker compose"]),
         "docs": docs_table(readme["documentation"]),
         "alt_problem": diagram_alt("problem"),
         "alt_communities": diagram_alt("communities"),
