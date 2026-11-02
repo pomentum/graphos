@@ -79,8 +79,6 @@ The [installation guide](docs/guide/installation.md) covers the same steps in mo
 
 Requires Docker with Compose v2 and about 4 GB of memory available to Docker (the defaults are laptop-sized; [tuning](docs/guide/apache-age.md) covers larger graphs).
 
-Already running graphos 0.9 or earlier on PostgreSQL 16? Pull and run the same `up`: the first start moves your data to PostgreSQL 18 ([upgrade guide](docs/guide/upgrade-postgresql-18.md)).
-
 ```bash
 git clone https://github.com/pomentum/graphos.git && cd graphos
 
@@ -269,8 +267,7 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 
 ## Built on Apache AGE
 
-graphos stores every tenant as an [Apache AGE](https://age.apache.org/) graph inside PostgreSQL 18 (image `apache/age:release_PG18_1.8.0`). PostgreSQL 16 with AGE 1.6, bundled up to graphos 0.9, is no longer
-supported: graphos-api does not start on it, and a stack on it moves to 18 by itself on `docker compose up` ([upgrade guide](docs/guide/upgrade-postgresql-18.md)). AGE provides the property-graph model and its per-label storage tables (and an openCypher engine; graphos queries the tables with SQL instead, so statement timeouts and cancellation always apply); graphos adds the HTTP boundary, tenancy, bulk paths, indexing and analytics on top. Apache AGE is a project of the Apache Software Foundation, licensed under Apache 2.0, and is not affiliated with graphos.
+graphos stores every tenant as an [Apache AGE](https://age.apache.org/) graph inside PostgreSQL 18 (image `apache/age:release_PG18_1.8.0`). AGE provides the property-graph model and its per-label storage tables (and an openCypher engine; graphos queries the tables with SQL instead, so statement timeouts and cancellation always apply); graphos adds the HTTP boundary, tenancy, bulk paths, indexing and analytics on top. Apache AGE is a project of the Apache Software Foundation, licensed under Apache 2.0, and is not affiliated with graphos.
 
 ## Development
 
