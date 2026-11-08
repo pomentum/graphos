@@ -2,6 +2,7 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Version](https://img.shields.io/github/v/tag/pomentum/graphos?sort=semver&label=version)](CHANGELOG.md)
+[![PyPI: graphos-client](https://img.shields.io/pypi/v/graphos-client?label=pypi%3A%20graphos-client)](https://pypi.org/project/graphos-client/)
 [![Website](https://img.shields.io/badge/website-www.pomentum.dev%2Fgraphos-1D5BD6)](https://www.pomentum.dev/graphos/)
 
 A multi-tenant property-graph service: **PostgreSQL + [Apache AGE](https://age.apache.org/) behind a typed HTTP API.**

@@ -38,6 +38,7 @@ Homepage = "https://github.com/pomentum/graphos"
 Documentation = "https://github.com/pomentum/graphos/tree/main/clients/python"
 Source = "https://github.com/pomentum/graphos"
 Issues = "https://github.com/pomentum/graphos/issues"
+Changelog = "https://github.com/pomentum/graphos/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling>=1.27"]  # 1.27: SPDX license + license-files (PEP 639)

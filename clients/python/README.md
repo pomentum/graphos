@@ -1,5 +1,9 @@
 # graphos-client
 
+[![PyPI](https://img.shields.io/pypi/v/graphos-client)](https://pypi.org/project/graphos-client/)
+[![Python](https://img.shields.io/pypi/pyversions/graphos-client)](https://pypi.org/project/graphos-client/)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/pomentum/graphos/blob/main/clients/python/LICENSE)
+
 Async Python client for [graphos](https://github.com/pomentum/graphos), a multi-tenant graph service built on PostgreSQL and Apache AGE. Typed request and response models, pooled connections, and a tenant pool for services that write to many tenants.
 
 ```bash
@@ -7,7 +11,15 @@ pip install graphos-client             # from PyPI
 pip install -e clients/python          # from a checkout of the repository
 ```
 
-Requires Python 3.11+. The client is async-only (`asyncio` + `httpx`).
+Requires Python 3.11+ (tested on 3.11, 3.12 and 3.13). The client is async-only (`asyncio` + `httpx`).
+
+**Which server.** The client and the graphos server are released together under one version: use
+the client of your server's version (`pip install "graphos-client==<version>"`; `await
+client.info()` tells the server's). Across versions, a newer client reads an older server's answers
+with what that server does not send left at its default (`None`, or empty), and a call to an
+endpoint the server does not have raises `GraphosError` with status `404`; an older client ignores
+the fields a newer server adds. What changed in each version: the
+[changelog](https://github.com/pomentum/graphos/blob/main/CHANGELOG.md).
 
 ## Quickstart
 

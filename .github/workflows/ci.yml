@@ -64,6 +64,28 @@ jobs:
           path: htmlcov/
           if-no-files-found: ignore
 
+  # ── Python client on the other versions it declares (3.11 runs above) ──
+  client:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    name: client (Python ${{ matrix.python }})
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install
+        run: pip install -e "clients/python[dev]"
+
+      - name: Tests
+        run: pytest clients/python/tests
+
   # ── Web UI: format, types, tests, production build ──────────────────────
   ui:
     runs-on: ubuntu-latest

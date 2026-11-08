@@ -4,6 +4,18 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Changed
+
+- **`graphos-client` reaches PyPI with each release.** The `graphos-client-release` workflow runs
+  by itself when a version tag is pushed, beside the image release; it can still be run by hand,
+  and a version already on PyPI is skipped. The client's tests run on Python 3.11, 3.12 and 3.13,
+  the versions the package declares, there and in CI.
+- **The client's PyPI page** links the changelog, shows PyPI badges (also on the README), and says
+  which server the client works with: the one of its version, and across versions what is left at
+  its default or refused.
+
 ## 0.14.12 — 2026-11-08
 
 The Python client is published on PyPI: `pip install graphos-client`.

@@ -1,24 +1,50 @@
-# Publish graphos-client to PyPI. Manual only: pushing a version tag does NOT
-# publish the client (it releases the container image, see image.yml).
+# Publish graphos-client to PyPI, from a version tag.
 #
-# To publish: Actions -> graphos-client-release -> Run workflow, and pick the
-# version tag (e.g. 0.1.0) as the ref. The tag must equal the version in both
-# clients/python/pyproject.toml and services/graphos/pyproject.toml.
+# Runs by itself when a version tag (e.g. 0.14.13) is pushed, beside image.yml,
+# which releases the container images from the same tag. It can also be run by
+# hand: Actions -> graphos-client-release -> Run workflow, picking the version tag
+# as the ref. The tag must equal the version in both clients/python/pyproject.toml
+# and services/graphos/pyproject.toml. A version already on PyPI is skipped, so
+# running it again for a published tag does nothing and succeeds.
 #
-# Uses PyPI trusted publishing (OIDC): no API token is stored in GitHub.
-# One-time setup on pypi.org: add a (pending) trusted publisher for project
-# "graphos-client" with owner/repository of this repo, workflow
-# "client-release.yml" and environment "pypi".
+# Uses PyPI trusted publishing (OIDC): no API token is stored in GitHub. The
+# trusted publisher on pypi.org is project "graphos-client", this repository,
+# workflow "client-release.yml" and environment "pypi".
 name: graphos-client-release
 
 on:
+  push:
+    tags: ["[0-9]+.[0-9]+.[0-9]+"]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  # The Python versions the package declares (its classifiers), each tested.
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    name: test (Python ${{ matrix.python }})
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Test
+        working-directory: clients/python
+        run: |
+          pip install -e ".[dev]"
+          ruff check src tests examples
+          pytest tests
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,13 +60,6 @@ jobs:
             exit 1
           fi
           node tools/release/version.mjs --check "${GITHUB_REF_NAME}"
-
-      - name: Test
-        working-directory: clients/python
-        run: |
-          pip install -e ".[dev]"
-          ruff check src tests examples
-          pytest tests
 
       - name: Build and check
         working-directory: clients/python
@@ -67,3 +86,5 @@ jobs:
           path: dist/
 
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true  # a re-run for a version already on PyPI succeeds
