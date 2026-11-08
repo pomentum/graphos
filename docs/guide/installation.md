@@ -276,7 +276,7 @@ The client examples include a demo tenant: an invented open-source ecosystem of 
 maintainers, teams and topics, made for exploring the UI and the algorithms.
 
 ```bash
-pip install -e clients/python
+pip install graphos-client
 export GRAPHOS_URL=http://127.0.0.1:8080 GRAPHOS_USER=graphos GRAPHOS_PASSWORD=<your new password>
 python clients/python/examples/08_demo_ecosystem.py
 ```
@@ -529,7 +529,7 @@ sign-in; it restores the user if it was disabled or deleted, and ends its sessio
 graphos: how fast its reads answer for one user and for several at once, and, on request, how long
 its graph jobs take. It learns what to read from the tenant itself (its schema summary and a sample
 of its nodes), so it works on any tenant without a dataset or queries written for it. It needs the
-Python client (`pip install ./clients/python`) and a user with `read` on the tenant:
+Python client (`pip install graphos-client`) and a user with `read` on the tenant:
 
 ```bash
 GRAPHOS_USER=<user> GRAPHOS_PASSWORD=<password>   python scripts/bench_tenant.py http://localhost:8080 <tenant>   --docker graphos-api --docker graphos-db

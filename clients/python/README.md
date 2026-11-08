@@ -3,7 +3,7 @@
 Async Python client for [graphos](https://github.com/pomentum/graphos), a multi-tenant graph service built on PostgreSQL and Apache AGE. Typed request and response models, pooled connections, and a tenant pool for services that write to many tenants.
 
 ```bash
-pip install graphos-client             # from PyPI, once released
+pip install graphos-client             # from PyPI
 pip install -e clients/python          # from a checkout of the repository
 ```
 
@@ -143,19 +143,19 @@ and renews the 15-minute token by itself. A program that holds credentials at gr
 provider can use `auth=BearerAuth(source)` instead: `source` is an async callable answering
 `(access token, seconds valid)`, called again before expiry and once on a `401`.
 
-Runnable scripts in [`examples/`](examples/). Each reads `GRAPHOS_URL` (default `http://127.0.0.1:8080`) and signs in as `GRAPHOS_USER` / `GRAPHOS_PASSWORD`: an admin, or a service account with `create_tenants` on the example tenants (`acme`, `library`, `team_red`, `team_green`, `team_blue`, and `demo` or `GRAPHOS_DEMO_TENANT`), which makes it their owner. `07_background_jobs.py` also vacuums, which needs an admin.
+Runnable scripts in [`examples/`](https://github.com/pomentum/graphos/tree/main/clients/python/examples). Each reads `GRAPHOS_URL` (default `http://127.0.0.1:8080`) and signs in as `GRAPHOS_USER` / `GRAPHOS_PASSWORD`: an admin, or a service account with `create_tenants` on the example tenants (`acme`, `library`, `team_red`, `team_green`, `team_blue`, and `demo` or `GRAPHOS_DEMO_TENANT`), which makes it their owner. `07_background_jobs.py` also vacuums, which needs an admin.
 
 | Script | Shows |
 |---|---|
-| [`01_quickstart.py`](examples/01_quickstart.py) | register a tenant, write nodes and edges, search / neighbours / expand |
-| [`02_bulk_load.py`](examples/02_bulk_load.py) | batched NDJSON bulk writes and a one-request snapshot import |
-| [`03_explore.py`](examples/03_explore.py) | paginated scans, scoped and induced subgraphs, aggregates, top-K, node properties, cache |
-| [`04_communities.py`](examples/04_communities.py) | communities (Louvain, or Leiden with `algorithm="leiden"`): compute, summarise, look up |
-| [`05_tenant_pool.py`](examples/05_tenant_pool.py) | `GraphosPool` serving several tenants with one schema |
-| [`06_rule_based_edges.py`](examples/06_rule_based_edges.py) | declaring a property-match rule and letting the server write the edges |
-| [`07_background_jobs.py`](examples/07_background_jobs.py) | long operations as background jobs: submit, wait, the one-recompute rule, cancel |
-| [`08_demo_ecosystem.py`](examples/08_demo_ecosystem.py) | the demo tenant (an invented software ecosystem, about 450 nodes) and every graph algorithm on it: metrics, the top nodes by PageRank and betweenness, communities |
-| [`09_better_answers.py`](examples/09_better_answers.py) | better answers from the algorithms on the demo tenant: search ranked by PageRank, a walk scoped to a community, the best hit per community, the bridges |
+| [`01_quickstart.py`](https://github.com/pomentum/graphos/blob/main/clients/python/examples/01_quickstart.py) | register a tenant, write nodes and edges, search / neighbours / expand |
+| [`02_bulk_load.py`](https://github.com/pomentum/graphos/blob/main/clients/python/examples/02_bulk_load.py) | batched NDJSON bulk writes and a one-request snapshot import |
+| [`03_explore.py`](https://github.com/pomentum/graphos/blob/main/clients/python/examples/03_explore.py) | paginated scans, scoped and induced subgraphs, aggregates, top-K, node properties, cache |
+| [`04_communities.py`](https://github.com/pomentum/graphos/blob/main/clients/python/examples/04_communities.py) | communities (Louvain, or Leiden with `algorithm="leiden"`): compute, summarise, look up |
+| [`05_tenant_pool.py`](https://github.com/pomentum/graphos/blob/main/clients/python/examples/05_tenant_pool.py) | `GraphosPool` serving several tenants with one schema |
+| [`06_rule_based_edges.py`](https://github.com/pomentum/graphos/blob/main/clients/python/examples/06_rule_based_edges.py) | declaring a property-match rule and letting the server write the edges |
+| [`07_background_jobs.py`](https://github.com/pomentum/graphos/blob/main/clients/python/examples/07_background_jobs.py) | long operations as background jobs: submit, wait, the one-recompute rule, cancel |
+| [`08_demo_ecosystem.py`](https://github.com/pomentum/graphos/blob/main/clients/python/examples/08_demo_ecosystem.py) | the demo tenant (an invented software ecosystem, about 450 nodes) and every graph algorithm on it: metrics, the top nodes by PageRank and betweenness, communities |
+| [`09_better_answers.py`](https://github.com/pomentum/graphos/blob/main/clients/python/examples/09_better_answers.py) | better answers from the algorithms on the demo tenant: search ranked by PageRank, a walk scoped to a community, the best hit per community, the bridges |
 
 ## What the client covers
 
@@ -191,4 +191,4 @@ Working on the client: see [DEVELOPMENT.md](https://github.com/pomentum/graphos/
 
 ## Licence
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache-2.0. See [LICENSE](https://github.com/pomentum/graphos/blob/main/clients/python/LICENSE) and [NOTICE](https://github.com/pomentum/graphos/blob/main/clients/python/NOTICE).

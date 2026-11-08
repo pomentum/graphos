@@ -89,7 +89,7 @@ curl -s "$G/v1/acme/graph/search?q=design&label=Document" -H "Authorization: Bea
 ### 1.4 Python client
 
 ```python
-# pip install -e clients/python   (distribution graphos-client, import name graphos_client)
+# pip install graphos-client   (import name graphos_client)
 import asyncio
 from graphos_client import EdgeUpsert, GraphosClient, NodeUpsert, PasswordAuth
 
