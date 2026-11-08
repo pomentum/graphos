@@ -61,3 +61,17 @@ projects, no real schemas, hosts, addresses or local paths, and never a password
 
 graphos is licensed under the [Apache License 2.0](LICENSE). Unless you say otherwise, a
 contribution you submit is licensed under the same terms (section 5 of the licence).
+
+## Forks and the graphos name
+
+Forks are welcome, to contribute back or to go their own way. What the licence asks of one that
+is redistributed (section 4): keep [LICENSE](LICENSE) and [NOTICE](NOTICE), and mark the files you
+changed.
+
+- **Its own name.** The licence grants no rights to the name graphos (section 6). Publish a fork
+  under a name of your own, and do not present it as graphos or as made by this project; saying
+  it is based on graphos is fine.
+- **Its own packages and images.** The Python client on PyPI, `graphos-client`, and the images
+  under `ghcr.io/pomentum/` are published only from this repository, from its version tags. A fork
+  publishes under its own names: its own PyPI project, and its own registry (the image workflow
+  publishes to the fork owner's `ghcr.io` namespace).
