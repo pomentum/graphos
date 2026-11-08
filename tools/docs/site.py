@@ -56,8 +56,23 @@ def repo_link(target: str, base: str = "") -> str:
     return f"{GITHUB}/{kind}/main/{path}{hash_}{fragment}"
 
 
+_LINK = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
+
+
 def inline(md: str) -> str:
-    """Render the inline Markdown the README uses: code, bold, italics and links."""
+    """Render the inline Markdown the README uses: code, bold, italics and links. Links
+    first, so a link's text may hold code (``[`graphos-client`](…)``)."""
+    parts = _LINK.split(md)                     # text, link text, link target, text, …
+    out = [_spans(parts[0])]
+    for i in range(1, len(parts), 3):
+        text, target, after = parts[i], parts[i + 1], parts[i + 2]
+        out.append(f'<a href="{html.escape(repo_link(target))}">{_spans(text)}</a>')
+        out.append(_spans(after))
+    return "".join(out)
+
+
+def _spans(md: str) -> str:
+    """Code, bold and italics."""
     out: list[str] = []
     for i, part in enumerate(re.split(r"(`[^`]+`)", md)):
         if i % 2:
@@ -66,11 +81,6 @@ def inline(md: str) -> str:
         text = html.escape(part, quote=False)
         text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
         text = re.sub(r"(?<![\w*])\*([^*]+)\*(?![\w*])", r"<em>\1</em>", text)
-        text = re.sub(
-            r"\[([^\]]+)\]\(([^)\s]+)\)",
-            lambda m: f'<a href="{html.escape(repo_link(m.group(2)))}">{m.group(1)}</a>',
-            text,
-        )
         out.append(text)
     return "".join(out)
 

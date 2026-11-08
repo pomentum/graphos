@@ -106,7 +106,7 @@
 <div class="card"><h4>Rule-derived edges</h4><p>Declare a property-match rule once; <code>edges:resolve</code> writes the edges in SQL (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md#9-rule-based-edges-resolve_rule">usage</a>).</p></div>
 <div class="card"><h4>Reconcile by difference</h4><p>Send the whole set of a node's or a type's edges; graphos adds, changes and removes only the difference, in one transaction (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md#reconcile-make-the-stored-edges-equal-to-a-set">usage</a>).</p></div>
 <div class="card"><h4>Copy, back up and restore</h4><p>A tenant's schema and data as files, restored exactly or loaded into plain AGE (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md#dataset-export-and-import">usage</a>, <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/without-graphos.md">without graphos</a>).</p></div>
-<div class="card"><h4>Python client</h4><p>Async and typed; signs in and renews its token by itself (<a href="https://github.com/pomentum/graphos/tree/main/clients/python">below</a>).</p></div>
+<div class="card"><h4>Python client</h4><p>Async and typed, on PyPI as <a href="https://pypi.org/project/graphos-client/"><code>graphos-client</code></a>; signs in and renews its token by itself (<a href="https://github.com/pomentum/graphos/tree/main/clients/python">below</a>).</p></div>
 </div></div>
 <div class="group"><h3>Explore</h3><div class="cards">
 <div class="card"><h4>Graph analytics</h4><p>A map of every label and the edges between them (about a second on ten million edges), aggregates, top-K by degree (<a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md#6-aggregates">usage</a>).</p></div>
@@ -184,7 +184,7 @@ docker compose -f docker-compose.graphos.yml --profile ui up -d
 curl -s http://127.0.0.1:8080/readyz    # {&quot;status&quot;:&quot;ready&quot;,...}</pre>
   <ol class="next prose">
     <li>Sign in to the UI at <code>http://127.0.0.1:8081</code> as <code>graphos</code> / <code>graphos</code> and choose a new password: the <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/installation.md">installation guide</a>.</li>
-    <li>Register a tenant, write nodes and edges, read them back: the <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md">usage guide</a>, or the <a href="https://github.com/pomentum/graphos/tree/main/clients/python">Python client</a>.</li>
+    <li>Register a tenant, write nodes and edges, read them back: the <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/usage.md">usage guide</a>, or the <a href="https://github.com/pomentum/graphos/tree/main/clients/python">Python client</a> (<code>pip install graphos-client</code>, <a href="https://pypi.org/project/graphos-client/">on PyPI</a>).</li>
     <li>Load the demo tenant to explore: <a href="https://github.com/pomentum/graphos/blob/main/clients/python/examples/08_demo_ecosystem.py"><code>08_demo_ecosystem.py</code></a>.</li>
   </ol>
 

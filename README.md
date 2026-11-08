@@ -31,7 +31,7 @@ The picture above is the map; each line below links to the section that covers i
 - **Rule-derived edges:** declare a property-match rule once; `edges:resolve` writes the edges in SQL ([usage](docs/guide/usage.md#9-rule-based-edges-resolve_rule)).
 - **Reconcile by difference:** send the whole set of a node's or a type's edges; graphos adds, changes and removes only the difference, in one transaction ([usage](docs/guide/usage.md#reconcile-make-the-stored-edges-equal-to-a-set)).
 - **Copy, back up and restore:** a tenant's schema and data as files, restored exactly or loaded into plain AGE ([usage](docs/guide/usage.md#dataset-export-and-import), [without graphos](docs/guide/without-graphos.md)).
-- **Python client:** async and typed; signs in and renews its token by itself ([below](#python-client)).
+- **Python client:** async and typed, on PyPI as [`graphos-client`](https://pypi.org/project/graphos-client/); signs in and renews its token by itself ([below](#python-client)).
 
 **Explore**
 
