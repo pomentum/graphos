@@ -1,5 +1,12 @@
 import type { ParseKeys } from "i18next";
-import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  type QueryClient,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { EdgeKey, ImportOptions, SearchParams } from "../api/graphosApi";
 import type {
   EdgeUpsert,
@@ -62,6 +69,16 @@ export const keys = {
   authConfig: () => ["auth-config"] as const,
   info: () => ["info"] as const,
 };
+
+/**
+ * Drops everything cached for tenant `name` (every tenant's key has its name
+ * second). Called when a tenant is deleted, restored or created, so a tenant
+ * created again under a deleted one's name never shows the old one's schema,
+ * map or groups, which are otherwise kept for minutes.
+ */
+export function forgetTenant(client: QueryClient, name: string): void {
+  client.removeQueries({ predicate: (query) => query.queryKey[1] === name });
+}
 
 /** Labels, hierarchy and search indexes; changes rarely, so cached for minutes. */
 export function useSchema() {

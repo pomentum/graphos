@@ -647,7 +647,8 @@ export interface Job {
  */
 export interface SchemaDocument {
   _export?: { format?: string; version?: number; graphos?: string; tenant?: string; exported_at?: string };
-  name: string;
+  /** The tenant's name; a file written by hand may leave it out (the UI sends the tenant's own). */
+  name?: string;
   vertex_labels?: string[];
   /** Per edge type, its declared label pairs (`{src, dst}` or `[src, dst]`). */
   edge_endpoints?: Record<string, unknown[]>;

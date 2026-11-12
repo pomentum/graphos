@@ -6,6 +6,24 @@ under one version.
 
 ## Unreleased
 
+The web UI forgets a deleted tenant, so one created again under its name starts empty; a schema
+file needs no `name` of its own, and one exported by this graphos is always read.
+
+### Fixed
+
+- **A tenant created again under a deleted one's name showed the old one.** The web UI keeps a
+  tenant's schema, map, groups and catalogue for 5 minutes, and its statistics for 30 seconds, by
+  the tenant's name, and deleting the tenant did not drop them: a tenant created again under the
+  name within that time showed the deleted one's labels and groups, though graphos had deleted
+  everything. Deleting, restoring and creating a tenant now drop what the page kept for its name.
+- **A schema file's `name` is not needed.** The New tenant dialog and the Schema page's import
+  send the name of the tenant they create or import into, never the file's, but a file without
+  one was refused as "not a schema file". A file that declares labels or edge types is read
+  without it; a `name` it has only fills in the New tenant dialog's name when that is empty.
+- **The web UI reads graphos's own newest schema files.** An export names its community algorithm
+  when the tenant's is not Louvain, which makes it format version 4 (since 0.14.0); the web UI read
+  up to version 3 and refused it as "from a newer graphos".
+
 ### Changed
 
 - **`graphos-client` reaches PyPI with each release.** The `graphos-client-release` workflow runs
