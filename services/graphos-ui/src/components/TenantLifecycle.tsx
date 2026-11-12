@@ -13,9 +13,11 @@ import {
   TextInput,
 } from "@mantine/core";
 import { IconFileUpload, IconRestore, IconTrash } from "@tabler/icons-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { SchemaDocument, UnregisteredTenant } from "../api/types";
+import { forgetTenant } from "../data/queries";
 import { mayCreate, readFileText, readSchemaFile, SCHEMA_VERSION, TENANT_NAME } from "../lib/schemaFile";
 import { relativeTime } from "../lib/time";
 import { isActive, useTransfers } from "../lib/transfers";
@@ -40,6 +42,7 @@ export function useMayCreateTenants(): boolean {
 export function NewTenantDialog({ opened, onClose }: { opened: boolean; onClose: () => void }) {
   const { t } = useTranslation();
   const { session, account, refreshMe } = useSessionContext();
+  const client = useQueryClient();
   const [name, setName] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [doc, setDoc] = useState<SchemaDocument | null>(null);
@@ -74,7 +77,7 @@ export function NewTenantDialog({ opened, onClose }: { opened: boolean; onClose:
     if ("doc" in read) {
       setDoc(read.doc);
       // The file's own tenant name is a good start for a new one.
-      if (!trimmed && TENANT_NAME.test(read.doc.name)) setName(read.doc.name);
+      if (!trimmed && read.doc.name && TENANT_NAME.test(read.doc.name)) setName(read.doc.name);
     } else if (read.problem.kind === "newerVersion") {
       setFileProblem(t("views.schema.file.newerVersion", { version: read.problem.version, supported: SCHEMA_VERSION }));
     } else {
@@ -94,6 +97,8 @@ export function NewTenantDialog({ opened, onClose }: { opened: boolean; onClose:
       else if (preview.restores) setError(t("shell.tenantLife.create.restores", { name: trimmed }));
       else {
         await account.createTenant(trimmed, schema);
+        // Also when the name was deleted elsewhere (another tab, another user).
+        forgetTenant(client, trimmed);
         await refreshMe(trimmed);
         close();
       }
@@ -167,6 +172,7 @@ export function DeleteTenantDialog({
 }) {
   const { t } = useTranslation();
   const { account } = useSessionContext();
+  const client = useQueryClient();
   const [dropData, setDropData] = useState(!registered);
   const [typed, setTyped] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -187,6 +193,7 @@ export function DeleteTenantDialog({
     setError(null);
     try {
       await account.deleteTenant(name, dropData);
+      forgetTenant(client, name);
       close();
       onDone();
     } catch (failure) {
@@ -265,6 +272,7 @@ export function DeleteTenantDialog({
 export function UnregisteredTenantsDialog({ opened, onClose }: { opened: boolean; onClose: () => void }) {
   const { t } = useTranslation();
   const { account, refreshMe } = useSessionContext();
+  const client = useQueryClient();
   const [list, setList] = useState<UnregisteredTenant[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState<string | null>(null);
@@ -292,6 +300,7 @@ export function UnregisteredTenantsDialog({ opened, onClose }: { opened: boolean
     setError(null);
     try {
       await account.restoreTenant(name);
+      forgetTenant(client, name);
       await refreshMe(name);
       onClose();
     } catch (failure) {

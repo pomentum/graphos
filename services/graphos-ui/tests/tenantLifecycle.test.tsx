@@ -51,10 +51,10 @@ function Selected() {
   return <output aria-label="selected">{session?.tenant ?? "none"}</output>;
 }
 
-function ui(fetchImpl: typeof fetch, children: React.ReactNode, who: Me = me()) {
+function ui(fetchImpl: typeof fetch, children: React.ReactNode, who: Me = me(), client = new QueryClient()) {
   return (
     <MantineProvider theme={theme}>
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={client}>
         <SessionProvider initial={{ me: who, tokens: TOKENS, tenant: "acme" }} fetchImpl={fetchImpl}>
           {children}
           <Selected />
@@ -129,6 +129,47 @@ describe("deleting a tenant", () => {
     fireEvent.click(forGood);
     await waitFor(() => expect(onDone).toHaveBeenCalledTimes(2));
     expect(calls.at(-1)).toMatchObject({ method: "DELETE", url: "/v1/tenants/acme?drop_data=true" });
+  });
+});
+
+describe("a tenant created again under a deleted one's name", () => {
+  it("shows nothing of the old one: deleting it drops what the page cached for it", async () => {
+    const { fetchImpl } = fakeGraphos({ "DELETE /v1/tenants/acme?drop_data=true": {} });
+    const client = new QueryClient();
+    client.setQueryData(["schema", "acme"], { vertex_labels: ["Doc"] });
+    client.setQueryData(["map", "acme", false], { labels: [{ label: "Doc", count: 3 }] });
+    client.setQueryData(["schema", "team_old"], { vertex_labels: ["Team"] });
+    const onDone = vi.fn();
+    render(
+      ui(
+        fetchImpl,
+        <DeleteTenantDialog name="acme" registered opened onClose={() => undefined} onDone={onDone} />,
+        me(),
+        client,
+      ),
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "Also delete its data" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Type acme to confirm" }), { target: { value: "acme" } });
+    fireEvent.click(screen.getByRole("button", { name: "Delete for good" }));
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+    expect(client.getQueryData(["schema", "acme"])).toBeUndefined();
+    expect(client.getQueryData(["map", "acme", false])).toBeUndefined();
+    expect(client.getQueryData(["schema", "team_old"])).toEqual({ vertex_labels: ["Team"] }); // others kept
+  });
+
+  it("drops what was cached under the name when it is created, deleted elsewhere or not", async () => {
+    const { fetchImpl } = fakeGraphos({
+      "POST /v1/tenants?dry_run=true": DRY_RUN,
+      "POST /v1/tenants": { tenant: "team_new" },
+      "GET /v1/me": me({ tenants: ["acme", "team_new", "team_old"], levels: { team_new: "owner" } }),
+    });
+    const client = new QueryClient();
+    client.setQueryData(["schema", "team_new"], { vertex_labels: ["Old"] }); // from another tab's deleted one
+    render(ui(fetchImpl, <NewTenantDialog opened onClose={() => undefined} />, me(), client));
+    fireEvent.change(screen.getByRole("textbox", { name: /^Name/ }), { target: { value: "team_new" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(screen.getByLabelText("selected")).toHaveTextContent("team_new"));
+    expect(client.getQueryData(["schema", "team_new"])).toBeUndefined();
   });
 });
 

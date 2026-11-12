@@ -1,8 +1,8 @@
 import type { SchemaDocument } from "../api/types";
 
-/** The schema file format graphos exports, and the newest version this UI reads. */
+/** The schema file format graphos exports, and the newest version this UI reads (graphos's own). */
 export const SCHEMA_FORMAT = "graphos.schema";
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /** A tenant name as graphos accepts it. */
 export const TENANT_NAME = /^[A-Za-z][A-Za-z0-9_]{0,62}$/;
@@ -11,7 +11,9 @@ export type SchemaFileProblem = { kind: "notJson" } | { kind: "notSchema" } | { 
 
 /**
  * Reads a schema file's text: the document, or why it is not one. A body
- * without an `_export` header (written by hand) is accepted, as graphos does.
+ * without an `_export` header (written by hand) is accepted, as graphos does,
+ * and so is one without a `name` that declares labels or edge types: the UI
+ * sends the name of the tenant it creates or imports into, never the file's.
  */
 export function readSchemaFile(text: string): { doc: SchemaDocument } | { problem: SchemaFileProblem } {
   let value: unknown;
@@ -31,7 +33,8 @@ export function readSchemaFile(text: string): { doc: SchemaDocument } | { proble
       return { problem: { kind: "newerVersion", version: header.version } };
     }
   }
-  if (typeof doc.name !== "string") return { problem: { kind: "notSchema" } };
+  const declares = Array.isArray(doc.vertex_labels) || Array.isArray(doc.edge_labels);
+  if (doc.name === undefined ? !declares : typeof doc.name !== "string") return { problem: { kind: "notSchema" } };
   return { doc };
 }
 

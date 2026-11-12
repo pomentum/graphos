@@ -25,14 +25,31 @@ describe("reading a schema file", () => {
     expect(readSchemaFile('{"name": "t"}')).toEqual({ doc: { name: "t" } });
   });
 
+  it("accepts a file written by hand without a name, when it declares labels or types", () => {
+    expect(readSchemaFile('{"vertex_labels": ["Doc"]}')).toEqual({ doc: { vertex_labels: ["Doc"] } });
+    expect(readSchemaFile('{"edge_labels": ["LINKS_TO"]}')).toEqual({ doc: { edge_labels: ["LINKS_TO"] } });
+    expect(readSchemaFile('{"format": "graphos.schema", "vertex_labels": []}')).toEqual({
+      doc: { format: "graphos.schema", vertex_labels: [] },
+    });
+    // Neither a name nor labels, or a name that is not one: not a schema.
+    expect(readSchemaFile('{"nodes": 3}')).toEqual({ problem: { kind: "notSchema" } });
+    expect(readSchemaFile('{"name": 5, "vertex_labels": []}')).toEqual({ problem: { kind: "notSchema" } });
+  });
+
+  it("reads graphos's own newest version (4: an export naming its community algorithm)", () => {
+    expect(readSchemaFile('{"_export": {"version": 4}, "name": "t"}')).toEqual({
+      doc: { _export: { version: 4 }, name: "t" },
+    });
+  });
+
   it("says why a file is not one", () => {
     expect(readSchemaFile("not json")).toEqual({ problem: { kind: "notJson" } });
     expect(readSchemaFile("[1]")).toEqual({ problem: { kind: "notSchema" } });
     expect(readSchemaFile('{"_export": {"format": "other"}, "name": "t"}')).toEqual({
       problem: { kind: "notSchema" },
     });
-    expect(readSchemaFile('{"_export": {"version": 4}, "name": "t"}')).toEqual({
-      problem: { kind: "newerVersion", version: 4 },
+    expect(readSchemaFile('{"_export": {"version": 5}, "name": "t"}')).toEqual({
+      problem: { kind: "newerVersion", version: 5 },
     });
   });
 
@@ -155,8 +172,8 @@ describe("the import dialog", () => {
     const { choose } = open();
     choose("{oops");
     expect(await screen.findByText("Not a JSON file")).toBeInTheDocument();
-    choose('{"_export": {"format": "graphos.schema", "version": 4}, "name": "acme"}');
-    expect(await screen.findByText(/newer graphos \(format version 4\)/)).toBeInTheDocument();
+    choose('{"_export": {"format": "graphos.schema", "version": 5}, "name": "acme"}');
+    expect(await screen.findByText(/newer graphos \(format version 5\)/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
   });
 });
