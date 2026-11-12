@@ -4,7 +4,7 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.14.13 — 2026-11-12
 
 The web UI forgets a deleted tenant, so one created again under its name starts empty; a schema
 file needs no `name` of its own, and one exported by this graphos is always read.
