@@ -128,7 +128,7 @@ services:
   # ── Control plane / REST API ────────────────────────────────────────────
   # Bridges graphos-internal (talks to graphos-db) and graphos-net (consumers).
   graphos-api:
-    image: ghcr.io/pomentum/graphos-api:0.15.0
+    image: ghcr.io/pomentum/graphos-api:0.16.0
     container_name: graphos-api
     hostname: graphos-api
     restart: unless-stopped
@@ -203,7 +203,7 @@ services:
   # or through single sign-on when graphos-api has GRAPHOS_OIDC_* set (docs/guide/installation.md).
   graphos-ui:
     profiles: ["ui"]
-    image: ghcr.io/pomentum/graphos-ui:0.15.0
+    image: ghcr.io/pomentum/graphos-ui:0.16.0
     container_name: graphos-ui
     restart: unless-stopped
     depends_on:

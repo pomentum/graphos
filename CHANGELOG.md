@@ -4,7 +4,7 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.16.0 — 2026-11-13
 
 The web UI catches up: undo on the Schema page, keyboard shortcuts and a list of them, changes to
 many rows at once in Browse, a multi-hop expand, a Database page for admins, and a confirmation
