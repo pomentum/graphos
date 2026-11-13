@@ -29,6 +29,11 @@ under one version.
 - **Change or delete the rows picked in Browse.** With write access, Set a property… writes one
   property (text, a number, true or false) on every picked node, or removes it, and Delete… deletes
   them with every relationship touching them, after a confirmation.
+- **Expand several hops at once.** The node inspector's Expand has a menu for 2 or 3 hops: every
+  node within them (the nearest 200), and the relationships among them, go on the canvas as one
+  step.
+- **A sample on an empty canvas.** When the whole graph is too big to show, the empty canvas offers
+  Show a sample of its busiest label (its best-connected nodes) beside Open the map.
 
 ### Fixed
 

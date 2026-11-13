@@ -28,6 +28,7 @@ import type {
   HubsResponse,
   InducedEdgesResponse,
   EdgesUpsertResponse,
+  ExpandHopsResponse,
   NodesAggregateResponse,
   Me,
   Preferences,
@@ -633,6 +634,11 @@ export class GraphosApi {
   }
 
   /** The edges whose both ends are among `nodeIds`. */
+  /** The nodes within `maxHops` hops of a node, either direction, nearest first (at most `limit`). */
+  expandHops(id: string, maxHops: number, limit: number): Promise<ExpandHopsResponse> {
+    return this.http.get(`${this.graph}/expand`, { node_id: id, max_hops: maxHops, limit, direction: "both" });
+  }
+
   inducedEdges(nodeIds: string[], limit = 2000): Promise<InducedEdgesResponse> {
     return this.http.post(`${this.graph}/induced_edges`, { node_ids: nodeIds, limit });
   }

@@ -812,6 +812,12 @@ export interface SchemaAddition {
   };
 }
 
+/** `GET …/graph/expand`: the nodes within `max_hops` of a seed, nearest first. */
+export interface ExpandHopsResponse {
+  truncated: boolean;
+  paths: { end_id: string; end_label: string; end_properties: Properties; hops: number; rel_path: string[] }[];
+}
+
 export interface TenantStats {
   n_vertices: number;
   n_edges: number;

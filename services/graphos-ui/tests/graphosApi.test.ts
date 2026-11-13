@@ -28,6 +28,12 @@ describe("GraphosApi", () => {
     ]);
   });
 
+  it("expands several hops from a node, both ways", async () => {
+    const { api, calls } = recorder();
+    await api.expandHops("p:1", 3, 200);
+    expect(calls[0]?.url).toBe("/api/v1/demo%20co/graph/expand?node_id=p%3A1&max_hops=3&limit=200&direction=both");
+  });
+
   it("patches with merge-patch and If-Match", async () => {
     const { api, calls } = recorder();
     await api.patchNode("n1", { owner: null }, { label: "Doc", etag: '"7.2"' });

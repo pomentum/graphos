@@ -16,7 +16,14 @@ import { GraphCanvas } from "../../components/GraphCanvas";
 import { Inspector } from "../../components/Inspector";
 import { NewEdgeDialog, type NewEdgeDialogProps } from "../../components/NewEdgeDialog";
 import { NewNodeDialog } from "../../components/NewNodeDialog";
-import { useCreateEdge, useCreateNode, useDeleteNodes, useLabelStyles, useSchema } from "../../data/queries";
+import {
+  useCreateEdge,
+  useCreateNode,
+  useDeleteNodes,
+  useGraphMap,
+  useLabelStyles,
+  useSchema,
+} from "../../data/queries";
 import { circular, force, layered, type CanvasLayout } from "../../graph/canvasLayouts";
 import { categorize, styleMaxima } from "../../graph/canvasStyle";
 import {
@@ -44,6 +51,8 @@ import { MapView } from "./MapView";
 import { ModeSwitch } from "./ModeSwitch";
 import { SelectionBar } from "./SelectionBar";
 import { useExpandNode } from "./useExpandNode";
+import { useExpandHops } from "./useExpandHops";
+import { useOpenHubs } from "./useOpenHubs";
 import { useFreshNodes } from "./useFreshNodes";
 import { useRecentlyChanged } from "./useRecentlyChanged";
 import { useWholeGraph } from "./useWholeGraph";
@@ -113,6 +122,14 @@ export function ExploreView() {
     [model, select, markFresh, frameOn],
   );
   const { expand, expandMany, dialog, isExpanding } = useExpandNode(model, onExpanded);
+  const { expandHops } = useExpandHops();
+  // An empty canvas offers a sample: the best-connected nodes of the busiest label.
+  const graphMap = useGraphMap();
+  const busiest = useMemo(
+    () => [...(graphMap.data?.labels ?? [])].sort((a, b) => b.count - a.count).find((l) => l.count > 0)?.label ?? null,
+    [graphMap.data],
+  );
+  const { openHubs, opening: sampling } = useOpenHubs();
   const [expandingMany, setExpandingMany] = useState(false);
   const deleteNodes = useDeleteNodes();
   // Where a double-click asked for a new node, and a link drawn between two nodes.
@@ -341,7 +358,12 @@ export function ExploreView() {
           rendererRef={renderer}
           minimap
         />
-        <CanvasStatus overview={overview} isEmpty={model.isEmpty} onLoad={() => void load()} />
+        <CanvasStatus
+          overview={overview}
+          isEmpty={model.isEmpty}
+          onLoad={() => void load()}
+          sample={busiest ? { label: busiest, busy: sampling !== null, open: () => void openHubs(busiest) } : null}
+        />
         {multi.size > 0 ? (
           <SelectionBar
             count={multi.size}
@@ -402,6 +424,7 @@ export function ExploreView() {
             onSelect={select}
             onSelectEdge={selectEdge}
             onExpand={(key) => void expand(key)}
+            onExpandHops={(key, hops) => void expandHops(key, hops)}
             onHide={hide}
           />
         </aside>

@@ -367,6 +367,7 @@
         "empty": "The canvas is empty",
         "emptyHint": "Find a node with search ({{shortcut}}), then double-click it to see its neighbours.",
         "openMap": "Open the map",
+        "showSample": "Show a sample of {{label}}",
         "showWhole": "Show the whole graph",
         "sample_one": "A sample of {{shown}} of {{total}} node. Search to focus on one.",
         "sample_other": "A sample of {{shown}} of {{total}} nodes. Search to focus on one."
@@ -374,6 +375,7 @@
       "history": {
         "open": "Open {{name}}",
         "expand": "Expand {{name}}",
+        "expandHops": "Expand {{name}} {{hops}} hops",
         "addPaths": "Add paths",
         "connect": "Connect {{type}}",
         "hide": "Hide {{name}}",
@@ -1369,6 +1371,10 @@
   "components": {
     "inspector": {
       "expand": "Expand",
+      "expandHops": "Expand more hops",
+      "expandHopsTooltip": "Every node within",
+      "hops_one": "{{count}} hop",
+      "hops_other": "{{count}} hops",
       "expandTooltip": "Add its neighbours, a page at a time (E)",
       "collapse": "Collapse",
       "collapseTooltip": "Take back the neighbours it added (C)",
@@ -1503,6 +1509,7 @@
     "relationshipCreated": "Relationship created",
     "relationshipDeleted": "Relationship deleted",
     "noNeighbours": "No neighbours",
+    "hopsTruncated": "Showing the nearest {{count}} nodes; there are more",
     "neighboursAllShown": "Its neighbours are all on the canvas already",
     "noHubs": "No {{label}} node has any edges",
     "schemaUpdated": "Added to the schema",
@@ -1642,6 +1649,7 @@
     "fileGone": "The file can no longer be read: it was moved, renamed or deleted after you chose it. Choose it again."
   },
   "errors": {
+    "expandFailed": "Couldn't expand the node",
     "notSaved": "Not saved",
     "couldNotSave": "Couldn't save",
     "conflict": "Changed by someone else",
