@@ -6,6 +6,10 @@ under one version.
 
 ## Unreleased
 
+The web UI catches up: undo on the Schema page, keyboard shortcuts and a list of them, changes to
+many rows at once in Browse, a multi-hop expand, a Database page for admins, and a confirmation
+before anything that cannot be taken back. The server and the Python client are unchanged.
+
 ### Added
 
 - **Undo on the Schema page.** An Undo button, and Ctrl+Z (⌘Z on macOS) anywhere on the page but in

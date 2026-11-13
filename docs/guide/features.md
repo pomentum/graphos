@@ -655,21 +655,27 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   the import, with its progress and graphos's answer);
   activity (what runs now, with cancel, and the writes, computations and
   schema changes of the last days, filterable, with a running indicator in
-  the toolbar on every page); a label as a table; the schema as a list or a diagram (laid out
+  the toolbar on every page); a label as a table, whose picked rows writers set a property on or
+  delete together; the schema as a list or a diagram (laid out
   along the relationships, lines routed between the boxes with their captions; a large schema as
   a grid), which maintainers can extend (labels, relationship types, search indexes, declared
   label pairs, and properties from *Add → Property*); each label and relationship type opens to
   its property definitions, where each comes from and the properties its rows carry undeclared,
   which maintainers declare, narrow and remove, with the tenant's property-check mode (`off`,
   `warn`, `strict`, which asks first) and a check of the stored rows run as a job with its report;
-  creating a tenant (empty or from a schema file), unregistering it, restoring it, and deleting it
+  undo on the Schema page (Ctrl/⌘+Z) for the changes graphos can take back, a maximized view and
+  keys for its actions, and a resolve rule run from a derived type's details; a multi-hop expand
+  (2 or 3 hops) in Explore and the groups' sizes; a copy button for a node's id and each property;
+  `?` listing every keyboard shortcut; actions that cannot be taken back (a delete, a reset, taking
+  a grant back) confirmed first; creating a tenant (empty or from a schema file), unregistering it, restoring it, and deleting it
   with its data; exports of what is on screen: every Explore view (graph, map, groups, metric views)
   as PNG, SVG (with the label icons, and the labels' font embedded) or JSON, a label's nodes and
   the overview's counts as CSV; the tenant's label styles (colour, caption, size, icon per label,
   colour and caption per relationship type) on the canvas, the map, the legend, the schema diagram
   and query results, set by maintainers on the Schema page; the Graph canvas laid out by force,
   on a circle label by label, or in layers along the edges;
-  an Access page for owners and admins (users, service accounts, grants). An
+  an Access page for owners and admins (users, service accounts, grants), and a Database page for
+  admins on the introspection endpoints above (tables, dead rows, vacuum, slow statements). An
   nginx image with no backend of its own; people sign in with their graphos
   user name and password, so permissions and attribution are graphos's; the
   session is one HttpOnly cookie no page script can read (nothing in browser
