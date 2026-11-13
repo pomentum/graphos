@@ -9,7 +9,7 @@ its stylesheet and theme switch (``site.css``, ``site.js``),
 The frame, ``tools/docs/site.html``, has ``{{ name }}`` slots this script fills from files
 the repository already has, so nothing on the page is written twice:
 
-- the README's features (Build, Explore, Run), web UI screenshots and captions, and
+- six of the README's features (:data:`PAGE_FEATURES`), its web UI screenshots and captions, and
   documentation table; the installation guide's install commands (its §2);
 - the version from ``services/graphos/pyproject.toml``;
 - the alt text of each diagram it shows, from the ``<desc>`` that ``diagrams.mjs`` writes
@@ -94,39 +94,55 @@ def sections(markdown: str) -> dict[str, str]:
     return parts
 
 
+# The README's features the page shows, in this order: what sets graphos apart. The README
+# lists them all; the page links the rest through the feature survey.
+PAGE_FEATURES = (
+    "Tenants and schema",
+    "Fast, idempotent writes",
+    "Reconcile by difference",
+    "Graph algorithms",
+    "AI agents (MCP)",
+    "Change feed",
+)
+
+
 def features(body: str) -> str:
-    """The README's Build / Explore / Run lists, as groups of cards."""
-    out: list[str] = []
+    """The README's features named in :data:`PAGE_FEATURES`, as one grid of cards."""
+    cards: dict[str, str] = {}
     for line in body.splitlines():
-        group = re.fullmatch(r"\*\*(\w+)\*\*", line.strip())
-        item = re.match(r"- \*\*(.+?):\*\* (.*)", line)
-        if group:
-            if out:
-                out.append("</div></div>")
-            out.append(f'<div class="group"><h3>{group.group(1)}</h3><div class="cards">')
-        elif item:
+        if item := re.match(r"- \*\*(.+?):\*\* (.*)", line):
             text = item.group(2)[:1].upper() + item.group(2)[1:]
-            out.append(
+            cards[item.group(1)] = (
                 f'<div class="card"><h4>{inline(item.group(1))}</h4><p>{inline(text)}</p></div>'
             )
-    out.append("</div></div>")
-    return "\n".join(out)
+    if missing := [name for name in PAGE_FEATURES if name not in cards]:
+        raise SystemExit(f"the README's features have no {missing}")
+    return '<div class="cards">\n' + "\n".join(cards[n] for n in PAGE_FEATURES) + "\n</div>"
+
+
+def png_size(path: Path) -> tuple[int, int]:
+    """A PNG's width and height, from its header."""
+    head = path.read_bytes()[16:24]
+    return int.from_bytes(head[:4], "big"), int.from_bytes(head[4:], "big")
 
 
 def shots(body: str) -> str:
     """The README's web UI screenshots, each with its alt text and caption: the WebP copy
     screenshots.py writes beside each PNG, a quarter of its size, and the PNG for a browser
-    without WebP."""
+    without WebP, with the PNG's own size (a shot may be of one dialog, not the window). Each
+    opens full size on a click; the stylesheet shows the first one across the whole grid."""
     out: list[str] = []
     pairs = re.findall(
         r'<img src="([^"]+)" width="100%" alt="([^"]+)">\s*\n\s*\*(.+?)\*\s*\n', body
     )
     for n, (src, alt, caption) in enumerate(pairs, 1):
         png = repo_link(src)
+        width, height = png_size(DOCS / png)
         out.append(
-            f'<figure class="fig"><picture><source type="image/webp" '
-            f'srcset="{png.removesuffix(".png")}.webp"><img class="shot" src="{png}" alt="{alt}" '
-            f'loading="lazy" width="1440" height="900"></picture><figcaption><span class="fig-n">'
+            f'<figure class="fig"><a class="zoom" href="{png}" title="Open full size">'
+            f'<picture><source type="image/webp" srcset="{png.removesuffix(".png")}.webp">'
+            f'<img class="shot" src="{png}" alt="{alt}" loading="lazy" width="{width}" '
+            f'height="{height}"></picture></a><figcaption><span class="fig-n">'
             f"UI {n:02d}</span><span>{inline(caption)}</span></figcaption></figure>"
         )
     return "\n".join(out)

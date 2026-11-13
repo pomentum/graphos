@@ -41,14 +41,15 @@ Where to read about the system as a whole:
 
 ## 2. Run the stack, check the repository
 
-Python 3.11, Node 22, Docker with compose.
+Python 3.11, Node 22, Docker with a recent Docker Compose (the `docker compose` plugin).
 
 ```bash
 bash scripts/init-secrets.sh                                 # random database passwords, once
-docker compose -f docker-compose.graphos.yml --profile ui up -d
+docker compose -f docker-compose.graphos.yml -f docker-compose.build.yml --profile ui up -d --build
 ```
 
-The API listens on `http://127.0.0.1:8080`, the UI on `http://127.0.0.1:8081`.
+`docker-compose.build.yml` builds graphos-api and graphos-ui from the checkout (tagged `:dev`);
+without it the compose file runs the published images. The API listens on `http://127.0.0.1:8080`, the UI on `http://127.0.0.1:8081`.
 
 ### Python environment
 

@@ -4,7 +4,19 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## 0.14.13 — 2026-11-12
+## Unreleased
+
+### Changed
+
+- **The compose file runs the published images.** `docker-compose.graphos.yml` now runs
+  `ghcr.io/pomentum/graphos-api` and `graphos-ui` at the checkout's version instead of building
+  them, so installing is one `docker compose ... up -d` with nothing to build. The published
+  images leave out community detection (python-igraph is GPL-2.0-or-later); add
+  `-f docker-compose.igraph.yml` to install it at the first start. To build from the checkout,
+  as the compose file did before, add `-f docker-compose.build.yml` (and `--build`); that build
+  still includes community detection unless `GRAPHOS_EXTRAS=` is empty.
+  **An existing stack built locally** switches to the published images at its next `up`, and
+  loses community detection unless one of the two files is added. Its data is not touched.
 
 The web UI forgets a deleted tenant, so one created again under its name starts empty; a schema
 file needs no `name` of its own, and one exported by this graphos is always read.

@@ -25,12 +25,12 @@ once it runs is in the [usage guide](usage.md).
 |---|---|---|
 | `graphos-db` | `apache/age:release_PG18_1.8.0` (pinned by digest) | PostgreSQL 18 with Apache AGE 1.8 (graphos-api refuses older ones). On an internal network: nothing but graphos-api (and, for an upgrade, graphos-db-import) reaches it. |
 | `graphos-db-export`, `graphos-db-import` | `apache/age` for PostgreSQL 16 and 18 | One-shot: move a PostgreSQL 16 database to PostgreSQL 18 on the first start after an upgrade ([§11](#11-upgrading-from-postgresql-16)); otherwise they exit at once. |
-| `graphos-api` | built from `services/graphos` (published: `ghcr.io/<owner>/graphos-api`) | The REST API, sign-in and the background jobs. Listens on `127.0.0.1:8080`. |
-| `graphos-ui` (optional) | built from `services/graphos-ui` (published: `ghcr.io/<owner>/graphos-ui`) | The web UI: static files and a same-origin proxy to the API, no state of its own. Listens on `127.0.0.1:8081`. |
+| `graphos-api` | `ghcr.io/pomentum/graphos-api` (or built from `services/graphos`) | The REST API, sign-in and the background jobs. Listens on `127.0.0.1:8080`. |
+| `graphos-ui` (optional) | `ghcr.io/pomentum/graphos-ui` (or built from `services/graphos-ui`) | The web UI: static files and a same-origin proxy to the API, no state of its own. Listens on `127.0.0.1:8081`. |
 
 [`docker-compose.graphos.yml`](../../docker-compose.graphos.yml) runs all of them.
 
-**Requirements:** Docker with Compose v2, and about 4 GB of memory for Docker (the defaults are
+**Requirements:** Docker with a recent Docker Compose (the `docker compose` plugin), and about 4 GB of memory for Docker (the defaults are
 laptop-sized; [tuning](apache-age.md) covers graphs of millions of edges). For single sign-on, an
 OpenID Connect provider that graphos-api can reach over HTTPS.
 
@@ -43,13 +43,19 @@ git clone https://github.com/pomentum/graphos.git && cd graphos
 #    services/graphos/deploy/secrets/ (gitignored)
 bash scripts/init-secrets.sh            # Windows: pwsh scripts/init-secrets.ps1
 
-# 2. Database, API and web UI (leave out --profile ui for the API alone)
+# 2. Database, API and web UI, from the published images (leave out --profile ui for the API alone)
 docker compose -f docker-compose.graphos.yml --profile ui up -d
 
 # 3. Up?
 curl -s http://127.0.0.1:8080/readyz    # {"status":"ready",...}
 ```
 
+- **Published images:** the compose file runs `ghcr.io/pomentum/graphos-api` and `graphos-ui`
+  (amd64 and arm64) at this checkout's version, Apache-2.0 with permissively licensed dependencies
+  only. They leave out community detection (Louvain and Leiden), whose library is GPL; add it with
+  `-f docker-compose.igraph.yml` ([§6](#6-louvain-communities-optional-extra)).
+- **Build from the checkout instead:** add `-f docker-compose.build.yml` and `--build`. That build
+  includes community detection unless you start with `GRAPHOS_EXTRAS= docker compose ...`.
 - API: <http://127.0.0.1:8080>, with its live OpenAPI contract at `/docs`.
 - UI: <http://127.0.0.1:8081> (another port: `GRAPHOS_UI_PORT=8090`).
 - Consumers in other compose projects attach to the `graphos-net` network and call
@@ -222,8 +228,8 @@ its name:
 
 | How you run graphos | Louvain and Leiden |
 |---|---|
-| this compose file, built locally | included (leave it out with `GRAPHOS_EXTRAS= docker compose ...`) |
-| the published image | not included; set `GRAPHOS_IGRAPH=true` on graphos-api (or add `-f docker-compose.igraph.yml`, which sets it), and the image installs it into the container on first start (PyPI must be reachable then): [example below](#louvain-with-the-published-images) |
+| this compose file with `-f docker-compose.build.yml`, built from the checkout | included (leave it out with `GRAPHOS_EXTRAS= docker compose ...`) |
+| the published images (the compose file's default) | not included; set `GRAPHOS_IGRAPH=true` on graphos-api (or add `-f docker-compose.igraph.yml`, which sets it), and the image installs it into the container on first start (PyPI must be reachable then): [example below](#louvain-with-the-published-images) |
 | `pip install "./services/graphos[louvain]"` | included |
 
 Everything else, the graph metrics included, works without it; `GET /v1/info` reports
@@ -231,33 +237,16 @@ Everything else, the graph metrics included, works without it; `GET /v1/info` re
 
 ### Louvain with the published images
 
-The compose file builds graphos-api and graphos-ui from your checkout. To run the published images
-instead, add an override file that names them and drops the build (`!reset` needs Compose 2.24 or
-later); set the version you want:
-
-```yaml
-# docker-compose.published.yml
-services:
-  graphos-api:
-    image: ghcr.io/pomentum/graphos-api:0.14.13
-    build: !reset null
-  graphos-ui:
-    image: ghcr.io/pomentum/graphos-ui:0.14.13
-    build: !reset null
-```
-
-Then start with the igraph overlay and the override:
+The compose file runs the published images; add the igraph overlay:
 
 ```bash
-docker compose -f docker-compose.graphos.yml -f docker-compose.igraph.yml \
-  -f docker-compose.published.yml --profile ui up -d
+docker compose -f docker-compose.graphos.yml -f docker-compose.igraph.yml --profile ui up -d
 curl -s http://127.0.0.1:8080/v1/info    # "features": {"louvain": true, ...}
 ```
 
 On its first start graphos-api installs python-igraph into its container; restarts reuse it, and a
 recreated container (a new image or changed settings) installs it again. Without
-`-f docker-compose.igraph.yml`, the same override runs the published images without Louvain. If
-the packages on ghcr.io are not public, sign in first with `docker login ghcr.io`.
+`-f docker-compose.igraph.yml`, the published images run without Louvain.
 
 The image's entrypoint does the install, so any deployment turns it on with environment variables
 alone:
@@ -282,7 +271,10 @@ python clients/python/examples/08_demo_ecosystem.py
 ```
 
 It registers the tenant `demo`, loads it, computes the graph metrics and, with the `louvain` extra,
-the communities. Then open the UI, pick `demo`, and use *Explore → Graph → Colours → By group*.
+the communities. The published images leave the extra out: start the stack with
+`-f docker-compose.igraph.yml` ([§6](#6-louvain-communities-optional-extra)) for the communities, or
+the demo loads without them. Then open the UI, pick `demo`, and use *Explore → Graph → Colours → By
+group*.
 
 ![The Explore view of the demo tenant, coloured by community](../images/ui-explore-graph-dark.png)
 
@@ -474,8 +466,7 @@ lists every one; the README the most common). Those for sign-in, besides the OID
   `GRAPHOS_DB_ADMIN_USER` and `GRAPHOS_DB_ADMIN_PASSWORD_FILE` and graphos-api creates the role and
   the extensions at its first start ([§2](#the-databases-set-up)); nothing is mounted into the
   database. Without them, prepare the database as `services/graphos/deploy/db-init/` does. The published API image has
-  no community detection; with the compose file, run the published images and add it as in
-  [§6](#louvain-with-the-published-images).
+  no community detection; add it as in [§6](#louvain-with-the-published-images).
 - **Without containers.** `pip install "./services/graphos[louvain]"`, point `GRAPHOS_DB_*` at the
   database, and run `python -m graphos` (see [services/graphos](../../services/graphos/README.md)).
 

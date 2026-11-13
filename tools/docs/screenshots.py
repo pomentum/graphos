@@ -26,7 +26,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PIL import Image
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import Locator, Page, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
 SETTLE_MS = 3500          # layouts animate: let them come to rest
@@ -167,8 +167,9 @@ _PEOPLE_CSV = (
 )
 
 
-def csv_import(page: Page) -> None:
-    """A CSV file mapped to a label, and graphos's check of every row before anything is written."""
+def csv_import(page: Page) -> Locator:
+    """A CSV file mapped to a label, and graphos's check of every row before anything is written:
+    the dialog alone, so its text stays readable where the page shows the shot small."""
     _go(page, "/overview")
     page.get_by_role("button", name="Import CSV").click()
     page.wait_for_timeout(600)
@@ -186,9 +187,11 @@ def csv_import(page: Page) -> None:
     page.wait_for_timeout(SETTLE_MS)
     dialog.get_by_text("graphos's check", exact=False).first.scroll_into_view_if_needed()
     page.wait_for_timeout(600)
+    return dialog
 
 
-SHOTS: dict[str, Callable[[Page], None]] = {
+# A shot returns the part of the page it is of, or None for the whole page.
+SHOTS: dict[str, Callable[[Page], Locator | None]] = {
     "explore-graph": explore_graph,
     "explore-groups": explore_groups,
     "explore-map": explore_map,
@@ -233,9 +236,9 @@ def main() -> int:
             page.get_by_role("button", name="Sign in", exact=True).click()
             page.wait_for_url("**/explore**")
             page.wait_for_timeout(SETTLE_MS)
-            SHOTS[name](page)
+            part = SHOTS[name](page)
             target = args.out / f"ui-{name}-{args.scheme}.png"
-            page.screenshot(path=target)
+            (part or page).screenshot(path=target)
             Image.open(target).save(target.with_suffix(".webp"), "WEBP", quality=WEBP_QUALITY, method=6)
             print(target.relative_to(ROOT) if target.is_relative_to(ROOT) else target)
             ctx.close()

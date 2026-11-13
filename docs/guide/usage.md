@@ -1427,7 +1427,8 @@ The Python methods are `cache_put(key, value, ttl_seconds=…)`, `cache_get(key)
 
 Louvain is an optional extra because python-igraph is GPL-2.0-or-later: `pip install
 "graphos[louvain]"`, or build the image with `--build-arg GRAPHOS_EXTRAS=louvain`. The bundled compose
-file includes it unless `GRAPHOS_EXTRAS=` is set. On an image without it (the published one), set
+file's build (`-f docker-compose.build.yml`) includes it unless `GRAPHOS_EXTRAS=` is set. On an
+image without it (the published one, which the compose file runs), set
 `GRAPHOS_IGRAPH=true` on graphos-api instead of rebuilding (the overlay `docker compose -f
 docker-compose.graphos.yml -f docker-compose.igraph.yml up -d` sets it): the image's entrypoint
 downloads python-igraph into the container on its first start (PyPI must be reachable then) and

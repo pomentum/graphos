@@ -3,7 +3,8 @@
 # freshly-booted docker-compose stack.
 #
 # Recipe:
-#   1. Bring up docker-compose.graphos.yml (graphos-db + graphos-api) as a
+#   1. Bring up docker-compose.graphos.yml (graphos-db + graphos-api, built from
+#      the checkout with docker-compose.build.yml) as a
 #      compose project of its own, `graphos-test` (see "Isolation" below).
 #   2. Wait for graphos-db to report healthy and graphos-api to be ready.
 #   3. Run `pytest -m db` inside a throwaway container on the stack's
@@ -32,6 +33,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SERVICE_DIR="$ROOT/services/graphos"
 COMPOSE_FILE="$ROOT/docker-compose.graphos.yml"
+BUILD_FILE="$ROOT/docker-compose.build.yml"     # the checkout's code, not the published image
 
 PROJECT=graphos-test
 DB_CONTAINER=graphos-test-db
@@ -113,7 +115,7 @@ networks:
   graphos-net:
     name: $EXTERNAL_NET
 EOF
-COMPOSE=(docker compose -p "$PROJECT" -f "$COMPOSE_FILE" -f "$OVERRIDE")
+COMPOSE=(docker compose -p "$PROJECT" -f "$COMPOSE_FILE" -f "$BUILD_FILE" -f "$OVERRIDE")
 
 # The project's volume names, as compose resolves them; all must be test ones.
 "${COMPOSE[@]}" config --format json | "$PY" -c '

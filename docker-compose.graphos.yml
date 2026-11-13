@@ -1,6 +1,11 @@
 # graphos — postgres+AGE data plane and FastAPI control plane.
 # Self-contained: own networks, own volumes, own backup policy.
 # Consumers attach to `graphos-net` and reach `graphos-api:8080`.
+#
+# graphos-api and graphos-ui are the published images, at this checkout's version
+# (tools/release/version.mjs sets it). They leave out community detection (python-igraph
+# is GPL-2.0-or-later): add -f docker-compose.igraph.yml to install it at the first start.
+# Add -f docker-compose.build.yml to build both from this checkout instead.
 name: graphos
 
 services:
@@ -123,15 +128,7 @@ services:
   # ── Control plane / REST API ────────────────────────────────────────────
   # Bridges graphos-internal (talks to graphos-db) and graphos-net (consumers).
   graphos-api:
-    image: graphos-api:${GRAPHOS_API_TAG:-dev}
-    build:
-      context: ./services/graphos
-      dockerfile: Dockerfile
-      args:
-        # Local builds include Louvain community detection. python-igraph is
-        # GPL-2.0-or-later: set GRAPHOS_EXTRAS="" to build a permissive-only
-        # image (recompute-communities then answers 501).
-        GRAPHOS_EXTRAS: ${GRAPHOS_EXTRAS-louvain}
+    image: ghcr.io/pomentum/graphos-api:0.14.13
     container_name: graphos-api
     hostname: graphos-api
     restart: unless-stopped
@@ -206,9 +203,7 @@ services:
   # or through single sign-on when graphos-api has GRAPHOS_OIDC_* set (docs/guide/installation.md).
   graphos-ui:
     profiles: ["ui"]
-    image: graphos-ui:${GRAPHOS_UI_TAG:-dev}
-    build:
-      context: ./services/graphos-ui
+    image: ghcr.io/pomentum/graphos-ui:0.14.13
     container_name: graphos-ui
     restart: unless-stopped
     depends_on:

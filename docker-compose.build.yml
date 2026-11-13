@@ -1,0 +1,22 @@
+# graphos-api and graphos-ui built from this checkout, instead of the published images
+# docker-compose.graphos.yml runs:
+#
+#   docker compose -f docker-compose.graphos.yml -f docker-compose.build.yml --profile ui up -d --build
+#
+# The images are tagged graphos-api:dev and graphos-ui:dev (GRAPHOS_API_TAG, GRAPHOS_UI_TAG), so a
+# build never takes the published images' names. The API build includes Louvain and Leiden
+# community detection: python-igraph is GPL-2.0-or-later, so an image built this way contains GPL
+# code. Set GRAPHOS_EXTRAS= (empty) to build a permissive-only image, as published
+# (recompute-communities then answers 501).
+services:
+  graphos-api:
+    image: graphos-api:${GRAPHOS_API_TAG:-dev}
+    build:
+      context: ./services/graphos
+      dockerfile: Dockerfile
+      args:
+        GRAPHOS_EXTRAS: ${GRAPHOS_EXTRAS-louvain}
+  graphos-ui:
+    image: graphos-ui:${GRAPHOS_UI_TAG:-dev}
+    build:
+      context: ./services/graphos-ui

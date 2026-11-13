@@ -8,8 +8,9 @@
  *   node tools/release/version.mjs --check 0.4.0       ... and equal to 0.4.0 (a tag), with a changelog entry
  *
  * graphos-api, graphos-ui and graphos-client are released together under one version, which
- * lives in seven places: both pyproject.toml files, both __version__ strings, the UI's
- * package.json and package-lock.json, and the website's page (docs/index.html, which
+ * lives in eight places: both pyproject.toml files, both __version__ strings, the UI's
+ * package.json and package-lock.json, the published images' tags in docker-compose.graphos.yml
+ * (the install commands run them), and the website's page (docs/index.html, which
  * tools/docs/site.py generates; the README's badge reads the newest tag itself, the page is
  * static). Setting it also turns the changelog's "## Unreleased" heading into
  * "## <version> — <date>" and updates the README's release example and the
@@ -41,6 +42,11 @@ const PLACES = [
   {
     file: 'docs/index.html',
     ...shown([/(· version )(\d+\.\d+\.\d+)(<\/p>)/, /(<dt>Latest<\/dt><dd>)(\d+\.\d+\.\d+)(<\/dd>)/]),
+  },
+  {
+    // The images the install commands run: a stale tag would install an older graphos.
+    file: 'docker-compose.graphos.yml',
+    ...shown([/(ghcr\.io\/pomentum\/graphos-api:)(\d+\.\d+\.\d+)(\s)/, /(ghcr\.io\/pomentum\/graphos-ui:)(\d+\.\d+\.\d+)(\s)/]),
   },
 ];
 

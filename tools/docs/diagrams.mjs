@@ -138,9 +138,9 @@ ${text(905, 206, '+ Apache AGE', { size: 13, weight: 600, fill: t.store, anchor:
 ${text(905, 232, 'private network', { size: 12, fill: t.soft, anchor: 'middle' })}
 ${mark(525, 352, 'one account per consumer', 'ok')}
 ${mark(525, 378, 'a graph per tenant; bounded, timed queries', 'ok')}
-${mark(525, 404, 'bulk load, indexes, communities built in', 'ok')}`;
+${mark(525, 404, 'bulk load, indexes, graph metrics built in', 'ok')}`;
   return k.svg(1000, 430, 'From many database clients to one graph service',
-    'Left: three services each embed a database driver, a connection string and their own Cypher, and all reach one shared graph database, so credentials and query text spread, there is no tenant boundary, a slow query affects everyone and each team re-solves bulk load and indexing. Right: the same services call graphos over typed HTTP; graphos alone reaches PostgreSQL with Apache AGE on a private network, giving each consumer its own account and short-lived tokens, a graph per tenant with bounded, timed queries, and built-in bulk load, indexing and community detection.',
+    'Left: three services each embed a database driver, a connection string and their own Cypher, and all reach one shared graph database, so credentials and query text spread, there is no tenant boundary, a slow query affects everyone and each team re-solves bulk load and indexing. Right: the same services call graphos over typed HTTP; graphos alone reaches PostgreSQL with Apache AGE on a private network, giving each consumer its own account and short-lived tokens, a graph per tenant with bounded, timed queries, and built-in bulk load, indexing and graph metrics, with community detection as an optional extra.',
     body);
 }
 
@@ -234,7 +234,7 @@ ${text(530, 236, 'ids persist; Leiden can start from the last run', { size: 13 }
 <rect x="30" y="256" width="12" height="12" rx="3" fill="${t.storeSoft}" stroke="${t.storeLine}"/>${text(48, 266, 'inside PostgreSQL', { size: 12.5, fill: t.soft })}
 <rect x="190" y="256" width="12" height="12" rx="3" fill="${t.accentSoft}" stroke="${t.accentLine}"/>${text(208, 266, 'inside graphos-api', { size: 12.5, fill: t.soft })}`;
   return k.svg(1000, 282, 'How communities are computed',
-    'A call to recompute-communities, by a user with maintain on the tenant, streams edges out of PostgreSQL as integer ids with plain SQL, builds a weighted undirected igraph with its vertices in id order, runs Louvain, or Leiden starting from the communities the last Leiden run stored, in a separate process with a fixed seed, and matches each new cluster to its predecessor from the last run by Jaccard overlap of at least 0.5 so community ids stay stable. Results are written back with COPY and a single UPDATE, then the community id is denormalised onto every edge so scoped traversals use an index. Only one run per tenant happens at a time, a dry run previews the partition, and the response reports time per step and modularity.',
+    'Community detection is an optional extra (python-igraph). A call to recompute-communities, by a user with maintain on the tenant, streams edges out of PostgreSQL as integer ids with plain SQL, builds a weighted undirected igraph with its vertices in id order, runs Louvain, or Leiden starting from the communities the last Leiden run stored, in a separate process with a fixed seed, and matches each new cluster to its predecessor from the last run by Jaccard overlap of at least 0.5 so community ids stay stable. Results are written back with COPY and a single UPDATE, then the community id is denormalised onto every edge so scoped traversals use an index. Only one run per tenant happens at a time, a dry run previews the partition, and the response reports time per step and modularity.',
     body);
 }
 
