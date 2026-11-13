@@ -6,6 +6,7 @@ import { useNodeEditor } from "../data/useNodeEditor";
 import { displayName, type GraphModel } from "../graph/GraphModel";
 import { useTenantSession } from "../session/SessionProvider";
 import { ConfirmDelete } from "./ConfirmDelete";
+import { CopyValue } from "./CopyValue";
 import { GraphMetrics } from "./GraphMetrics";
 import { ConnectionList } from "./ConnectionList";
 import classes from "./Inspector.module.css";
@@ -52,9 +53,12 @@ export function Inspector({ model, selected, onSelect, onSelectEdge, onExpand, o
   return (
     <Stack gap="md" className={classes.root}>
       <div>
-        <Text fw={600} size="md" truncate title={ref.id}>
-          {displayName(editor.record?.properties ?? attributes.properties, ref.id)}
-        </Text>
+        <Group gap={4} wrap="nowrap">
+          <Text fw={600} size="md" truncate title={ref.id}>
+            {displayName(editor.record?.properties ?? attributes.properties, ref.id)}
+          </Text>
+          <CopyValue value={ref.id} label={t("components.copy.id")} />
+        </Group>
         <Group gap={6} mt={4}>
           <Badge variant="light" size="sm" radius="sm" tt="none">
             {ref.label}

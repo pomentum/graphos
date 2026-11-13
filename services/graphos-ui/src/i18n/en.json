@@ -1380,6 +1380,11 @@
       "moreLabels_other": "{{count}} more labels in grey",
       "notGrouped": "{{formatted}} not grouped"
     },
+    "copy": {
+      "id": "Copy the id",
+      "value": "Copy {{name}}",
+      "copied": "Copied"
+    },
     "propertyEditor": {
       "remove": "Remove {{name}}",
       "valueOf": "Value of {{name}}",

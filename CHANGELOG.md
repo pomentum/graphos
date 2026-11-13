@@ -24,6 +24,8 @@ under one version.
   keys typed in a text field go to the field.
 - **Filters on long lists.** Users, grants (the tenant's and all), saved queries and the Schema
   page's labels and relationship types get a filter field once they have more than 8 entries.
+- **Copy a node's id or a property's value.** The node inspector has a copy button by the node's
+  name (its id), and every property row, of a node or an edge, one for its value.
 
 ### Fixed
 
