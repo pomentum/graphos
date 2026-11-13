@@ -34,6 +34,11 @@ under one version.
   step.
 - **A sample on an empty canvas.** When the whole graph is too big to show, the empty canvas offers
   Show a sample of its busiest label (its best-connected nodes) beside Open the map.
+- **Group sizes in Explore's Groups view.** Beside how many groups there are: the largest and the
+  smallest group's size, and how many nodes are in no group.
+- **Run a resolve rule from the Schema page.** A derived relationship type's details have Run the
+  rule now (write access), which adds the relationships the rule derives from the data as it is
+  and says how many.
 
 ### Fixed
 

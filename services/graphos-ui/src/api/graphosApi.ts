@@ -28,7 +28,9 @@ import type {
   HubsResponse,
   InducedEdgesResponse,
   EdgesUpsertResponse,
+  CommunitySummary,
   ExpandHopsResponse,
+  ResolveEdgesResponse,
   NodesAggregateResponse,
   Me,
   Preferences,
@@ -340,6 +342,16 @@ export class GraphosApi {
   }
 
   /** The groups (communities) of the last recompute, largest first, and the edges between them. */
+  /** Counts over the last recompute's groups: how many, their sizes, the nodes in none. */
+  communitySummary(): Promise<CommunitySummary> {
+    return this.http.get(`${this.graph}/community-summary`, { top: 1 });
+  }
+
+  /** Runs edge types' resolve rules now, adding the edges they derive (`insert`). */
+  resolveEdges(edgeTypes: string[]): Promise<ResolveEdgesResponse> {
+    return this.http.post(`${this.graph}/edges:resolve`, { edge_types: edgeTypes, mode: "insert" });
+  }
+
   communityMap(limit = 150): Promise<CommunityMap> {
     return this.http.get(`${this.graph}/communities/map`, { limit });
   }

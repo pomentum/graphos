@@ -100,6 +100,35 @@ export function useGraphMap(exact = false) {
   return useQuery({ queryKey: keys.map(tenant, exact), queryFn: () => api.graphMap(exact), staleTime: 5 * 60_000 });
 }
 
+/** Counts over the last recompute's groups; read again with them after a recompute. */
+export function useCommunitySummary(enabled = true) {
+  const { api, tenant } = useTenantSession();
+  return useQuery({
+    queryKey: [...keys.groups(tenant), "summary"],
+    queryFn: () => api.communitySummary(),
+    staleTime: 5 * 60_000,
+    enabled,
+  });
+}
+
+/**
+ * Runs a relationship type's resolve rule now: the edges it derives are
+ * added. The map and the counts are read again afterwards.
+ */
+export function useResolveEdges() {
+  const { api, tenant } = useTenantSession();
+  const client = useQueryClient();
+  return useMutation({
+    meta: { errorTitle: "views.schema.resolve.failed" },
+    mutationFn: (type: string) => api.resolveEdges([type]),
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: ["map", tenant] }),
+        client.invalidateQueries({ queryKey: keys.stats(tenant) }),
+      ]),
+  });
+}
+
 /** The groups of the last recompute and the edges between them. */
 export function useCommunityMap() {
   const { api, tenant } = useTenantSession();

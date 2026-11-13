@@ -818,6 +818,29 @@ export interface ExpandHopsResponse {
   paths: { end_id: string; end_label: string; end_properties: Properties; hops: number; rel_path: string[] }[];
 }
 
+/** `GET …/graph/community-summary`: over the last recompute's groups. */
+export interface CommunitySummary {
+  n_communities: number;
+  n_assigned_nodes: number;
+  n_unassigned_nodes: number;
+  largest_community_size: number;
+  smallest_community_size: number;
+}
+
+/** `POST …/graph/edges:resolve`: what each resolve rule wrote. */
+export interface ResolveEdgesResponse {
+  results: {
+    edge_type: string;
+    edges_written: number;
+    edges_removed: number;
+    duration_ms: number;
+    warning: string | null;
+  }[];
+  total_edges_written: number;
+  total_edges_removed: number;
+  total_duration_ms: number;
+}
+
 export interface TenantStats {
   n_vertices: number;
   n_edges: number;

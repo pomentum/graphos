@@ -38,6 +38,7 @@ import {
 import { ALL, entryOf, type SchemaPart } from "../../lib/propertySchema";
 import { mayCreate } from "../../lib/schemaFile";
 import { SchemaUndo } from "./SchemaUndo";
+import { ResolveRule } from "./ResolveRule";
 import { FILTER_FROM, ListFilter, matches } from "../../components/ListFilter";
 import { useMaximize } from "../../components/Maximize";
 import { formatCount } from "../../lib/time";
@@ -86,7 +87,7 @@ const SHOWN_PAIRS = 3;
  */
 export function SchemaView() {
   const { t } = useTranslation();
-  const { tenant, canMaintain, api, me } = useTenantSession();
+  const { tenant, canMaintain, canWrite, api, me } = useTenantSession();
   const { refreshMe } = useSessionContext();
   const schema = useSchema();
   const map = useGraphMap();
@@ -441,6 +442,7 @@ export function SchemaView() {
                   {open === `edge:${row.type}` ? (
                     <div className={classes.detail} style={{ paddingLeft: 12 }}>
                       <DeprecationLines schema={schema.data!} part="edge" name={row.type} />
+                      {row.derived && canWrite ? <ResolveRule type={row.type} /> : null}
                       <EdgeProperties type={row.type}>
                         {(carried) =>
                           panel(

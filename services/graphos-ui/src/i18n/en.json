@@ -399,6 +399,9 @@
         "computeFailed": "Computing the groups failed",
         "recompute": "Compute again",
         "totals": "{{shown}} largest of {{total}} groups · computed {{when}}",
+        "sizes": "sizes {{largest}} to {{smallest}} nodes",
+        "unassigned_one": "{{formatted}} node in no group",
+        "unassigned_other": "{{formatted}} nodes in no group",
         "members_one": "{{formatted}} member",
         "members_other": "{{formatted}} members",
         "internal_one": "{{formatted}} relationship inside",
@@ -802,6 +805,15 @@
       "readOnly": "Read only. Whoever maintains this tenant can add labels, relationship types and search indexes, and deprecate them; its owners can rename them.",
       "neverRemoves": "No data is ever deleted here: labels and relationship types are renamed in place, deprecated, and dropped only once deprecated and empty; a declared pair can be removed.",
       "filter": "Filter labels and relationship types",
+      "resolve": {
+        "run": "Run the rule now",
+        "tooltip": "Adds the relationships this type's resolve rule derives from the data as it is now. Run again on unchanged data, it adds nothing.",
+        "running": "Resolving; a large graph takes a while",
+        "done": "Resolved {{type}}",
+        "written_one": "{{formatted}} relationship written in {{seconds}} s",
+        "written_other": "{{formatted}} relationships written in {{seconds}} s",
+        "failed": "The rule did not run"
+      },
       "maximize": {
         "maximize": "Maximize (M)",
         "restore": "Restore (M or Esc)"

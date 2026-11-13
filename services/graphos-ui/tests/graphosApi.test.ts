@@ -34,6 +34,18 @@ describe("GraphosApi", () => {
     expect(calls[0]?.url).toBe("/api/v1/demo%20co/graph/expand?node_id=p%3A1&max_hops=3&limit=200&direction=both");
   });
 
+  it("reads the groups' counts, and runs a type's resolve rule", async () => {
+    const { api, calls } = recorder();
+    await api.communitySummary();
+    await api.resolveEdges(["CALLS"]);
+    expect(calls[0]?.url).toBe("/api/v1/demo%20co/graph/community-summary?top=1");
+    expect(calls[1]).toMatchObject({
+      method: "POST",
+      url: "/api/v1/demo%20co/graph/edges:resolve",
+      body: { edge_types: ["CALLS"], mode: "insert" },
+    });
+  });
+
   it("patches with merge-patch and If-Match", async () => {
     const { api, calls } = recorder();
     await api.patchNode("n1", { owner: null }, { label: "Doc", etag: '"7.2"' });
