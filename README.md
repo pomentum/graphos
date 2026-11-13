@@ -80,7 +80,7 @@ The picture above is the map; each line below links to the section that covers i
 
 The [installation guide](docs/guide/installation.md) covers the same steps in more detail, single sign-on, and what to change before other people use it.
 
-Requires Docker with Compose v2 and about 4 GB of memory available to Docker (the defaults are laptop-sized; [tuning](docs/guide/apache-age.md) covers larger graphs).
+Requires Docker with a recent Docker Compose (the `docker compose` plugin) and about 4 GB of memory available to Docker (the defaults are laptop-sized; [tuning](docs/guide/apache-age.md) covers larger graphs).
 
 ```bash
 git clone https://github.com/pomentum/graphos.git && cd graphos

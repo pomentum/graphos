@@ -191,7 +191,7 @@
   </div>
 
   <h2 id="start"><span class="sec" aria-hidden="true"><span class="num">07 · Get started</span></span>Run it on your machine</h2>
-  <p class="prose">Docker with Compose v2 and about 4 GB of memory for Docker. These commands run the published images (<code>ghcr.io/pomentum/graphos-api</code> and <code>graphos-ui</code>, amd64 and arm64), so nothing is built. They leave out community detection, whose library is GPL: add <code>-f docker-compose.igraph.yml</code> to download it at the first start. To build from source, add <code>-f docker-compose.build.yml</code> (the <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/installation.md#2-install-with-docker-compose">installation guide</a>).</p>
+  <p class="prose">Docker with a recent Docker Compose (the <code>docker compose</code> plugin) and about 4 GB of memory for Docker. These commands run the published images (<code>ghcr.io/pomentum/graphos-api</code> and <code>graphos-ui</code>, amd64 and arm64), so nothing is built. They leave out community detection, whose library is GPL: add <code>-f docker-compose.igraph.yml</code> to download it at the first start. To build from source, add <code>-f docker-compose.build.yml</code> (the <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/installation.md#2-install-with-docker-compose">installation guide</a>).</p>
   <pre class="record">{{ quickstart }}</pre>
   <ol class="next prose">
     <li>Sign in to the UI at <code>http://127.0.0.1:8081</code> as <code>graphos</code> / <code>graphos</code> and choose a new password: the <a href="https://github.com/pomentum/graphos/blob/main/docs/guide/installation.md">installation guide</a>.</li>

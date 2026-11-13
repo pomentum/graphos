@@ -30,7 +30,7 @@ once it runs is in the [usage guide](usage.md).
 
 [`docker-compose.graphos.yml`](../../docker-compose.graphos.yml) runs all of them.
 
-**Requirements:** Docker with Compose v2, and about 4 GB of memory for Docker (the defaults are
+**Requirements:** Docker with a recent Docker Compose (the `docker compose` plugin), and about 4 GB of memory for Docker (the defaults are
 laptop-sized; [tuning](apache-age.md) covers graphs of millions of edges). For single sign-on, an
 OpenID Connect provider that graphos-api can reach over HTTPS.
 
