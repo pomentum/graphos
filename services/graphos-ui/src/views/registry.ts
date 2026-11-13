@@ -1,6 +1,7 @@
 import {
   IconActivity,
   IconChartBar,
+  IconDatabase,
   IconKey,
   IconRoute,
   IconSchema,
@@ -95,6 +96,14 @@ export const VIEWS: ViewDefinition[] = [
     icon: IconKey,
     group: "Admin",
     requires: "owner",
+  },
+  {
+    id: "database",
+    path: "/database",
+    title: "views.registry.titles.database",
+    icon: IconDatabase,
+    group: "Admin",
+    requires: "admin",
   },
 ];
 

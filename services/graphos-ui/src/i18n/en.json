@@ -330,7 +330,8 @@
         "activity": "Activity",
         "browse": "Browse",
         "schema": "Schema",
-        "access": "Access"
+        "access": "Access",
+        "database": "Database"
       }
     },
     "explore": {
@@ -685,6 +686,41 @@
       "emptyHint": "Writes, computations and schema changes appear here as they happen.",
       "clearFilters": "Clear filters",
       "loadFailed": "Could not load earlier activity"
+    },
+    "database": {
+      "title": "Database",
+      "hint": "The database graphos runs on: sizes, dead rows, vacuums and the slowest statements.",
+      "summary": "PostgreSQL {{postgres}} · AGE {{age}} · {{size}} on disk",
+      "refresh": "Refresh",
+      "tables": "Tables",
+      "filter": "Filter tables",
+      "never": "never",
+      "actionsFor": "Actions for {{table}}",
+      "deadTooltip": "A large share of this table's rows are dead: a vacuum makes the space reusable.",
+      "columns": {
+        "table": "Table",
+        "rows": "Rows",
+        "dead": "Dead rows",
+        "size": "Size",
+        "vacuumed": "Last vacuum",
+        "mean": "Mean",
+        "calls": "Calls",
+        "total": "Total",
+        "statement": "Statement"
+      },
+      "vacuum": {
+        "one": "Vacuum",
+        "full": "Vacuum FULL…",
+        "all": "Vacuum everything",
+        "allTitle": "Vacuum every table?",
+        "allText": "Runs VACUUM ANALYZE on every table of every tenant. Reads and writes go on meanwhile; on a large database it takes minutes.",
+        "fullTitle": "VACUUM FULL {{table}}?",
+        "fullText": "Rewrites the table to give its dead space back to the disk. The table is locked while it runs: reads and writes of it wait, for seconds to minutes on a large table.",
+        "failed": "The vacuum did not run"
+      },
+      "slow": "Slowest statements",
+      "slowHint": "By mean time, from pg_stat_statements: what the database has spent its time on since its statistics were last reset.",
+      "slowUnavailable": "pg_stat_statements is not loaded on this database."
     },
     "query": {
       "title": "Query",

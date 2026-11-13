@@ -29,6 +29,9 @@ import type {
   InducedEdgesResponse,
   EdgesUpsertResponse,
   CommunitySummary,
+  DbStats,
+  SlowQueries,
+  VacuumRequest,
   ExpandHopsResponse,
   ResolveEdgesResponse,
   NodesAggregateResponse,
@@ -343,6 +346,21 @@ export class GraphosApi {
 
   /** The groups (communities) of the last recompute, largest first, and the edges between them. */
   /** Counts over the last recompute's groups: how many, their sizes, the nodes in none. */
+  /** The database's size and versions, and each table's rows and vacuums (admins). */
+  dbStats(): Promise<DbStats> {
+    return this.http.get("/v1/db/stats");
+  }
+
+  /** The slowest statements, by mean time (admins). */
+  slowQueries(limit: number): Promise<SlowQueries> {
+    return this.http.get("/v1/db/slow-queries", { limit });
+  }
+
+  /** Vacuums some tables, or the whole database (admins). */
+  vacuum(request: VacuumRequest): Promise<{ tables_processed: string[]; elapsed_ms: number }> {
+    return this.http.post("/v1/db/vacuum", request);
+  }
+
   communitySummary(): Promise<CommunitySummary> {
     return this.http.get(`${this.graph}/community-summary`, { top: 1 });
   }

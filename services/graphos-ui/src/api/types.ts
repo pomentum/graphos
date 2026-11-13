@@ -841,6 +841,41 @@ export interface ResolveEdgesResponse {
   total_duration_ms: number;
 }
 
+/** One table of `GET /v1/db/stats`. */
+export interface TableStat {
+  schema_name: string;
+  table_name: string;
+  n_live_tuples: number;
+  n_dead_tuples: number;
+  total_bytes: number;
+  index_bytes: number;
+  last_vacuum: string | null;
+  last_autovacuum: string | null;
+  last_analyze: string | null;
+}
+
+/** `GET /v1/db/stats` (admins). */
+export interface DbStats {
+  postgres_version: string;
+  database_size_bytes: number;
+  age_version: string | null;
+  tables: TableStat[];
+}
+
+/** `GET /v1/db/slow-queries` (admins): from pg_stat_statements, when it is loaded. */
+export interface SlowQueries {
+  available: boolean;
+  queries: { query: string; calls: number; total_exec_ms: number; mean_exec_ms: number; rows: number }[];
+  note: string | null;
+}
+
+/** `POST /v1/db/vacuum` (admins): some tables (`schema.table`) or all; FULL locks each table it rewrites. */
+export interface VacuumRequest {
+  tables?: string[];
+  full?: boolean;
+  analyze?: boolean;
+}
+
 export interface TenantStats {
   n_vertices: number;
   n_edges: number;

@@ -39,6 +39,10 @@ under one version.
 - **Run a resolve rule from the Schema page.** A derived relationship type's details have Run the
   rule now (write access), which adds the relationships the rule derives from the data as it is
   and says how many.
+- **A Database page for admins.** The database's size and versions; each table's rows, dead rows
+  (flagged when they are over a fifth), size and last vacuum, with a filter; a vacuum of one table,
+  VACUUM FULL of one (it locks the table, so it asks first) or of everything; and the slowest
+  statements from pg_stat_statements.
 
 ### Fixed
 
