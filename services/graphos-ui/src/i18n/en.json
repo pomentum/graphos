@@ -282,6 +282,36 @@
       "changePassword": "Change password",
       "passwordChanged": "Password changed. Your other sessions have ended.",
       "signOut": "Sign out"
+    },
+    "shortcuts": {
+      "title": "Keyboard shortcuts",
+      "inFields": "In a text field, keys go to the field: its own undo, for one.",
+      "drag": "drag",
+      "sections": {
+        "everywhere": "Everywhere",
+        "explore": "Explore (graph)",
+        "schema": "Schema",
+        "query": "Query"
+      },
+      "do": {
+        "search": "Search nodes",
+        "shortcuts": "This list",
+        "back": "Back (undo the last step)",
+        "focus": "Focus on the selection",
+        "expand": "Expand the selection",
+        "collapse": "Collapse the selection",
+        "hide": "Hide the selection",
+        "selectAll": "Select every node",
+        "deselect": "Deselect",
+        "lasso": "Pick nodes with a loop",
+        "undo": "Undo the last change",
+        "listOrDiagram": "List or diagram",
+        "addLabel": "Add a label",
+        "addRelationship": "Add a relationship type",
+        "maximize": "Maximize or restore",
+        "restore": "Restore",
+        "run": "Run the query"
+      }
     }
   },
   "views": {
@@ -729,6 +759,10 @@
       "heading": "Schema of {{tenant}}",
       "readOnly": "Read only. Whoever maintains this tenant can add labels, relationship types and search indexes, and deprecate them; its owners can rename them.",
       "neverRemoves": "No data is ever deleted here: labels and relationship types are renamed in place, deprecated, and dropped only once deprecated and empty; a declared pair can be removed.",
+      "maximize": {
+        "maximize": "Maximize (M)",
+        "restore": "Restore (M or Esc)"
+      },
       "undo": {
         "button": "Undo",
         "tooltip": "Undo {{step}} ({{key}})",

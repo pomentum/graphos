@@ -1,4 +1,5 @@
 import {
+  ActionIcon,
   Alert,
   Badge,
   Button,
@@ -12,7 +13,15 @@ import {
   Tooltip,
   UnstyledButton,
 } from "@mantine/core";
-import { IconChevronDown, IconDownload, IconPlus, IconUpload } from "@tabler/icons-react";
+import { useHotkeys } from "@mantine/hooks";
+import {
+  IconArrowsMaximize,
+  IconArrowsMinimize,
+  IconChevronDown,
+  IconDownload,
+  IconPlus,
+  IconUpload,
+} from "@tabler/icons-react";
 import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
@@ -29,6 +38,7 @@ import {
 import { ALL, entryOf, type SchemaPart } from "../../lib/propertySchema";
 import { mayCreate } from "../../lib/schemaFile";
 import { SchemaUndo } from "./SchemaUndo";
+import { useMaximize } from "../../components/Maximize";
 import { formatCount } from "../../lib/time";
 import { useSessionContext, useTenantSession } from "../../session/SessionProvider";
 import { browseParams } from "../browse/browseState";
@@ -94,6 +104,17 @@ export function SchemaView() {
   const setView = (next: string) => setParams(next === "diagram" ? { view: "diagram" } : {}, { replace: true });
   // A label pair drawn on the diagram, waiting for the relationship type it declares.
   const [pair, setPair] = useState<{ src: string; dst: string } | null>(null);
+  const maximize = useMaximize();
+  // Keys for the page, not while a dialog of it is open (a field's keys go to the field).
+  const idle = adding === null && !importing && !addingProperty;
+  const mayAdd = canMaintain && Boolean(schema.data) && !locked;
+  useHotkeys([
+    ["M", () => idle && maximize.toggle()],
+    ["Escape", () => idle && maximize.maximized && maximize.restore(), { preventDefault: false }],
+    ["V", () => idle && setView(view === "diagram" ? "list" : "diagram")],
+    ["L", () => idle && mayAdd && setAdding("label")],
+    ["R", () => idle && mayAdd && setAdding("relationship")],
+  ]);
 
   const counts = useMemo(
     () => (map.data ? new Map(map.data.labels.map((l) => [l.label, l.count] as const)) : null),
@@ -169,6 +190,20 @@ export function SchemaView() {
             onChange={setView}
           />
           {canMaintain && schema.data ? <SchemaUndo /> : null}
+          <Tooltip
+            label={maximize.maximized ? t("views.schema.maximize.restore") : t("views.schema.maximize.maximize")}
+            withArrow
+          >
+            <ActionIcon
+              variant="default"
+              size="md"
+              aria-label={maximize.maximized ? t("views.schema.maximize.restore") : t("views.schema.maximize.maximize")}
+              aria-pressed={maximize.maximized}
+              onClick={maximize.toggle}
+            >
+              {maximize.maximized ? <IconArrowsMinimize size={15} /> : <IconArrowsMaximize size={15} />}
+            </ActionIcon>
+          </Tooltip>
           {canMaintain && schema.data ? (
             <Group gap={6}>
               <Tooltip label={t("views.schema.file.exportTooltip")} withArrow multiline w={240}>

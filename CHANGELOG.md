@@ -16,6 +16,19 @@ under one version.
   dropped. A change graphos cannot take back (a parent label, a new search index, a drop, an
   import, a new schema manager) empties the history, and the button's tooltip says which. An undo
   is refused, and the history emptied, if someone saved the schema since.
+- **Maximize on the Schema page.** A button, or M, gives the page the whole window (the toolbar and
+  the sidebar give way); M or Esc restores it, as does opening another page.
+- **Keyboard shortcuts, and a list of them.** On the Schema page: V switches between the list and
+  the diagram, L adds a label, R a relationship type. `?` anywhere opens the list of every shortcut
+  (Explore's, the Schema page's, the Query page's and the search). Ctrl stands for ⌘ on macOS;
+  keys typed in a text field go to the field.
+
+### Fixed
+
+- **The schema diagram of an empty graph was hard to read.** A label with no nodes is drawn greyed
+  (dashed, transparent, dimmed) so it steps back beside labels that have some; in a graph with no
+  nodes at all every label was, and the whole diagram faded. Labels are now greyed only while
+  others have nodes, and Hide empty labels hides none while none has any.
 
 ## 0.15.0 — 2026-11-13
 

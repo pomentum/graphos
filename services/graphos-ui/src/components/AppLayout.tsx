@@ -1,6 +1,6 @@
 import { ActionIcon, Group, Text } from "@mantine/core";
-import { useDisclosure, useMediaQuery } from "@mantine/hooks";
-import { useEffect } from "react";
+import { useDisclosure, useHotkeys, useMediaQuery } from "@mantine/hooks";
+import { useEffect, useMemo, useState } from "react";
 import { IconLayoutSidebar } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -12,6 +12,8 @@ import { VIEWS, visibleViews } from "../views/registry";
 import { useServiceInfo } from "../data/queries";
 import classes from "./AppLayout.module.css";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { MaximizeContext } from "./Maximize";
+import { ShortcutsDialog } from "./ShortcutsDialog";
 import { NodeSearch, type PickMode } from "./NodeSearch";
 import { Sidebar } from "./Sidebar";
 import { RunningIndicator } from "./RunningJobs";
@@ -36,6 +38,16 @@ export function AppLayout() {
   // beside it: closed by default, and closed again after choosing a view.
   const narrow = useMediaQuery(NARROW, false, { getInitialValueInEffect: false });
   const [sidebarOpen, sidebar] = useDisclosure(!narrow);
+  // A view maximized to the whole window (the Schema page offers it), until restored or left.
+  const [maximized, setMaximized] = useState(false);
+  const maximize = useMemo(
+    () => ({ maximized, toggle: () => setMaximized((on) => !on), restore: () => setMaximized(false) }),
+    [maximized],
+  );
+  useEffect(() => setMaximized(false), [location.pathname]);
+  // The list of keyboard shortcuts.
+  const [shortcutsOpen, shortcuts] = useDisclosure(false);
+  useHotkeys([["shift+?", shortcuts.open]]);
   // A dataset download or upload stops if the page is left: ask first.
   useEffect(() => guardLeavingWhileTransferring(), []);
   useEffect(() => {
@@ -54,7 +66,12 @@ export function AppLayout() {
   };
 
   return (
-    <div className={classes.root} data-sidebar={sidebarOpen ? "open" : "closed"} data-narrow={narrow || undefined}>
+    <div
+      className={classes.root}
+      data-sidebar={sidebarOpen ? "open" : "closed"}
+      data-narrow={narrow || undefined}
+      data-maximized={maximized || undefined}
+    >
       <header className={classes.toolbar}>
         <Group gap="sm" className={classes.toolbarStart} wrap="nowrap">
           <ActionIcon
@@ -85,9 +102,12 @@ export function AppLayout() {
       ) : null}
       <main className={classes.main}>
         <ErrorBoundary resetKey={location.pathname}>
-          <Outlet />
+          <MaximizeContext.Provider value={maximize}>
+            <Outlet />
+          </MaximizeContext.Provider>
         </ErrorBoundary>
       </main>
+      <ShortcutsDialog opened={shortcutsOpen} onClose={shortcuts.close} />
     </div>
   );
 }

@@ -84,3 +84,17 @@
     gap: 6px;
   }
 }
+
+/* A view maximized to the whole window: no toolbar, no sidebar. */
+.root[data-maximized] {
+  display: block;
+}
+
+.root[data-maximized] .toolbar,
+.root[data-maximized] .sidebar {
+  display: none;
+}
+
+.root[data-maximized] .main {
+  height: 100vh;
+}
