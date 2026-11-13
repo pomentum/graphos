@@ -78,6 +78,18 @@ describe("schema diagram", () => {
     expect(diagram.lone).toEqual(["File", "Class", "Repo"]);
   });
 
+  it("draws every label in full, and hides none, while the graph has no nodes at all", () => {
+    const none = { ...map, labels: map.labels.map((l) => ({ ...l, count: 0 })) };
+    const diagram = buildDiagram(schema, none, { hideEmpty: true });
+    expect(diagram.boxes.map((b) => b.label).sort()).toEqual([...schema.vertex_labels].sort());
+    expect(diagram.boxes.every((b) => !b.empty)).toBe(true);
+    // Once one label has nodes, the others are empty again.
+    const one = { ...none, labels: none.labels.map((l) => (l.label === "File" ? { ...l, count: 3 } : l)) };
+    const some = buildDiagram(schema, one);
+    expect(some.boxes.find((b) => b.label === "File")!.empty).toBe(false);
+    expect(some.boxes.find((b) => b.label === "Symbol")!.empty).toBe(true);
+  });
+
   it("survives a cycle in the hierarchy", () => {
     const looped = { ...schema, vertex_labels: ["A", "B"], label_hierarchy: { A: "B", B: "A" } };
     const diagram = buildDiagram(looped, undefined);

@@ -10,7 +10,11 @@ export interface Box {
   parent: string | null;
   /** The top of its inheritance chain (itself when it has no parent). */
   family: string;
-  /** No nodes yet (drawn greyed). */
+  /**
+   * No nodes yet while other labels have some (drawn greyed, and hidden by
+   * Hide empty labels). In a graph with no nodes at all no box is empty: the
+   * schema is all there is to see, so it is drawn in full.
+   */
   empty: boolean;
   w: number;
   h: number;
@@ -183,10 +187,11 @@ export function buildDiagram(
 ): Diagram {
   const text = options.text ?? PLAIN_TEXT;
   const counts = map ? new Map(map.labels.map((l) => [l.label, l.count] as const)) : null;
+  const anyNodes = schema.vertex_labels.some((label) => (counts?.get(label) ?? 0) > 0);
   const boxes: Box[] = [];
   for (const label of [...schema.vertex_labels].sort()) {
     const count = counts ? (counts.get(label) ?? 0) : null;
-    const empty = count === 0;
+    const empty = anyNodes && count === 0;
     if (options.hideEmpty && empty) continue;
     const parent = schema.label_hierarchy[label] ?? null;
     const family = familyOf(label, schema.label_hierarchy);
