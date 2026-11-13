@@ -28,6 +28,7 @@ import {
 } from "../../data/queries";
 import { ALL, entryOf, type SchemaPart } from "../../lib/propertySchema";
 import { mayCreate } from "../../lib/schemaFile";
+import { SchemaUndo } from "./SchemaUndo";
 import { formatCount } from "../../lib/time";
 import { useSessionContext, useTenantSession } from "../../session/SessionProvider";
 import { browseParams } from "../browse/browseState";
@@ -167,6 +168,7 @@ export function SchemaView() {
             value={view}
             onChange={setView}
           />
+          {canMaintain && schema.data ? <SchemaUndo /> : null}
           {canMaintain && schema.data ? (
             <Group gap={6}>
               <Tooltip label={t("views.schema.file.exportTooltip")} withArrow multiline w={240}>

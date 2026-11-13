@@ -4,6 +4,19 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Added
+
+- **Undo on the Schema page.** An Undo button, and Ctrl+Z (⌘Z on macOS) anywhere on the page but in
+  a text field, take back the last schema change, and the one before, up to 50 per tenant for the
+  session. Every change is written to graphos at once, so undoing one writes its opposite: a style,
+  property definition, deprecation or the strict label pairs switch as it was, a declared pair
+  removed or declared again, a rename made back, a new label or type (still empty) deprecated and
+  dropped. A change graphos cannot take back (a parent label, a new search index, a drop, an
+  import, a new schema manager) empties the history, and the button's tooltip says which. An undo
+  is refused, and the history emptied, if someone saved the schema since.
+
 ## 0.15.0 — 2026-11-13
 
 Installing is one command: the compose file runs the published images, and builds from the

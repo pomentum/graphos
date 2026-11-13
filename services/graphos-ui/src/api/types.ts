@@ -793,6 +793,12 @@ export interface SchemaAddition {
   strict_endpoints?: boolean;
   /** Styles to declare (an entry replaces the stored one; `null` removes it). */
   display?: DisplaySpec;
+  /**
+   * How `display` merges: `entries` (an entry sent replaces or, with `null`,
+   * removes the stored one) or `missing_only`. Omitted: `missing_only` for
+   * the tenant's schema manager, `entries` for anyone else.
+   */
+  display_merge?: "entries" | "missing_only";
   /** Property definitions to declare (an entry replaces the stored one; `null` removes it). */
   property_schema?: {
     mode?: PropertyMode;
