@@ -15,6 +15,8 @@ import classes from "./BrowseView.module.css";
 import { MAX_OPEN_NODES, useOpenNodes } from "../explore/useOpenNodes";
 import { BrowseExport } from "./BrowseExport";
 import { FilterBar } from "./FilterBar";
+import { BulkActions } from "./BulkActions";
+import { useTenantSession } from "../../session/SessionProvider";
 
 /** Rows per page. */
 const PAGE_SIZE = 50;
@@ -140,6 +142,7 @@ function LabelPages({
   const navigate = useNavigate();
   const { open } = useWorkspace();
   const openNodes = useOpenNodes();
+  const { canWrite } = useTenantSession();
   const profile = usePropertyProfile(label);
   const [pager, setPager] = useState(FIRST_PAGE);
   // Rows picked across pages, by id, for opening together.
@@ -224,6 +227,9 @@ function LabelPages({
               <Button size="xs" loading={opening} onClick={() => void openPicked()}>
                 {t("views.browse.selection.open")}
               </Button>
+              {canWrite ? (
+                <BulkActions rows={[...picked.values()]} names={names} onDone={() => setPicked(new Map())} />
+              ) : null}
               <Button size="xs" variant="subtle" color="gray" onClick={() => setPicked(new Map())}>
                 {t("views.browse.selection.clear")}
               </Button>

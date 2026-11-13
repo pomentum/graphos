@@ -1,4 +1,4 @@
-import { Button, Loader, Text } from "@mantine/core";
+import { Button, Group, Loader, Text } from "@mantine/core";
 import { useTranslation } from "react-i18next";
 import type { Overview } from "../../graph/WorkspaceProvider";
 import { searchShortcut } from "../../lib/platform";
@@ -14,11 +14,15 @@ export function CanvasStatus({
   overview,
   isEmpty,
   onLoad,
+  sample = null,
 }: {
   overview: Overview;
   isEmpty: boolean;
   onLoad: () => void;
+  /** A sample to offer on an empty canvas when the whole graph is too big: the busiest label's hubs. */
+  sample?: { label: string; busy: boolean; open: () => void } | null;
 }) {
+  const tooBig = Boolean(overview.total && overview.total > WHOLE_GRAPH_LIMIT);
   const { t } = useTranslation();
   if (overview.status === "loading") {
     return (
@@ -39,11 +43,22 @@ export function CanvasStatus({
         <Text size="sm" c="dimmed">
           {t("views.explore.status.emptyHint", { shortcut: searchShortcut() })}
         </Text>
-        <Button size="xs" variant="default" mt="sm" className={classes.emptyAction} onClick={onLoad}>
-          {overview.total && overview.total > WHOLE_GRAPH_LIMIT
-            ? t("views.explore.status.openMap")
-            : t("views.explore.status.showWhole")}
-        </Button>
+        <Group gap="xs" mt="sm" justify="center">
+          {tooBig && sample ? (
+            <Button
+              size="xs"
+              variant="default"
+              className={classes.emptyAction}
+              loading={sample.busy}
+              onClick={sample.open}
+            >
+              {t("views.explore.status.showSample", { label: sample.label })}
+            </Button>
+          ) : null}
+          <Button size="xs" variant="default" className={classes.emptyAction} onClick={onLoad}>
+            {tooBig ? t("views.explore.status.openMap") : t("views.explore.status.showWhole")}
+          </Button>
+        </Group>
       </div>
     );
   }

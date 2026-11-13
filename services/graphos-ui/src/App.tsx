@@ -13,6 +13,7 @@ import { SessionProvider, useSessionContext } from "./session/SessionProvider";
 import { memoryColorSchemeManager } from "./theme/colorScheme";
 import { resolveCssVariables, theme } from "./theme/mantineTheme";
 import { AccessView } from "./views/access/AccessView";
+import { DatabaseView } from "./views/database/DatabaseView";
 import { ActivityView } from "./views/activity/ActivityView";
 import { BrowseView } from "./views/browse/BrowseView";
 import { SchemaView } from "./views/schema/SchemaView";
@@ -33,6 +34,7 @@ const SCREENS: Record<string, ComponentType> = {
   browse: BrowseView,
   schema: SchemaView,
   access: AccessView,
+  database: DatabaseView,
   query: QueryView,
 };
 

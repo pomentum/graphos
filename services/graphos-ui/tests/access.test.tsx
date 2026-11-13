@@ -29,10 +29,15 @@ function json(body: unknown, status = 200): Response {
 const OIDC = { issuer: "https://login.example.com", client_id: "graphos", scopes: "openid", display_name: "SSO" };
 
 /** A graphos answering the Access page; records what was sent. */
-function server({ sso = false }: { sso?: boolean } = {}) {
+function server({
+  sso = false,
+  failGrants = false,
+  users = [],
+}: { sso?: boolean; failGrants?: boolean; users?: string[] } = {}) {
   const sent: { method: string; path: string; body: unknown }[] = [];
   const grants = [
     { subject: "user:olive", tenant: "acme", level: "owner", granted_by: "creator" },
+    { subject: "user:sam", tenant: "acme", level: "read", granted_by: "olive" },
     ...(sso ? [{ subject: "oidc-group:Graph Analysts", tenant: "acme", level: "read", granted_by: "olive" }] : []),
   ];
   const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -41,9 +46,14 @@ function server({ sso = false }: { sso?: boolean } = {}) {
     const body = init?.body ? JSON.parse(String(init.body)) : null;
     sent.push({ method, path: url.pathname + url.search, body });
     if (url.pathname === "/api/v1/auth/config") return json({ password: true, oidc: sso ? OIDC : null });
-    if (url.pathname === "/api/v1/grants" && method === "GET") return json({ grants });
+    if (url.pathname === "/api/v1/grants" && method === "GET")
+      return failGrants ? json({ detail: "database unavailable" }, 500) : json({ grants });
+    if (url.pathname === "/api/v1/grants" && method === "DELETE") return new Response(null, { status: 204 });
     if (url.pathname === "/api/v1/grants" && method === "POST") return json({ ...body, granted_by: "olive" }, 201);
-    if (url.pathname === "/api/v1/users" && method === "GET") return json({ users: [] });
+    if (url.pathname === "/api/v1/users" && method === "GET")
+      return json({
+        users: users.map((name) => ({ name, kind: "person", disabled: false, must_change: false, created_at: "" })),
+      });
     if (url.pathname === "/api/v1/users" && method === "POST") {
       return json(
         {
@@ -129,5 +139,38 @@ describe("Access", () => {
       name: "loader",
       kind: "service",
     });
+  });
+
+  it("asks before taking a grant back, and takes it back only once confirmed", async () => {
+    const { fetchImpl, sent } = server();
+    renderAccess(me(), fetchImpl);
+    fireEvent.click(await screen.findByRole("button", { name: "Take read back from sam" }));
+    const dialog = await screen.findByRole("dialog", { name: "Take read back from sam?" });
+    expect(within(dialog).getByText("sam loses read on acme at once.")).toBeInTheDocument();
+    expect(sent.some((r) => r.method === "DELETE")).toBe(false);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Take back" }));
+    await waitFor(() =>
+      expect(sent.some((r) => r.method === "DELETE" && r.path.startsWith("/api/v1/grants"))).toBe(true),
+    );
+  });
+
+  it("says when a list could not be loaded", async () => {
+    const { fetchImpl } = server({ failGrants: true });
+    renderAccess(me(), fetchImpl);
+    expect(await screen.findByText("Could not load this list")).toBeInTheDocument();
+    expect(screen.getByText("database unavailable")).toBeInTheDocument();
+  });
+
+  it("filters a long list of users as you type", async () => {
+    const names = ["ana", "bob", "carla", "dimitris", "eleni", "fotis", "giorgos", "ioanna", "kostas"];
+    const { fetchImpl } = server({ users: names });
+    renderAccess(me({ admin: true }), fetchImpl);
+    const filter = await screen.findByRole("textbox", { name: "Filter users" });
+    const section = within(filter.closest("section")!);
+    expect(await section.findByText("kostas")).toBeInTheDocument();
+    fireEvent.change(filter, { target: { value: "IS" } });
+    expect(section.getByText("dimitris")).toBeInTheDocument();
+    expect(section.getByText("fotis")).toBeInTheDocument();
+    expect(section.queryByText("kostas")).toBeNull();
   });
 });

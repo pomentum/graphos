@@ -793,6 +793,12 @@ export interface SchemaAddition {
   strict_endpoints?: boolean;
   /** Styles to declare (an entry replaces the stored one; `null` removes it). */
   display?: DisplaySpec;
+  /**
+   * How `display` merges: `entries` (an entry sent replaces or, with `null`,
+   * removes the stored one) or `missing_only`. Omitted: `missing_only` for
+   * the tenant's schema manager, `entries` for anyone else.
+   */
+  display_merge?: "entries" | "missing_only";
   /** Property definitions to declare (an entry replaces the stored one; `null` removes it). */
   property_schema?: {
     mode?: PropertyMode;
@@ -804,6 +810,70 @@ export interface SchemaAddition {
     vertex?: Record<string, DeprecatedEntry | null>;
     edge?: Record<string, DeprecatedEntry | null>;
   };
+}
+
+/** `GET …/graph/expand`: the nodes within `max_hops` of a seed, nearest first. */
+export interface ExpandHopsResponse {
+  truncated: boolean;
+  paths: { end_id: string; end_label: string; end_properties: Properties; hops: number; rel_path: string[] }[];
+}
+
+/** `GET …/graph/community-summary`: over the last recompute's groups. */
+export interface CommunitySummary {
+  n_communities: number;
+  n_assigned_nodes: number;
+  n_unassigned_nodes: number;
+  largest_community_size: number;
+  smallest_community_size: number;
+}
+
+/** `POST …/graph/edges:resolve`: what each resolve rule wrote. */
+export interface ResolveEdgesResponse {
+  results: {
+    edge_type: string;
+    edges_written: number;
+    edges_removed: number;
+    duration_ms: number;
+    warning: string | null;
+  }[];
+  total_edges_written: number;
+  total_edges_removed: number;
+  total_duration_ms: number;
+}
+
+/** One table of `GET /v1/db/stats`. */
+export interface TableStat {
+  schema_name: string;
+  table_name: string;
+  n_live_tuples: number;
+  n_dead_tuples: number;
+  total_bytes: number;
+  index_bytes: number;
+  last_vacuum: string | null;
+  last_autovacuum: string | null;
+  last_analyze: string | null;
+}
+
+/** `GET /v1/db/stats` (admins). */
+export interface DbStats {
+  postgres_version: string;
+  database_size_bytes: number;
+  age_version: string | null;
+  tables: TableStat[];
+}
+
+/** `GET /v1/db/slow-queries` (admins): from pg_stat_statements, when it is loaded. */
+export interface SlowQueries {
+  available: boolean;
+  queries: { query: string; calls: number; total_exec_ms: number; mean_exec_ms: number; rows: number }[];
+  note: string | null;
+}
+
+/** `POST /v1/db/vacuum` (admins): some tables (`schema.table`) or all; FULL locks each table it rewrites. */
+export interface VacuumRequest {
+  tables?: string[];
+  full?: boolean;
+  analyze?: boolean;
 }
 
 export interface TenantStats {

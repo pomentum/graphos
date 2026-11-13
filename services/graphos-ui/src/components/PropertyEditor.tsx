@@ -1,4 +1,5 @@
 import { ActionIcon, Autocomplete, Group, NumberInput, Switch, Text, TextInput, UnstyledButton } from "@mantine/core";
+import { CopyValue } from "./CopyValue";
 import { IconPlus, IconX } from "@tabler/icons-react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -60,20 +61,25 @@ export function PropertyEditor({ draft, editable, onChange, suggestions = [] }: 
               ) : (
                 <ValueInput name={key} value={value} onChange={(v) => set(key, v)} />
               )}
-              {editable && !isSystemProperty(key) ? (
-                <ActionIcon
-                  variant="subtle"
-                  color="gray"
-                  size="xs"
-                  aria-label={t("components.propertyEditor.remove", { name: key })}
+              <Group gap={2} wrap="nowrap" justify="flex-end">
+                <CopyValue
+                  value={formatValue(value)}
+                  label={t("components.copy.value", { name: key })}
                   className={classes.remove}
-                  onClick={() => remove(key)}
-                >
-                  <IconX size={12} />
-                </ActionIcon>
-              ) : (
-                <span />
-              )}
+                />
+                {editable && !isSystemProperty(key) ? (
+                  <ActionIcon
+                    variant="subtle"
+                    color="gray"
+                    size="xs"
+                    aria-label={t("components.propertyEditor.remove", { name: key })}
+                    className={classes.remove}
+                    onClick={() => remove(key)}
+                  >
+                    <IconX size={12} />
+                  </ActionIcon>
+                ) : null}
+              </Group>
             </div>
           );
         })}

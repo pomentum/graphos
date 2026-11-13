@@ -28,6 +28,12 @@ import type {
   HubsResponse,
   InducedEdgesResponse,
   EdgesUpsertResponse,
+  CommunitySummary,
+  DbStats,
+  SlowQueries,
+  VacuumRequest,
+  ExpandHopsResponse,
+  ResolveEdgesResponse,
   NodesAggregateResponse,
   Me,
   Preferences,
@@ -339,6 +345,31 @@ export class GraphosApi {
   }
 
   /** The groups (communities) of the last recompute, largest first, and the edges between them. */
+  /** Counts over the last recompute's groups: how many, their sizes, the nodes in none. */
+  /** The database's size and versions, and each table's rows and vacuums (admins). */
+  dbStats(): Promise<DbStats> {
+    return this.http.get("/v1/db/stats");
+  }
+
+  /** The slowest statements, by mean time (admins). */
+  slowQueries(limit: number): Promise<SlowQueries> {
+    return this.http.get("/v1/db/slow-queries", { limit });
+  }
+
+  /** Vacuums some tables, or the whole database (admins). */
+  vacuum(request: VacuumRequest): Promise<{ tables_processed: string[]; elapsed_ms: number }> {
+    return this.http.post("/v1/db/vacuum", request);
+  }
+
+  communitySummary(): Promise<CommunitySummary> {
+    return this.http.get(`${this.graph}/community-summary`, { top: 1 });
+  }
+
+  /** Runs edge types' resolve rules now, adding the edges they derive (`insert`). */
+  resolveEdges(edgeTypes: string[]): Promise<ResolveEdgesResponse> {
+    return this.http.post(`${this.graph}/edges:resolve`, { edge_types: edgeTypes, mode: "insert" });
+  }
+
   communityMap(limit = 150): Promise<CommunityMap> {
     return this.http.get(`${this.graph}/communities/map`, { limit });
   }
@@ -633,6 +664,11 @@ export class GraphosApi {
   }
 
   /** The edges whose both ends are among `nodeIds`. */
+  /** The nodes within `maxHops` hops of a node, either direction, nearest first (at most `limit`). */
+  expandHops(id: string, maxHops: number, limit: number): Promise<ExpandHopsResponse> {
+    return this.http.get(`${this.graph}/expand`, { node_id: id, max_hops: maxHops, limit, direction: "both" });
+  }
+
   inducedEdges(nodeIds: string[], limit = 2000): Promise<InducedEdgesResponse> {
     return this.http.post(`${this.graph}/induced_edges`, { node_ids: nodeIds, limit });
   }

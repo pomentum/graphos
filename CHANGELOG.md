@@ -4,6 +4,64 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+The web UI catches up: undo on the Schema page, keyboard shortcuts and a list of them, changes to
+many rows at once in Browse, a multi-hop expand, a Database page for admins, and a confirmation
+before anything that cannot be taken back. The server and the Python client are unchanged.
+
+### Added
+
+- **Undo on the Schema page.** An Undo button, and Ctrl+Z (⌘Z on macOS) anywhere on the page but in
+  a text field, take back the last schema change, and the one before, up to 50 per tenant for the
+  session. Every change is written to graphos at once, so undoing one writes its opposite: a style,
+  property definition, deprecation or the strict label pairs switch as it was, a declared pair
+  removed or declared again, a rename made back, a new label or type (still empty) deprecated and
+  dropped. A change graphos cannot take back (a parent label, a new search index, a drop, an
+  import, a new schema manager) empties the history, and the button's tooltip says which. An undo
+  is refused, and the history emptied, if someone saved the schema since.
+- **Maximize on the Schema page.** A button, or M, gives the page the whole window (the toolbar and
+  the sidebar give way); M or Esc restores it, as does opening another page.
+- **Keyboard shortcuts, and a list of them.** On the Schema page: V switches between the list and
+  the diagram, L adds a label, R a relationship type. `?` anywhere opens the list of every shortcut
+  (Explore's, the Schema page's, the Query page's and the search). Ctrl stands for ⌘ on macOS;
+  keys typed in a text field go to the field.
+- **Filters on long lists.** Users, grants (the tenant's and all), saved queries and the Schema
+  page's labels and relationship types get a filter field once they have more than 8 entries.
+- **Copy a node's id or a property's value.** The node inspector has a copy button by the node's
+  name (its id), and every property row, of a node or an edge, one for its value.
+- **Change or delete the rows picked in Browse.** With write access, Set a property… writes one
+  property (text, a number, true or false) on every picked node, or removes it, and Delete… deletes
+  them with every relationship touching them, after a confirmation.
+- **Expand several hops at once.** The node inspector's Expand has a menu for 2 or 3 hops: every
+  node within them (the nearest 200), and the relationships among them, go on the canvas as one
+  step.
+- **A sample on an empty canvas.** When the whole graph is too big to show, the empty canvas offers
+  Show a sample of its busiest label (its best-connected nodes) beside Open the map.
+- **Group sizes in Explore's Groups view.** Beside how many groups there are: the largest and the
+  smallest group's size, and how many nodes are in no group.
+- **Run a resolve rule from the Schema page.** A derived relationship type's details have Run the
+  rule now (write access), which adds the relationships the rule derives from the data as it is
+  and says how many.
+- **A Database page for admins.** The database's size and versions; each table's rows, dead rows
+  (flagged when they are over a fifth), size and last vacuum, with a filter; a vacuum of one table,
+  VACUUM FULL of one (it locks the table, so it asks first) or of everything; and the slowest
+  statements from pg_stat_statements.
+
+### Fixed
+
+- **Actions that cannot be taken back now ask first.** Deleting a user, resetting a password or a
+  service account's secret, taking a grant back and deleting a saved query happened at the first
+  click; each now names what happens and asks for a confirmation. (Removing a declared label pair
+  does not ask: Undo takes it back.)
+- **A failed delete of a saved query said nothing.** It now shows the error, like every other write.
+- **The Access lists were blank while loading or after a failed load.** They now show a spinner,
+  or the error.
+- **The schema diagram of an empty graph was hard to read.** A label with no nodes is drawn greyed
+  (dashed, transparent, dimmed) so it steps back beside labels that have some; in a graph with no
+  nodes at all every label was, and the whole diagram faded. Labels are now greyed only while
+  others have nodes, and Hide empty labels hides none while none has any.
+
 ## 0.15.0 — 2026-11-13
 
 Installing is one command: the compose file runs the published images, and builds from the

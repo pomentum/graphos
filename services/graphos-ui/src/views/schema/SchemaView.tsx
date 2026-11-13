@@ -1,4 +1,5 @@
 import {
+  ActionIcon,
   Alert,
   Badge,
   Button,
@@ -12,7 +13,15 @@ import {
   Tooltip,
   UnstyledButton,
 } from "@mantine/core";
-import { IconChevronDown, IconDownload, IconPlus, IconUpload } from "@tabler/icons-react";
+import { useHotkeys } from "@mantine/hooks";
+import {
+  IconArrowsMaximize,
+  IconArrowsMinimize,
+  IconChevronDown,
+  IconDownload,
+  IconPlus,
+  IconUpload,
+} from "@tabler/icons-react";
 import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
@@ -28,6 +37,10 @@ import {
 } from "../../data/queries";
 import { ALL, entryOf, type SchemaPart } from "../../lib/propertySchema";
 import { mayCreate } from "../../lib/schemaFile";
+import { SchemaUndo } from "./SchemaUndo";
+import { ResolveRule } from "./ResolveRule";
+import { FILTER_FROM, ListFilter, matches } from "../../components/ListFilter";
+import { useMaximize } from "../../components/Maximize";
 import { formatCount } from "../../lib/time";
 import { useSessionContext, useTenantSession } from "../../session/SessionProvider";
 import { browseParams } from "../browse/browseState";
@@ -74,7 +87,7 @@ const SHOWN_PAIRS = 3;
  */
 export function SchemaView() {
   const { t } = useTranslation();
-  const { tenant, canMaintain, api, me } = useTenantSession();
+  const { tenant, canMaintain, canWrite, api, me } = useTenantSession();
   const { refreshMe } = useSessionContext();
   const schema = useSchema();
   const map = useGraphMap();
@@ -93,14 +106,29 @@ export function SchemaView() {
   const setView = (next: string) => setParams(next === "diagram" ? { view: "diagram" } : {}, { replace: true });
   // A label pair drawn on the diagram, waiting for the relationship type it declares.
   const [pair, setPair] = useState<{ src: string; dst: string } | null>(null);
+  const maximize = useMaximize();
+  // Keys for the page, not while a dialog of it is open (a field's keys go to the field).
+  const idle = adding === null && !importing && !addingProperty;
+  const mayAdd = canMaintain && Boolean(schema.data) && !locked;
+  useHotkeys([
+    ["M", () => idle && maximize.toggle()],
+    ["Escape", () => idle && maximize.maximized && maximize.restore(), { preventDefault: false }],
+    ["V", () => idle && setView(view === "diagram" ? "list" : "diagram")],
+    ["L", () => idle && mayAdd && setAdding("label")],
+    ["R", () => idle && mayAdd && setAdding("relationship")],
+  ]);
 
   const counts = useMemo(
     () => (map.data ? new Map(map.data.labels.map((l) => [l.label, l.count] as const)) : null),
     [map.data],
   );
   const properties = useMemo(() => propertiesByLabel(catalogue.data?.by_property ?? {}), [catalogue.data]);
-  const labels = schema.data ? labelTree(schema.data, counts, properties) : [];
-  const relationships = schema.data ? relationshipRows(schema.data, map.data) : [];
+  const [filter, setFilter] = useState("");
+  const allLabels = schema.data ? labelTree(schema.data, counts, properties) : [];
+  const allRelationships = schema.data ? relationshipRows(schema.data, map.data) : [];
+  const filterable = allLabels.length + allRelationships.length > FILTER_FROM;
+  const labels = allLabels.filter((row) => matches(filter, row.label, row.parent));
+  const relationships = allRelationships.filter((row) => matches(filter, row.type));
   const indexes = Object.entries(schema.data?.search_indexes ?? {});
   const allProperties = Object.keys(catalogue.data?.by_property ?? {}).sort();
   const styles = useMemo(() => labelStyles(schema.data), [schema.data]);
@@ -167,6 +195,21 @@ export function SchemaView() {
             value={view}
             onChange={setView}
           />
+          {canMaintain && schema.data ? <SchemaUndo /> : null}
+          <Tooltip
+            label={maximize.maximized ? t("views.schema.maximize.restore") : t("views.schema.maximize.maximize")}
+            withArrow
+          >
+            <ActionIcon
+              variant="default"
+              size="md"
+              aria-label={maximize.maximized ? t("views.schema.maximize.restore") : t("views.schema.maximize.maximize")}
+              aria-pressed={maximize.maximized}
+              onClick={maximize.toggle}
+            >
+              {maximize.maximized ? <IconArrowsMinimize size={15} /> : <IconArrowsMaximize size={15} />}
+            </ActionIcon>
+          </Tooltip>
           {canMaintain && schema.data ? (
             <Group gap={6}>
               <Tooltip label={t("views.schema.file.exportTooltip")} withArrow multiline w={240}>
@@ -244,6 +287,9 @@ export function SchemaView() {
 
       {schema.data && view === "list" ? (
         <Stack gap="xl" mt="md">
+          {filterable ? (
+            <ListFilter value={filter} onChange={setFilter} label={t("views.schema.filter")} w={280} />
+          ) : null}
           <section>
             <Title order={2} size="sm" mb="xs">
               {t("views.schema.sections.labels")} · {schema.data.vertex_labels.length}
@@ -331,7 +377,7 @@ export function SchemaView() {
 
           <section>
             <Title order={2} size="sm" mb="xs">
-              {t("views.schema.sections.relationships")} · {relationships.length}
+              {t("views.schema.sections.relationships")} · {allRelationships.length}
             </Title>
             <div className={classes.group}>
               <AllRow
@@ -396,6 +442,7 @@ export function SchemaView() {
                   {open === `edge:${row.type}` ? (
                     <div className={classes.detail} style={{ paddingLeft: 12 }}>
                       <DeprecationLines schema={schema.data!} part="edge" name={row.type} />
+                      {row.derived && canWrite ? <ResolveRule type={row.type} /> : null}
                       <EdgeProperties type={row.type}>
                         {(carried) =>
                           panel(

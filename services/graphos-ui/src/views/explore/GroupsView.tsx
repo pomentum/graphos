@@ -5,7 +5,8 @@ import { useTranslation } from "react-i18next";
 import type Sigma from "sigma";
 import { CanvasExportMenu } from "../../components/CanvasExportMenu";
 import { GraphCanvas } from "../../components/GraphCanvas";
-import { useCommunityMap, useServiceInfo } from "../../data/queries";
+import { useCommunityMap, useCommunitySummary, useServiceInfo } from "../../data/queries";
+import { formatCount } from "../../lib/time";
 import { buildCommunityModel, communityCategories, groupKey, type Community } from "../../graph/communityGraph";
 import type { EdgeAttributes, NodeAttributes } from "../../graph/GraphModel";
 import { largestBubbles, mapEdgeDisplay, mapNodeDisplay } from "../../graph/graphMap";
@@ -55,6 +56,7 @@ export function GroupsView({
   const renderer = useRef<Sigma<NodeAttributes, EdgeAttributes> | null>(null);
   const workspace = useWorkspace();
   const map = useCommunityMap();
+  const summary = useCommunitySummary(Boolean(map.data?.n_communities));
   const palette = usePalette();
   // Kept in the workspace: leaving the view keeps the group selected.
   const { selectedGroup: selected, setSelectedGroup: setSelected } = workspace;
@@ -193,6 +195,19 @@ export function GroupsView({
                   total: data.n_communities,
                   when: data.computed_at ? relativeTime(data.computed_at) : "",
                 })}
+            {!running && summary.data
+              ? ` · ${t("views.explore.groups.sizes", {
+                  largest: formatCount(summary.data.largest_community_size),
+                  smallest: formatCount(summary.data.smallest_community_size),
+                })}${
+                  summary.data.n_unassigned_nodes
+                    ? ` · ${t("views.explore.groups.unassigned", {
+                        count: summary.data.n_unassigned_nodes,
+                        formatted: formatCount(summary.data.n_unassigned_nodes),
+                      })}`
+                    : ""
+                }`
+              : null}
           </Text>
         ) : null}
       </section>

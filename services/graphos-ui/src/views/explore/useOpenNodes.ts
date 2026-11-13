@@ -6,15 +6,16 @@ import { useTenantSession } from "../../session/SessionProvider";
 export const MAX_OPEN_NODES = 500;
 
 /**
- * Puts a set of nodes of one label, and the relationships among them, on
- * the graph canvas as one step (Back takes them off), beside whatever is
- * there already, then shows the graph framed on them. Used by the map
- * (a label's hubs) and by Browse (the rows picked).
+ * Puts a set of nodes, and the relationships among them, on the graph
+ * canvas as one step (Back takes them off), beside whatever is there
+ * already, then shows the graph framed on them. Used by the map (a label's
+ * hubs), by Browse (the rows picked) and by a multi-hop expand. The nodes
+ * are of `label` unless one names its own.
  */
 export function useOpenNodes(): (
   title: string,
   label: string,
-  nodes: { id: string; properties: Properties }[],
+  nodes: { id: string; label?: string; properties: Properties }[],
 ) => Promise<string[]> {
   const { api } = useTenantSession();
   const { model, select, setMode, frameOn } = useWorkspace();
@@ -22,13 +23,14 @@ export function useOpenNodes(): (
   return async (title, label, nodes) => {
     const picked = nodes.slice(0, MAX_OPEN_NODES);
     const induced = picked.length > 1 ? await api.inducedEdges(picked.map((n) => n.id)) : { edges: [] };
+    const labelOf = new Map(picked.map((n) => [n.id, n.label ?? label] as const));
     const keys = model.addGroup(
       title,
-      picked.map((n) => ({ ref: { id: n.id, label }, properties: n.properties })),
+      picked.map((n) => ({ ref: { id: n.id, label: n.label ?? label }, properties: n.properties })),
       induced.edges.map((e) => ({
         type: e.type,
-        src: { id: e.src_id, label },
-        dst: { id: e.dst_id, label },
+        src: { id: e.src_id, label: labelOf.get(e.src_id) ?? label },
+        dst: { id: e.dst_id, label: labelOf.get(e.dst_id) ?? label },
         properties: e.properties,
       })),
     );

@@ -1,11 +1,12 @@
-import { Badge, Button, Group, Stack, Text, Tooltip } from "@mantine/core";
-import { IconArrowsMaximize, IconArrowsMinimize, IconEyeOff } from "@tabler/icons-react";
+import { ActionIcon, Badge, Button, Group, Menu, Stack, Text, Tooltip } from "@mantine/core";
+import { IconArrowsMaximize, IconArrowsMinimize, IconChevronDown, IconEyeOff } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useDeleteNode, useProperties } from "../data/queries";
 import { useNodeEditor } from "../data/useNodeEditor";
 import { displayName, type GraphModel } from "../graph/GraphModel";
 import { useTenantSession } from "../session/SessionProvider";
 import { ConfirmDelete } from "./ConfirmDelete";
+import { CopyValue } from "./CopyValue";
 import { GraphMetrics } from "./GraphMetrics";
 import { ConnectionList } from "./ConnectionList";
 import classes from "./Inspector.module.css";
@@ -19,6 +20,8 @@ export interface InspectorProps {
   onSelectEdge: (key: string) => void;
   /** Adds the node's neighbours to the canvas. */
   onExpand: (key: string) => void;
+  /** Adds every node within `hops` hops, and the relationships among them. */
+  onExpandHops?: (key: string, hops: number) => void;
   /** Takes the node off the canvas (not out of graphos). */
   onHide: (key: string) => void;
 }
@@ -29,7 +32,7 @@ export interface InspectorProps {
  * delete. Editing rules (versions, conflicts) live in `useNodeEditor`; this
  * component only presents them.
  */
-export function Inspector({ model, selected, onSelect, onSelectEdge, onExpand, onHide }: InspectorProps) {
+export function Inspector({ model, selected, onSelect, onSelectEdge, onExpand, onExpandHops, onHide }: InspectorProps) {
   const { t } = useTranslation();
   const { canWrite } = useTenantSession();
   const attributes = model.graph.getNodeAttributes(selected);
@@ -52,9 +55,12 @@ export function Inspector({ model, selected, onSelect, onSelectEdge, onExpand, o
   return (
     <Stack gap="md" className={classes.root}>
       <div>
-        <Text fw={600} size="md" truncate title={ref.id}>
-          {displayName(editor.record?.properties ?? attributes.properties, ref.id)}
-        </Text>
+        <Group gap={4} wrap="nowrap">
+          <Text fw={600} size="md" truncate title={ref.id}>
+            {displayName(editor.record?.properties ?? attributes.properties, ref.id)}
+          </Text>
+          <CopyValue value={ref.id} label={t("components.copy.id")} />
+        </Group>
         <Group gap={6} mt={4}>
           <Badge variant="light" size="sm" radius="sm" tt="none">
             {ref.label}
@@ -76,6 +82,23 @@ export function Inspector({ model, selected, onSelect, onSelectEdge, onExpand, o
               {t("components.inspector.expand")}
             </Button>
           </Tooltip>
+          {onExpandHops ? (
+            <Menu position="bottom-start" withinPortal>
+              <Menu.Target>
+                <ActionIcon variant="default" size={22} aria-label={t("components.inspector.expandHops")}>
+                  <IconChevronDown size={12} />
+                </ActionIcon>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Label>{t("components.inspector.expandHopsTooltip")}</Menu.Label>
+                {[2, 3].map((hops) => (
+                  <Menu.Item key={hops} onClick={() => onExpandHops(selected, hops)}>
+                    {t("components.inspector.hops", { count: hops })}
+                  </Menu.Item>
+                ))}
+              </Menu.Dropdown>
+            </Menu>
+          ) : null}
           {model.canCollapse(selected) ? (
             <Tooltip label={t("components.inspector.collapseTooltip")} withArrow>
               <Button

@@ -23,6 +23,7 @@ import type {
   TenantSchema,
 } from "../api/types";
 import { ApiError } from "../api/http";
+import { inverseOf, schemaUndo, useSchemaUndoState, type SchemaChange, type UndoOp } from "./schemaUndo";
 import { CATEGORY_OPS, type ActivityCategory } from "../lib/changes";
 import { saveFile } from "../lib/download";
 import { isActiveJob } from "../lib/jobs";
@@ -78,6 +79,7 @@ export const keys = {
  */
 export function forgetTenant(client: QueryClient, name: string): void {
   client.removeQueries({ predicate: (query) => query.queryKey[1] === name });
+  schemaUndo.clear(name);
 }
 
 /** Labels, hierarchy and search indexes; changes rarely, so cached for minutes. */
@@ -96,6 +98,35 @@ export function useLabelStyles(): LabelStyles {
 export function useGraphMap(exact = false) {
   const { api, tenant } = useTenantSession();
   return useQuery({ queryKey: keys.map(tenant, exact), queryFn: () => api.graphMap(exact), staleTime: 5 * 60_000 });
+}
+
+/** Counts over the last recompute's groups; read again with them after a recompute. */
+export function useCommunitySummary(enabled = true) {
+  const { api, tenant } = useTenantSession();
+  return useQuery({
+    queryKey: [...keys.groups(tenant), "summary"],
+    queryFn: () => api.communitySummary(),
+    staleTime: 5 * 60_000,
+    enabled,
+  });
+}
+
+/**
+ * Runs a relationship type's resolve rule now: the edges it derives are
+ * added. The map and the counts are read again afterwards.
+ */
+export function useResolveEdges() {
+  const { api, tenant } = useTenantSession();
+  const client = useQueryClient();
+  return useMutation({
+    meta: { errorTitle: "views.schema.resolve.failed" },
+    mutationFn: (type: string) => api.resolveEdges([type]),
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: ["map", tenant] }),
+        client.invalidateQueries({ queryKey: keys.stats(tenant) }),
+      ]),
+  });
 }
 
 /** The groups of the last recompute and the edges between them. */
@@ -468,6 +499,54 @@ export function useDeleteNodes() {
     onSettled: (_, __, { nodes }) => {
       for (const node of nodes) client.removeQueries({ queryKey: keys.node(tenant, node.label, node.id) });
       void client.invalidateQueries({ queryKey: keys.stats(tenant) });
+      // Browse's pages no longer show them.
+      void client.invalidateQueries({ queryKey: ["scan", tenant] });
+    },
+  });
+}
+
+/** Nodes patched at once by a bulk property change. */
+const PATCH_CONCURRENCY = 4;
+
+/**
+ * Sets one property on many nodes (`value` `null` removes it), each with its
+ * own merge patch, a few at a time. Every node is tried; the nodes that
+ * failed are reported together at the end.
+ */
+export function useSetPropertyOnNodes() {
+  const { api, tenant } = useTenantSession();
+  const client = useQueryClient();
+  return useMutation({
+    meta: { success: "views.browse.bulk.done", errorTitle: "views.browse.bulk.failed" },
+    mutationFn: async ({
+      nodes,
+      name,
+      value,
+    }: {
+      nodes: { id: string; label: string }[];
+      name: string;
+      value: unknown;
+    }) => {
+      const failed: string[] = [];
+      let next = 0;
+      const worker = async () => {
+        while (next < nodes.length) {
+          const node = nodes[next++]!;
+          try {
+            await api.patchNode(node.id, { [name]: value } as Properties, { label: node.label });
+          } catch {
+            failed.push(node.id);
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(PATCH_CONCURRENCY, nodes.length) }, worker));
+      if (failed.length) throw new Error(`${failed.length} of ${nodes.length}: ${failed.slice(0, 5).join(", ")}`);
+      return nodes.length;
+    },
+    onSettled: (_, __, { nodes }) => {
+      for (const node of nodes) client.removeQueries({ queryKey: keys.node(tenant, node.label, node.id) });
+      void client.invalidateQueries({ queryKey: ["scan", tenant] });
+      void client.invalidateQueries({ queryKey: keys.catalogue(tenant) });
     },
   });
 }
@@ -481,6 +560,23 @@ export function useCreateNode() {
     mutationFn: (node: NodeUpsert) => api.upsertNode(node),
     onSuccess: () => void client.invalidateQueries({ queryKey: keys.stats(tenant) }),
   });
+}
+
+/**
+ * Records what undoes each schema change (data/schemaUndo.ts), from the schema
+ * on screen just before it: `snapshot()` in `onMutate`, `record()` once
+ * graphos has made the change.
+ */
+function useRecordUndo() {
+  const { tenant } = useTenantSession();
+  const client = useQueryClient();
+  return {
+    snapshot: () => ({ before: client.getQueryData<TenantSchema>(keys.schema(tenant)) ?? null }),
+    record: (context: { before: TenantSchema | null } | undefined, change: SchemaChange) => {
+      if (context?.before) schemaUndo.record(tenant, inverseOf(context.before, change));
+      else schemaUndo.clear(tenant);
+    },
+  };
 }
 
 /**
@@ -516,7 +612,10 @@ export function useReleaseSchemaManager() {
     meta: { success: "notices.schemaManagerReleased", errorTitle: "errors.schemaManagerNotReleased" },
     mutationFn: () => api.setSchemaManager(null, version.etag()),
     onError: version.onError,
-    onSuccess: () => client.invalidateQueries({ queryKey: keys.schema(tenant) }),
+    onSuccess: () => {
+      schemaUndo.record(tenant, inverseOf(null, { kind: "manager" }));
+      return client.invalidateQueries({ queryKey: keys.schema(tenant) });
+    },
   });
 }
 
@@ -533,7 +632,10 @@ export function useSetSchemaManager() {
     meta: { success: "notices.schemaManagerSet", errorTitle: "errors.schemaManagerNotSet" },
     mutationFn: (subject: string) => api.setSchemaManager(subject, version.etag()),
     onError: version.onError,
-    onSuccess: () => client.invalidateQueries({ queryKey: keys.schema(tenant) }),
+    onSuccess: () => {
+      schemaUndo.record(tenant, inverseOf(null, { kind: "manager" }));
+      return client.invalidateQueries({ queryKey: keys.schema(tenant) });
+    },
   });
 }
 
@@ -545,17 +647,21 @@ export function useAddToSchema() {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
   const version = useSchemaVersion();
+  const undo = useRecordUndo();
   return useMutation({
     meta: { success: "notices.schemaUpdated", errorTitle: "errors.schemaNotUpdated" },
     mutationFn: (addition: SchemaAddition) => api.addToSchema(addition, version.etag()),
+    onMutate: undo.snapshot,
     onError: version.onError,
-    onSuccess: () =>
-      Promise.all([
+    onSuccess: (_data, addition, context) => {
+      undo.record(context, { kind: "add", addition });
+      return Promise.all([
         client.invalidateQueries({ queryKey: keys.schema(tenant) }),
         client.invalidateQueries({ queryKey: ["map", tenant] }),
         client.invalidateQueries({ queryKey: keys.catalogue(tenant) }),
         client.invalidateQueries({ queryKey: keys.propertyDefinitions(tenant) }),
-      ]),
+      ]);
+    },
   });
 }
 
@@ -597,12 +703,14 @@ export function useImportSchema() {
     mutationFn: ({ doc, options }: { doc: SchemaDocument; options: ImportOptions }) =>
       api.importSchema(doc, { ...options, etag: version.etag() }),
     onError: version.onError,
-    onSuccess: () =>
-      Promise.all([
+    onSuccess: (_data, { options }) => {
+      if (!options.name || options.name === tenant) schemaUndo.record(tenant, inverseOf(null, { kind: "import" }));
+      return Promise.all([
         client.invalidateQueries({ queryKey: keys.schema(tenant) }),
         client.invalidateQueries({ queryKey: ["map", tenant] }),
         client.invalidateQueries({ queryKey: keys.catalogue(tenant) }),
-      ]),
+      ]);
+    },
   });
 }
 
@@ -636,10 +744,15 @@ export function useRenameSchema() {
   const { api } = useTenantSession();
   const refresh = useRefreshSchema();
   const version = useSchemaVersion();
+  const undo = useRecordUndo();
   return useMutation({
     meta: { errorTitle: "errors.notRenamed" },
     mutationFn: (request: SchemaRenameRequest) => api.renameSchema(request, false, version.etag()),
-    onSuccess: () => refresh(),
+    onMutate: undo.snapshot,
+    onSuccess: (_data, request, context) => {
+      undo.record(context, { kind: "rename", request });
+      return refresh();
+    },
     onError: version.onError,
   });
 }
@@ -649,24 +762,32 @@ export function useDeprecate() {
   const { api } = useTenantSession();
   const refresh = useRefreshSchema();
   const version = useSchemaVersion();
+  const undo = useRecordUndo();
   return useMutation({
     meta: { success: "notices.deprecationSaved", errorTitle: "errors.deprecationNotSaved" },
     mutationFn: (deprecated: NonNullable<SchemaAddition["deprecated"]>) =>
       api.addToSchema({ deprecated }, version.etag()),
-    onSuccess: () => refresh(),
+    onMutate: undo.snapshot,
+    onSuccess: (_data, deprecated, context) => {
+      undo.record(context, { kind: "add", addition: { deprecated } });
+      return refresh();
+    },
     onError: version.onError,
   });
 }
 
 /** Drops a deprecated label or type that has no rows (owner). */
 export function useDropLabel() {
-  const { api } = useTenantSession();
+  const { api, tenant } = useTenantSession();
   const refresh = useRefreshSchema();
   const version = useSchemaVersion();
   return useMutation({
     meta: { success: "notices.labelDropped", errorTitle: "errors.labelNotDropped" },
     mutationFn: (name: string) => api.dropLabel(name, version.etag()),
-    onSuccess: () => refresh(),
+    onSuccess: (_data, name) => {
+      schemaUndo.record(tenant, inverseOf(null, { kind: "drop", name }));
+      return refresh();
+    },
     onError: version.onError,
   });
 }
@@ -676,13 +797,71 @@ export function useRemoveEdgeEndpoint() {
   const { api, tenant } = useTenantSession();
   const client = useQueryClient();
   const version = useSchemaVersion();
+  const undo = useRecordUndo();
   return useMutation({
     meta: { success: "notices.schemaUpdated", errorTitle: "errors.schemaNotUpdated" },
     mutationFn: ({ type, src, dst }: { type: string; src: string; dst: string }) =>
       api.removeEdgeEndpoint(type, src, dst, version.etag()),
-    onSuccess: () => client.invalidateQueries({ queryKey: keys.schema(tenant) }),
+    onMutate: undo.snapshot,
+    onSuccess: (_data, pair, context) => {
+      undo.record(context, { kind: "removeEndpoint", ...pair });
+      return client.invalidateQueries({ queryKey: keys.schema(tenant) });
+    },
     onError: version.onError,
   });
+}
+
+/**
+ * Undoes the tenant's last schema change that can be undone: its opposite
+ * writes, in order. The first is sent with the schema's version on screen,
+ * so it is refused (412) if someone saved the schema since; the stack is then
+ * emptied, as after any failure, since what it would undo is no longer known.
+ */
+export function useUndoSchema() {
+  const { api, tenant } = useTenantSession();
+  const refresh = useRefreshSchema();
+  const version = useSchemaVersion();
+  const state = useSchemaUndoState(tenant);
+  const run = (op: UndoOp, etag: string | undefined) => {
+    switch (op.kind) {
+      case "add":
+        return api.addToSchema(op.addition, etag);
+      case "removeEndpoint":
+        return api.removeEdgeEndpoint(op.type, op.src, op.dst, etag);
+      case "rename":
+        return api.renameSchema(op.request, false, etag);
+      case "drop":
+        return api.dropLabel(op.name, etag);
+    }
+  };
+  const mutation = useMutation({
+    meta: { success: "notices.schemaUndone", errorTitle: "errors.schemaNotUndone" },
+    mutationFn: async () => {
+      const step = schemaUndo.pop(tenant);
+      if (!step) return;
+      let etag = version.etag();
+      for (const [i, op] of step.ops.entries()) {
+        // Each write changes the schema's version: the next one is sent with the new one.
+        if (i > 0) etag = (await api.schema()).etag ?? undefined;
+        await run(op, etag);
+      }
+    },
+    onError: (error: unknown) => {
+      schemaUndo.clear(tenant);
+      version.onError(error);
+    },
+    onSettled: () => refresh(),
+  });
+  return {
+    /** What Undo would undo, or null. */
+    step: state.steps.at(-1)?.label ?? null,
+    /** The change that emptied the stack because it cannot be undone, or null. */
+    blocked: state.blocked,
+    undo: () => {
+      if (state.steps.length && !mutation.isPending) mutation.mutate();
+    },
+    pending: mutation.isPending,
+  };
 }
 
 /** Creates an edge between two existing nodes. */
