@@ -400,7 +400,7 @@
         "computeFailed": "Computing the groups failed",
         "recompute": "Compute again",
         "totals": "{{shown}} largest of {{total}} groups · computed {{when}}",
-        "sizes": "sizes {{largest}} to {{smallest}} nodes",
+        "sizes": "sizes {{smallest}} to {{largest}} nodes",
         "unassigned_one": "{{formatted}} node in no group",
         "unassigned_other": "{{formatted}} nodes in no group",
         "members_one": "{{formatted}} member",
