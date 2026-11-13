@@ -5,6 +5,8 @@
 [![PyPI: graphos-client](https://img.shields.io/pypi/v/graphos-client?label=pypi%3A%20graphos-client)](https://pypi.org/project/graphos-client/)
 [![Website](https://img.shields.io/badge/website-www.pomentum.dev%2Fgraphos-1D5BD6)](https://www.pomentum.dev/graphos/)
 
+> **γράφος** /ˈɣɾa.fos/ *noun*. Ancient Greek for a written record: a letter, a document. From γράφω, *to write, to draw*, the root of every *graph*.
+
 A multi-tenant property-graph service: **PostgreSQL + [Apache AGE](https://age.apache.org/) behind a typed HTTP API.**
 
 Your services send JSON over HTTP. graphos owns the database, writes the SQL against AGE's tables, enforces tenant isolation, and gives you bulk loading, traversal, aggregation, graph algorithms (communities, PageRank, betweenness, components) and a web UI. Consumers never get a connection string; raw Cypher runs only in a read-only console that graphos controls.
@@ -22,29 +24,29 @@ The picture above is the map; each line below links to the section that covers i
 
 **Build**
 
-- **Tenants and schema:** each tenant is its own AGE graph with its own labels; no built-in labels or property names; optional property rules, `warn` or `strict`; labels, relationship types and properties renamed in place or deprecated, with what replaces them ([usage](docs/guide/usage.md#3-tenant-registration)).
+- **Tenants and schema:** each tenant is its own AGE graph, and a caller reaches only the tenants it is granted. graphos ships no labels of its own: you declare yours, add property rules if you want them, and rename or deprecate them later, in place ([usage](docs/guide/usage.md#3-tenant-registration)).
 - **A program can own its schema:** a tenant can name a schema manager (a service account, say), whose registrations alone change labels, relationship types and indexes, while people still restyle them in the web UI; a dry run reports what people changed instead of overwriting it unseen, and schema edits carry a version (`If-Match`), so two editors never undo each other ([usage](docs/guide/usage.md#a-schema-manager-and-the-drift-report)).
-- **Fast, idempotent writes:** batches, NDJSON bulk and snapshot import as COPY-staged upserts, 37–156× faster than per-row Cypher `MERGE` in our measurements ([usage](docs/guide/usage.md#4-writing-data), [AGE notes](docs/guide/apache-age.md)).
+- **Fast, idempotent writes:** send batches, an NDJSON stream or a whole snapshot. graphos stages them with COPY and upserts them, so sending the same data twice changes nothing: 1,153–4,840 edges a second in our benchmark, where per-row Cypher `MERGE` managed 31 ([usage](docs/guide/usage.md#4-writing-data), [AGE notes](docs/guide/apache-age.md)).
 - **Load a CSV file:** send the file itself; graphos maps its columns to properties, merges rows that repeat an id, checks every row (a dry run writes nothing) and writes them as bulk loads do ([usage](docs/guide/usage.md#csv-import)).
 - **Edit in place, safely:** patch or delete one node or edge, or delete up to 1,000 nodes in one transaction; `If-Match` turns a concurrent edit into a `412` instead of a lost update ([usage](docs/guide/usage.md#4-writing-data)).
 - **Composable reads:** search (substring or ranked indexes), neighbors, multi-hop expand, shortest paths, scans and subgraphs ([usage](docs/guide/usage.md#5-reads-that-compose)).
 - **Rule-derived edges:** declare a property-match rule once; `edges:resolve` writes the edges in SQL ([usage](docs/guide/usage.md#9-rule-based-edges-resolve_rule)).
-- **Reconcile by difference:** send the whole set of a node's or a type's edges; graphos adds, changes and removes only the difference, in one transaction ([usage](docs/guide/usage.md#reconcile-make-the-stored-edges-equal-to-a-set)).
+- **Reconcile by difference:** send the full set of a node's (or a type's) edges as your source has them. graphos adds, changes and removes only what differs, in one transaction ([usage](docs/guide/usage.md#reconcile-make-the-stored-edges-equal-to-a-set)).
 - **Copy, back up and restore:** a tenant's schema and data as files, restored exactly or loaded into plain AGE ([usage](docs/guide/usage.md#dataset-export-and-import), [without graphos](docs/guide/without-graphos.md)).
 - **Python client:** async and typed, on PyPI as [`graphos-client`](https://pypi.org/project/graphos-client/); signs in and renews its token by itself ([below](#python-client)).
 
 **Explore**
 
 - **Graph analytics:** a map of every label and the edges between them (about a second on ten million edges), aggregates, top-K by degree ([usage](docs/guide/usage.md#6-aggregates)).
-- **Graph algorithms:** communities with Louvain or Leiden (optional extra), PageRank, betweenness, components and degree, run beside the API and written onto the nodes; re-runs write only what changed ([what each finds](docs/guide/algorithms.md)).
+- **Graph algorithms:** communities (Louvain or Leiden, an optional extra), PageRank, betweenness, components and degree, computed beside the API and stored on the nodes. A re-run writes only what changed, and a community keeps its id from run to run ([what each finds](docs/guide/algorithms.md)).
 - **Cypher console:** read-only Cypher on one tenant, write clauses refused, with a timeout, a row cap and saved queries ([usage](docs/guide/usage.md#cypher-console)).
-- **AI agents (MCP):** `/mcp` serves graphos's reads to agents as tools and resources, with the caller's grants and a schema summary made for models; MCP clients sign people in themselves ([agents guide](docs/guide/agents.md)).
+- **AI agents (MCP):** `/mcp` gives agents graphos's reads as tools, with the caller's own grants and a schema summary written for models. MCP clients sign people in by themselves ([agents guide](docs/guide/agents.md)).
 - **Web UI (optional):** explore, inspect and edit, work on many nodes at once, import a CSV file, query, extend the schema, follow changes live and export what is on screen ([below](#web-ui)).
 
 **Run**
 
 - **Safe by default:** 15-minute tokens for people and service accounts, single sign-on, a level per tenant, stored secrets sealed with a master key, a Host allowlist, statement timeouts, the database out of reach ([installation](docs/guide/installation.md#8-before-other-people-use-it), [single sign-on](docs/guide/sso.md)).
-- **Change feed:** every write recorded in its transaction; read after a cursor or follow live ([usage](docs/guide/usage.md#10-change-feed)).
+- **Change feed:** every write is recorded in the same transaction that makes it. Read the changes after a cursor, or follow them live ([usage](docs/guide/usage.md#10-change-feed)).
 - **Background jobs:** long operations answer `202` at once, then can be polled and cancelled ([usage](docs/guide/usage.md#background-jobs)).
 - **Operable:** Prometheus metrics, JSON logs with `traceparent`, an audit log and per-user rate limiting ([usage](docs/guide/usage.md#11-operations)).
 
@@ -52,7 +54,7 @@ The picture above is the map; each line below links to the section that covers i
 
 <img src="docs/images/ui-explore-graph-dark.png" width="100%" alt="The Explore view of the demo tenant, an invented software ecosystem: about 450 nodes coloured by the community Louvain found, six clusters around shared core libraries; the selected library's panel shows its community id and the graph metrics graphos computed.">
 
-*Explore, on the [demo tenant](clients/python/examples/08_demo_ecosystem.py): coloured by community, a core library selected with the metrics graphos computed for it.*
+*Explore, on the [demo tenant](clients/python/examples/08_demo_ecosystem.py): coloured by community (the optional igraph extra), a core library selected with the metrics graphos computed for it.*
 
 <img src="docs/images/ui-schema-editor-dark.png" width="100%" alt="The schema diagram of the demo tenant: Library, Framework and Tool in a block under their parent label Package, the selected label's relationships, its properties in a panel (declared, or carried without a definition), and the Add menu for a new label, relationship type, search index or property.">
 
@@ -86,7 +88,8 @@ git clone https://github.com/pomentum/graphos.git && cd graphos
 # 1. Create local secrets: random database passwords
 bash scripts/init-secrets.sh          # or: pwsh scripts/init-secrets.ps1
 
-# 2. Start graphos-db (Postgres 18 + AGE 1.8), graphos-api and the web UI (http://127.0.0.1:8081)
+# 2. Start graphos-db (Postgres 18 + AGE 1.8) and the published graphos-api and web UI
+#    (http://127.0.0.1:8081); add -f docker-compose.build.yml to build them from the checkout
 docker compose -f docker-compose.graphos.yml --profile ui up -d
 
 # 3. Check it is up
@@ -135,7 +138,7 @@ curl -s -H "Authorization: Bearer $ADMIN_TOKEN" "http://127.0.0.1:8080/v1/acme/g
 curl -s -H "Authorization: Bearer $ADMIN_TOKEN" "http://127.0.0.1:8080/v1/acme/graph/expand?node_id=u1&max_hops=2"
 ```
 
-**Compute communities** (`maintain` on the tenant; writes `community_id` onto every node; needs the `louvain` extra, which the compose build includes):
+**Compute communities** (`maintain` on the tenant; writes `community_id` onto every node; needs the [optional `louvain` extra](#louvain-is-an-optional-extra)):
 
 ```bash
 curl -s -X POST http://127.0.0.1:8080/v1/acme/recompute-communities \
@@ -156,7 +159,7 @@ The full, live API contract is at `http://127.0.0.1:8080/docs` (Swagger UI), `/r
 `/openapi.json`: every route with the errors it can answer, the bodies it takes and a description of
 every field.
 
-**A tenant to explore:** `GRAPHOS_URL=http://127.0.0.1:8080 GRAPHOS_USER=graphos GRAPHOS_PASSWORD=<yours> python clients/python/examples/08_demo_ecosystem.py` loads the demo tenant (an invented software ecosystem, about 450 nodes) and runs the algorithms on it; then open the UI.
+**A tenant to explore:** `GRAPHOS_URL=http://127.0.0.1:8080 GRAPHOS_USER=graphos GRAPHOS_PASSWORD=<yours> python clients/python/examples/08_demo_ecosystem.py` loads the demo tenant (an invented software ecosystem, about 450 nodes) and runs the algorithms on it, communities only [with the igraph extra](#louvain-is-an-optional-extra); then open the UI.
 
 ### Louvain is an optional extra
 
@@ -167,8 +170,9 @@ Community detection uses [python-igraph](https://python.igraph.org/), which is G
 | `pip install ./services/graphos` / default image | no; `recompute-communities` answers `501` |
 | `pip install "./services/graphos[louvain]"` | yes |
 | `docker build --build-arg GRAPHOS_EXTRAS=louvain` | yes (the image then contains GPL code) |
-| `docker compose ... up` (local build) | yes by default; `GRAPHOS_EXTRAS= docker compose ...` to leave it out |
-| an image without it (the published one), with `GRAPHOS_IGRAPH=true` (or `-f docker-compose.igraph.yml`, which sets it) | yes, no rebuild: the image's entrypoint downloads python-igraph into the container on first start ([example with the published images](docs/guide/installation.md#louvain-with-the-published-images)) |
+| `docker compose -f docker-compose.graphos.yml up` (the published images) | no |
+| the same with `-f docker-compose.igraph.yml` (it sets `GRAPHOS_IGRAPH=true`), or any image without it given `GRAPHOS_IGRAPH=true` | yes, no rebuild: the image's entrypoint downloads python-igraph into the container on first start ([example](docs/guide/installation.md#louvain-with-the-published-images)) |
+| the same with `-f docker-compose.build.yml` (built from the checkout) | yes by default; `GRAPHOS_EXTRAS= docker compose ...` to leave it out |
 
 `GET /v1/info` reports `features.louvain` so clients can check before calling.
 
@@ -176,7 +180,7 @@ Community detection uses [python-igraph](https://python.igraph.org/), which is G
 
 The [`graphos-image`](.github/workflows/image.yml) workflow builds and smoke-tests both variants (`linux/amd64`) on every pull request and push, and publishes the default (permissive-only) variant for `linux/amd64` and `linux/arm64`, each built on a runner of that architecture, to `ghcr.io/<owner>/graphos-api`, and the web UI to `ghcr.io/<owner>/graphos-ui`, from `main` and version tags. The `louvain` variant is built and smoke-tested but not published.
 
-**Releasing.** What changed in each version is in [CHANGELOG.md](CHANGELOG.md). Push a version tag such as `0.14.13` to publish the images (`ghcr.io/<owner>/graphos-api:0.14.13` and `:0.14`, and the same for `graphos-ui`); set the version first with `node tools/release/version.mjs X.Y.Z`, which writes it everywhere it lives (server, client, UI, the website's page), turns the changelog's *Unreleased* heading into the release; CI and the release workflows check with `--check` that every place matches the tag. [`graphos-client`](https://pypi.org/project/graphos-client/) is published to PyPI by the [`graphos-client-release`](.github/workflows/client-release.yml) workflow, run by hand from a version tag (trusted publishing: no token is stored).
+**Releasing.** What changed in each version is in [CHANGELOG.md](CHANGELOG.md). Push a version tag such as `0.14.13` to publish the images (`ghcr.io/<owner>/graphos-api:0.14.13` and `:0.14`, and the same for `graphos-ui`); set the version first with `node tools/release/version.mjs X.Y.Z`, which writes it everywhere it lives (server, client, UI, the website's page), turns the changelog's *Unreleased* heading into the release; CI and the release workflows check with `--check` that every place matches the tag. [`graphos-client`](https://pypi.org/project/graphos-client/) is published to PyPI by the [`graphos-client-release`](.github/workflows/client-release.yml) workflow when a version tag is pushed (trusted publishing: no token is stored).
 
 ## Python client
 

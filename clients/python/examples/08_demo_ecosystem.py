@@ -312,7 +312,8 @@ async def main() -> None:
 
         # Communities: needs the Louvain extra.
         if not (await g.info()).get("features", {}).get("louvain"):
-            print("this server was built without the Louvain extra: no communities")
+            print("no communities: this server has no community detection, an optional extra "
+                  "(with the compose file, start it with -f docker-compose.igraph.yml)")
             return
         try:
             found = await g.recompute_communities(

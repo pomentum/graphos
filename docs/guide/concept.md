@@ -354,7 +354,7 @@ root. Read that file for exact values; its shape:
 
 | | `graphos-db` | `graphos-api` |
 |---|---|---|
-| Image | `apache/age:release_PG18_1.8.0` (by digest) | built from `services/graphos/Dockerfile`, tagged `graphos-api:${GRAPHOS_API_TAG:-dev}` |
+| Image | `apache/age:release_PG18_1.8.0` (by digest) | `ghcr.io/pomentum/graphos-api` at the checkout's version; with `docker-compose.build.yml`, built from `services/graphos/Dockerfile` and tagged `graphos-api:${GRAPHOS_API_TAG:-dev}` |
 | Networks | `graphos-internal` only | `graphos-internal` + `graphos-net` |
 | Ports | `expose: 5432` (no host port) | `127.0.0.1:8080:8080` |
 | Secrets | `services/graphos/deploy/secrets/` bind-mounted (directory) at `/run/graphos/secrets` | same directory |
@@ -409,8 +409,8 @@ refuses AGE's `regnamespace` column, which AGE 1.6 cannot prepare
 `GRAPHOS_FORWARDED_ALLOW_IPS` (default `127.0.0.1`) lists the addresses whose
 `X-Forwarded-*` headers are trusted; set it to the reverse proxy's address.
 The image installs extras from the
-`GRAPHOS_EXTRAS` build arg: empty in the Dockerfile, `louvain` by default in
-the compose file (§5).
+`GRAPHOS_EXTRAS` build arg: empty in the Dockerfile and the published images,
+`louvain` by default in `docker-compose.build.yml` (§5).
 
 Networks:
 

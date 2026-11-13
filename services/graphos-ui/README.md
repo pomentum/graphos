@@ -63,6 +63,7 @@ With the rest of graphos (from the repository root):
 docker compose -f docker-compose.graphos.yml --profile ui up -d
 ```
 
+That runs the published image; to run this folder's code, add `-f docker-compose.build.yml --build`.
 The UI is then at <http://127.0.0.1:8081> (`GRAPHOS_UI_PORT` changes the port). On its own,
 point it at any graphos it can reach; next to the compose stack, join its `graphos-net` network so
 the name `graphos-api` resolves:
