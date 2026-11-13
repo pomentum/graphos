@@ -764,6 +764,35 @@
         "history_other": "Open {{count}} {{label}} nodes",
         "openFailed": "Couldn't open the nodes",
         "showOnMap": "Show on map"
+      },
+      "bulk": {
+        "set": "Set a property…",
+        "delete": "Delete…",
+        "setTitle_one": "Set a property on {{count}} node",
+        "setTitle_other": "Set a property on {{count}} nodes",
+        "property": "Property",
+        "value": "Value",
+        "kinds": {
+          "text": "Text",
+          "number": "Number",
+          "true": "true",
+          "false": "false",
+          "remove": "Remove"
+        },
+        "notANumber": "Not a number",
+        "idReserved": "The id cannot be changed",
+        "setHint_one": "Written to the picked node, replacing any value it has.",
+        "setHint_other": "Written to each of the {{count}} picked nodes, replacing any value they have.",
+        "removeHint_one": "Removed from the picked node.",
+        "removeHint_other": "Removed from each of the {{count}} picked nodes.",
+        "setAction": "Set",
+        "removeAction": "Remove",
+        "done": "Changed the picked nodes",
+        "failed": "Some nodes were not changed",
+        "deleteTitle_one": "Delete {{count}} node?",
+        "deleteTitle_other": "Delete {{count}} nodes?",
+        "deleteText_one": "The node and every relationship touching it are deleted from graphos for good.",
+        "deleteText_other": "The {{count}} nodes and every relationship touching them are deleted from graphos for good."
       }
     },
     "schema": {

@@ -470,6 +470,54 @@ export function useDeleteNodes() {
     onSettled: (_, __, { nodes }) => {
       for (const node of nodes) client.removeQueries({ queryKey: keys.node(tenant, node.label, node.id) });
       void client.invalidateQueries({ queryKey: keys.stats(tenant) });
+      // Browse's pages no longer show them.
+      void client.invalidateQueries({ queryKey: ["scan", tenant] });
+    },
+  });
+}
+
+/** Nodes patched at once by a bulk property change. */
+const PATCH_CONCURRENCY = 4;
+
+/**
+ * Sets one property on many nodes (`value` `null` removes it), each with its
+ * own merge patch, a few at a time. Every node is tried; the nodes that
+ * failed are reported together at the end.
+ */
+export function useSetPropertyOnNodes() {
+  const { api, tenant } = useTenantSession();
+  const client = useQueryClient();
+  return useMutation({
+    meta: { success: "views.browse.bulk.done", errorTitle: "views.browse.bulk.failed" },
+    mutationFn: async ({
+      nodes,
+      name,
+      value,
+    }: {
+      nodes: { id: string; label: string }[];
+      name: string;
+      value: unknown;
+    }) => {
+      const failed: string[] = [];
+      let next = 0;
+      const worker = async () => {
+        while (next < nodes.length) {
+          const node = nodes[next++]!;
+          try {
+            await api.patchNode(node.id, { [name]: value } as Properties, { label: node.label });
+          } catch {
+            failed.push(node.id);
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(PATCH_CONCURRENCY, nodes.length) }, worker));
+      if (failed.length) throw new Error(`${failed.length} of ${nodes.length}: ${failed.slice(0, 5).join(", ")}`);
+      return nodes.length;
+    },
+    onSettled: (_, __, { nodes }) => {
+      for (const node of nodes) client.removeQueries({ queryKey: keys.node(tenant, node.label, node.id) });
+      void client.invalidateQueries({ queryKey: ["scan", tenant] });
+      void client.invalidateQueries({ queryKey: keys.catalogue(tenant) });
     },
   });
 }

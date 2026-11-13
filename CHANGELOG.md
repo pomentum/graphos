@@ -26,6 +26,9 @@ under one version.
   page's labels and relationship types get a filter field once they have more than 8 entries.
 - **Copy a node's id or a property's value.** The node inspector has a copy button by the node's
   name (its id), and every property row, of a node or an edge, one for its value.
+- **Change or delete the rows picked in Browse.** With write access, Set a property… writes one
+  property (text, a number, true or false) on every picked node, or removes it, and Delete… deletes
+  them with every relationship touching them, after a confirmation.
 
 ### Fixed
 
