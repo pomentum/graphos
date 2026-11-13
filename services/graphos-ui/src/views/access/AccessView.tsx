@@ -24,6 +24,7 @@ import { useTranslation } from "react-i18next";
 import type { Grant, GrantLevel, UserCreated, UserInfo } from "../../api/types";
 import { useAccessMutations, useAuthConfig, useGrants, useUsers } from "../../data/queries";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { FILTER_FROM, ListFilter, matches } from "../../components/ListFilter";
 import { relativeTime } from "../../lib/time";
 import { useTenantSession } from "../../session/SessionProvider";
 import classes from "./AccessView.module.css";
@@ -109,6 +110,8 @@ function TenantAccess({ tenant }: { tenant: string }) {
   const [kind, setKind] = useState<SubjectKind>("user");
   const [user, setUser] = useState("");
   const [level, setLevel] = useState<GrantLevel>("read");
+  const [filter, setFilter] = useState("");
+  const shown = (grants.data ?? []).filter((g) => matches(filter, subjectName(g.subject), g.tenant, g.level));
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -118,9 +121,14 @@ function TenantAccess({ tenant }: { tenant: string }) {
 
   return (
     <section>
-      <Title order={2} size="h4" mb={4}>
-        {t("views.access.tenantTitle", { tenant })}
-      </Title>
+      <Group justify="space-between" mb={4}>
+        <Title order={2} size="h4">
+          {t("views.access.tenantTitle", { tenant })}
+        </Title>
+        {(grants.data?.length ?? 0) > FILTER_FROM ? (
+          <ListFilter value={filter} onChange={setFilter} label={t("views.access.filterGrants")} />
+        ) : null}
+      </Group>
       <Text size="sm" c="dimmed" mb="sm">
         {t("views.access.tenantHint")}
       </Text>
@@ -135,7 +143,7 @@ function TenantAccess({ tenant }: { tenant: string }) {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {(grants.data ?? []).map((g) => {
+            {shown.map((g) => {
               // A pattern grant (sol_*, *) is an admin's to take back.
               const revocable = g.tenant === tenant || isAdmin;
               return (
@@ -212,6 +220,8 @@ function Users() {
   const [shown, setShown] = useState<UserCreated | null>(null);
   // A reset or a delete waiting for its confirmation: neither can be taken back.
   const [confirm, setConfirm] = useState<{ action: "reset" | "delete"; user: UserInfo } | null>(null);
+  const [filter, setFilter] = useState("");
+  const listed = (users.data ?? []).filter((user) => matches(filter, user.name));
 
   const reset = (user: UserInfo) =>
     resetSecret.mutate(user.name, {
@@ -228,9 +238,14 @@ function Users() {
         <Title order={2} size="h4">
           {t("views.access.usersTitle")}
         </Title>
-        <Button size="xs" variant="default" leftSection={<IconPlus size={14} />} onClick={() => setAdding(true)}>
-          {t("views.access.addUser")}
-        </Button>
+        <Group gap="xs">
+          {(users.data?.length ?? 0) > FILTER_FROM ? (
+            <ListFilter value={filter} onChange={setFilter} label={t("views.access.filterUsers")} />
+          ) : null}
+          <Button size="xs" variant="default" leftSection={<IconPlus size={14} />} onClick={() => setAdding(true)}>
+            {t("views.access.addUser")}
+          </Button>
+        </Group>
       </Group>
       <Text size="sm" c="dimmed" mb="sm">
         {t("views.access.usersHint")}
@@ -247,7 +262,7 @@ function Users() {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {(users.data ?? []).map((user) => (
+            {listed.map((user) => (
               <Table.Tr key={user.name}>
                 <Table.Td>{user.name}</Table.Td>
                 <Table.Td>
@@ -452,6 +467,10 @@ function AllGrants() {
   const [pattern, setPattern] = useState("*");
   const [level, setLevel] = useState<GrantLevel>("read");
   const who = kind === "user" ? (user ?? "") : name;
+  const [filter, setFilter] = useState("");
+  const shown = (grants.data ?? []).filter((g) =>
+    matches(filter, subjectName(g.subject), g.tenant, g.level, g.granted_by),
+  );
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -464,9 +483,14 @@ function AllGrants() {
 
   return (
     <section>
-      <Title order={2} size="h4" mb={4}>
-        {t("views.access.allTitle")}
-      </Title>
+      <Group justify="space-between" mb={4}>
+        <Title order={2} size="h4">
+          {t("views.access.allTitle")}
+        </Title>
+        {(grants.data?.length ?? 0) > FILTER_FROM ? (
+          <ListFilter value={filter} onChange={setFilter} label={t("views.access.filterGrants")} />
+        ) : null}
+      </Group>
       <Text size="sm" c="dimmed" mb="sm">
         {t("views.access.allHint")}
       </Text>
@@ -482,7 +506,7 @@ function AllGrants() {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {(grants.data ?? []).map((g) => (
+            {shown.map((g) => (
               <Table.Tr key={`${g.subject}|${g.tenant}|${g.level}`}>
                 <Table.Td>
                   <SubjectLabel subject={g.subject} />

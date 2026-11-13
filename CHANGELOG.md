@@ -22,6 +22,8 @@ under one version.
   the diagram, L adds a label, R a relationship type. `?` anywhere opens the list of every shortcut
   (Explore's, the Schema page's, the Query page's and the search). Ctrl stands for ⌘ on macOS;
   keys typed in a text field go to the field.
+- **Filters on long lists.** Users, grants (the tenant's and all), saved queries and the Schema
+  page's labels and relationship types get a filter field once they have more than 8 entries.
 
 ### Fixed
 

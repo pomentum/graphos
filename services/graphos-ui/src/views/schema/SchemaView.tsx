@@ -38,6 +38,7 @@ import {
 import { ALL, entryOf, type SchemaPart } from "../../lib/propertySchema";
 import { mayCreate } from "../../lib/schemaFile";
 import { SchemaUndo } from "./SchemaUndo";
+import { FILTER_FROM, ListFilter, matches } from "../../components/ListFilter";
 import { useMaximize } from "../../components/Maximize";
 import { formatCount } from "../../lib/time";
 import { useSessionContext, useTenantSession } from "../../session/SessionProvider";
@@ -121,8 +122,12 @@ export function SchemaView() {
     [map.data],
   );
   const properties = useMemo(() => propertiesByLabel(catalogue.data?.by_property ?? {}), [catalogue.data]);
-  const labels = schema.data ? labelTree(schema.data, counts, properties) : [];
-  const relationships = schema.data ? relationshipRows(schema.data, map.data) : [];
+  const [filter, setFilter] = useState("");
+  const allLabels = schema.data ? labelTree(schema.data, counts, properties) : [];
+  const allRelationships = schema.data ? relationshipRows(schema.data, map.data) : [];
+  const filterable = allLabels.length + allRelationships.length > FILTER_FROM;
+  const labels = allLabels.filter((row) => matches(filter, row.label, row.parent));
+  const relationships = allRelationships.filter((row) => matches(filter, row.type));
   const indexes = Object.entries(schema.data?.search_indexes ?? {});
   const allProperties = Object.keys(catalogue.data?.by_property ?? {}).sort();
   const styles = useMemo(() => labelStyles(schema.data), [schema.data]);
@@ -281,6 +286,9 @@ export function SchemaView() {
 
       {schema.data && view === "list" ? (
         <Stack gap="xl" mt="md">
+          {filterable ? (
+            <ListFilter value={filter} onChange={setFilter} label={t("views.schema.filter")} w={280} />
+          ) : null}
           <section>
             <Title order={2} size="sm" mb="xs">
               {t("views.schema.sections.labels")} · {schema.data.vertex_labels.length}
@@ -368,7 +376,7 @@ export function SchemaView() {
 
           <section>
             <Title order={2} size="sm" mb="xs">
-              {t("views.schema.sections.relationships")} · {relationships.length}
+              {t("views.schema.sections.relationships")} · {allRelationships.length}
             </Title>
             <div className={classes.group}>
               <AllRow

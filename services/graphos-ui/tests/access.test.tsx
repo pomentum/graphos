@@ -29,7 +29,11 @@ function json(body: unknown, status = 200): Response {
 const OIDC = { issuer: "https://login.example.com", client_id: "graphos", scopes: "openid", display_name: "SSO" };
 
 /** A graphos answering the Access page; records what was sent. */
-function server({ sso = false, failGrants = false }: { sso?: boolean; failGrants?: boolean } = {}) {
+function server({
+  sso = false,
+  failGrants = false,
+  users = [],
+}: { sso?: boolean; failGrants?: boolean; users?: string[] } = {}) {
   const sent: { method: string; path: string; body: unknown }[] = [];
   const grants = [
     { subject: "user:olive", tenant: "acme", level: "owner", granted_by: "creator" },
@@ -46,7 +50,10 @@ function server({ sso = false, failGrants = false }: { sso?: boolean; failGrants
       return failGrants ? json({ detail: "database unavailable" }, 500) : json({ grants });
     if (url.pathname === "/api/v1/grants" && method === "DELETE") return new Response(null, { status: 204 });
     if (url.pathname === "/api/v1/grants" && method === "POST") return json({ ...body, granted_by: "olive" }, 201);
-    if (url.pathname === "/api/v1/users" && method === "GET") return json({ users: [] });
+    if (url.pathname === "/api/v1/users" && method === "GET")
+      return json({
+        users: users.map((name) => ({ name, kind: "person", disabled: false, must_change: false, created_at: "" })),
+      });
     if (url.pathname === "/api/v1/users" && method === "POST") {
       return json(
         {
@@ -152,5 +159,18 @@ describe("Access", () => {
     renderAccess(me(), fetchImpl);
     expect(await screen.findByText("Could not load this list")).toBeInTheDocument();
     expect(screen.getByText("database unavailable")).toBeInTheDocument();
+  });
+
+  it("filters a long list of users as you type", async () => {
+    const names = ["ana", "bob", "carla", "dimitris", "eleni", "fotis", "giorgos", "ioanna", "kostas"];
+    const { fetchImpl } = server({ users: names });
+    renderAccess(me({ admin: true }), fetchImpl);
+    const filter = await screen.findByRole("textbox", { name: "Filter users" });
+    const section = within(filter.closest("section")!);
+    expect(await section.findByText("kostas")).toBeInTheDocument();
+    fireEvent.change(filter, { target: { value: "IS" } });
+    expect(section.getByText("dimitris")).toBeInTheDocument();
+    expect(section.getByText("fotis")).toBeInTheDocument();
+    expect(section.queryByText("kostas")).toBeNull();
   });
 });

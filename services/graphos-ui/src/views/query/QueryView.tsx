@@ -34,6 +34,7 @@ import { useCatalogue, useLabelStyles, useSchema, useServiceInfo } from "../../d
 import { useWorkspace } from "../../graph/WorkspaceProvider";
 import { CSV_TYPE, exportName, toCsv } from "../../lib/csv";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { FILTER_FROM, ListFilter, matches } from "../../components/ListFilter";
 import { saveFile } from "../../lib/download";
 import { formatCount } from "../../lib/time";
 import { isApple } from "../../lib/platform";
@@ -75,6 +76,8 @@ export function QueryView() {
   const saved = useQuery({ queryKey: ["cypher-saved", tenant], queryFn: () => api.savedQueries() });
   // A saved query to delete, once confirmed: it goes for everyone on the tenant.
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
+  const listed = (saved.data ?? []).filter((item) => matches(filter, item.name, item.description));
   const deleteSaved = useMutation({
     meta: { success: "views.query.notices.deleted", errorTitle: "views.query.errors.notDeleted" },
     mutationFn: (name: string) => api.deleteSavedQuery(name),
@@ -244,8 +247,11 @@ export function QueryView() {
         <Title order={2} size="sm">
           {t("views.query.savedTitle")}
         </Title>
+        {(saved.data?.length ?? 0) > FILTER_FROM ? (
+          <ListFilter value={filter} onChange={setFilter} label={t("views.query.filterSaved")} w="100%" />
+        ) : null}
         {saved.data?.length ? (
-          saved.data.map((item) => (
+          listed.map((item) => (
             <Group key={item.name} gap={4} wrap="nowrap" align="flex-start">
               <UnstyledButton
                 className={classes.savedItem}

@@ -683,6 +683,7 @@
     },
     "query": {
       "title": "Query",
+      "filterSaved": "Filter saved queries",
       "confirmDelete": {
         "title": "Delete the saved query {{name}}?",
         "text": "It is deleted for everyone on this tenant."
@@ -769,6 +770,7 @@
       "heading": "Schema of {{tenant}}",
       "readOnly": "Read only. Whoever maintains this tenant can add labels, relationship types and search indexes, and deprecate them; its owners can rename them.",
       "neverRemoves": "No data is ever deleted here: labels and relationship types are renamed in place, deprecated, and dropped only once deprecated and empty; a declared pair can be removed.",
+      "filter": "Filter labels and relationship types",
       "maximize": {
         "maximize": "Maximize (M)",
         "restore": "Restore (M or Esc)"
@@ -1255,6 +1257,8 @@
       "revoke": "Take back",
       "revokeFrom": "Take {{level}} back from {{name}}",
       "loading": "Loading",
+      "filterUsers": "Filter users",
+      "filterGrants": "Filter grants",
       "loadFailed": "Could not load this list",
       "confirm": {
         "deleteTitle": "Delete {{name}}?",
