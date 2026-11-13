@@ -25,6 +25,13 @@ under one version.
 
 ### Fixed
 
+- **Actions that cannot be taken back now ask first.** Deleting a user, resetting a password or a
+  service account's secret, taking a grant back and deleting a saved query happened at the first
+  click; each now names what happens and asks for a confirmation. (Removing a declared label pair
+  does not ask: Undo takes it back.)
+- **A failed delete of a saved query said nothing.** It now shows the error, like every other write.
+- **The Access lists were blank while loading or after a failed load.** They now show a spinner,
+  or the error.
 - **The schema diagram of an empty graph was hard to read.** A label with no nodes is drawn greyed
   (dashed, transparent, dimmed) so it steps back beside labels that have some; in a graph with no
   nodes at all every label was, and the whole diagram faded. Labels are now greyed only while

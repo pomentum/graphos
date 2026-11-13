@@ -683,6 +683,16 @@
     },
     "query": {
       "title": "Query",
+      "confirmDelete": {
+        "title": "Delete the saved query {{name}}?",
+        "text": "It is deleted for everyone on this tenant."
+      },
+      "notices": {
+        "deleted": "Deleted the saved query"
+      },
+      "errors": {
+        "notDeleted": "Saved query not deleted"
+      },
       "hint": "Read-only Cypher on this tenant's graph. Writes go through the API; database functions (schema.name()) are refused; a query that runs too long is stopped. AGE's dialect: ORDER BY an expression, not a RETURN alias.",
       "editor": "Cypher query",
       "keys": "{{key}} runs the query · Ctrl+Space suggests labels, properties and clauses",
@@ -1244,6 +1254,18 @@
       "allHint": "Levels on a tenant or a pattern (sol_*, *), the right to create tenants whose names match, and admin.",
       "revoke": "Take back",
       "revokeFrom": "Take {{level}} back from {{name}}",
+      "loading": "Loading",
+      "loadFailed": "Could not load this list",
+      "confirm": {
+        "deleteTitle": "Delete {{name}}?",
+        "deleteText": "The account is deleted for good: it can no longer sign in, and programs signed in as it are refused from their next request.",
+        "resetTitle": "Reset {{name}}'s password?",
+        "resetText": "The current password stops working at once. You will be shown a one-time password to give them.",
+        "newSecretTitle": "New secret for {{name}}?",
+        "newSecretText": "The current secret stops working at once: programs using it are refused until they have the new one, shown next.",
+        "revokeTitle": "Take {{level}} back from {{name}}?",
+        "revokeText": "{{name}} loses {{level}} on {{tenant}} at once."
+      },
       "kinds": {
         "person": "Person",
         "service": "Service account"

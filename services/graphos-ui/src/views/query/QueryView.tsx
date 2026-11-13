@@ -23,7 +23,7 @@ import {
   IconPlayerPlay,
   IconTopologyStar3,
 } from "@tabler/icons-react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useMemo, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -33,6 +33,7 @@ import { captionOf, styledColors, type LabelStyles } from "../../theme/labelStyl
 import { useCatalogue, useLabelStyles, useSchema, useServiceInfo } from "../../data/queries";
 import { useWorkspace } from "../../graph/WorkspaceProvider";
 import { CSV_TYPE, exportName, toCsv } from "../../lib/csv";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { saveFile } from "../../lib/download";
 import { formatCount } from "../../lib/time";
 import { isApple } from "../../lib/platform";
@@ -72,6 +73,17 @@ export function QueryView() {
   const stop = useRef<AbortController | null>(null);
   const client = useQueryClient();
   const saved = useQuery({ queryKey: ["cypher-saved", tenant], queryFn: () => api.savedQueries() });
+  // A saved query to delete, once confirmed: it goes for everyone on the tenant.
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const deleteSaved = useMutation({
+    meta: { success: "views.query.notices.deleted", errorTitle: "views.query.errors.notDeleted" },
+    mutationFn: (name: string) => api.deleteSavedQuery(name),
+    onSuccess: (_data, name) => {
+      if (active?.name === name) setActive(null);
+      setDeleting(null);
+      return client.invalidateQueries({ queryKey: ["cypher-saved", tenant] });
+    },
+  });
   const schema = useSchema();
   const catalogue = useCatalogue();
   const remember = (next: Partial<{ query: string; params: Record<string, string>; result: CypherResult | null }>) =>
@@ -264,15 +276,7 @@ export function QueryView() {
                     </ActionIcon>
                   </Menu.Target>
                   <Menu.Dropdown>
-                    <Menu.Item
-                      color="red"
-                      onClick={() =>
-                        void api.deleteSavedQuery(item.name).then(() => {
-                          if (active?.name === item.name) setActive(null);
-                          return client.invalidateQueries({ queryKey: ["cypher-saved", tenant] });
-                        })
-                      }
-                    >
+                    <Menu.Item color="red" onClick={() => setDeleting(item.name)}>
                       {t("common.actions.delete")}
                     </Menu.Item>
                   </Menu.Dropdown>
@@ -300,6 +304,15 @@ export function QueryView() {
           }}
         />
       ) : null}
+      <ConfirmDialog
+        opened={deleting !== null}
+        title={t("views.query.confirmDelete.title", { name: deleting ?? "" })}
+        message={t("views.query.confirmDelete.text")}
+        confirmLabel={t("common.actions.delete")}
+        busy={deleteSaved.isPending}
+        onConfirm={() => deleting && deleteSaved.mutate(deleting)}
+        onClose={() => setDeleting(null)}
+      />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import {
   ActionIcon,
   Alert,
+  Loader,
   Badge,
   Button,
   Code,
@@ -22,6 +23,7 @@ import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { Grant, GrantLevel, UserCreated, UserInfo } from "../../api/types";
 import { useAccessMutations, useAuthConfig, useGrants, useUsers } from "../../data/queries";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { relativeTime } from "../../lib/time";
 import { useTenantSession } from "../../session/SessionProvider";
 import classes from "./AccessView.module.css";
@@ -159,6 +161,7 @@ function TenantAccess({ tenant }: { tenant: string }) {
             })}
           </Table.Tbody>
         </Table>
+        <LoadState query={grants} />
         {grants.data?.length === 0 ? (
           <Text size="sm" c="dimmed" p="sm">
             {t("views.access.noGrants")}
@@ -207,8 +210,17 @@ function Users() {
   const { me } = useTenantSession();
   const [adding, setAdding] = useState(false);
   const [shown, setShown] = useState<UserCreated | null>(null);
+  // A reset or a delete waiting for its confirmation: neither can be taken back.
+  const [confirm, setConfirm] = useState<{ action: "reset" | "delete"; user: UserInfo } | null>(null);
 
-  const reset = (user: UserInfo) => resetSecret.mutate(user.name, { onSuccess: setShown });
+  const reset = (user: UserInfo) =>
+    resetSecret.mutate(user.name, {
+      onSuccess: (created) => {
+        setConfirm(null);
+        setShown(created);
+      },
+    });
+  const remove = (user: UserInfo) => deleteUser.mutate(user.name, { onSuccess: () => setConfirm(null) });
 
   return (
     <section>
@@ -270,14 +282,14 @@ function Users() {
                         </ActionIcon>
                       </Menu.Target>
                       <Menu.Dropdown>
-                        <Menu.Item onClick={() => reset(user)}>
+                        <Menu.Item onClick={() => setConfirm({ action: "reset", user })}>
                           {user.kind === "service" ? t("views.access.newSecret") : t("views.access.resetPassword")}
                         </Menu.Item>
                         <Menu.Item onClick={() => setDisabled.mutate({ name: user.name, disabled: !user.disabled })}>
                           {user.disabled ? t("views.access.enable") : t("views.access.disable")}
                         </Menu.Item>
                         <Menu.Divider />
-                        <Menu.Item color="red" onClick={() => deleteUser.mutate(user.name)}>
+                        <Menu.Item color="red" onClick={() => setConfirm({ action: "delete", user })}>
                           {t("views.access.delete")}
                         </Menu.Item>
                       </Menu.Dropdown>
@@ -288,7 +300,35 @@ function Users() {
             ))}
           </Table.Tbody>
         </Table>
+        <LoadState query={users} />
       </div>
+      <ConfirmDialog
+        opened={confirm !== null}
+        title={
+          confirm?.action === "delete"
+            ? t("views.access.confirm.deleteTitle", { name: confirm.user.name })
+            : confirm?.user.kind === "service"
+              ? t("views.access.confirm.newSecretTitle", { name: confirm.user.name })
+              : t("views.access.confirm.resetTitle", { name: confirm?.user.name ?? "" })
+        }
+        message={
+          confirm?.action === "delete"
+            ? t("views.access.confirm.deleteText")
+            : confirm?.user.kind === "service"
+              ? t("views.access.confirm.newSecretText")
+              : t("views.access.confirm.resetText")
+        }
+        confirmLabel={
+          confirm?.action === "delete"
+            ? t("views.access.delete")
+            : confirm?.user.kind === "service"
+              ? t("views.access.newSecret")
+              : t("views.access.resetPassword")
+        }
+        busy={deleteUser.isPending || resetSecret.isPending}
+        onConfirm={() => confirm && (confirm.action === "delete" ? remove(confirm.user) : reset(confirm.user))}
+        onClose={() => setConfirm(null)}
+      />
       <AddUserDialog
         opened={adding}
         busy={createUser.isPending}
@@ -465,6 +505,7 @@ function AllGrants() {
             ))}
           </Table.Tbody>
         </Table>
+        <LoadState query={grants} />
       </div>
       <form onSubmit={submit}>
         <Group gap="xs" mt="sm" align="flex-end" wrap="wrap">
@@ -537,19 +578,54 @@ function LevelBadge({ level }: { level: GrantLevel }) {
   );
 }
 
+/** Takes a grant back, once confirmed: the access ends at once. */
 function RevokeButton({ grant, busy, onRevoke }: { grant: Grant; busy: boolean; onRevoke: () => void }) {
   const { t } = useTranslation();
+  const [asking, setAsking] = useState(false);
+  const what = { name: subjectName(grant.subject), level: grant.level, tenant: grant.tenant };
   return (
-    <Tooltip label={t("views.access.revoke")} withArrow>
-      <ActionIcon
-        variant="subtle"
-        color="red"
-        loading={busy}
-        onClick={onRevoke}
-        aria-label={t("views.access.revokeFrom", { name: subjectName(grant.subject), level: grant.level })}
-      >
-        <IconX size={14} />
-      </ActionIcon>
-    </Tooltip>
+    <>
+      <Tooltip label={t("views.access.revoke")} withArrow>
+        <ActionIcon
+          variant="subtle"
+          color="red"
+          loading={busy}
+          onClick={() => setAsking(true)}
+          aria-label={t("views.access.revokeFrom", what)}
+        >
+          <IconX size={14} />
+        </ActionIcon>
+      </Tooltip>
+      <ConfirmDialog
+        opened={asking}
+        title={t("views.access.confirm.revokeTitle", what)}
+        message={t("views.access.confirm.revokeText", what)}
+        confirmLabel={t("views.access.revoke")}
+        busy={busy}
+        onConfirm={() => {
+          onRevoke();
+          setAsking(false);
+        }}
+        onClose={() => setAsking(false)}
+      />
+    </>
   );
+}
+
+/** A list's load: a spinner while it loads, the error when it fails, nothing once it has loaded. */
+function LoadState({ query }: { query: { isLoading: boolean; error: Error | null } }) {
+  const { t } = useTranslation();
+  if (query.isLoading)
+    return (
+      <Group justify="center" p="sm">
+        <Loader size="sm" aria-label={t("views.access.loading")} />
+      </Group>
+    );
+  if (query.error)
+    return (
+      <Alert color="red" variant="light" m="xs" title={t("views.access.loadFailed")}>
+        {query.error.message}
+      </Alert>
+    );
+  return null;
 }
