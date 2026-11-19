@@ -14,7 +14,7 @@ and the commands.
 | `services/graphos/` | [`services/graphos/DEVELOPMENT.md`](services/graphos/DEVELOPMENT.md): data-model invariants, database tests |
 | `clients/python/` | [`clients/python/DEVELOPMENT.md`](clients/python/DEVELOPMENT.md): models mirror the service, retries |
 | `services/graphos-ui/` | [`services/graphos-ui/DEVELOPMENT.md`](services/graphos-ui/DEVELOPMENT.md): layers, text, screenshots |
-| `docs/images/`, the website's page, API docs assets | [`docs/guide/development.md`, Pictures and docs tools](docs/guide/development.md#pictures-and-docs-tools): never edit a picture by hand |
+| `docs/images/`, API docs assets | [`docs/guide/development.md`, Pictures and docs tools](docs/guide/development.md#pictures-and-docs-tools): never edit a picture by hand |
 | A design decision | [`docs/guide/adrs/README.md`](docs/guide/adrs/README.md): when an ADR is needed, its template |
 
 ## Hard rules
@@ -57,5 +57,5 @@ pytest clients/python/tests
 
 # Repository
 node tools/docs/diagrams.mjs --check && node tools/release/version.mjs --check
-python tools/docs/api_docs_assets.py --check && python tools/docs/site.py --check
+python tools/docs/api_docs_assets.py --check
 ```

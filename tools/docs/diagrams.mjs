@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const OUT = join(ROOT, 'docs', 'images');
 
-// The same palette as the website (docs/site.css): flat fills, hairline strokes, no shadows.
+// The same palette as the website (www.pomentum.dev/graphos/): flat fills, hairline strokes, no shadows.
 const THEMES = {
   light: {
     ink: '#131A22', soft: '#4A5563', rule: '#C4CDD6', card: '#F7F8F9', well: '#E6EAEE',
