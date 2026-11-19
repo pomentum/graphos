@@ -82,8 +82,7 @@ workflow builds the UI image and smoke-tests it.
 Besides the shared list in [development.md §3](../../docs/guide/development.md#3-docs-discipline):
 
 - **Retake the screenshots** a visible change affects, of the demo tenant
-  only, with `tools/docs/screenshots.py`, then regenerate the website's page
-  with `python tools/docs/site.py`. The steps are in
+  only, with `tools/docs/screenshots.py`. The steps are in
   [development.md, Pictures and docs tools](../../docs/guide/development.md#pictures-and-docs-tools).
 - Update the UI README when a view, a folder's job or the stack changes.
 - A UI that needs a new endpoint changes the service first

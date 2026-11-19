@@ -180,7 +180,7 @@ Community detection uses [python-igraph](https://python.igraph.org/), which is G
 
 The [`graphos-image`](.github/workflows/image.yml) workflow builds and smoke-tests both variants (`linux/amd64`) on every pull request and push, and publishes the default (permissive-only) variant for `linux/amd64` and `linux/arm64`, each built on a runner of that architecture, to `ghcr.io/<owner>/graphos-api`, and the web UI to `ghcr.io/<owner>/graphos-ui`, from `main` and version tags. The `louvain` variant is built and smoke-tested but not published.
 
-**Releasing.** What changed in each version is in [CHANGELOG.md](CHANGELOG.md). Push a version tag such as `0.16.0` to publish the images (`ghcr.io/<owner>/graphos-api:0.16.0` and `:0.16`, and the same for `graphos-ui`); set the version first with `node tools/release/version.mjs X.Y.Z`, which writes it everywhere it lives (server, client, UI, the website's page), turns the changelog's *Unreleased* heading into the release; CI and the release workflows check with `--check` that every place matches the tag. [`graphos-client`](https://pypi.org/project/graphos-client/) is published to PyPI by the [`graphos-client-release`](.github/workflows/client-release.yml) workflow when a version tag is pushed (trusted publishing: no token is stored).
+**Releasing.** What changed in each version is in [CHANGELOG.md](CHANGELOG.md). Push a version tag such as `0.16.0` to publish the images (`ghcr.io/<owner>/graphos-api:0.16.0` and `:0.16`, and the same for `graphos-ui`); set the version first with `node tools/release/version.mjs X.Y.Z`, which writes it everywhere it lives (server, client, UI, the install commands' image tags), turns the changelog's *Unreleased* heading into the release; CI and the release workflows check with `--check` that every place matches the tag. [`graphos-client`](https://pypi.org/project/graphos-client/) is published to PyPI by the [`graphos-client-release`](.github/workflows/client-release.yml) workflow when a version tag is pushed (trusted publishing: no token is stored).
 
 ## Python client
 
@@ -286,7 +286,6 @@ pytest clients/python/tests
 bash scripts/run-db-tests.sh                   # integration tests against the compose stack
 node tools/docs/diagrams.mjs                    # regenerate the diagrams, docs/images/*.svg
 python tools/docs/screenshots.py --ui <url>     # retake the UI screenshots (docs/images/ui-*), of the demo tenant
-python tools/docs/site.py                       # regenerate the website's page, docs/index.html
 (cd services/graphos-ui && npm ci && npm test)  # the web UI: tests (npm run dev to run it)
 ```
 

@@ -25,8 +25,8 @@ and [`CLAUDE.md`](../../CLAUDE.md) point here and do not repeat them.
 | `docker-compose.graphos.yml` | The stack: `graphos-db` (PostgreSQL 18 + AGE 1.8), `graphos-api`, `graphos-ui` (profile `ui`), and the move from PostgreSQL 16. | |
 | `docker-compose.igraph.yml` | Sets `GRAPHOS_IGRAPH=true`: the image's entrypoint (`services/graphos/docker-entrypoint.sh`) adds python-igraph (GPL) to a published image at start, for Louvain and Leiden. | |
 | `scripts/` | `init-secrets.sh` / `.ps1`, `run-db-tests.sh`, benchmarks, `bench_tenant.py` (measures a running tenant). | [installation §14](installation.md#14-measuring-a-tenant) |
-| `tools/` | `docs/` (diagrams, UI screenshots, API docs assets, the website's page), `release/version.mjs`, `export/ndjson_to_age.py`. | |
-| `docs/` | The website's root, as GitHub Pages serves it: `index.html`, `site.css`, `site.js`, `404.html`; no guides. | [§3](#pictures-and-docs-tools) |
+| `tools/` | `docs/` (diagrams, UI screenshots, API docs assets), `release/version.mjs`, `export/ndjson_to_age.py`. | |
+| `docs/` | The guides and the pictures; not a website: the website is built in [pomentum.github.io](https://github.com/pomentum/pomentum.github.io). | [§3](#pictures-and-docs-tools) |
 | `docs/guide/` | User and design documentation, these guides; [`README.md`](README.md) is its index. | |
 | `docs/guide/adrs/` | Architecture decision records: one file per decision. | [ADRs](adrs/README.md) |
 | `docs/images/` | Diagrams and UI screenshots, all made by `tools/docs/`, for the README, the guides and the website. | [§3](#pictures-and-docs-tools) |
@@ -147,7 +147,6 @@ python clients/python/examples/08_demo_ecosystem.py     # load the demo tenant
 export GRAPHOS_USER=... GRAPHOS_PASSWORD=...            # a user granted only the demo tenant
 python tools/docs/screenshots.py --ui http://localhost:5173              # every shot
 python tools/docs/screenshots.py --ui http://localhost:5173 query        # or name them
-python tools/docs/site.py                               # the website's page shows the README's shots
 ```
 
 The shots are `explore-graph`, `explore-groups`, `explore-map`,
@@ -156,38 +155,17 @@ The shots are `explore-graph`, `explore-groups`, `explore-map`,
 `screenshots.py`; where it is shown, its alt text says what it shows. Never
 take a screenshot of real data.
 
-**The website** (`https://www.pomentum.dev/graphos/`) is `docs/` as it is
-on `main`: GitHub Pages serves the folder (Settings → Pages → Deploy from a
-branch, `main`, `/docs`) and runs no build of ours. Its page,
-`docs/index.html`, is generated like the diagrams: `tools/docs/site.py` fills
-the frame `tools/docs/site.html` with the README's features, screenshots,
-first quickstart block and documentation table, the version, and each
-diagram's alt text from its SVG. Edit the README, the diagrams or the frame,
-never `docs/index.html`. Beside it sit `site.css` and
-`site.js` (its design and light/dark switch), `favicon.svg`,
-`404.html` and `.nojekyll`; its pictures are `docs/images/`. The guides
-live apart, in `docs/guide/`; GitHub still serves them as plain files, since
-everything committed under `docs/` is published, so keep private notes in
-`docs/design/`, which git ignores.
-
-What the frame says itself must match the docs: At a glance matches
-[`features.md`](features.md) or the README, and each benchmark figure is
-quoted, with its setup, from [`apache-age.md`](apache-age.md),
-[`concept.md`](concept.md), [`features.md`](features.md) or
-[`upgrade-postgresql-18.md`](upgrade-postgresql-18.md); a new measurement
-goes into those docs first.
-
-```bash
-python tools/docs/site.py                          # write docs/index.html; fails on a broken local link
-python tools/docs/site.py --check                  # exit 1 when docs/index.html is out of date
-python -m http.server -d docs 8000                 # preview at http://127.0.0.1:8000/
-```
-
-Run it after changing the README's features, screenshots, quickstart or
-documentation table, and commit `docs/index.html` with the change. The
-version on the page is `tools/release/version.mjs`'s to set, with the
-others, and its `--check` fails when the page shows another one. The site is live once that commit
-is on `main`.
+**The website** (`https://www.pomentum.dev/graphos/`) is built in the
+[pomentum.github.io](https://github.com/pomentum/pomentum.github.io)
+repository, from `graphos-site/`; nothing in this repository is published as
+a site. Its version line reads the newest release itself. When the README's
+features, screenshots, quickstart or a benchmark figure change, change the
+page there too: each figure it quotes comes, with its setup, from
+[`apache-age.md`](apache-age.md), [`concept.md`](concept.md),
+[`features.md`](features.md) or
+[`upgrade-postgresql-18.md`](upgrade-postgresql-18.md), and a new
+measurement goes into those docs first. Private notes go in `docs/design/`,
+which git ignores.
 
 **API docs assets.** graphos serves Swagger UI (`/docs`) and ReDoc
 (`/redoc`) from files in `services/graphos/src/graphos/static/api-docs/`,

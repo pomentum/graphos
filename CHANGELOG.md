@@ -4,6 +4,18 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## Unreleased
+
+### Changed
+
+- **The website is built elsewhere.** <https://www.pomentum.dev/graphos/> is now built in the
+  [pomentum.github.io](https://github.com/pomentum/pomentum.github.io) repository, with graphos's
+  use cases as animated walkthroughs; its version line reads the newest release itself. This
+  repository no longer publishes a Pages site: the page (`docs/index.html`, `site.css`, `site.js`,
+  `404.html`, `favicon.svg`, `.nojekyll`) and its generator (`tools/docs/site.py`, `site.html`) are
+  gone, and `tools/release/version.mjs` sets the version in seven places, not eight. The pictures
+  stay in `docs/images/`, for the README and the guides.
+
 ## 0.16.0 — 2026-11-13
 
 The web UI catches up: undo on the Schema page, keyboard shortcuts and a list of them, changes to
