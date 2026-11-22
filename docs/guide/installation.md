@@ -23,8 +23,7 @@ once it runs is in the [usage guide](usage.md).
 
 | Part | Image | Role |
 |---|---|---|
-| `graphos-db` | `apache/age:release_PG18_1.8.0` (pinned by digest) | PostgreSQL 18 with Apache AGE 1.8 (graphos-api refuses older ones). On an internal network: nothing but graphos-api (and, for an upgrade, graphos-db-import) reaches it. |
-| `graphos-db-export`, `graphos-db-import` | `apache/age` for PostgreSQL 16 and 18 | One-shot: move a PostgreSQL 16 database to PostgreSQL 18 on the first start after an upgrade ([§11](#11-upgrading-from-postgresql-16)); otherwise they exit at once. |
+| `graphos-db` | `apache/age:release_PG18_1.8.0` (pinned by digest) | PostgreSQL 18 with Apache AGE 1.8 (graphos-api refuses older ones). On an internal network: nothing but graphos-api reaches it. |
 | `graphos-api` | `ghcr.io/pomentum/graphos-api` (or built from `services/graphos`) | The REST API, sign-in and the background jobs. Listens on `127.0.0.1:8080`. |
 | `graphos-ui` (optional) | `ghcr.io/pomentum/graphos-ui` (or built from `services/graphos-ui`) | The web UI: static files and a same-origin proxy to the API, no state of its own. Listens on `127.0.0.1:8081`. |
 
@@ -61,9 +60,9 @@ curl -s http://127.0.0.1:8080/readyz    # {"status":"ready",...}
 - Consumers in other compose projects attach to the `graphos-net` network and call
   `http://graphos-api:8080`.
 
-The data lives in the `graphos_data_pg18` volume (`graphos_data` and `graphos_upgrade` matter only
-after an upgrade from PostgreSQL 16, [§11](#11-upgrading-from-postgresql-16)). `docker compose ... down`
-keeps them; `down -v` deletes all three.
+The data lives in the `graphos_data_pg18` volume. `docker compose ... down` keeps it; `down -v`
+deletes it. (An install moved from PostgreSQL 16 also has `graphos_data` and `graphos_upgrade`,
+which this compose file no longer names: see [§11](#11-upgrading-from-postgresql-16).)
 
 ### The database's set-up
 
@@ -508,13 +507,20 @@ lists every one; the README the most common). Those for sign-in, besides the OID
 ## 11. Upgrading from PostgreSQL 16
 
 graphos 0.9 and earlier ran PostgreSQL 16 with AGE 1.6 on the volume `graphos_data`; graphos-api
-no longer starts on that database ([ADR-0007](adrs/ADR-0007-drop-postgresql-16.md)). The compose file runs PostgreSQL 18 with AGE 1.8 on a new volume,
-`graphos_data_pg18`, and moves the data by itself on the first start:
+no longer starts on that database ([ADR-0007](adrs/ADR-0007-drop-postgresql-16.md)). Move it in
+two steps: **graphos 0.16.0**, whose compose file runs PostgreSQL 18 with AGE 1.8 on a new volume,
+`graphos_data_pg18`, and moves the data by itself on its first start; then the current release,
+whose compose file no longer carries the move
+([ADR-0016](adrs/ADR-0016-release-compose-without-the-postgresql-16-move.md)). Do not skip the
+first step: the current compose file alone starts on a new, empty database.
 
 ```bash
-git pull
+git fetch --tags && git checkout 0.16.0
 docker compose -f docker-compose.graphos.yml up -d
 docker compose -f docker-compose.graphos.yml logs -f graphos-db-export graphos-db-import
+# once it checks out:
+git checkout main
+docker compose -f docker-compose.graphos.yml up -d --remove-orphans
 ```
 
 Everything moves: tenants and their graphs, users and grants, saved queries, the change feed,

@@ -22,7 +22,7 @@ and [`CLAUDE.md`](../../CLAUDE.md) point here and do not repeat them.
 | `services/graphos/` | The service, `graphos-api`: FastAPI on PostgreSQL + Apache AGE (Python 3.11+). | [service](../../services/graphos/DEVELOPMENT.md) |
 | `clients/python/` | The Python client, `graphos-client`, published on its own. | [client](../../clients/python/DEVELOPMENT.md) |
 | `services/graphos-ui/` | The web UI: React, TypeScript, Vite, Mantine. | [UI](../../services/graphos-ui/DEVELOPMENT.md) |
-| `docker-compose.graphos.yml` | The stack: `graphos-db` (PostgreSQL 18 + AGE 1.8), `graphos-api`, `graphos-ui` (profile `ui`), and the move from PostgreSQL 16. | |
+| `docker-compose.graphos.yml` | The stack: `graphos-db` (PostgreSQL 18 + AGE 1.8), `graphos-api`, `graphos-ui` (profile `ui`). The move from PostgreSQL 16 left it in 0.16.1 (ADR-0016). | |
 | `docker-compose.igraph.yml` | Sets `GRAPHOS_IGRAPH=true`: the image's entrypoint (`services/graphos/docker-entrypoint.sh`) adds python-igraph (GPL) to a published image at start, for Louvain and Leiden. | |
 | `scripts/` | `init-secrets.sh` / `.ps1`, `run-db-tests.sh`, benchmarks, `bench_tenant.py` (measures a running tenant). | [installation §14](installation.md#14-measuring-a-tenant) |
 | `tools/` | `docs/` (diagrams, UI screenshots, API docs assets), `release/version.mjs`, `export/ndjson_to_age.py`. | |

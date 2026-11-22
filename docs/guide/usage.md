@@ -41,8 +41,8 @@ file publishes the API on `127.0.0.1:8080` only; put a reverse proxy in front of
 beyond local use, and set `GRAPHOS_FORWARDED_ALLOW_IPS` to the proxy's address (§11).
 
 The bundled database is PostgreSQL 18 with AGE 1.8, on the volume `graphos_data_pg18`. A stack
-that ran PostgreSQL 16 (volume `graphos_data`) has its data moved there by itself on its first
-`up` from 0.10.0 on: see [Upgrading the database](upgrade-postgresql-18.md).
+that ran PostgreSQL 16 (volume `graphos_data`) upgrades through 0.16.0 first, whose compose file
+moves the data there by itself: see [Upgrading the database](upgrade-postgresql-18.md).
 
 `graphos_app` is created by `services/graphos/deploy/db-init/01-app-role.sh`. Like every script in
 `db-init/`, it runs only when the data volume is empty. graphos-api also creates it at start, as

@@ -10,7 +10,8 @@ graphos-api stops gracefully (ADR-0015): on SIGTERM it stops taking requests, an
 with `Retry-After`, finishes what is running, and within a configurable grace puts the jobs it
 could not finish back in the queue, where another replica or the next start runs them again.
 Set your platform's stop grace longer than graphos's. The Python client follows a stopping server,
-and its README reads better on PyPI.
+and its README reads better on PyPI. **The release compose file no longer moves a PostgreSQL 16
+install: one still on 16 upgrades to 0.16.0 first** (ADR-0016).
 
 ### Added
 
@@ -33,6 +34,15 @@ and its README reads better on PyPI.
 
 ### Changed
 
+- **The release compose file no longer moves PostgreSQL 16**
+  ([ADR-0016](docs/guide/adrs/ADR-0016-release-compose-without-the-postgresql-16-move.md)):
+  `graphos-db-export`, `graphos-db-import`, the volumes `graphos_data` and `graphos_upgrade`, and
+  graphos-api's wait for the move are gone, so every start runs two containers fewer. **An install
+  still on PostgreSQL 16 upgrades to 0.16.0 first**, whose compose file moves the data, then to
+  0.16.1 (`up -d --remove-orphans` removes the move's finished containers); going straight to
+  0.16.1 starts graphos on a new, empty database, with the data left untouched on `graphos_data`
+  ([upgrade guide](docs/guide/upgrade-postgresql-18.md)). The scripts in
+  `services/graphos/deploy/db-upgrade/` stay, for a database run by hand.
 - **`GRAPHOS_SHUTDOWN_GRACE_S`** is the whole drain's maximum, jobs included, and defaults to 8
   (was 5); the release compose file sets 30 and `stop_grace_period: 40s`. **Set your platform's
   stop grace at least 5 s longer**: Docker kills after its own, and Docker Desktop was seen doing
@@ -48,7 +58,9 @@ and its README reads better on PyPI.
   gone, and `tools/release/version.mjs` sets the version in seven places, not eight. The pictures
   stay in `docs/images/`, for the README and the guides.
 - **Docs:** stopping graphos-api, and the platform grace to set with it, in
-  [installation §8](docs/guide/installation.md#stopping-graphos-api); ADR-0015 accepted.
+  [installation §8](docs/guide/installation.md#stopping-graphos-api); ADR-0015 accepted. The
+  upgrade from PostgreSQL 16 in two steps, through 0.16.0; ADR-0016 accepted, superseding
+  ADR-0007's "the move stays" for the compose file.
 
 ### Fixed
 

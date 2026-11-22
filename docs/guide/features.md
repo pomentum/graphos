@@ -616,8 +616,10 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   token and never list tenant names (admins use `GET /v1/tenants`).
 - **Database:** the bundled `graphos-db` is PostgreSQL 18 with AGE 1.8,
   pinned by digest; graphos-api refuses to start on PostgreSQL before 18 or
-  AGE before 1.8. On the first `docker compose up` after the upgrade, two one-shot
-  services move a PostgreSQL 16 stack's data by themselves:
+  AGE before 1.8. An install still on PostgreSQL 16 upgrades through 0.16.0,
+  whose compose file has two one-shot services that move its data by themselves
+  on the first `docker compose up` (the release compose file no longer has them
+  from 0.16.1, ADR-0016):
   `graphos-db-export` (PostgreSQL 16, no network) dumps the old volume, and
   `graphos-db-import` restores it into PostgreSQL 18, repoints AGE's catalogue
   at the restored schemas (a restore changes their OIDs), adds AGE 1.8's

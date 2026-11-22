@@ -378,9 +378,11 @@ only.
 1.6 for PostgreSQL 16, and 1.6 carries out some Cypher writes in a read-only
 transaction and can wedge a database process on a variable-length pattern.
 `db.py::unsupported_database` refuses any PostgreSQL before 18 or AGE before
-1.8, and graphos-api stops at start with the reason. The compose moves a
-PostgreSQL 16 stack by itself with two one-shot services that run on every
-`up` and exit at once when there is nothing to move:
+1.8, and graphos-api stops at start with the reason. Releases up to 0.16.0
+move a PostgreSQL 16 stack by themselves, with two one-shot services in their
+compose file that run on every `up` and exit at once when there is nothing to
+move; from 0.16.1 the release compose file no longer has them, and an install
+still on 16 goes through 0.16.0 first (ADR-0016):
 
 - `graphos-db-export` (the PostgreSQL 16 image, `network_mode: none`) starts
   PostgreSQL 16 on the old `graphos_data` volume, dumps it (`pg_dump -Fc`) to
@@ -392,8 +394,8 @@ PostgreSQL 16 stack by itself with two one-shot services that run on every
   lacking it (AGE's own upgrade script would; a restore runs none), puts it
   in place of the new, empty `graphos` database, and gathers planner
   statistics in parallel;
-- `graphos-api` waits for the import to succeed. At every start it also adds
-  that trigger, where missing, to its registered tenants' label tables
+- `graphos-api` waits for the import to succeed (in 0.16.0's compose file).
+  At every start it also adds that trigger, where missing, to its registered tenants' label tables
   (`bootstrap.ensure_cache_invalidation_triggers`; nothing before AGE 1.8).
 
 A failed import leaves nothing behind and runs again on the next `up`; the
@@ -1665,7 +1667,7 @@ Postgres instance.
    database server (§4.1); a community write-back on a large graph holds every
    tenant's feed until it commits.
 10. **Backups** are operator-owned: `pg_dump` / `pg_basebackup` or a snapshot of
-   the `graphos_data_pg18` volume (`graphos_data` on PostgreSQL 16). A
+   the `graphos_data_pg18` volume. A
    restore needs AGE's catalogue pointed at the restored schemas' new OIDs,
    which graphos-api does at start (`db.repair_age_catalogue`), and fresh
    planner statistics, which it does not; restoring an AGE 1.6 dump into AGE
