@@ -4,7 +4,13 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.16.1 — 2026-11-22
+
+graphos-api stops gracefully (ADR-0015): on SIGTERM it stops taking requests, answering `503`
+with `Retry-After`, finishes what is running, and within a configurable grace puts the jobs it
+could not finish back in the queue, where another replica or the next start runs them again.
+Set your platform's stop grace longer than graphos's. The Python client follows a stopping server,
+and its README reads better on PyPI.
 
 ### Added
 
