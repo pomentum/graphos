@@ -90,7 +90,7 @@ What has to be true for the decision to count as carried out (tests, docs).
 | [ADR-0004](ADR-0004-team-annotations.md) | Team annotations: saved views, notes and flags | Proposed (2026-10-16) |
 | [ADR-0005](ADR-0005-geo-view-and-external-calls.md) | A geographic view, and no third-party calls from the UI by default | Proposed (2026-10-16), to be built only on demand |
 | [ADR-0006](ADR-0006-console-on-by-default.md) | The Cypher console is on by default | Accepted (2026-10-19) |
-| [ADR-0007](ADR-0007-drop-postgresql-16.md) | PostgreSQL 16 / AGE 1.6 is no longer supported | Accepted (2026-10-19) |
+| [ADR-0007](ADR-0007-drop-postgresql-16.md) | PostgreSQL 16 / AGE 1.6 is no longer supported | Accepted (2026-10-19); the move in the compose file superseded by ADR-0016 |
 | [ADR-0008](ADR-0008-mcp-uses-the-api-tokens.md) | `/mcp` takes the tokens the REST API takes, signs its clients in, and is on by default | Accepted (2026-10-19) |
 | [ADR-0009](ADR-0009-rename-and-deprecate.md) | Renaming and deprecating labels, edge types and properties | Accepted (2026-10-19) |
 | [ADR-0010](ADR-0010-analysis-results-outside-properties.md) | Analysis results outside `properties` | Rejected (2026-10-21): the churn, not the storage, is the cost |
@@ -99,3 +99,4 @@ What has to be true for the decision to count as carried out (tests, docs).
 | [ADR-0013](ADR-0013-schema-manager-and-drift-reports.md) | A tenant's schema manager, and drift reports | Proposed (2026-10-29), revised (2026-10-29); amended by ADR-0014 |
 | [ADR-0014](ADR-0014-schema-manager-after-review.md) | The schema manager, after an independent review | Accepted (2026-10-29) |
 | [ADR-0015](ADR-0015-graceful-shutdown-and-drain.md) | graphos-api drains on SIGTERM, and hands back what it could not finish | Accepted (2026-11-22) |
+| [ADR-0016](ADR-0016-release-compose-without-the-postgresql-16-move.md) | The release compose file no longer moves PostgreSQL 16 | Accepted (2026-11-22) |
