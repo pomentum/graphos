@@ -98,3 +98,4 @@ What has to be true for the decision to count as carried out (tests, docs).
 | [ADR-0012](ADR-0012-database-setup-at-start.md) | graphos-api sets its database up at start | Accepted (2026-10-29) |
 | [ADR-0013](ADR-0013-schema-manager-and-drift-reports.md) | A tenant's schema manager, and drift reports | Proposed (2026-10-29), revised (2026-10-29); amended by ADR-0014 |
 | [ADR-0014](ADR-0014-schema-manager-after-review.md) | The schema manager, after an independent review | Accepted (2026-10-29) |
+| [ADR-0015](ADR-0015-graceful-shutdown-and-drain.md) | graphos-api drains on SIGTERM, and hands back what it could not finish | Accepted (2026-11-22) |
