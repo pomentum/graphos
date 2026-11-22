@@ -712,6 +712,8 @@ class Job(BaseModel):
     consumer: str | None = None
     cancel_requested: bool = False
     sync: bool = False     # run by a synchronous call (its caller waits); listed while running
+    # Times a stop of graphos-api put the job back in the queue; 0 from older servers.
+    attempts: int = 0
     progress: JobProgress | None = None
     created_at: datetime
     started_at: datetime | None = None

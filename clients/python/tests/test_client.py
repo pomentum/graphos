@@ -1601,3 +1601,75 @@ def test_a_job_carries_its_progress() -> None:
     job = Job.model_validate(_job("running", kind="rename_property",
                                   progress={"done": 500, "total": 1200}))
     assert job.progress is not None and job.progress.done == 500
+
+
+def test_a_job_says_how_often_a_stop_put_it_back() -> None:
+    assert Job.model_validate(_job("queued", attempts=1)).attempts == 1
+    # An older server sends no attempts.
+    assert Job.model_validate(_job("queued")).attempts == 0
+
+
+@pytest.mark.asyncio
+async def test_a_stopping_servers_retry_after_is_waited_for(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    waits: list[float] = []
+
+    async def no_wait(seconds: float) -> None:
+        waits.append(seconds)
+
+    monkeypatch.setattr("graphos_client._client.asyncio.sleep", no_wait)
+    answers = [
+        httpx.Response(503, headers={"retry-after": "2"},
+                       json={"detail": "graphos is shutting down", "code": "draining"}),
+        httpx.Response(503, headers={"retry-after": "3600"}, json={"detail": "down"}),
+        httpx.Response(503, json={"detail": "not ready"}),
+        httpx.Response(200, json={"tenant": "t", "query": "x", "label": None, "limit": 10,
+                                  "truncated": False, "elapsed_ms": 1, "nodes": []}),
+    ]
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return answers.pop(0)
+
+    cli = GraphosClient(base_url="http://x", tenant="t", retries=3, retry_backoff_s=0.5,
+                        transport=_mock_transport(handler))
+    await cli.search("x")
+    # Retry-After when longer than the back-off, at most 30 s; else the back-off.
+    assert waits == [2.0, 30.0, 2.0]
+    await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_a_stream_ended_by_a_stopping_server_reconnects_at_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    waits: list[float] = []
+
+    async def no_wait(seconds: float) -> None:
+        waits.append(seconds)
+
+    monkeypatch.setattr("graphos_client._client.asyncio.sleep", no_wait)
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if len(calls) == 1:
+            e1 = json.dumps(_change(1))
+            return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=_sse(
+                f"id: 100.1\nevent: change\ndata: {e1}\n\n",
+                'event: draining\ndata: {"reason": "draining"}\n\n',
+            ))
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=_sse(
+            'event: gone\ndata: {"status": 410, "detail": "pruned"}\n\n',
+        ))
+
+    cli = GraphosClient(base_url="http://x", tenant="demo", retry_backoff_s=0.5,
+                        transport=_mock_transport(handler))
+    got = []
+    with pytest.raises(GraphosError):
+        async for change in cli.stream_changes("100.0"):
+            got.append(change.cursor)
+    assert got == ["100.1"]
+    assert [r.headers.get("last-event-id") for r in calls] == ["100.0", "100.1"]
+    assert waits == []          # no back-off after a draining event
+    await cli.close()
