@@ -6,6 +6,10 @@ The middleware records:
 - ``graphos_request_duration_seconds{method, route}``    — latency histogram
 - ``graphos_db_pool_size{state}``                        — asyncpg pool gauge
 
+The drain on SIGTERM (:mod:`graphos.drain`) and the job runner record
+``graphos_draining``, ``graphos_requests_in_flight``,
+``graphos_drain_refused_total`` and ``graphos_jobs_handed_back_total{kind, outcome}``.
+
 Route labels use the FastAPI route's *path template* (e.g.
 ``/v1/{tenant}/graph/search``), not the concrete URL — so two requests
 that hit the same handler share a bucket even though their tenant
@@ -74,6 +78,25 @@ DB_POOL_SIZE = Gauge(
 REGISTERED_TENANTS = Gauge(
     "graphos_registered_tenants",
     "Number of tenants currently in the in-process registry.",
+)
+
+# The drain on SIGTERM (graphos.drain, ADR-0015).
+DRAINING = Gauge(
+    "graphos_draining",
+    "1 once this process has begun draining before it stops, else 0.",
+)
+REQUESTS_IN_FLIGHT = Gauge(
+    "graphos_requests_in_flight",
+    "HTTP requests being served, /healthz, /readyz and /metrics aside.",
+)
+DRAIN_REFUSED = Counter(
+    "graphos_drain_refused_total",
+    "Requests answered 503 because this process was draining.",
+)
+JOBS_HANDED_BACK = Counter(
+    "graphos_jobs_handed_back_total",
+    "Jobs interrupted by a stop, by what became of them: queued again, failed or cancelled.",
+    labelnames=("kind", "outcome"),
 )
 
 

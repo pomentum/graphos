@@ -6,7 +6,8 @@
   for people reading it (the Activity page).
 - ``GET /v1/{tenant}/changes/stream``: Server-Sent Events, one ``change``
   event per record, its position as the event id, so a client resumes with
-  ``Last-Event-ID`` after a reconnect.
+  ``Last-Event-ID`` after a reconnect.  A stopping process ends its streams
+  with an ``event: draining`` (graphos.drain).
 
 Ordering, visibility and retention are :mod:`graphos.changes`'s.  A cursor
 whose records were pruned answers 410: the consumer resyncs from the head.
@@ -35,6 +36,7 @@ from graphos.contracts.changes import (
     ChangesHistory,
     ChangesResponse,
 )
+from graphos.drain import STREAM_EVENT, Drain
 
 router = APIRouter(tags=["changes"], prefix="/{tenant}/changes")
 
@@ -184,9 +186,10 @@ async def changes_history(
     summary="Follow the feed live (Server-Sent Events)",
     description=(
         "`text/event-stream`: a `change` event per record (`id` = its cursor, `data` = the "
-        "record as in `GET …/changes`), a comment line when idle, and a final `gone` event "
-        "if the stream falls behind retention.  Starts after `Last-Event-ID`, else after "
-        "`after`, else at the oldest record kept."
+        "record as in `GET …/changes`), a comment line when idle, a final `gone` event "
+        "if the stream falls behind retention, and a final `draining` event when the server "
+        "is stopping (reconnect with `Last-Event-ID`).  Starts after `Last-Event-ID`, else "
+        "after `after`, else at the oldest record kept."
     ),
     response_class=StreamingResponse,
     responses={
@@ -194,7 +197,8 @@ async def changes_history(
             "description": (
                 "A Server-Sent Events stream that stays open: `change` events, `: keep-alive` "
                 "comments, and a last `gone` event (`data` with `status` 410 and `detail`) "
-                "when the stream falls behind retention."
+                "when the stream falls behind retention, or a last `draining` event (`data`: "
+                "`{\"reason\": \"draining\"}`) when the server is stopping."
             ),
             "content": {"text/event-stream": {}},
         },
@@ -244,6 +248,7 @@ async def _events(request: Request, tenant: str, page: changes.Page) -> AsyncIte
     settings = request.app.state.settings
     pool: asyncpg.Pool = request.app.state.pool
     feed: changes.ChangeFeed | None = getattr(request.app.state, "change_feed", None)
+    drain: Drain | None = getattr(request.app.state, "drain", None)
     yield "retry: 2000\n\n"
     quiet_since = time.monotonic()
     while True:
@@ -254,11 +259,17 @@ async def _events(request: Request, tenant: str, page: changes.Page) -> AsyncIte
         elif time.monotonic() - quiet_since >= settings.changes_heartbeat_s:
             yield ": keep-alive\n\n"
             quiet_since = time.monotonic()
-        if not page.more:
+        if not page.more and not (drain is not None and drain.refusing):
             if feed is not None:
                 await feed.wait(tenant)
             else:
                 await asyncio.sleep(settings.changes_poll_s)
+        if drain is not None and drain.refusing:
+            # This process is stopping: the client reconnects, to another
+            # replica or after the restart, after the last id it received.
+            drain.stream_ended()
+            yield STREAM_EVENT
+            return
         if await request.is_disconnected():
             return
         try:

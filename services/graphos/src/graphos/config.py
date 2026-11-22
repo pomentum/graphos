@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import quote
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -125,9 +125,17 @@ class Settings(BaseSettings):
     # re-reading the table (bounds staleness if a change was not announced).
     cache_max_age_s: float = Field(default=30.0, gt=0)
 
-    # Seconds a stopping server waits for open requests (change-feed streams
-    # never finish on their own) before cancelling them.
-    shutdown_grace_s: float = Field(default=5.0, gt=0)
+    # ── Stopping (``graphos.drain``, ADR-0015) ───────────────────────────
+    # The most seconds from SIGTERM to the process's exit.  Requests and jobs
+    # still running near the end are cut and jobs go back to the queue.  The
+    # platform's own grace (compose stop_grace_period, Kubernetes
+    # terminationGracePeriodSeconds) must be at least 5 s longer.
+    shutdown_grace_s: float = Field(default=8.0, ge=2)
+    # Seconds after SIGTERM during which requests are still served while
+    # /readyz already answers 503 "draining", so a load balancer stops
+    # sending requests before any is refused.  Behind one: its health-check
+    # interval times its failure threshold (Kubernetes: 5).
+    drain_delay_s: float = Field(default=0.0, ge=0)
 
     # ── Change feed ──────────────────────────────────────────────────────
     # Records older than this are pruned; a cursor behind them gets 410.
@@ -255,6 +263,18 @@ class Settings(BaseSettings):
             return None
         return v
 
+    @model_validator(mode="after")
+    def _delay_within_grace(self) -> Settings:
+        # The delay must leave time to finish requests and hand jobs back.
+        limit = self.shutdown_grace_s - drain_reserve_s(self.shutdown_grace_s)
+        if self.drain_delay_s >= limit:
+            raise ValueError(
+                f"GRAPHOS_DRAIN_DELAY_S ({self.drain_delay_s:g}) must be less than "
+                f"{limit:g}: GRAPHOS_SHUTDOWN_GRACE_S ({self.shutdown_grace_s:g}) less the "
+                f"{drain_reserve_s(self.shutdown_grace_s):g} s kept for handing work back",
+            )
+        return self
+
     def resolved_db_password(self) -> str:
         """Resolve db_password from inline secret or *_FILE."""
         return _secret(self.db_password, self.db_password_file, "GRAPHOS_DB_PASSWORD")
@@ -281,6 +301,12 @@ class Settings(BaseSettings):
         user = quote(user, safe="")
         pw = quote(password, safe="")
         return f"postgresql://{user}:{pw}@{self.db_host}:{self.db_port}/{self.db_name}"
+
+
+def drain_reserve_s(grace_s: float) -> float:
+    """The end of a drain kept for handing jobs back and exiting: a quarter of
+    the grace, at most 5 s (graphos.drain)."""
+    return min(5.0, grace_s / 4)
 
 
 def _secret(value: SecretStr | None, file: Path | None, name: str) -> str:

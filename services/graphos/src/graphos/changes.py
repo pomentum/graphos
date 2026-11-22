@@ -389,7 +389,7 @@ class ChangeFeed:
         self._waiters: dict[str, set[asyncio.Event]] = {}
         self._tasks: list[asyncio.Task[None]] = []
         listener.subscribe(CHANNEL, self._notified)
-        listener.on_connect(self._wake_all)   # anything missed while not listening
+        listener.on_connect(self.wake_all)   # anything missed while not listening
 
     def start(self) -> None:
         self._tasks = [
@@ -420,7 +420,8 @@ class ChangeFeed:
         for event in self._waiters.get(tenant, ()):
             event.set()
 
-    def _wake_all(self) -> None:
+    def wake_all(self) -> None:
+        """Wake every stream: after a reconnect, and when a drain ends them."""
         for waiters in self._waiters.values():
             for event in waiters:
                 event.set()

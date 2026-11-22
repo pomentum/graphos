@@ -696,7 +696,16 @@ Nothing in graphos reads the cache implicitly. Expired rows are not swept.
   `GET /v1/jobs/{id}` returns its status and, when done, the synchronous
   response body or the error it would have returned; `GET /v1/jobs` lists
   recent jobs; `POST /v1/jobs/{id}:cancel` cancels. Jobs run on any replica,
-  once each, and are not re-run automatically.
+  once each; a job a stop of its replica interrupted goes back to the queue
+  under the same id and runs again (three times at most), a failed one is not
+  re-run.
+- **Stopping:** on SIGTERM graphos-api drains within
+  `GRAPHOS_SHUTDOWN_GRACE_S` (8 s): `/readyz` answers 503 `draining` at once,
+  new requests get 503 with `Retry-After` while it still listens, requests and
+  jobs already running finish, change-feed streams end so their clients
+  reconnect elsewhere, and what is still running near the end is cut, its
+  jobs handed back to the queue
+  ([installation §8](installation.md#stopping-graphos-api), ADR-0015).
 - **Timeouts:** every statement runs under a server-side `statement_timeout`
   (`GRAPHOS_STATEMENT_TIMEOUT_S`, default 60 s); it is the only per-statement
   limit (no client-side command timeout). Tenant bootstrap and the startup

@@ -44,7 +44,8 @@ class Job(BaseModel):
         ...,
         description=(
             "`queued` -> `running` -> `succeeded`, `failed` or `cancelled`. A running job "
-            "whose process died is marked `failed`; jobs are not retried."
+            "that a stop of the server interrupted goes back to `queued` (see `attempts`); "
+            "one whose process died otherwise is marked `failed`. A failed job is not retried."
         ),
     )
     params: dict[str, Any] = Field(
@@ -69,6 +70,13 @@ class Job(BaseModel):
         description=(
             "Run by a synchronous call: its caller waits for the response. Listed so "
             "others see it running; it can be cancelled like a background job."
+        ),
+    )
+    attempts: int = Field(
+        default=0,
+        description=(
+            "Times a stop of graphos-api interrupted the job and put it back in the queue, "
+            "to run again from the start. The third interruption fails it."
         ),
     )
     created_at: datetime = Field(..., description="When it was submitted.")

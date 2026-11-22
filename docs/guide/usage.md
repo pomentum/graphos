@@ -748,7 +748,8 @@ queries whose Cypher names it.
   (rule `renamed`, in any mode). Its definitions, deprecation, property and search indexes and
   styles follow at the end. Refused when rows carry both names, or a generated column, a resolve
   rule or a search index over other labels uses the property. A failed or cancelled rename resumes
-  when asked again. Renaming `name` on a vertex label answers a warning: search without an index
+  when asked again; one whose job a stop of graphos-api interrupted stays `running` and goes on by
+  itself when the job runs again. Renaming `name` on a vertex label answers a warning: search without an index
   matches `name` by default, so ask it for the new property afterwards, or declare a search index.
 
 Every rename is kept in the tenant's `renames` (oldest first: kind, from, to, on, when, who,
@@ -1686,8 +1687,10 @@ curl -N "$G/v1/acme/changes/stream" -H "Authorization: Bearer $TOKEN" -H "Last-E
 A commit wakes the stream at once (Postgres `LISTEN` / `NOTIFY`); streams also look every
 `GRAPHOS_CHANGES_POLL_S` seconds, so a lost notification only delays an event. An idle stream sends
 a `: keep-alive` comment every `GRAPHOS_CHANGES_HEARTBEAT_S` seconds (15) for proxies (graphos also
-sends `X-Accel-Buffering: no`). When graphos stops, open streams are closed after
-`GRAPHOS_SHUTDOWN_GRACE_S` (5 s); clients reconnect with `Last-Event-ID` and continue.
+sends `X-Accel-Buffering: no`). When graphos stops, open streams end with
+`event: draining` (`data: {"reason": "draining"}`) as soon as it refuses new requests; clients
+reconnect with `Last-Event-ID`, to another replica or after the restart, and continue
+([installation §8](installation.md#stopping-graphos-api)).
 
 **Retention.** Records older than `GRAPHOS_CHANGES_RETENTION_H` hours (168) are pruned in batches of
 5,000, a short transaction each. A cursor whose records were pruned gets **410**, on a page request
@@ -1696,7 +1699,8 @@ resync from the head.
 
 Python: `changes(after)`, `changes_head()`, `iter_changes(after)` (pages until caught up) and
 `stream_changes(after)`, which follows the stream forever, reconnecting with back-off and
-`Last-Event-ID`, and raises `GraphosError` 410 when it is time to resync.
+`Last-Event-ID` (at once after `event: draining`), and raises `GraphosError` 410 when it is time
+to resync.
 
 ```python
 async with GraphosClient(base_url=G, token=TOKEN, tenant="acme") as g:
@@ -1713,7 +1717,7 @@ async with GraphosClient(base_url=G, token=TOKEN, tenant="acme") as g:
 | Endpoint | Auth | Purpose |
 |---|---|---|
 | `GET /healthz` | none | process alive: `{"status": "ok"}`, no database access |
-| `GET /readyz` | none | database round-trip: `{"status": "ready", "registered_tenants": <count>}`, or 503 with `{"status": "not_ready", "reason"}` only (`lifespan_not_complete` while starting, `db_unreachable` on a database failure; the error goes to the server log) |
+| `GET /readyz` | none | database round-trip: `{"status": "ready", "registered_tenants": <count>}`, or 503 with `{"status": "not_ready", "reason"}` only (`lifespan_not_complete` while starting, `db_unreachable` on a database failure, the error going to the server log; `draining` once graphos is stopping) |
 | `GET /v1/info` | none | `version`, `postgres_version`, `age_version`, `tenants` (a count), `features` (`louvain`, `community_algorithms`, `metrics`, `cypher`) |
 | `GET /metrics` | none | Prometheus exposition; restrict it at the proxy if you expose it |
 | `GET /v1/db/stats` | admin | PostgreSQL and AGE versions, database size, plus per-table live/dead tuples, sizes and vacuum times (top 200 tables) |
@@ -1824,14 +1828,19 @@ for `edges:resolve`, admin for vacuum. One whole-graph job (recompute or metrics
 tenant can be queued or running at a time; another is refused with **409**.
 
 Every API replica runs queued jobs, `GRAPHOS_JOB_CONCURRENCY` at a time (default 1), and the
-database hands each job to exactly one replica. A job whose replica stops (crash or shutdown) is
-recorded as failed; jobs are never re-run automatically. Finished jobs are kept for
-`GRAPHOS_JOB_RETENTION_H` hours (default 168).
+database hands each job to exactly one replica. A job whose replica is stopped (SIGTERM) goes back
+to the queue under the same id, with `attempts` counting it, and runs again from the start on
+another replica or after the restart: its status goes `running`, `queued`, `running`, and
+`wait_for_job` keeps waiting. The third time it is interrupted it is failed (503). A job whose
+replica crashed is recorded as failed, and a failed job is never re-run automatically. Finished
+jobs are kept for `GRAPHOS_JOB_RETENTION_H` hours (default 168).
 
 **Metrics.** graphos exports `graphos_requests_total{method,route,status}`,
 `graphos_request_duration_seconds{method,route}`, `graphos_db_pool_size{state=total|idle|active}`,
-`graphos_registered_tenants`, `graphos_rate_limited_total{token_id}` and
-`graphos_property_violations_total{kind,outcome,rule}` (§3). `route` is the path
+`graphos_registered_tenants`, `graphos_rate_limited_total{token_id}`,
+`graphos_property_violations_total{kind,outcome,rule}` (§3), and for a stop
+`graphos_draining` (1 once draining), `graphos_requests_in_flight`, `graphos_drain_refused_total`
+and `graphos_jobs_handed_back_total{kind,outcome=queued|failed|cancelled|gone|error}`. `route` is the path
 template, not the concrete URL; `token_id` is the first 12 hex characters of the SHA-256 of the
 user name (of the bearer token when auth is disabled), never the token itself. The default
 `prometheus_client` process and runtime collectors are also exported.
@@ -1894,7 +1903,8 @@ listed here.
 | `BETWEENNESS_MAX_NODES` | 20000 (§8, *Graph metrics*) |
 | `METRICS_MIN_CHANGE` | 0.01: a PageRank or betweenness score is rewritten only when it moved by more than this share of the stored value; 0 writes every change (§8, *Graph metrics*) |
 | `COMPUTE_THREADS` | 0: half the CPUs the process may use, at least one; the threads a metrics or community computation may use (betweenness is the one that uses many) |
-| `REGISTRY_SYNC_S`, `CACHE_MAX_AGE_S`, `SHUTDOWN_GRACE_S` | 30, 30, 5 (*Several replicas*, §7, §10) |
+| `REGISTRY_SYNC_S`, `CACHE_MAX_AGE_S` | 30, 30 (*Several replicas*, §7) |
+| `SHUTDOWN_GRACE_S`, `DRAIN_DELAY_S` | 8, 0: the most seconds from SIGTERM to exit, and how long requests are still served while `/readyz` already answers 503 ([installation §8](installation.md#stopping-graphos-api)) |
 | `CHANGES_RETENTION_H`, `CHANGES_POLL_S`, `CHANGES_HEARTBEAT_S` | 168, 1, 15 (§10) |
 | `REQUIRE_IF_MATCH` | false (§4) |
 | `AUTH_DISABLED` | false; `true` makes every request an anonymous admin |
@@ -1945,6 +1955,6 @@ and the 422 of a `strict` property schema (with `violations` and `total`).
 | 499 | a console query cancelled by its caller |
 | 501 | Louvain extra not installed |
 | 502 | single sign-on: the identity provider could not be reached |
-| 503 | `/readyz` not ready; the database out of memory or connections, or at a configured limit (SQLSTATE class 53); the connection to the database lost or refused, or the database shutting down or restarting ("Database unavailable", SQLSTATE class 08 and 57P01 to 57P03): the statement did not complete, retry when `/readyz` answers again. `application/problem+json`; a job records it the same way |
+| 503 | graphos is stopping: `"code": "draining"` and `Retry-After: 2`, send the request again (to another replica, or after the restart); `/readyz` not ready; the database out of memory or connections, or at a configured limit (SQLSTATE class 53); the connection to the database lost or refused, or the database shutting down or restarting ("Database unavailable", SQLSTATE class 08 and 57P01 to 57P03): the statement did not complete, retry when `/readyz` answers again. `application/problem+json`; a job records it the same way |
 | 504 | statement timeout on a read or a write (`application/problem+json`); a console query stopped at `GRAPHOS_CYPHER_TIMEOUT_S` |
 | 507 | the database server is out of disk space (SQLSTATE 53100, `application/problem+json`), on a read, a write (bulk and CSV loads, snapshot import included) or a job; the statement that needed more was rolled back (rows of a bulk load flushed before it stay written); a job records it the same way, so the web UI says so. Freeing the space: [installation §8](installation.md#a-full-database-disk) |

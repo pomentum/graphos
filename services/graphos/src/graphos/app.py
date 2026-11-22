@@ -5,6 +5,8 @@ Lifespan responsibilities:
 - Build the asyncpg pool.
 - Load the auth token store (idempotent SIGHUP reload registered too).
 - Start the background job runner (stopped before the pool closes).
+- Give the drain on SIGTERM its hooks into the job runner and the change
+  feed (graphos.drain, ADR-0015).
 - Mark the service ready.
 
 graphos does **not** bootstrap any tenants on startup — consumers register
@@ -91,10 +93,12 @@ from graphos.db import (
     unsupported_database,
 )
 from graphos.db_setup import ensure_database_setup
+from graphos.drain import Drain, DrainHooks, DrainMiddleware
+from graphos.drain import install as install_drain
 from graphos.graph_compute import configure as configure_compute
 from graphos.graph_compute import terminate_running
 from graphos.graph_metrics import configure as configure_metrics
-from graphos.jobs import JobKind, JobRunner
+from graphos.jobs import JOBS_CHANNEL, JobKind, JobRunner
 from graphos.observability.audit import AuditMiddleware
 from graphos.observability.logging import RequestContextMiddleware, configure_logging
 from graphos.observability.metrics import MetricsMiddleware, metrics_handler
@@ -137,14 +141,21 @@ async def _run_vacuum(pool: asyncpg.Pool, _tenant: str | None, params: dict[str,
     return await db.run_vacuum(pool, VacuumRequest.model_validate(params))
 
 
-# Operations that accept ``Prefer: respond-async``.
+# Operations that accept ``Prefer: respond-async``.  Every kind may run again
+# from the start after a stop cut it (``resumable``, ADR-0015): the community
+# and metrics write-backs are one transaction each and nothing is written
+# before them; edge resolution inserts with ON CONFLICT DO NOTHING; the
+# property check writes nothing; a property rename continues where it
+# stopped; a vacuum changes no data.
 JOB_KINDS: dict[str, JobKind] = {
-    "recompute_communities": JobKind(run=_run_recompute, needs="maintain"),
-    "compute_metrics": JobKind(run=_run_metrics, needs="maintain"),
-    "resolve_edges": JobKind(run=_run_resolve),
-    "check_properties": JobKind(run=_run_check, needs="maintain"),
-    "rename_property": JobKind(run=schema_rename.run_property_job, needs="owner"),
-    "vacuum": JobKind(run=_run_vacuum, needs="admin"),
+    "recompute_communities": JobKind(run=_run_recompute, needs="maintain", resumable=True),
+    "compute_metrics": JobKind(run=_run_metrics, needs="maintain", resumable=True),
+    "resolve_edges": JobKind(run=_run_resolve, resumable=True),
+    "check_properties": JobKind(run=_run_check, needs="maintain", resumable=True),
+    "rename_property": JobKind(
+        run=schema_rename.run_property_job, needs="owner", resumable=True,
+    ),
+    "vacuum": JobKind(run=_run_vacuum, needs="admin", resumable=True),
 }
 
 
@@ -294,6 +305,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     cache.LRU.max_age_s = settings.cache_max_age_s
     listener.subscribe(CACHE_CHANNEL, cache.on_notification)
     listener.on_connect(cache.LRU.clear)
+    # A job another replica put back on its way out: claim it now, not at the next poll.
+    listener.subscribe(JOBS_CHANNEL, lambda _kind: runner.notify())
     if access_store is not None:
         listener.subscribe(identity.ACCESS_CHANNEL, access_store.on_notify)
         listener.on_connect(access_store.on_notify)
@@ -305,9 +318,21 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.registry_sync = registry_sync
     app.state.listener = listener
 
+    # 6. What a drain on SIGTERM asks of the jobs and the streams (graphos.drain).
+    app.state.drain.hooks = DrainHooks(
+        begin=runner.begin_drain,
+        refuse=feed.wake_all,
+        cut=runner.hand_back_all,
+        running_jobs=runner.running,
+    )
+
     log.info(
         "graphos ready",
-        extra={"version": __version__, "tenants_restored": restored},
+        extra={
+            "version": __version__, "tenants_restored": restored,
+            "shutdown_grace_s": settings.shutdown_grace_s,
+            "drain_delay_s": settings.drain_delay_s,
+        },
     )
 
     try:
@@ -351,6 +376,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     openapi.install(app)
     app.state.settings = settings
     app.state.lent_tokens = LentTokens()
+    # The drain on SIGTERM (ADR-0015); the server finds it through install().
+    app.state.drain = Drain(grace_s=settings.shutdown_grace_s, delay_s=settings.drain_delay_s)
+    install_drain(app.state.drain)
     configure_metrics(
         betweenness_max_nodes=settings.betweenness_max_nodes,
         min_change=settings.metrics_min_change,
@@ -488,8 +516,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # reverse-registration order. Registration order here gives the
     # actual on-the-wire execution:
     #
-    #     RequestContext  ← outermost on request (binds trace_id first
-    #                        so audit log etc. can use it)
+    #     TrustedHost     ← when GRAPHOS_ALLOWED_HOSTS is set
+    #     Drain           ← refuses while stopping; its cut answers 503 (graphos.drain)
+    #     RequestContext  ← binds trace_id first so audit log etc. can use it
     #     RateLimit       ← rejects before any work happens
     #     Metrics         ← times only requests that aren't rate-limited
     #     Audit           ← innermost: sees the final status code
@@ -507,6 +536,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         window_s=settings.rate_limit_window_s,
     )
     app.add_middleware(RequestContextMiddleware)
+    # Outside every BaseHTTPMiddleware, so a request it cancels is still its
+    # own when the CancelledError comes back (graphos.drain).
+    app.add_middleware(DrainMiddleware, drain=app.state.drain)
     hosts = allowed_hosts(settings.allowed_hosts)
     if hosts:
         # Outermost: a request for a Host graphos is not is refused (400)

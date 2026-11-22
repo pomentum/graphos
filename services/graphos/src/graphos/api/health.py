@@ -3,6 +3,9 @@
 - ``/healthz``: process alive. Does not touch DB.
 - ``/readyz``:  asyncpg pool exists and DB roundtrip succeeds. Used by
   orchestrators (compose ``depends_on: condition: service_healthy``).
+  Once the process drains on SIGTERM (graphos.drain) it answers 503
+  ``draining`` before anything else, so a load balancer stops sending it
+  requests; ``/healthz`` stays 200: the process is alive.
 
 Note: readiness does **not** depend on any tenant being registered.
 graphos is ready as soon as it can talk to graphos-db; tenants are
@@ -37,12 +40,20 @@ async def healthz() -> dict[str, str]:
     summary="Readiness: the database answers",
     description=(
         "Needs no token. 200 with the number of registered tenants once the database answers "
-        "a round trip; 503 with a `reason` (`lifespan_not_complete`, `db_unreachable`) before. "
+        "a round trip; 503 with a `reason` (`lifespan_not_complete`, `db_unreachable`) before, "
+        "and `draining` once the server is stopping. "
         "Does not depend on any tenant being registered."
     ),
-    responses={503: {"description": "Not ready yet, or the database does not answer."}},
+    responses={
+        503: {"description": "Not ready yet, the database does not answer, or stopping."},
+    },
 )
 async def readyz(request: Request, response: Response) -> dict[str, Any]:
+    drain = getattr(request.app.state, "drain", None)
+    if drain is not None and drain.draining:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"status": "not_ready", "reason": "draining"}
+
     pool = getattr(request.app.state, "pool", None)
 
     if pool is None:

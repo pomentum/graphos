@@ -25,6 +25,7 @@ Paths are under `services/graphos/src/graphos/`.
 | Audit log, metrics, logging, rate limits | `observability/` (`audit.py`, `metrics.py`, `logging.py`, `rate_limit.py`) |
 | Settings and their `GRAPHOS_*` variables | `config.py` |
 | Tenant DDL, registry, start-up maintenance | `bootstrap.py`, `lifecycle.py` |
+| How the process stops: the drain on SIGTERM, jobs handed back | `drain.py`, `__main__.py` (`GraphosServer`), `jobs.py` (ADR-0015) |
 | Finding one node or edge by identity | `lookup.py` |
 | Louvain, PageRank and other algorithms | `louvain*.py`, `graph_metrics*.py`, `graph_compute.py` |
 | Database roles and first-start SQL | `services/graphos/deploy/db-init/`, and `db_setup.py`, which does the same at start (ADR-0012): keep the two in step |

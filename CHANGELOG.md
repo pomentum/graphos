@@ -6,8 +6,34 @@ under one version.
 
 ## Unreleased
 
+### Added
+
+- **graphos-api drains on SIGTERM** ([ADR-0015](docs/guide/adrs/ADR-0015-graceful-shutdown-and-drain.md),
+  [installation §8](docs/guide/installation.md#stopping-graphos-api)). `/readyz` answers `503`
+  `draining` at once and every response closes its connection; after `GRAPHOS_DRAIN_DELAY_S`
+  (new, default 0; 5 on Kubernetes) new requests get `503` with `Retry-After: 2` and
+  `"code": "draining"` while graphos keeps listening, and change-feed streams end with an
+  `event: draining`. Requests and jobs already running go on; near the end of
+  `GRAPHOS_SHUTDOWN_GRACE_S` what still runs is cut: a request answers `503`, a write rolls back
+  with its change record, and a background job goes back to the queue under the same id, to run
+  again from the start on another replica or after the restart (the third interruption fails it).
+  A second signal cuts at once. The exit status is `0`, or `1` when a job could not be put back
+  or the drain overran its grace. Metrics: `graphos_draining`, `graphos_requests_in_flight`,
+  `graphos_drain_refused_total`, `graphos_jobs_handed_back_total{kind,outcome}`.
+- **Jobs:** `attempts`, the times a stop put the job back in the queue. A job a drain marked
+  whose process was killed before it was put back is requeued by another replica's sweep.
+- **Client:** `Job.attempts`; a 503's `Retry-After` is waited for when longer than the backoff
+  (at most 30 s); `stream_changes` reconnects at once after `event: draining`.
+
 ### Changed
 
+- **`GRAPHOS_SHUTDOWN_GRACE_S`** is the whole drain's maximum, jobs included, and defaults to 8
+  (was 5); the release compose file sets 30 and `stop_grace_period: 40s`. **Set your platform's
+  stop grace at least 5 s longer**: Docker kills after its own, and Docker Desktop was seen doing
+  so after 3.4 s when none was set.
+- **graphos's database connections** set `client_connection_check_interval` (5 s): a graphos
+  process killed during a long statement no longer leaves it running, with its locks (the
+  tenant's whole-graph lock among them), until it ends.
 - **The website is built elsewhere.** <https://www.pomentum.dev/graphos/> is now built in the
   [pomentum.github.io](https://github.com/pomentum/pomentum.github.io) repository, with graphos's
   use cases as animated walkthroughs; its version line reads the newest release itself. This
@@ -15,6 +41,14 @@ under one version.
   `404.html`, `favicon.svg`, `.nojekyll`) and its generator (`tools/docs/site.py`, `site.html`) are
   gone, and `tools/release/version.mjs` sets the version in seven places, not eight. The pictures
   stay in `docs/images/`, for the README and the guides.
+- **Docs:** stopping graphos-api, and the platform grace to set with it, in
+  [installation §8](docs/guide/installation.md#stopping-graphos-api); ADR-0015 accepted.
+
+### Fixed
+
+- **A request still running when a stop's grace ran out** answered `500`; it answers `503` with
+  `Retry-After` and `"code": "draining"`, and the connection is no longer refused while graphos
+  drains.
 
 ## 0.16.0 — 2026-11-13
 

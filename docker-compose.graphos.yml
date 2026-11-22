@@ -161,6 +161,10 @@ services:
       GRAPHOS_ALLOWED_HOSTS: ${GRAPHOS_ALLOWED_HOSTS:-}
       # The MCP endpoint for agents at /mcp (docs/guide/agents.md); false turns it off.
       GRAPHOS_MCP: ${GRAPHOS_MCP:-true}
+      # On stop, graphos drains for at most this long: new requests get 503,
+      # running ones finish, jobs still running near the end go back to the
+      # queue. stop_grace_period below must stay at least 5 s longer.
+      GRAPHOS_SHUTDOWN_GRACE_S: ${GRAPHOS_SHUTDOWN_GRACE_S:-30}
       GRAPHOS_BIND_HOST: "0.0.0.0"
       GRAPHOS_BIND_PORT: "8080"
       GRAPHOS_LOG_LEVEL: info
@@ -197,6 +201,9 @@ services:
     # enough for roughly 3 M edges; raise to 4g for 6 M+.
     mem_limit: 2g
     mem_reservation: 256m
+    # Longer than GRAPHOS_SHUTDOWN_GRACE_S: Docker kills the process after this
+    # whatever it is doing, and its default is not to be relied on (installation §8).
+    stop_grace_period: 40s
 
   # The web UI: static files and a same-origin proxy to graphos-api, no state of
   # its own. Opt in with `--profile ui`. Users sign in with their graphos user name and password,

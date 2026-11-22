@@ -4,6 +4,8 @@ httpx's ASGI transport buffers a whole response, so a never-ending SSE
 stream cannot be tested through it.  :func:`live_server` runs uvicorn on a
 free local port in the test's own event loop, where the test's asyncpg pool
 lives, and the change feed's listener when the test starts one.
+:func:`graphos_server` runs graphos's own server instead, for the drain on
+SIGTERM.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import asyncpg
 import uvicorn
 from fastapi import FastAPI
 
+from graphos.__main__ import GraphosServer
 from graphos.app import create_app
 from graphos.changes import ChangeFeed
 from graphos.config import Settings
@@ -42,6 +45,34 @@ async def live_server(app: FastAPI) -> AsyncIterator[str]:
     finally:
         server.should_exit = True
         await asyncio.wait_for(task, timeout=10)
+
+
+@asynccontextmanager
+async def graphos_server(
+    app: FastAPI,
+) -> AsyncIterator[tuple[str, GraphosServer, asyncio.Task[None]]]:
+    """``app`` served by :class:`graphos.__main__.GraphosServer`, the server
+    ``python -m graphos`` runs: a signal sent through its ``handle_exit``
+    drains the app (graphos.drain).  Yields the URL, the server and its task,
+    which ends when the drain is over."""
+    # No watchdog: it ends the process, and the test run goes on after the server.
+    server = GraphosServer(uvicorn.Config(
+        app, host="127.0.0.1", port=0, lifespan="off", log_level="warning",
+        timeout_graceful_shutdown=2,
+    ), watchdog=False)
+    task = asyncio.create_task(server.serve())
+    for _ in range(500):
+        if server.started:
+            break
+        await asyncio.sleep(0.01)
+    assert server.started, "uvicorn did not start"
+    port = server.servers[0].sockets[0].getsockname()[1]
+    try:
+        yield f"http://127.0.0.1:{port}", server, task
+    finally:
+        if not task.done():
+            server.should_exit = True
+        await asyncio.wait_for(task, timeout=30)
 
 
 @dataclass

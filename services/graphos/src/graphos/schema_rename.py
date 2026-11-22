@@ -21,6 +21,7 @@ label returns nothing instead of failing.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -815,8 +816,13 @@ async def run_property_job(
             if not found:
                 break
         await finish_property(pool, tenant, on, old, new, tables)
-    except BaseException:
-        await _mark(pool, tenant, on, old, new, "failed")
+    except BaseException as exc:
+        # A stop that hands the job back: the rename stays running and goes on
+        # where it stopped when the job runs again (ADR-0015).  If the hand-back
+        # fails it instead, the rename stays running as after a crash, and
+        # asking again resumes it.
+        if not (isinstance(exc, asyncio.CancelledError) and jobs.handing_back()):
+            await _mark(pool, tenant, on, old, new, "failed")
         raise
     return SchemaRenameResponse(
         tenant=tenant, kind="property", from_=old, to=new, on=on, rows=done,
