@@ -85,8 +85,9 @@ Besides the shared list in [development.md §3](../../docs/guide/development.md#
 ## 6. Release
 
 The client shares its version with the service and the UI
-(`node tools/release/version.mjs <version>`). It is published to PyPI by
-hand: the `graphos-client-release` workflow, run from a version tag
-(`.github/workflows/client-release.yml`). A version tag does not publish it.
-Never tag or publish without the owner's approval
+(`node tools/release/version.mjs <version>`). Pushing a version tag publishes
+it to PyPI: the `graphos-client-release` workflow
+(`.github/workflows/client-release.yml`) runs on the tag, beside the image
+workflow, and can also be run by hand from the tag; a version already on PyPI
+is skipped. Never tag or publish without the owner's approval
 ([development.md §6](../../docs/guide/development.md#6-git)).

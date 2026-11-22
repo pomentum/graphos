@@ -180,7 +180,7 @@ Community detection uses [python-igraph](https://python.igraph.org/), which is G
 
 The [`graphos-image`](.github/workflows/image.yml) workflow builds and smoke-tests both variants (`linux/amd64`) on every pull request and push, and publishes the default (permissive-only) variant for `linux/amd64` and `linux/arm64`, each built on a runner of that architecture, to `ghcr.io/<owner>/graphos-api`, and the web UI to `ghcr.io/<owner>/graphos-ui`, from `main` and version tags. The `louvain` variant is built and smoke-tested but not published.
 
-**Releasing.** What changed in each version is in [CHANGELOG.md](CHANGELOG.md). Push a version tag such as `0.16.0` to publish the images (`ghcr.io/<owner>/graphos-api:0.16.0` and `:0.16`, and the same for `graphos-ui`); set the version first with `node tools/release/version.mjs X.Y.Z`, which writes it everywhere it lives (server, client, UI, the install commands' image tags), turns the changelog's *Unreleased* heading into the release; CI and the release workflows check with `--check` that every place matches the tag. [`graphos-client`](https://pypi.org/project/graphos-client/) is published to PyPI by the [`graphos-client-release`](.github/workflows/client-release.yml) workflow when a version tag is pushed (trusted publishing: no token is stored).
+**Releasing.** What changed in each version is in [CHANGELOG.md](CHANGELOG.md). Push a version tag such as `0.16.1` to publish the images (`ghcr.io/<owner>/graphos-api:0.16.1` and `:0.16`, and the same for `graphos-ui`); set the version first with `node tools/release/version.mjs X.Y.Z`, which writes it everywhere it lives (server, client, UI, the install commands' image tags), turns the changelog's *Unreleased* heading into the release; CI and the release workflows check with `--check` that every place matches the tag. [`graphos-client`](https://pypi.org/project/graphos-client/) is published to PyPI by the [`graphos-client-release`](.github/workflows/client-release.yml) workflow when a version tag is pushed (trusted publishing: no token is stored).
 
 ## Python client
 
@@ -250,7 +250,8 @@ All settings are environment variables prefixed `GRAPHOS_` (full list in [`confi
 | `GRAPHOS_CHANGES_RETENTION_H` | `168` | Hours change-feed records are kept; an older cursor gets `410` |
 | `GRAPHOS_CHANGES_POLL_S` | `1.0` | Live streams re-read at least this often (a commit wakes them at once) |
 | `GRAPHOS_CHANGES_HEARTBEAT_S` | `15` | Keep-alive comment on an idle stream |
-| `GRAPHOS_SHUTDOWN_GRACE_S` | `5` | On stop, open requests (change streams) are cancelled after this |
+| `GRAPHOS_SHUTDOWN_GRACE_S` | `8` (compose: `30`) | The most seconds from SIGTERM to exit: new requests get `503`, running ones finish, what is left near the end is cut and its jobs go back to the queue. Set the platform's stop grace (`stop_grace_period`, `terminationGracePeriodSeconds`) at least 5 s longer ([installation](docs/guide/installation.md#stopping-graphos-api)) |
+| `GRAPHOS_DRAIN_DELAY_S` | `0` | Seconds after SIGTERM during which requests are still served while `/readyz` answers `503`, so a load balancer stops sending them first; `5` on Kubernetes |
 | `GRAPHOS_REGISTRY_SYNC_S` | `30` | With several replicas: how often each re-reads every tenant registration (changes normally arrive at once) |
 | `GRAPHOS_CACHE_MAX_AGE_S` | `30` | Longest a K/V cache entry is served from a replica's memory |
 

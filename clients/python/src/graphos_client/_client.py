@@ -160,6 +160,19 @@ def _by_type(pairs: list[tuple[str, Any]]) -> dict[str, list[Any]]:
 # 5xx answers a retry cannot change: a statement timeout (504) would time out
 # again, a database out of disk space (507) would fail again.
 _NOT_RETRIED = frozenset({httpx.codes.GATEWAY_TIMEOUT, httpx.codes.INSUFFICIENT_STORAGE})
+# The longest ``Retry-After`` honoured: a server asking for more is not
+# waited for longer than this between two tries.
+_MAX_RETRY_AFTER_S = 30.0
+
+
+def _retry_after(resp: httpx.Response) -> float:
+    """A 503's ``Retry-After`` in seconds (a stopping server sends one); 0 when absent."""
+    if resp.status_code != httpx.codes.SERVICE_UNAVAILABLE:
+        return 0.0
+    try:
+        return min(max(float(resp.headers.get("retry-after", "0")), 0.0), _MAX_RETRY_AFTER_S)
+    except ValueError:      # an HTTP date: not sent by graphos
+        return 0.0
 
 
 class GraphosClient:
@@ -278,7 +291,8 @@ class GraphosClient:
         Retries network errors and 5xx responses (except 504, a statement
         timeout that would only time out again, and 507, a database out of
         disk space that a retry would only fill again) when ``idempotent`` is
-        true.
+        true.  A 503's ``Retry-After`` (a stopping server sends one) is
+        waited for when it is longer than the back-off.
         Long-running operations pass ``idempotent=False`` so a failure is
         never re-run automatically.  4xx errors surface immediately as
         ``GraphosError``.
@@ -340,7 +354,9 @@ class GraphosClient:
                 and idempotent
                 and attempt <= self._retries
             ):
-                await asyncio.sleep(self._retry_backoff_s * (2 ** (attempt - 1)))
+                await asyncio.sleep(
+                    max(self._retry_backoff_s * (2 ** (attempt - 1)), _retry_after(resp)),
+                )
                 continue
 
             detail, body = _extract_detail(resp), _json_body(resp)
@@ -2136,16 +2152,19 @@ class GraphosClient:
 
         After a dropped connection, a server restart or a 5xx, it reconnects
         with back-off and resumes after the last record it yielded
-        (``Last-Event-ID``), so nothing is skipped.  ``read_timeout_s``
-        without a byte (the server sends a keep-alive every 15 s) counts as
-        a dropped connection.  Raises ``GraphosError`` on 410 (resync) and on
-        any other 4xx.
+        (``Last-Event-ID``), so nothing is skipped.  A stopping server ends
+        the stream with a ``draining`` event: it reconnects at once, to
+        another replica or, when the server answers 503, after its back-off.
+        ``read_timeout_s`` without a byte (the server sends a keep-alive
+        every 15 s) counts as a dropped connection.  Raises ``GraphosError``
+        on 410 (resync) and on any other 4xx.
         """
         last = after
         backoff = self._retry_backoff_s
         path = f"/v1/{self._tenant}/changes/stream"
         while True:
             headers = {"Last-Event-ID": last} if last else {}
+            drained = False
             try:
                 async with self._http.stream(
                     "GET", path, headers=headers,
@@ -2169,12 +2188,17 @@ class GraphosClient:
                                 raise GraphosError(
                                     httpx.codes.GONE, json.loads(data)["detail"], "GET", path,
                                 )
+                            elif event == "draining":
+                                drained = True
             except (httpx.TransportError, httpx.StreamError) as exc:
                 if not reconnect:
                     raise GraphosError(0, f"change stream: {exc}", "GET", path) from exc
                 log.warning("change stream dropped (%s); reconnecting", type(exc).__name__)
             if not reconnect:
                 return
+            if drained:
+                log.info("change stream: the server is stopping; reconnecting")
+                continue
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, max_backoff_s)
 

@@ -51,6 +51,14 @@ async def _on_acquire(conn: asyncpg.Connection) -> None:
     await conn.execute('SET search_path = ag_catalog, "$user", public;')
 
 
+# PostgreSQL does not notice that a client is gone while a statement of its
+# runs: a graphos process killed (SIGKILL) during a long statement left it
+# running to its end, its locks held, the tenant's whole-graph lock among them
+# (ADR-0015, E4).  With this check the backend looks every 5 s and ends it.
+# A setting of context ``user``: graphos's own role may set it.
+CLIENT_CONNECTION_CHECK_MS = "5000"
+
+
 # Server-side limit for schema work: tenant bootstrap (index builds on large
 # labels can take minutes), the internal schema, and the startup reload.
 DDL_TIMEOUT_S = 1800.0
@@ -88,10 +96,12 @@ async def create_pool(settings: Settings) -> asyncpg.Pool:
         # selectivity the planner can judge only from the values. After five
         # runs of a prepared statement PostgreSQL 18 kept a generic plan for a
         # property scan that read 34,702 rows for 100 (50 ms -> 1 s).
+        # The connection check ends a killed process's statement (ADR-0015).
         server_settings={
             "statement_timeout": str(int(settings.statement_timeout_s * 1000)),
             "jit": "on" if settings.db_jit else "off",
             "plan_cache_mode": "force_custom_plan",
+            "client_connection_check_interval": CLIENT_CONNECTION_CHECK_MS,
         },
         command_timeout=None,
     )
@@ -367,6 +377,10 @@ CREATE TABLE IF NOT EXISTS graphos_meta.jobs (
 );
 -- A synchronous call of a job kind, listed while it runs (graphos.jobs.run_tracked).
 ALTER TABLE graphos_meta.jobs ADD COLUMN IF NOT EXISTS sync boolean NOT NULL DEFAULT false;
+-- Times a stop put the job back in the queue, and when a drain began while it
+-- ran (graphos.jobs, ADR-0015).
+ALTER TABLE graphos_meta.jobs ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT 0;
+ALTER TABLE graphos_meta.jobs ADD COLUMN IF NOT EXISTS draining_since timestamptz;
 
 -- Claiming the oldest queued job, and the stale-heartbeat sweep.
 CREATE INDEX IF NOT EXISTS jobs_active

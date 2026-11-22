@@ -5,9 +5,12 @@ graphos's bundled database is now **PostgreSQL 18 with Apache AGE 1.8**. Postgre
 start on it and names this page ([ADR-0007](adrs/ADR-0007-drop-postgresql-16.md)). Move before,
 or as, you upgrade graphos.
 
-With Docker Compose the move is one command: update the files and run `docker compose up -d`.
-The compose file moves the data by itself on the first start. This page says what that does, how
-long it takes, how to check it and how to go back.
+With Docker Compose the move takes two steps: start **graphos 0.16.0**, whose compose file moves
+the data by itself on its first start, then upgrade to the current release. From 0.16.1 the
+release compose file no longer carries the move ([ADR-0016](adrs/ADR-0016-release-compose-without-the-postgresql-16-move.md)):
+**do not go from PostgreSQL 16 straight to 0.16.1 or later**, or graphos starts on a new, empty
+database (your data stays untouched on `graphos_data`; see [Troubleshooting](#troubleshooting)).
+This page says what the move does, how long it takes, how to check it and how to go back.
 
 - [Why move](#why-move)
 - [Before you start](#before-you-start)
@@ -59,21 +62,30 @@ the move changes is in the [changelog](../../CHANGELOG.md).)
 ## Upgrade with Docker Compose
 
 ```bash
-# 1. The new release (or your own copy of its compose file and services/graphos/deploy/)
-git pull
+# 1. graphos 0.16.0, the last release whose compose file moves the data
+#    (or your own copy of that release's compose file and services/graphos/deploy/)
+git fetch --tags && git checkout 0.16.0
 
 # 2. Start it: the first start moves the data
 docker compose -f docker-compose.graphos.yml up -d
 
 # 3. Follow the move
 docker compose -f docker-compose.graphos.yml logs -f graphos-db-export graphos-db-import
+
+# 4. Once the result checks out (below), the current release; --remove-orphans removes
+#    the move's two finished containers, which its compose file no longer has
+git checkout main
+docker compose -f docker-compose.graphos.yml up -d --remove-orphans
 ```
 
-That is all. Do not remove any volume before the move has finished and you have checked it.
+Do not remove any volume before the move has finished and you have checked it. The current
+release's compose file does not name `graphos_data` and `graphos_upgrade`; they stay on disk, as
+they are, until you remove them ([Clean up](#clean-up)).
 
 ## What happens during the first start
 
-`docker compose up` stops the old PostgreSQL 16 `graphos-db` and then:
+This is 0.16.0's compose file (step 2 above). `docker compose up` stops the old PostgreSQL 16
+`graphos-db` and then:
 
 1. **`graphos-db`** starts PostgreSQL 18 / AGE 1.8 on the new, empty volume `graphos_data_pg18`;
    its init scripts create the extensions and graphos's roles, as for a new install.
@@ -129,10 +141,11 @@ curl -s http://127.0.0.1:8080/v1/info
 
 ## Going back
 
-The previous release's compose file runs on `graphos_data`, untouched by the move:
+The compose file of the release you ran before the move (0.9 or earlier) runs on `graphos_data`,
+untouched by the move:
 
 ```bash
-git checkout <the previous release>          # its docker-compose.graphos.yml
+git checkout <the release you ran before>    # its docker-compose.graphos.yml
 docker compose -f docker-compose.graphos.yml up -d
 ```
 
@@ -161,6 +174,7 @@ markers that say the move is done.
 | `graphos-db-export: no PostgreSQL data on the old volume` | A new install, or `graphos_data` is empty | Nothing to move |
 | `graphos-db` restarts with `database files are incompatible with server` | A PostgreSQL 16 volume was mounted on PostgreSQL 18 (an override that kept `graphos_data` on `graphos-db`) | Use the compose file's volumes: `graphos_data_pg18` for `graphos-db` |
 | The first start is slow after the move | Planner statistics are gathered by the import; on very large databases it takes a while | Wait; later starts are quick |
+| After an upgrade from PostgreSQL 16 straight to 0.16.1 or later, graphos starts with no tenants, and the admin `graphos` has its first password again | That release's compose file does not move the data: graphos started on a new, empty PostgreSQL 18 database. Your data is untouched on `graphos_data` | Stop the stack (`docker compose -f docker-compose.graphos.yml down`), remove the new volume, which holds only that empty database (`docker volume rm graphos_data_pg18`: the move refuses a database graphos has used), then follow [Upgrade with Docker Compose](#upgrade-with-docker-compose) from step 1 |
 
 ## A database you run yourself
 
@@ -236,7 +250,7 @@ the contents matched by checksum). Only the restore must be serial: a parallel d
 (`pg_dump -Fd -j N`) is fine.
 
 [`deploy/db-upgrade/import-pg18.sh`](../../services/graphos/deploy/db-upgrade/import-pg18.sh) is the
-same procedure as the compose runs it. On a managed PostgreSQL that offers AGE 1.8 on PostgreSQL 18,
+same procedure as 0.16.0's compose file runs it. On a managed PostgreSQL that offers AGE 1.8 on PostgreSQL 18,
 the same steps apply where its tools allow them (a serial `pg_restore`, then the catalogue fix and the
 trigger block);
 check what it permits before moving.

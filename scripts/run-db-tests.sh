@@ -67,27 +67,15 @@ if [[ -z "$PY" ]]; then
 fi
 
 # Every name the compose file fixes is replaced, so nothing of a stack running
-# on the same machine (graphos-db, graphos_data, graphos-net, port 8080, ...)
-# is touched. The PostgreSQL 16 volume is a new, empty one: the move from
-# PostgreSQL 16 finds nothing to move, as on a new install. Another database
-# image gets a data volume of its own (another major's data must never land
-# on the PostgreSQL 18 one) and no move.
+# on the same machine (graphos-db, graphos_data_pg18, graphos-net, port 8080,
+# ...) is touched. Another database image gets a data volume of its own
+# (another major's data must never land on the PostgreSQL 18 one).
 if [[ -n "$DB_IMAGE" ]]; then
     DATA_VOLUME=graphos_test_db
     DB_OVERRIDE="    image: $DB_IMAGE"
-    MOVE_OVERRIDE='  graphos-db-export:
-    container_name: graphos-test-db-export
-    entrypoint: ["true"]
-  graphos-db-import:
-    container_name: graphos-test-db-import
-    entrypoint: ["true"]'
 else
     DATA_VOLUME=graphos_test_db_pg18
     DB_OVERRIDE=""
-    MOVE_OVERRIDE='  graphos-db-export:
-    container_name: graphos-test-db-export
-  graphos-db-import:
-    container_name: graphos-test-db-import'
 fi
 OVERRIDE="$(mktemp)"
 cat > "$OVERRIDE" <<EOF
@@ -95,7 +83,6 @@ services:
   graphos-db:
     container_name: $DB_CONTAINER
 $DB_OVERRIDE
-$MOVE_OVERRIDE
   graphos-api:
     container_name: $API_CONTAINER
     ports: !override
@@ -103,12 +90,8 @@ $MOVE_OVERRIDE
   graphos-ui:
     container_name: graphos-test-ui
 volumes:
-  graphos_data:
-    name: graphos_test_old_pg16
   graphos_data_pg18:
     name: $DATA_VOLUME
-  graphos_upgrade:
-    name: graphos_test_upgrade
 networks:
   graphos-internal:
     name: $INTERNAL_NET

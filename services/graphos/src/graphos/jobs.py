@@ -15,8 +15,18 @@ task is cancelled, which cancels its database statement and terminates a
 community computation's process (the process running the job learns of
 the request at once if it is the same process, otherwise within one
 heartbeat).  A running job whose heartbeat stops (its process died) is
-marked failed by any replica; jobs are not retried automatically.
+marked failed by any replica; a failed job is not retried automatically.
 Finished jobs are deleted after the retention period.
+
+A stop of the process hands its running jobs back (ADR-0015,
+:mod:`graphos.drain`): when the drain begins, the runner stops claiming and
+marks them (``draining_since``); when it cuts them, each job of a
+``resumable`` kind goes back to ``queued`` with ``attempts`` + 1, and
+``NOTIFY`` on :data:`JOBS_CHANNEL` lets another replica claim it at once.
+The third interruption fails it.  A job marked by a drain whose process was
+killed before the hand-back (its heartbeat stops) is put back by the sweep
+instead of failed; one without the mark may have killed its process itself
+(memory), so it is failed.
 
 The same kinds called synchronously are recorded too (:func:`run_tracked`,
 ``sync``): the caller still waits for the response, but the call is listed
@@ -27,6 +37,7 @@ outcome, so everyone with access to the tenant sees what is running.
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import json
 import logging
@@ -36,15 +47,33 @@ from dataclasses import dataclass
 from typing import Any, TypeVar, cast
 from uuid import UUID
 
+import anyio
 import asyncpg
 from fastapi import HTTPException
 from pydantic import BaseModel
 
-from graphos import resources
+from graphos import drain, resources
 from graphos.changes import ACTOR, Actor
 from graphos.contracts.jobs import Job
+from graphos.observability.metrics import JOBS_HANDED_BACK
 
 log = logging.getLogger(__name__)
+
+# NOTIFY'd with the job's kind when a stop puts a job back in the queue.
+JOBS_CHANNEL = "graphos_jobs"
+# A job interrupted by a stop this many times is failed, not queued again: it
+# did not fit in that many drains, and another try would move it once more.
+MAX_INTERRUPTIONS = 3
+# Why a job is failed on its last interruption.
+_EXHAUSTED = (
+    f"interrupted: graphos stopped {MAX_INTERRUPTIONS} times while the job ran; "
+    "raise GRAPHOS_SHUTDOWN_GRACE_S or run it when no stop is due"
+)
+# What putting a running job back in the queue sets.
+_REQUEUE = (
+    "status = 'queued', attempts = attempts + 1, started_at = NULL, heartbeat_at = NULL, "
+    "progress = NULL, draining_since = NULL"
+)
 
 
 def _unexpected(exc: BaseException) -> dict[str, Any]:
@@ -60,6 +89,16 @@ JobFn = Callable[[asyncpg.Pool, str | None, dict[str, Any]], Awaitable[BaseModel
 # The job the current task runs (set by the runner and run_tracked), for
 # report_progress.
 CURRENT_JOB: ContextVar[UUID | None] = ContextVar("graphos_current_job", default=None)
+# Jobs a stop is interrupting to hand them back (JobRunner.hand_back_all).
+_HANDING_BACK: set[UUID] = set()
+
+
+def handing_back() -> bool:
+    """The current job is being interrupted by a stop that hands it back: a
+    kind that records its own failure (a property rename) leaves it to the
+    hand-back, which may put the job back in the queue."""
+    job_id = CURRENT_JOB.get()
+    return job_id is not None and job_id in _HANDING_BACK
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
 
@@ -71,10 +110,13 @@ class JobKind:
     synchronous endpoint, or raises ``HTTPException`` as that endpoint
     would.  ``needs`` is the access starting it needs, and so cancelling
     it: ``"write"`` or ``"maintain"`` on its tenant, or ``"admin"``.
+    ``resumable``: running it again from the start after a stop cut it is
+    safe, so a stop puts it back in the queue rather than failing it.
     """
 
     run: JobFn
     needs: str = "write"
+    resumable: bool = False
 
 
 # Kinds that exclude each other per tenant (the unique index
@@ -94,7 +136,7 @@ class JobConflictError(Exception):
 _COLUMNS = (
     "id, kind, tenant, status, params::text AS params, result::text AS result, "
     "error::text AS error, progress::text AS progress, consumer, cancel_requested, sync, "
-    "created_at, started_at, finished_at"
+    "attempts, created_at, started_at, finished_at"
 )
 
 
@@ -246,16 +288,25 @@ async def run_tracked(  # noqa: PLR0913 — the job's fields and how to run it
         return response
     except asyncio.CancelledError:
         beat.cancel()                     # it must not cancel the call again
-        if job_id in _CANCELLING or await pool.fetchval(
-            "SELECT cancel_requested FROM graphos_meta.jobs WHERE id = $1;", job_id,
-        ):
+        # Shielded: when the drain cuts the request, the cancellation comes
+        # through the request's task group (BaseHTTPMiddleware), which delivers
+        # it again at every await; the call's outcome must still be read.
+        with anyio.CancelScope(shield=True):
+            requested = job_id in _CANCELLING or await pool.fetchval(
+                "SELECT cancel_requested FROM graphos_meta.jobs WHERE id = $1;", job_id,
+            )
+        if requested:
             if task is not None:
                 task.uncancel()
             status = "cancelled"
             raise HTTPException(
                 status_code=409, detail=f"cancelled: job {job_id} was cancelled while running",
             ) from None
-        error = {"status": 503, "detail": "interrupted: the request was cancelled"}
+        error = {
+            "status": 503,
+            "detail": "interrupted: the server was shutting down" if drain.cutting()
+            else "interrupted: the request was cancelled",
+        }
         raise
     except HTTPException as exc:
         error = {"status": exc.status_code, "detail": str(exc.detail)}
@@ -270,26 +321,34 @@ async def run_tracked(  # noqa: PLR0913 — the job's fields and how to run it
         beat.cancel()
         _TRACKED.pop(job_id, None)
         _CANCELLING.discard(job_id)
-        try:
-            await _finish(pool, job_id, status, result, error)
-        except Exception:  # noqa: BLE001 — the call's own outcome comes first
-            log.warning("recording a synchronous job failed", extra={"job_id": str(job_id)})
+        # Shielded as above: a cut request still records its outcome.
+        with anyio.CancelScope(shield=True):
+            try:
+                await _finish(pool, job_id, status, result, error)
+            except Exception:  # noqa: BLE001 — the call's own outcome comes first
+                log.warning(
+                    "recording a synchronous job failed", extra={"job_id": str(job_id)},
+                )
 
 
-async def _finish(
+async def _finish(  # noqa: PLR0913 — the outcome's parts and whose run it is
     pool: asyncpg.Pool,
     job_id: UUID,
     status: str,
     result: dict[str, Any] | None,
     error: dict[str, Any] | None,
+    attempts: int = 0,
 ) -> None:
+    # ``attempts`` names the run: a job put back in the queue and claimed
+    # elsewhere is a new run, which a late write of the old one must not touch.
     await pool.execute(
         "UPDATE graphos_meta.jobs SET status = $2, finished_at = now(), "
         "  result = $3::jsonb, error = $4::jsonb "
-        "WHERE id = $1 AND status = 'running';",
+        "WHERE id = $1 AND status = 'running' AND attempts = $5;",
         job_id, status,
         json.dumps(result) if result is not None else None,
         json.dumps(error) if error is not None else None,
+        attempts,
     )
 
 
@@ -309,6 +368,7 @@ async def report_progress(pool: asyncpg.Pool, done: int, total: int | None) -> N
 
 async def _beat(
     pool: asyncpg.Pool, job_id: UUID, task: asyncio.Task[Any] | None, heartbeat_s: float,
+    attempts: int = 0,
 ) -> None:
     """Keep a running job's heartbeat; cancel ``task`` when a cancel is requested."""
     while True:
@@ -316,8 +376,8 @@ async def _beat(
         try:
             cancel = await pool.fetchval(
                 "UPDATE graphos_meta.jobs SET heartbeat_at = now() "
-                "WHERE id = $1 RETURNING cancel_requested;",
-                job_id,
+                "WHERE id = $1 AND attempts = $2 RETURNING cancel_requested;",
+                job_id, attempts,
             )
         except Exception:  # noqa: BLE001 — try again next beat
             log.warning("job heartbeat failed", extra={"job_id": str(job_id)})
@@ -361,41 +421,93 @@ class JobRunner:
         self._retention_h = retention_h
         self._wake = asyncio.Event()
         self._active: dict[UUID, asyncio.Task[None]] = {}
+        # The jobs inside their kind's own work: only there may a stop cancel
+        # one, never while it records its outcome.
+        self._in_run: set[UUID] = set()
         self._loop_task: asyncio.Task[None] | None = None
-        self._stopping = False
+        self._stopping = False        # no more claiming
+        self._handing_back = False    # a cancellation now is a stop's, not a user's
+        self._outcomes: collections.Counter[str] = collections.Counter()
+        self._resumable = [name for name, kind in self.kinds.items() if kind.resumable]
 
     def start(self) -> None:
         self._loop_task = asyncio.create_task(self._loop(), name="graphos-jobs")
 
-    async def stop(self) -> None:
-        """Stop claiming; running jobs are interrupted and recorded as failed."""
-        self._stopping = True
-        if self._loop_task is not None:
-            self._loop_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._loop_task
+    def running(self) -> int:
+        """How many jobs this process runs now."""
+        return len(self._active)
+
+    async def begin_drain(self) -> None:
+        """Stop claiming, and mark the jobs running here as stopped by a drain:
+        if this process is killed before it hands them back, another
+        process's sweep puts them back in the queue (ADR-0015)."""
+        await self._stop_claiming()
+        if not self._active:
+            return
+        try:
+            await self._pool.execute(
+                "UPDATE graphos_meta.jobs SET draining_since = now() "
+                "WHERE id = ANY($1::uuid[]) AND status = 'running';",
+                list(self._active),
+            )
+        except Exception:  # noqa: BLE001 — the hand-back still happens; only a kill would miss it
+            log.warning("could not mark the running jobs as draining", exc_info=True)
+
+    async def hand_back_all(self) -> dict[str, int]:
+        """Interrupt the jobs running here and hand each back: queued again,
+        failed or cancelled (ADR-0015).  Returns how many ended each way
+        (``error``: the outcome could not be written)."""
+        await self._stop_claiming()
+        self._handing_back = True
+        for job_id, task in list(self._active.items()):
+            if job_id in self._in_run:
+                _HANDING_BACK.add(job_id)
+                task.cancel()
         tasks = list(self._active.values())
-        for task in tasks:
+        if tasks:
+            # asyncio.wait, not gather: if this wait is itself cut short (the
+            # drain's budget), the jobs still record their outcome.
+            await asyncio.wait(tasks)
+        return dict(self._outcomes)
+
+    async def stop(self) -> None:
+        """Stop claiming and hand the running jobs back, as a drain does."""
+        await self.hand_back_all()
+
+    async def _stop_claiming(self) -> None:
+        self._stopping = True
+        self._wake.set()
+        task = self._loop_task
+        if task is None or task.done():
+            return
+        # The loop ends at its next check; cancelling it in the middle of a
+        # claim could leave a job running with nothing running it.  A loop
+        # stuck on the database is cancelled after a while all the same.
+        # Every caller waits for the same loop to end.
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+        except TimeoutError:
             task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
     def notify(self) -> None:
         """A job was queued by this process: look now rather than at the next poll."""
         self._wake.set()
 
     def cancel_local(self, job_id: UUID) -> None:
-        """Cancel the job, or the synchronous call, now if this process runs it."""
-        task = self._active.get(job_id)
-        if task is not None:
-            task.cancel()
-        else:
+        """Cancel the job, or the synchronous call, now if this process runs it.
+        A job already recording its outcome is left to finish recording it."""
+        if job_id in self._in_run:
+            self._active[job_id].cancel()
+        elif job_id not in self._active:
             cancel_tracked(job_id)
 
     async def _loop(self) -> None:
         while not self._stopping:
             try:
                 await self._sweep()
-                while len(self._active) < self._concurrency:
+                while len(self._active) < self._concurrency and not self._stopping:
                     row = await self._claim()
                     if row is None:
                         break
@@ -427,11 +539,40 @@ class JobRunner:
             "  SELECT id FROM graphos_meta.jobs "
             "  WHERE status = 'queued' AND kind = ANY($1::text[]) "
             "  ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1"
-            ") RETURNING id, kind, tenant, consumer, params::text AS params;",
+            ") RETURNING id, kind, tenant, consumer, params::text AS params, attempts;",
             list(self.kinds),
         )
 
     async def _sweep(self) -> None:
+        # Jobs a drain marked whose process was killed before handing them back.
+        requeued = await self._pool.fetch(
+            f"UPDATE graphos_meta.jobs SET {_REQUEUE} "
+            "WHERE status = 'running' AND NOT sync AND NOT cancel_requested "
+            "  AND draining_since IS NOT NULL AND kind = ANY($2::text[]) AND attempts + 1 < $3 "
+            "  AND heartbeat_at < now() - make_interval(secs => $1) "
+            "RETURNING id, kind;",
+            3 * self._heartbeat_s, self._resumable, MAX_INTERRUPTIONS,
+        )
+        if requeued:
+            for row in requeued:
+                JOBS_HANDED_BACK.labels(kind=row["kind"], outcome="queued").inc()
+            log.warning(
+                "jobs stopped by a drain put back in the queue",
+                extra={"job_ids": [str(row["id"]) for row in requeued]},
+            )
+            self._wake.set()
+        # The rest of the drained ones, by the hand-back's rule: cancelled when
+        # that was asked for, else failed on their third interruption.
+        await self._pool.execute(
+            "UPDATE graphos_meta.jobs SET finished_at = now(), "
+            "  status = CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END, "
+            "  error = CASE WHEN cancel_requested THEN NULL "
+            "    ELSE jsonb_build_object('status', 503, 'detail', $3::text) END "
+            "WHERE status = 'running' AND NOT sync AND draining_since IS NOT NULL "
+            "  AND kind = ANY($2::text[]) "
+            "  AND heartbeat_at < now() - make_interval(secs => $1);",
+            3 * self._heartbeat_s, self._resumable, _EXHAUSTED,
+        )
         stale = await self._pool.execute(
             "UPDATE graphos_meta.jobs SET status = 'failed', finished_at = now(), "
             "  error = jsonb_build_object('status', 500, 'detail', "
@@ -455,37 +596,106 @@ class JobRunner:
         # task's own context: set here, it is seen by everything it awaits.
         ACTOR.set(Actor(consumer=row["consumer"], trace_id=f"job:{job_id}"))
         CURRENT_JOB.set(job_id)
+        attempts: int = row["attempts"]
         heartbeat = asyncio.create_task(
-            _beat(self._pool, job_id, asyncio.current_task(), self._heartbeat_s),
+            _beat(self._pool, job_id, asyncio.current_task(), self._heartbeat_s, attempts),
         )
         result: dict[str, Any] | None = None
         error: dict[str, Any] | None = None
         status = "failed"
+        handed_back = False
         try:
-            if kind is None:
-                error = {"status": 500, "detail": f"unknown job kind {row['kind']!r}"}
-            else:
-                response = await kind.run(self._pool, row["tenant"], json.loads(row["params"]))
-                result, status = response.model_dump(mode="json"), "succeeded"
-        except asyncio.CancelledError:
-            current = cast("asyncio.Task[Any]", asyncio.current_task())
-            current.uncancel()   # so the outcome can still be recorded
-            if self._stopping:
-                error = {"status": 503, "detail": "interrupted: the server was shutting down"}
-            else:
-                status = "cancelled"
-        except HTTPException as exc:
-            error = {"status": exc.status_code, "detail": str(exc.detail)}
-        except asyncpg.exceptions.QueryCanceledError:
-            error = {"status": 504, "detail": "a database statement exceeded its timeout"}
-        except Exception as exc:  # noqa: BLE001 — recorded on the job, not raised
-            log.exception("job failed", extra={"job_id": str(job_id), "kind": row["kind"]})
-            error = _unexpected(exc)
-        finally:
-            heartbeat.cancel()
+            try:
+                if kind is None:
+                    error = {"status": 500, "detail": f"unknown job kind {row['kind']!r}"}
+                else:
+                    self._in_run.add(job_id)
+                    try:
+                        response = await kind.run(
+                            self._pool, row["tenant"], json.loads(row["params"]),
+                        )
+                    finally:
+                        self._in_run.discard(job_id)
+                    result, status = response.model_dump(mode="json"), "succeeded"
+            except asyncio.CancelledError:
+                current = cast("asyncio.Task[Any]", asyncio.current_task())
+                current.uncancel()   # so the outcome can still be recorded
+                if self._handing_back:
+                    handed_back = True
+                else:
+                    status = "cancelled"
+            except Exception as exc:  # noqa: BLE001 — recorded on the job, not raised
+                if job_id in _HANDING_BACK:
+                    # The stop's cancellation, turned into another error by the job.
+                    handed_back = True
+                elif isinstance(exc, HTTPException):
+                    error = {"status": exc.status_code, "detail": str(exc.detail)}
+                elif isinstance(exc, asyncpg.exceptions.QueryCanceledError):
+                    error = {"status": 504, "detail": "a database statement exceeded its timeout"}
+                else:
+                    log.exception(
+                        "job failed", extra={"job_id": str(job_id), "kind": row["kind"]},
+                    )
+                    error = _unexpected(exc)
+            finally:
+                heartbeat.cancel()
 
-        await _finish(self._pool, job_id, status, result, error)
-        log.info(
-            "job finished",
-            extra={"job_id": str(job_id), "kind": row["kind"], "status": status},
+            if handed_back:
+                await self._hand_back(
+                    job_id, row["kind"], kind is not None and kind.resumable, attempts,
+                )
+                return
+            await _finish(self._pool, job_id, status, result, error, attempts)
+            log.info(
+                "job finished",
+                extra={"job_id": str(job_id), "kind": row["kind"], "status": status},
+            )
+        finally:
+            _HANDING_BACK.discard(job_id)
+
+    async def _hand_back(self, job_id: UUID, kind: str, resumable: bool, attempts: int) -> None:
+        """Record what a stop makes of a job it interrupted: ``cancelled`` if
+        someone asked for that, ``queued`` again if its kind may run again and
+        it has not been interrupted too often, else ``failed``."""
+        outcome = "error"
+        try:
+            async with self._pool.acquire() as conn, conn.transaction():
+                # Still this run's (``attempts``): another process's sweep may
+                # have put it back and another replica claimed it meanwhile.
+                row = await conn.fetchrow(
+                    "SELECT cancel_requested FROM graphos_meta.jobs "
+                    "WHERE id = $1 AND status = 'running' AND attempts = $2 FOR UPDATE;",
+                    job_id, attempts,
+                )
+                if row is None:
+                    outcome = "gone"
+                elif row["cancel_requested"]:
+                    outcome = "cancelled"
+                    await conn.execute(
+                        "UPDATE graphos_meta.jobs SET status = 'cancelled', finished_at = now() "
+                        "WHERE id = $1;",
+                        job_id,
+                    )
+                elif resumable and attempts + 1 < MAX_INTERRUPTIONS:
+                    outcome = "queued"
+                    await conn.execute(
+                        f"UPDATE graphos_meta.jobs SET {_REQUEUE} WHERE id = $1;", job_id,
+                    )
+                    await conn.execute("SELECT pg_notify($1, $2);", JOBS_CHANNEL, kind)
+                else:
+                    outcome = "failed"
+                    detail = (
+                        _EXHAUSTED if resumable else "interrupted: the server was shutting down"
+                    )
+                    await conn.execute(
+                        "UPDATE graphos_meta.jobs SET status = 'failed', finished_at = now(), "
+                        "  error = $2::jsonb WHERE id = $1;",
+                        job_id, json.dumps({"status": 503, "detail": detail}),
+                    )
+        except Exception:  # noqa: BLE001 — a kill would leave it to the sweep; say so
+            log.exception("job could not be handed back", extra={"job_id": str(job_id)})
+        self._outcomes[outcome] += 1
+        JOBS_HANDED_BACK.labels(kind=kind, outcome=outcome).inc()
+        log.warning(
+            "job handed back", extra={"job_id": str(job_id), "kind": kind, "outcome": outcome},
         )

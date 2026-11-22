@@ -360,6 +360,7 @@ root. Read that file for exact values; its shape:
 | Secrets | `services/graphos/deploy/secrets/` bind-mounted (directory) at `/run/graphos/secrets` | same directory |
 | Healthcheck | `pg_isready -U graphos -d graphos` | Python `urllib` GET of `/healthz` |
 | Memory | `mem_limit: 2g`, `mem_reservation: 512m`, `shm_size: 1g` | `mem_limit: 2g` (headroom for the community recompute) |
+| Stopping | Docker's default | `stop_grace_period: 40s`, `GRAPHOS_SHUTDOWN_GRACE_S: 30` (the drain, §2.5.7) |
 | DB role | superuser `graphos` (init scripts only) | `graphos_app` (§2.2) |
 
 `graphos-db` runs with `shared_preload_libraries=age,pg_stat_statements`,
@@ -377,9 +378,11 @@ only.
 1.6 for PostgreSQL 16, and 1.6 carries out some Cypher writes in a read-only
 transaction and can wedge a database process on a variable-length pattern.
 `db.py::unsupported_database` refuses any PostgreSQL before 18 or AGE before
-1.8, and graphos-api stops at start with the reason. The compose moves a
-PostgreSQL 16 stack by itself with two one-shot services that run on every
-`up` and exit at once when there is nothing to move:
+1.8, and graphos-api stops at start with the reason. Releases up to 0.16.0
+move a PostgreSQL 16 stack by themselves, with two one-shot services in their
+compose file that run on every `up` and exit at once when there is nothing to
+move; from 0.16.1 the release compose file no longer has them, and an install
+still on 16 goes through 0.16.0 first (ADR-0016):
 
 - `graphos-db-export` (the PostgreSQL 16 image, `network_mode: none`) starts
   PostgreSQL 16 on the old `graphos_data` volume, dumps it (`pg_dump -Fc`) to
@@ -391,8 +394,8 @@ PostgreSQL 16 stack by itself with two one-shot services that run on every
   lacking it (AGE's own upgrade script would; a restore runs none), puts it
   in place of the new, empty `graphos` database, and gathers planner
   statistics in parallel;
-- `graphos-api` waits for the import to succeed. At every start it also adds
-  that trigger, where missing, to its registered tenants' label tables
+- `graphos-api` waits for the import to succeed (in 0.16.0's compose file).
+  At every start it also adds that trigger, where missing, to its registered tenants' label tables
   (`bootstrap.ensure_cache_invalidation_triggers`; nothing before AGE 1.8).
 
 A failed import leaves nothing behind and runs again on the next `up`; the
@@ -760,7 +763,12 @@ paths let it through too: `writes.py` re-raises it, and the `:bulk` and
 
 Every pooled connection also starts with `plan_cache_mode = force_custom_plan`
 and `jit = off` (`GRAPHOS_DB_JIT=true` turns JIT on), as server settings that
-`RESET ALL` keeps (§3).
+`RESET ALL` keeps (§3), and with `client_connection_check_interval = 5000`
+(ms), the console's too: PostgreSQL does not notice a client that is gone
+while a statement of its runs, so a graphos process killed during a long
+statement left it running to its end with its locks held, the tenant's
+whole-graph lock among them; with the check the backend ends it within
+about 5 s (ADR-0015).
 
 Deliberately long operations raise the timeout for their own connection
 (`db.py::allow_long_statements`; the pool's `RESET ALL` on release restores
@@ -869,9 +877,19 @@ through the database (§2.6, §4.1).
   to the server log. There is no dedicated mapping for data endpoints; they
   fail with a 5xx.
 - `graphos-api` down: consumers have no path to the data (by design, §2.4).
-- `graphos-api` stopping: requests still open after `GRAPHOS_SHUTDOWN_GRACE_S`
-  (5 s) are cancelled. Change-feed streams never end by themselves, so they
-  are the ones this closes; their clients resume with `Last-Event-ID`.
+- `graphos-api` stopping (SIGTERM): it drains within `GRAPHOS_SHUTDOWN_GRACE_S`
+  (8 s) (`graphos/drain.py`, [ADR-0015](adrs/ADR-0015-graceful-shutdown-and-drain.md)).
+  `/readyz` answers 503 `draining` at once and responses close their
+  connection; after `GRAPHOS_DRAIN_DELAY_S` (0 s) new requests get 503 with
+  `Retry-After: 2` and `code: "draining"` (graphos keeps listening), and
+  change-feed streams end with `event: draining`, their clients resuming
+  with `Last-Event-ID`. Requests and jobs already running go on until the
+  cut, a quarter of the grace (at most 5 s) before its end: a request whose
+  answer has not started gets the 503, a write's transaction rolls back with
+  its change record, and jobs go back to the queue (§2.6). The middleware
+  that does it is outside the `BaseHTTPMiddleware` layers and marks the
+  tasks it cancels: under those layers the task's cancel count is back to 0
+  when the error returns, and the cut would answer 500.
 
 #### 2.5.8 Generic analytics — examples
 
@@ -1036,8 +1054,22 @@ then inserts a row into `graphos_meta.jobs` and answers 202 with the job and
   job of the two whole-graph kinds exclude each other.
 - **Heartbeat.** A running job refreshes `heartbeat_at` every
   `GRAPHOS_JOB_HEARTBEAT_S` (10 s); any replica marks a job silent for three
-  heartbeats as failed (`interrupted`). Graceful shutdown records running jobs
-  as failed with 503. Nothing is re-run automatically.
+  heartbeats as failed (`interrupted`). A failed job is not re-run.
+- **A stop hands jobs back** ([ADR-0015](adrs/ADR-0015-graceful-shutdown-and-drain.md)).
+  When a drain begins (§2.5.7) the runner stops claiming and sets
+  `draining_since` on the jobs it runs. At the cut it cancels them by the
+  cancel path above, never while one records its outcome, and puts each back:
+  `queued` again with `attempts` + 1 (`started_at`, `heartbeat_at`, `progress`
+  cleared) and `NOTIFY graphos_jobs`, which wakes the other replicas' runners;
+  `cancelled` if a cancel was asked for; `failed` 503 on its third interruption,
+  or when its kind is not `resumable`. Every kind is resumable: the community
+  and metrics write-backs are one transaction each, edge resolution inserts
+  with `ON CONFLICT DO NOTHING`, the property check writes nothing, a rename
+  continues where it stopped, a vacuum changes no data. A job marked
+  `draining_since` whose heartbeat stops (the platform killed the process
+  before the hand-back) is put back by the sweep instead of failed; one
+  without the mark may have killed its own process, and is failed. A direct
+  call cut by a drain is recorded `failed` 503 and its caller gets 503.
 - **Cancel.** A queued job becomes `cancelled` at once. For a running one,
   `cancel_requested` is set; the process running it cancels its task (at once
   if it is the same process, otherwise at the next heartbeat), which cancels
@@ -1606,7 +1638,10 @@ Postgres instance.
    within `GRAPHOS_REGISTRY_SYNC_S` / `GRAPHOS_CACHE_MAX_AGE_S`; the rate
    limiter and the sign-in throttle stay per replica (§2.5.7).
 2. **Bulk writes are not atomic per request.** Each 500-row (bulk, CSV) or
-   5,000-row (snapshot) flush commits independently.
+   5,000-row (snapshot) flush commits independently. An upload cut by a stop
+   (§2.5.7) keeps its committed flushes and must be sent again whole: a
+   client still sending cannot read the 503 (httpx reports a read error), so
+   nothing tells it how far it got. Exports cut by a stop start again too.
 3. **One edge per type per ordered node pair** (§2.3).
 4. **`edges:resolve` inserts by default.** Edges whose rule no longer matches are
    removed only with `mode: reconcile`, and only the marked ones (`graphos_derived`; a
@@ -1632,7 +1667,7 @@ Postgres instance.
    database server (§4.1); a community write-back on a large graph holds every
    tenant's feed until it commits.
 10. **Backups** are operator-owned: `pg_dump` / `pg_basebackup` or a snapshot of
-   the `graphos_data_pg18` volume (`graphos_data` on PostgreSQL 16). A
+   the `graphos_data_pg18` volume. A
    restore needs AGE's catalogue pointed at the restored schemas' new OIDs,
    which graphos-api does at start (`db.repair_age_catalogue`), and fresh
    planner statistics, which it does not; restoring an AGE 1.6 dump into AGE

@@ -23,8 +23,7 @@ once it runs is in the [usage guide](usage.md).
 
 | Part | Image | Role |
 |---|---|---|
-| `graphos-db` | `apache/age:release_PG18_1.8.0` (pinned by digest) | PostgreSQL 18 with Apache AGE 1.8 (graphos-api refuses older ones). On an internal network: nothing but graphos-api (and, for an upgrade, graphos-db-import) reaches it. |
-| `graphos-db-export`, `graphos-db-import` | `apache/age` for PostgreSQL 16 and 18 | One-shot: move a PostgreSQL 16 database to PostgreSQL 18 on the first start after an upgrade ([§11](#11-upgrading-from-postgresql-16)); otherwise they exit at once. |
+| `graphos-db` | `apache/age:release_PG18_1.8.0` (pinned by digest) | PostgreSQL 18 with Apache AGE 1.8 (graphos-api refuses older ones). On an internal network: nothing but graphos-api reaches it. |
 | `graphos-api` | `ghcr.io/pomentum/graphos-api` (or built from `services/graphos`) | The REST API, sign-in and the background jobs. Listens on `127.0.0.1:8080`. |
 | `graphos-ui` (optional) | `ghcr.io/pomentum/graphos-ui` (or built from `services/graphos-ui`) | The web UI: static files and a same-origin proxy to the API, no state of its own. Listens on `127.0.0.1:8081`. |
 
@@ -61,9 +60,9 @@ curl -s http://127.0.0.1:8080/readyz    # {"status":"ready",...}
 - Consumers in other compose projects attach to the `graphos-net` network and call
   `http://graphos-api:8080`.
 
-The data lives in the `graphos_data_pg18` volume (`graphos_data` and `graphos_upgrade` matter only
-after an upgrade from PostgreSQL 16, [§11](#11-upgrading-from-postgresql-16)). `docker compose ... down`
-keeps them; `down -v` deletes all three.
+The data lives in the `graphos_data_pg18` volume. `docker compose ... down` keeps it; `down -v`
+deletes it. (An install moved from PostgreSQL 16 also has `graphos_data` and `graphos_upgrade`,
+which this compose file no longer names: see [§11](#11-upgrading-from-postgresql-16).)
 
 ### The database's set-up
 
@@ -431,6 +430,41 @@ cannot run variable-length patterns (`-[*1..3]->`) either: AGE refuses graphos's
 ([apache-age.md](apache-age.md) §5), at once and harmlessly on 1.8. Reads by these roles are not
 in graphos's audit log; use PostgreSQL's logging (`log_statement`, `pgaudit`) if they must be.
 
+### Stopping graphos-api
+
+On SIGTERM (`docker compose stop`, a redeploy, Kubernetes scaling a pod down) graphos-api drains
+before it exits ([ADR-0015](adrs/ADR-0015-graceful-shutdown-and-drain.md)):
+
+1. `/readyz` answers `503 {"status": "not_ready", "reason": "draining"}` at once, `/healthz`
+   stays `200`, and every response closes its connection. For `GRAPHOS_DRAIN_DELAY_S` seconds
+   requests are still served, so a load balancer stops sending them first.
+2. Then every new request gets `503` with `Retry-After: 2` and `"code": "draining"` (graphos
+   keeps listening, so clients get an answer, not a refused connection), and change-feed streams
+   end with an `event: draining`; their clients reconnect with `Last-Event-ID`.
+3. Requests and background jobs already running go on.
+4. Near the end of `GRAPHOS_SHUTDOWN_GRACE_S`, what still runs is cut. A request gets `503` if
+   its answer had not started; a write rolls back with its change-feed record. Background jobs
+   go back to the queue under the same id (`attempts` counts it) and another replica, or this one
+   after its restart, runs them again from the start; a job cut three times fails.
+5. graphos-api exits with status `0`, or `1` when a job could not be put back or the drain
+   overran its grace. A second SIGTERM or Ctrl-C cuts at once.
+
+**The platform must wait longer than graphos.** Docker and Kubernetes kill the process after
+their own grace, whatever graphos is doing; set it at least 5 s longer than
+`GRAPHOS_SHUTDOWN_GRACE_S` (default 8 s). Do not rely on the platform's default: Docker documents
+10 s, but Docker Desktop was measured killing after 3.4 s when nothing was set.
+
+| Where | Set |
+|---|---|
+| Docker Compose | `stop_grace_period: 40s` on graphos-api, with `GRAPHOS_SHUTDOWN_GRACE_S: 30` (the release compose file does this) |
+| `docker stop` / `docker run` | `docker stop -t 40`, or `--stop-timeout 40` on the container |
+| Kubernetes | `terminationGracePeriodSeconds: 40`, `GRAPHOS_SHUTDOWN_GRACE_S=30`, `GRAPHOS_DRAIN_DELAY_S=5`, a readiness probe on `/readyz` and a liveness probe on `/healthz`; no `preStop` sleep (the delay does it, and a `preStop` hook's time counts against the grace) |
+
+Behind any other load balancer, set `GRAPHOS_DRAIN_DELAY_S` to its health-check interval times
+the failures it needs before it takes graphos out. If the platform kills graphos before it has
+put its jobs back, another replica (or the next start) still requeues them, about 30 s later,
+and the database ends the killed process's statements within 5 s.
+
 ## 9. Settings for sign-in and access
 
 All settings are environment variables prefixed `GRAPHOS_` ([`config.py`](../../services/graphos/src/graphos/config.py)
@@ -473,13 +507,20 @@ lists every one; the README the most common). Those for sign-in, besides the OID
 ## 11. Upgrading from PostgreSQL 16
 
 graphos 0.9 and earlier ran PostgreSQL 16 with AGE 1.6 on the volume `graphos_data`; graphos-api
-no longer starts on that database ([ADR-0007](adrs/ADR-0007-drop-postgresql-16.md)). The compose file runs PostgreSQL 18 with AGE 1.8 on a new volume,
-`graphos_data_pg18`, and moves the data by itself on the first start:
+no longer starts on that database ([ADR-0007](adrs/ADR-0007-drop-postgresql-16.md)). Move it in
+two steps: **graphos 0.16.0**, whose compose file runs PostgreSQL 18 with AGE 1.8 on a new volume,
+`graphos_data_pg18`, and moves the data by itself on its first start; then the current release,
+whose compose file no longer carries the move
+([ADR-0016](adrs/ADR-0016-release-compose-without-the-postgresql-16-move.md)). Do not skip the
+first step: the current compose file alone starts on a new, empty database.
 
 ```bash
-git pull
+git fetch --tags && git checkout 0.16.0
 docker compose -f docker-compose.graphos.yml up -d
 docker compose -f docker-compose.graphos.yml logs -f graphos-db-export graphos-db-import
+# once it checks out:
+git checkout main
+docker compose -f docker-compose.graphos.yml up -d --remove-orphans
 ```
 
 Everything moves: tenants and their graphs, users and grants, saved queries, the change feed,

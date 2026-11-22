@@ -25,10 +25,11 @@ Paths are under `services/graphos/src/graphos/`.
 | Audit log, metrics, logging, rate limits | `observability/` (`audit.py`, `metrics.py`, `logging.py`, `rate_limit.py`) |
 | Settings and their `GRAPHOS_*` variables | `config.py` |
 | Tenant DDL, registry, start-up maintenance | `bootstrap.py`, `lifecycle.py` |
+| How the process stops: the drain on SIGTERM, jobs handed back | `drain.py`, `__main__.py` (`GraphosServer`), `jobs.py` (ADR-0015) |
 | Finding one node or edge by identity | `lookup.py` |
 | Louvain, PageRank and other algorithms | `louvain*.py`, `graph_metrics*.py`, `graph_compute.py` |
 | Database roles and first-start SQL | `services/graphos/deploy/db-init/`, and `db_setup.py`, which does the same at start (ADR-0012): keep the two in step |
-| The move from PostgreSQL 16 to 18 | `services/graphos/deploy/db-upgrade/` |
+| The move from PostgreSQL 16 to 18 | `services/graphos/deploy/db-upgrade/`, run by 0.16.0's compose file (ADR-0016) |
 | Architecture, write paths, limitations | [`concept.md`](../../docs/guide/concept.md) (§3 internal layout, §4 write paths, §8 known limitations) |
 | AGE behaviour, bugs and workarounds | [`apache-age.md`](../../docs/guide/apache-age.md), [`graph_age_practices.md`](../../docs/guide/graph_age_practices.md) |
 
@@ -61,7 +62,7 @@ bash scripts/run-db-tests.sh --db-image <image>              # another database 
 CI runs the integration job on pull requests and on `main`, against the
 compose's PostgreSQL 18 / AGE 1.8. graphos-api refuses to start on an older
 database (ADR-0007); the move from PostgreSQL 16 stays in
-`services/graphos/deploy/db-upgrade/`.
+`services/graphos/deploy/db-upgrade/`, which 0.16.0's compose file runs (ADR-0016).
 
 ## 3. Data-model invariants
 

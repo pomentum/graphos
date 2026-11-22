@@ -63,7 +63,7 @@ import asyncpg
 
 from graphos import resources
 from graphos.config import Settings
-from graphos.db import _on_acquire, _on_connect
+from graphos.db import CLIENT_CONNECTION_CHECK_MS, _on_acquire, _on_connect
 
 log = logging.getLogger(__name__)
 
@@ -636,6 +636,8 @@ async def start(settings: Settings, owner: asyncpg.Pool) -> Console | None:
         "jit": "off",
         # Its backends, told apart in pg_stat_activity.
         "application_name": APPLICATION_NAME,
+        # A killed process's query ends within seconds (graphos.db).
+        "client_connection_check_interval": CLIENT_CONNECTION_CHECK_MS,
     }
     temp_limit = settings.cypher_temp_file_limit
     if temp_limit != "-1":

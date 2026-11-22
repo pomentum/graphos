@@ -1,6 +1,6 @@
 # ADR-0007: PostgreSQL 16 / AGE 1.6 is no longer supported
 
-- **Status:** Accepted (2026-10-19)
+- **Status:** Accepted (2026-10-19); its "the move stays" in the compose file superseded by ADR-0016 (2026-11-22)
 - **Scope:** the databases graphos-api starts on, CI's integration job, `GET /v1/info`, the docs;
   not the move from PostgreSQL 16 (`docker-compose.graphos.yml`, `deploy/db-upgrade/`)
 - **Related:** [upgrade-postgresql-18.md](../upgrade-postgresql-18.md); apache-age.md; concept.md

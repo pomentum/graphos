@@ -4,10 +4,52 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.16.1 — 2026-11-22
+
+graphos-api stops gracefully (ADR-0015): on SIGTERM it stops taking requests, answering `503`
+with `Retry-After`, finishes what is running, and within a configurable grace puts the jobs it
+could not finish back in the queue, where another replica or the next start runs them again.
+Set your platform's stop grace longer than graphos's. The Python client follows a stopping server,
+and its README reads better on PyPI. **The release compose file no longer moves a PostgreSQL 16
+install: one still on 16 upgrades to 0.16.0 first** (ADR-0016).
+
+### Added
+
+- **graphos-api drains on SIGTERM** ([ADR-0015](docs/guide/adrs/ADR-0015-graceful-shutdown-and-drain.md),
+  [installation §8](docs/guide/installation.md#stopping-graphos-api)). `/readyz` answers `503`
+  `draining` at once and every response closes its connection; after `GRAPHOS_DRAIN_DELAY_S`
+  (new, default 0; 5 on Kubernetes) new requests get `503` with `Retry-After: 2` and
+  `"code": "draining"` while graphos keeps listening, and change-feed streams end with an
+  `event: draining`. Requests and jobs already running go on; near the end of
+  `GRAPHOS_SHUTDOWN_GRACE_S` what still runs is cut: a request answers `503`, a write rolls back
+  with its change record, and a background job goes back to the queue under the same id, to run
+  again from the start on another replica or after the restart (the third interruption fails it).
+  A second signal cuts at once. The exit status is `0`, or `1` when a job could not be put back
+  or the drain overran its grace. Metrics: `graphos_draining`, `graphos_requests_in_flight`,
+  `graphos_drain_refused_total`, `graphos_jobs_handed_back_total{kind,outcome}`.
+- **Jobs:** `attempts`, the times a stop put the job back in the queue. A job a drain marked
+  whose process was killed before it was put back is requeued by another replica's sweep.
+- **Client:** `Job.attempts`; a 503's `Retry-After` is waited for when longer than the backoff
+  (at most 30 s); `stream_changes` reconnects at once after `event: draining`.
 
 ### Changed
 
+- **The release compose file no longer moves PostgreSQL 16**
+  ([ADR-0016](docs/guide/adrs/ADR-0016-release-compose-without-the-postgresql-16-move.md)):
+  `graphos-db-export`, `graphos-db-import`, the volumes `graphos_data` and `graphos_upgrade`, and
+  graphos-api's wait for the move are gone, so every start runs two containers fewer. **An install
+  still on PostgreSQL 16 upgrades to 0.16.0 first**, whose compose file moves the data, then to
+  0.16.1 (`up -d --remove-orphans` removes the move's finished containers); going straight to
+  0.16.1 starts graphos on a new, empty database, with the data left untouched on `graphos_data`
+  ([upgrade guide](docs/guide/upgrade-postgresql-18.md)). The scripts in
+  `services/graphos/deploy/db-upgrade/` stay, for a database run by hand.
+- **`GRAPHOS_SHUTDOWN_GRACE_S`** is the whole drain's maximum, jobs included, and defaults to 8
+  (was 5); the release compose file sets 30 and `stop_grace_period: 40s`. **Set your platform's
+  stop grace at least 5 s longer**: Docker kills after its own, and Docker Desktop was seen doing
+  so after 3.4 s when none was set.
+- **graphos's database connections** set `client_connection_check_interval` (5 s): a graphos
+  process killed during a long statement no longer leaves it running, with its locks (the
+  tenant's whole-graph lock among them), until it ends.
 - **The website is built elsewhere.** <https://www.pomentum.dev/graphos/> is now built in the
   [pomentum.github.io](https://github.com/pomentum/pomentum.github.io) repository, with graphos's
   use cases as animated walkthroughs; its version line reads the newest release itself. This
@@ -15,6 +57,16 @@ under one version.
   `404.html`, `favicon.svg`, `.nojekyll`) and its generator (`tools/docs/site.py`, `site.html`) are
   gone, and `tools/release/version.mjs` sets the version in seven places, not eight. The pictures
   stay in `docs/images/`, for the README and the guides.
+- **Docs:** stopping graphos-api, and the platform grace to set with it, in
+  [installation §8](docs/guide/installation.md#stopping-graphos-api); ADR-0015 accepted. The
+  upgrade from PostgreSQL 16 in two steps, through 0.16.0; ADR-0016 accepted, superseding
+  ADR-0007's "the move stays" for the compose file.
+
+### Fixed
+
+- **A request still running when a stop's grace ran out** answered `500`; it answers `503` with
+  `Retry-After` and `"code": "draining"`, and the connection is no longer refused while graphos
+  drains.
 
 ## 0.16.0 — 2026-11-13
 
