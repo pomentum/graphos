@@ -18,6 +18,7 @@ from graphos_client import (
     BearerAuth,
     BulkNodesResponse,
     CsvImportResponse,
+    DeleteEdgesResponse,
     DeleteNodesResponse,
     EdgeCheckItem,
     EdgesCheckResponse,
@@ -1281,6 +1282,37 @@ async def test_delete_nodes_is_retried_on_5xx() -> None:
     with pytest.raises(GraphosError):
         await cli.delete_nodes([NodeRef(label="Doc", id="a")])
     assert len(calls) == 3          # idempotent: a node already gone is skipped
+    await cli.close()
+
+
+@pytest.mark.asyncio
+async def test_delete_edges_posts_the_edges_in_one_request() -> None:
+    seen: list[tuple[str, str, dict]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path, json.loads(request.content)))
+        return httpx.Response(200, json={
+            "tenant": "demo", "edges_requested": 2, "edges_deleted": 1, "elapsed_ms": 2,
+        })
+
+    resp = await _client_for(handler).delete_edges([
+        EdgeCheckItem(type="CITES", src_id="a/b", dst_id="c"),
+        EdgeCheckItem(type="TAGGED", src_id="a/b", dst_id="x", dst_label="Tag"),
+    ])
+    assert seen == [("POST", "/v1/demo/graph/edges:delete", {"edges": [
+        {"type": "CITES", "src_id": "a/b", "dst_id": "c"},
+        {"type": "TAGGED", "src_id": "a/b", "dst_id": "x", "dst_label": "Tag"},
+    ]})]
+    assert isinstance(resp, DeleteEdgesResponse)
+    assert (resp.edges_requested, resp.edges_deleted) == (2, 1)
+
+
+@pytest.mark.asyncio
+async def test_delete_edges_is_retried_on_5xx() -> None:
+    cli, calls = _counting_client(502)
+    with pytest.raises(GraphosError):
+        await cli.delete_edges([EdgeCheckItem(type="CITES", src_id="a", dst_id="b")])
+    assert len(calls) == 3          # idempotent: an edge already gone is skipped
     await cli.close()
 
 

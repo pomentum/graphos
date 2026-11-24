@@ -41,6 +41,7 @@ from graphos_client._models import (
     CypherResult,
     DeleteByPropertyResponse,
     DeleteEdgeResponse,
+    DeleteEdgesResponse,
     DeleteNodeResponse,
     DeleteNodesResponse,
     EdgeCheckItem,
@@ -2054,6 +2055,20 @@ class GraphosClient:
             "POST", f"/v1/{self._tenant}/graph/edges:check", json_body=body,
         )
         return EdgesCheckResponse.model_validate(resp.json())
+
+    async def delete_edges(self, edges: Iterable[EdgeCheckItem]) -> DeleteEdgesResponse:
+        """Delete up to 1000 edges, each by type and the ids of its ends, in one
+        transaction; their end nodes stay.  An edge that does not exist is
+        skipped.  An end id in several labels with more than one matching edge
+        refuses the whole batch (``GraphosError`` 409): ``src_label`` /
+        ``dst_label`` pick one.  The call is retried on a lost connection or a
+        5xx; a retry after the first attempt committed finds nothing left and
+        reports zero deleted."""
+        body = {"edges": [e.model_dump(exclude_none=True) for e in edges]}
+        resp = await self._request(
+            "POST", f"/v1/{self._tenant}/graph/edges:delete", json_body=body,
+        )
+        return DeleteEdgesResponse.model_validate(resp.json())
 
     # ── Shortest paths ─────────────────────────────────────────────────────
 
