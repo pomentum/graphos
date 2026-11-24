@@ -532,6 +532,7 @@ the reads, `write` for the writes; `maintain`, `owner` and `admin` are named.
 | `DELETE …/graph/edges/{type}?src=&dst=&src_label=&dst_label=` | Delete one edge | tenant |
 | `DELETE …/graph/nodes?property_key=&property_value=` | Delete every node with that property value, and their edges | tenant |
 | `POST …/graph/nodes:delete` `{nodes: [{label, id}]}` | Delete up to 1,000 nodes and their edges, in one transaction | tenant |
+| `POST …/graph/edges:delete` `{edges: [{type, src_id, dst_id}]}` | Delete up to 1,000 edges, in one transaction; their end nodes stay | tenant |
 | **Computations** | | |
 | `POST /v1/{tenant}/recompute-communities` | Louvain or Leiden (§5); 501 without the extra | `maintain` |
 | `POST …/graph/metrics:compute` | Degree, PageRank, weakly connected components and betweenness, stored on the nodes as `graphos_*` properties | `maintain` |
@@ -1193,7 +1194,7 @@ closed, not reused. Every console query is in the audit log (§2.5.6).
 | Every edge upsert (`/edges`, `edges:bulk`, `edges:csv`, `snapshot-import`) | SQL: binary `COPY` into a temp table, `INSERT … ON CONFLICT (start_id, end_id) DO UPDATE` |
 | `nodes/aggregate`, `export`, `communities?include_members=true` member lists | SQL |
 | Node deletes (by id, by property) | SQL: one statement deletes the matching nodes (unique `id` index, or GIN containment for other keys) and every edge touching them |
-| `search`, `nodes/{id}` (GET, PATCH), `nodes/{id}/properties`, `edges/{type}` (GET, PATCH, DELETE), `edges:check`, `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `nodes:scan`, `edges:scan`, `edges/aggregate` | SQL |
+| `search`, `nodes/{id}` (GET, PATCH), `nodes/{id}/properties`, `edges/{type}` (GET, PATCH, DELETE), `edges:check`, `edges:delete`, `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `nodes:scan`, `edges:scan`, `edges/aggregate` | SQL |
 | `top`, `stats`, `communities`, `community-summary`, `community-ids`, `catalogue` | SQL |
 | `paths`, `map`, `map/hubs`, `communities/map`, `properties`, `properties:check`, dataset export (`snapshot`) | SQL |
 | Graph metrics edge stream and write-back | SQL (`COPY` + `UPDATE … FROM`) |

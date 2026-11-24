@@ -562,6 +562,87 @@ async def delete_edge(  # noqa: PLR0913 — the edge's identity has this many pa
     return 1
 
 
+class AmbiguousEdgeError(lookup.AmbiguousMatchError):
+    """An edge of a batch delete matched more than one edge; ``edge`` is the
+    ``(type, src_id, dst_id)`` it was named by."""
+
+    def __init__(self, edge: tuple[str, str, str], candidates: list[str]) -> None:
+        super().__init__(candidates)
+        self.edge = edge
+
+
+# An edge named by type and the ids of its ends, with the labels that pick one
+# when an id is in several labels: ``(type, src_id, dst_id, src_label, dst_label)``.
+EdgeKey = tuple[str, str, str, str | None, str | None]
+
+
+async def delete_edges(
+    pool: asyncpg.Pool,
+    *,
+    tenant: str,
+    edges: Sequence[EdgeKey],
+) -> int:
+    """Delete the edges named by ``edges``, in one transaction; their end
+    nodes stay.
+
+    Each is found and locked as :func:`delete_edge` finds it.  One that does
+    not exist, or is named twice, is skipped, so a repeat deletes nothing.
+    One change record per edge type and label pair.  Two batches deleting the
+    same edges in another order can lock each other (a deadlock, or a
+    serialization failure): the whole transaction is rolled back and run
+    again, up to :data:`DELETE_ATTEMPTS` times.
+
+    Returns:
+        The number of edges deleted.
+
+    Raises:
+        AmbiguousEdgeError: an end id is in several labels and more than one
+            edge matches; nothing is deleted.
+    """
+    with _db_errors("edge delete failed", query="DELETE edges by their ends", graph=tenant):
+        for attempt in range(1, DELETE_ATTEMPTS + 1):
+            try:
+                return await _delete_edges_once(pool, tenant, edges)
+            except (asyncpg.exceptions.DeadlockDetectedError,
+                    asyncpg.exceptions.SerializationError):
+                if attempt == DELETE_ATTEMPTS:
+                    raise
+                await asyncio.sleep(0.05 * attempt)
+    raise AssertionError("unreachable")
+
+
+async def _delete_edges_once(
+    pool: asyncpg.Pool, tenant: str, edges: Sequence[EdgeKey],
+) -> int:
+    """One transaction of :func:`delete_edges`."""
+    deleted: dict[tuple[str, str, str], list[list[str]]] = {}
+    async with pool.acquire() as conn, conn.transaction():
+        for edge_type, src_id, dst_id, src_label, dst_label in edges:
+            try:
+                edge = await lookup.find_edge(
+                    conn, tenant=tenant, edge_type=edge_type, src_id=src_id, dst_id=dst_id,
+                    src_label=src_label, dst_label=dst_label, for_update=True,
+                )
+            except lookup.AmbiguousMatchError as exc:
+                raise AmbiguousEdgeError((edge_type, src_id, dst_id), exc.candidates) from exc
+            if edge is None:
+                continue
+            await conn.execute(
+                f'DELETE FROM ONLY "{tenant}"."{edge_type}" '
+                f"WHERE start_id = $1::text::graphid AND end_id = $2::text::graphid;",
+                edge.start_gid,
+                edge.end_gid,
+            )
+            key = (edge_type, edge.src_label, edge.dst_label)
+            deleted.setdefault(key, []).append([src_id, dst_id])
+        for (edge_type, src_label, dst_label), ids in sorted(deleted.items()):
+            await changes.record(
+                conn, tenant=tenant, op="delete", kind="edge", label=edge_type,
+                src_label=src_label, dst_label=dst_label, ids=ids, count=len(ids),
+            )
+    return sum(len(ids) for ids in deleted.values())
+
+
 async def _locked_node(
     conn: asyncpg.Connection,
     tenant: str,

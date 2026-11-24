@@ -242,6 +242,16 @@ one id (or one src/dst pair) in a batch collapse into one row.
     with `Retry-After`, nothing deleted.
   - Returns `nodes_requested`, `nodes_deleted` and `edges_deleted` (each edge
     once).
+- **Batch edge delete** (`POST …/graph/edges:delete`): up to 1,000 edges,
+  each by type and the ids of its ends, as `edges:check` names them; the end
+  nodes stay.
+  - One transaction: all of them go, or none.
+  - An edge that does not exist is skipped, so a repeat deletes nothing.
+  - An end id in several labels with more than one edge matching refuses the
+    batch (409); `src_label` / `dst_label` pick one.
+  - Run again on a deadlock (three times at most), then 503 with
+    `Retry-After`, nothing deleted.
+  - Returns `edges_requested` and `edges_deleted`.
 
 ---
 
