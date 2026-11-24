@@ -82,6 +82,7 @@ from graphos.contracts.graph import (
     CatalogueResponse,
     DeleteByPropertyResponse,
     DeleteEdgeResponse,
+    DeleteEdgesResponse,
     DeleteNodeResponse,
     DeleteNodesResponse,
     EdgeCheckItem,
@@ -92,6 +93,7 @@ from graphos.contracts.graph import (
     EdgesAggregateResponse,
     EdgesCheckRequest,
     EdgesCheckResponse,
+    EdgesDeleteRequest,
     EdgesScanItem,
     EdgesScanRequest,
     EdgesScanResponse,
@@ -1216,15 +1218,7 @@ async def check_edges(
     principal: ReadPrincipal,
 ) -> EdgesCheckResponse:
     _check_tenant(tenant, principal)
-    spec = registered_tenants()[tenant]
-    unknown_types = sorted({e.type for e in body.edges} - set(spec.edge_labels))
-    if unknown_types:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"edge types {unknown_types} are not registered for tenant '{tenant}'",
-        )
-    for label in sorted({lbl for e in body.edges for lbl in (e.src_label, e.dst_label) if lbl}):
-        _check_vertex_label(tenant, label)
+    _check_edge_items(tenant, body.edges)
 
     started = time.perf_counter()
     results: list[EdgeCheckResult] = []
@@ -1240,6 +1234,92 @@ async def check_edges(
         present=statuses.count("present"),
         absent=statuses.count("absent"),
         ambiguous=statuses.count("ambiguous"),
+        elapsed_ms=int((time.perf_counter() - started) * 1000),
+    )
+
+
+def _check_edge_items(tenant: str, items: list[EdgeCheckItem]) -> None:
+    """Every type and label a batch of edges names is registered (400 otherwise)."""
+    spec = registered_tenants()[tenant]
+    unknown_types = sorted({e.type for e in items} - set(spec.edge_labels))
+    if unknown_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"edge types {unknown_types} are not registered for tenant '{tenant}'",
+        )
+    for label in sorted({lbl for e in items for lbl in (e.src_label, e.dst_label) if lbl}):
+        _check_vertex_label(tenant, label)
+
+
+@router.post(
+    "/edges:delete",
+    response_model=DeleteEdgesResponse,
+    summary="Delete a batch of edges by type and the ids of their ends; their end nodes stay",
+    description=(
+        "Removes each edge named by its type and the ids of its two ends, as "
+        "`POST /edges:check` names them, in one transaction: all of them or none. "
+        f"Up to {MAX_NODES_UPSERT_BATCH} edges per request; their end nodes stay.\n\n"
+        "Idempotent: an edge that does not exist is skipped, so a repeat deletes "
+        "nothing. An end id that is in several labels, with more than one edge "
+        "matching, refuses the whole batch (409): `src_label` / `dst_label` pick "
+        "one. Every type and label must be registered for the tenant (400 otherwise, "
+        "and nothing is deleted). An edge a rule derives is deleted too, and the next "
+        "`edges:resolve` makes it again while its rule matches."
+    ),
+    responses={
+        400: {"description": (
+            "An edge type or label not registered for the tenant, or the database refused "
+            "the delete; nothing is deleted."
+        )},
+        409: {"description": (
+            "An end id is in several labels and more than one edge matches; nothing is "
+            "deleted. Pass `src_label` and/or `dst_label` for that edge."
+        )},
+        503: {"description": (
+            "Lost to concurrent writes on the same edges; nothing was deleted. Retry."
+        )},
+    },
+)
+async def delete_edges(
+    tenant: Tenant,
+    body: EdgesDeleteRequest,
+    request: Request,
+    principal: WritePrincipal,
+) -> DeleteEdgesResponse:
+    _check_tenant(tenant, principal)
+    _check_edge_items(tenant, body.edges)
+
+    started = time.perf_counter()
+    try:
+        deleted = await writes.delete_edges(
+            request.app.state.pool, tenant=tenant,
+            edges=[(e.type, e.src_id, e.dst_id, e.src_label, e.dst_label) for e in body.edges],
+        )
+    except writes.AmbiguousEdgeError as exc:
+        edge_type, src_id, dst_id = exc.edge
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"{len(exc.candidates)} {edge_type} edges match from '{src_id}' to "
+                f"'{dst_id}', between labels {exc.candidates}; pass src_label and/or "
+                "dst_label for it. Nothing was deleted."
+            ),
+        ) from exc
+    except CypherError as exc:
+        if exc.sqlstate in _LOCK_CONFLICTS:
+            # Lost to another delete every time: nothing was deleted, and a retry is safe.
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="another write held these edges; nothing was deleted, try again",
+                headers={"Retry-After": "1"},
+            ) from exc
+        raise resources.write_failed(
+            exc, status.HTTP_400_BAD_REQUEST, f"delete failed: {exc}",
+        ) from exc
+    return DeleteEdgesResponse(
+        tenant=tenant,
+        edges_requested=len(body.edges),
+        edges_deleted=deleted,
         elapsed_ms=int((time.perf_counter() - started) * 1000),
     )
 

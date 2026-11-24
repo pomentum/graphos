@@ -4,6 +4,23 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
+## 0.16.2 — 2026-11-24
+
+Edges can be deleted in batches: `POST …/graph/edges:delete` removes up to 1,000 edges, named
+as `edges:check` names them, in one transaction, and their end nodes stay. The Python client
+has `delete_edges`. No upgrade step: replace the images, or upgrade `graphos-client`.
+
+### Added
+
+- **Batch edge delete:** `POST /v1/{tenant}/graph/edges:delete` deletes up to 1,000 edges,
+  each by type and the ids of its ends as `edges:check` names them, in one transaction; their
+  end nodes stay. An edge that does not exist is skipped, so a repeat deletes nothing. An end
+  id in several labels with more than one edge matching refuses the batch with `409`
+  (`src_label` / `dst_label` pick one); an unregistered type or label is `400`; a batch that
+  keeps losing to concurrent writes on the same edges is run again, then answers `503` with
+  `Retry-After`. One change record per edge type and label pair. `write` access.
+- **Client:** `delete_edges`, with `DeleteEdgesResponse`; retried as idempotent.
+
 ## 0.16.1 — 2026-11-22
 
 graphos-api stops gracefully (ADR-0015): on SIGTERM it stops taking requests, answering `503`

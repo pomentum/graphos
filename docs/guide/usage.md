@@ -1063,12 +1063,21 @@ Python: `g.reconcile_node_edges(label=, node_id=, edge_type=, other_label=, targ
 | `DELETE /v1/{t}/graph/edges/{type}?src=&dst=[&src_label=&dst_label=]` | Delete one edge; its end nodes stay; idempotent (`edges_deleted: 0` if absent); 409 when several edges match |
 | `DELETE /v1/{t}/graph/nodes?property_key=team&property_value=core` | Delete every node whose property equals that string, and their edges, in one transaction; returns node and edge counts (each edge once) |
 | `POST /v1/{t}/graph/nodes:delete` | Delete up to 1,000 nodes, each by `label` and `id`, and their edges, in one transaction; a label takes in its child labels' nodes; a node that does not exist is skipped; 400 (nothing deleted) when a label is not registered; 503 with `Retry-After` (nothing deleted) when concurrent writes on the same edges keep winning |
+| `POST /v1/{t}/graph/edges:delete` | Delete up to 1,000 edges, each by `type`, `src_id` and `dst_id` (with `src_label` / `dst_label` when an id is in several labels), as `edges:check` names them, in one transaction; their end nodes stay; an edge that does not exist is skipped; 400 (nothing deleted) when a type or label is not registered; 409 (nothing deleted) when several edges match one entry; 503 with `Retry-After` (nothing deleted) when concurrent writes on the same edges keep winning |
 
 ```bash
 curl -s -X POST "$G/v1/acme/graph/nodes:delete" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"nodes": [{"label": "Document", "id": "d1"}, {"label": "User", "id": "u2"}]}'
 # → {"tenant":"acme","nodes_requested":2,"nodes_deleted":2,"edges_deleted":2,"elapsed_ms":3}
+```
+
+```bash
+curl -s -X POST "$G/v1/acme/graph/edges:delete" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"edges": [{"type": "AUTHORED", "src_id": "u1", "dst_id": "d1"},
+                 {"type": "CITES", "src_id": "d1", "dst_id": "d9"}]}'
+# → {"tenant":"acme","edges_requested":2,"edges_deleted":2,"elapsed_ms":2}
 ```
 
 ---
@@ -1649,6 +1658,7 @@ Read access is enough for all four. A record:
 | node delete (by id or by property) | `delete`, one per label, with the ids; `detail.edges_removed` counts the edges deleted with them (for the whole statement), `detail.where` the property for a delete by property |
 | batch node delete (`nodes:delete`) | `delete`, one per label, with the ids deleted; `detail.edges_removed` counts the edges deleted by that label's statement |
 | edge delete | `delete` with the pair |
+| batch edge delete (`edges:delete`) | `delete`, one per edge type and label pair, with the pairs deleted |
 | `edges:resolve` | one `resolve` summary per edge type, `count` edges, no ids: re-read the type; with `mode: reconcile`, a `delete` record of the removed edges and an `upsert` one of the adopted, each with `detail.reconcile: "resolve"` |
 | `edges:reconcile` | one `upsert` (added and changed) and one `delete` (removed) record, `detail.reconcile` `node` or `type`; ids up to 10,000 |
 | Community write-back | one `communities` summary, `count` nodes, no ids |

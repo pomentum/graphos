@@ -42,6 +42,7 @@ from graphos_client._models import (
     CypherResult,
     DeleteByPropertyResponse,
     DeleteEdgeResponse,
+    DeleteEdgesResponse,
     DeleteNodeResponse,
     DeleteNodesResponse,
     EdgeCheckItem,
@@ -116,7 +117,7 @@ from graphos_client._models import (
 )
 from graphos_client._pool import GraphosPool, TenantSchema, is_schema_drift
 
-__version__ = "0.16.1"
+__version__ = "0.16.2"
 
 __all__ = [
     "AnalysisFreshness",
@@ -156,6 +157,7 @@ __all__ = [
     "CommunitySummary",
     "DeleteByPropertyResponse",
     "DeleteEdgeResponse",
+    "DeleteEdgesResponse",
     "DeleteNodeResponse",
     "DeleteNodesResponse",
     "EdgeCheckItem",

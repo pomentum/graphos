@@ -214,7 +214,7 @@ which makes it their owner. `07_background_jobs.py` also vacuums, which needs an
 | Area | Methods |
 |---|---|
 | Tenants | `register_tenant`, `ensure_tenant`, `export_schema`, `import_schema`, `remove_edge_endpoint`, `rename_label`, `rename_edge_type`, `rename_property`, `drop_label`, `list_tenants`, `get_tenant`, `unregister_tenant`, `restore_tenant`, `list_unregistered_tenants`, `me`, `schema`, `schema_summary` |
-| Writes | `upsert_nodes`, `upsert_edges`, `bulk_upsert_nodes`, `bulk_upsert_edges`, `import_csv_nodes`, `import_csv_edges`, `snapshot_import`, `upsert_node_properties`, `patch_node`, `patch_edge`, `delete_node`, `delete_nodes`, `delete_edge`, `delete_by_property`, `reconcile_node_edges`, `reconcile_type_edges`, `resolve_edges` |
+| Writes | `upsert_nodes`, `upsert_edges`, `bulk_upsert_nodes`, `bulk_upsert_edges`, `import_csv_nodes`, `import_csv_edges`, `snapshot_import`, `upsert_node_properties`, `patch_node`, `patch_edge`, `delete_node`, `delete_nodes`, `delete_edge`, `delete_edges`, `delete_by_property`, `reconcile_node_edges`, `reconcile_type_edges`, `resolve_edges` |
 | Reads | `search`, `get_node`, `get_edge`, `check_edges`, `find_paths`, `neighbors`, `expand`, `induced_edges`, `scoped_subgraph`, `sample_subgraph`, `scan_nodes`, `scan_nodes_iter`, `scan_edges`, `scan_edges_iter`, `export_graph` |
 | Aggregates | `graph_map`, `map_hubs`, `label_top_by_edge`, `aggregate_nodes`, `aggregate_edges`, `tenant_stats` |
 | Cypher console | `cypher`, `saved_queries`, `save_query`, `run_saved_query`, `saved_query`, `delete_saved_query` |
@@ -236,7 +236,8 @@ Worth knowing about some of them:
   as a job: `await cli.wait_for_job(result.job_id)`. `drop_label` drops a deprecated, empty label.
   `unregister_tenant(drop_data=True)` deletes the tenant with its data. `schema_summary` is the
   schema as a language model needs it, with the values.
-- **Writes.** `delete_nodes` takes a batch of `NodeRef`. `reconcile_node_edges` and
+- **Writes.** `delete_nodes` takes a batch of `NodeRef`, `delete_edges` one of
+  `EdgeCheckItem` (the end nodes stay). `reconcile_node_edges` and
   `reconcile_type_edges` make a scope exactly a given set of edges; `resolve_edges(mode="reconcile")`
   does the same for the edges a rule derives.
 - **Reads.** `check_edges` checks many edges at once, by `EdgeCheckItem`. The `*_iter` scans page

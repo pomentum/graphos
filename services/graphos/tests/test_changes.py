@@ -60,7 +60,7 @@ def test_every_write_function_records_a_change() -> None:
         "store_community_map",
     }
     tree = ast.parse(WRITES.read_text(encoding="utf-8"))
-    recorders = {"_delete_nodes_recorded", "_delete_by_label"}
+    recorders = {"_delete_nodes_recorded", "_delete_by_label", "_delete_edges_once"}
     missing = []
     for fn in tree.body:
         if not isinstance(fn, ast.AsyncFunctionDef) or fn.name.startswith("_"):

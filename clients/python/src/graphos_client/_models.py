@@ -831,6 +831,15 @@ class DeleteEdgeResponse(BaseModel):
     elapsed_ms: int
 
 
+class DeleteEdgesResponse(BaseModel):
+    """What :meth:`GraphosClient.delete_edges` removed; the end nodes stay."""
+
+    tenant: str
+    edges_requested: int
+    edges_deleted: int
+    elapsed_ms: int
+
+
 class SummaryValueCount(BaseModel):
     value: str
     kind: str | None = None

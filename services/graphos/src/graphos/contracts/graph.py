@@ -492,6 +492,31 @@ class EdgesCheckResponse(BaseModel):
     elapsed_ms: int = Field(..., description="Time spent answering, in milliseconds.")
 
 
+class EdgesDeleteRequest(BaseModel):
+    """Body for POST /v1/{tenant}/graph/edges:delete."""
+
+    edges: list[EdgeCheckItem] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_NODES_UPSERT_BATCH,
+        description=(
+            f"Up to {MAX_NODES_UPSERT_BATCH} edges, each by type and the ids of its ends, as "
+            "`POST /edges:check` names them. An edge that does not exist is skipped."
+        ),
+    )
+
+
+class DeleteEdgesResponse(BaseModel):
+    """Response for POST /v1/{tenant}/graph/edges:delete; the end nodes stay."""
+
+    tenant: str = Field(..., description="The tenant.")
+    edges_requested: int = Field(..., description="Entries in the request, duplicates included.")
+    edges_deleted: int = Field(
+        ..., description="Edges removed; one that does not exist, or is named twice, is skipped.",
+    )
+    elapsed_ms: int = Field(..., description="Time spent deleting, in milliseconds.")
+
+
 # ── Edge upsert ────────────────────────────────────────────────────────────
 
 
