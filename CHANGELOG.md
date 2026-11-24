@@ -4,7 +4,11 @@ Server (`graphos-api`, image `ghcr.io/pomentum/graphos-api`), web UI (image
 `ghcr.io/pomentum/graphos-ui`, from 0.3.0) and client (`graphos-client`) are released together
 under one version.
 
-## Unreleased
+## 0.16.2 — 2026-11-24
+
+Edges can be deleted in batches: `POST …/graph/edges:delete` removes up to 1,000 edges, named
+as `edges:check` names them, in one transaction, and their end nodes stay. The Python client
+has `delete_edges`. No upgrade step: replace the images, or upgrade `graphos-client`.
 
 ### Added
 
